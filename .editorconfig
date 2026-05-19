@@ -1,0 +1,35 @@
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = crlf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.{json,csproj,props,targets}]
+indent_size = 2
+
+[*.cs]
+# The CA/IDE rules that bit us in Chuvadi - promote to errors
+dotnet_diagnostic.CA1062.severity = error
+dotnet_diagnostic.IDE0270.severity = error
+dotnet_diagnostic.IDE0005.severity = error
+
+# C# style
+csharp_new_line_before_open_brace = all
+csharp_indent_case_contents = true
+csharp_space_after_keywords_in_control_flow_statements = true
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+
+# Prefer file-scoped namespaces
+csharp_style_namespace_declarations = file_scoped:warning
+
+# Prefer var when type is apparent
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion

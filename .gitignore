@@ -1,0 +1,51 @@
+# Build output
+bin/
+obj/
+[Bb]uild/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Visual Studio
+.vs/
+*.rsuser
+
+# JetBrains Rider
+.idea/
+*.DotSettings.user
+
+# VS Code
+.vscode/
+
+# Test results
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage.cobertura.xml
+[Cc]overlet/
+
+# NuGet
+*.nupkg
+*.snupkg
+.nuget/
+packages/
+
+# Python (for tools/gen_api_docs.py)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and local artifacts
+*.log
+*.local.json
+secrets.json

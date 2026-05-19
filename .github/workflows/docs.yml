@@ -1,0 +1,37 @@
+name: docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build (Release) to produce XML doc files
+        run: dotnet build --configuration Release
+
+      - name: Regenerate API docs
+        run: python tools/gen_api_docs.py
+
+      - name: Fail if docs/api is out of date
+        run: |
+          if [ -n "$(git status --porcelain docs/api)" ]; then
+            echo "::error::API docs are stale. Run 'python tools/gen_api_docs.py' locally and commit the result."
+            git diff docs/api
+            exit 1
+          fi
