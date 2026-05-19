@@ -1,6 +1,8 @@
 <Solution>
   <Folder Name="/examples/">
     <Project Path="examples/Anjal.ApiClient/Anjal.ApiClient.csproj" />
+    <Project Path="examples/Anjal.DkimKeygen/Anjal.DkimKeygen.csproj" />
+    <Project Path="examples/Anjal.DkimSigning/Anjal.DkimSigning.csproj" />
     <Project Path="examples/Anjal.InboundEndToEnd/Anjal.InboundEndToEnd.csproj" />
     <Project Path="examples/Anjal.Mime.Build/Anjal.Mime.Build.csproj" />
     <Project Path="examples/Anjal.Mime.Parse/Anjal.Mime.Parse.csproj" />
@@ -9,6 +11,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Anjal.Api/Anjal.Api.csproj" />
+    <Project Path="src/Anjal.Dkim/Anjal.Dkim.csproj" />
     <Project Path="src/Anjal.Dns/Anjal.Dns.csproj" />
     <Project Path="src/Anjal.Mime/Anjal.Mime.csproj" />
     <Project Path="src/Anjal.Routing/Anjal.Routing.csproj" />
@@ -18,6 +21,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Anjal.Api.Tests/Anjal.Api.Tests.csproj" />
+    <Project Path="tests/Anjal.Dkim.Tests/Anjal.Dkim.Tests.csproj" />
     <Project Path="tests/Anjal.Mime.Tests/Anjal.Mime.Tests.csproj" />
     <Project Path="tests/Anjal.Routing.Tests/Anjal.Routing.Tests.csproj" />
     <Project Path="tests/Anjal.Smtp.Tests/Anjal.Smtp.Tests.csproj" />

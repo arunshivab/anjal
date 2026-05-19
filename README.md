@@ -1,18 +1,17 @@
 # Anjal (அஞ்சல்)
 
-A .NET 10 mail server library. Protocol code (MIME, SMTP, DNS) and the
-HTTP API are hand-written with no external NuGet dependencies. TLS uses
-the BCL's `System.Net.Security.SslStream`. The PostgreSQL store layer
-uses [Npgsql](https://www.npgsql.org/).
+A .NET 10 mail server library. Protocol code (MIME, SMTP, DNS, DKIM) and
+the HTTP API are hand-written with no external NuGet dependencies. TLS
+uses the BCL's `System.Net.Security.SslStream`. DKIM uses the BCL's
+`System.Security.Cryptography.RSA`. The PostgreSQL store layer uses
+[Npgsql](https://www.npgsql.org/).
 
 ## Status
 
-**v0.5.0** - bidirectional mail + HTTP/JSON API + STARTTLS. Anjal now
-accepts STARTTLS on the receiver side and uses STARTTLS opportunistically
-on the sender side, with per-destination policy control. RFC 3207 wire
-format. RFC 5246 / 8446 (TLS 1.2 / 1.3) via the BCL.
-
-DKIM signing is the next phase.
+**v0.6.0** - bidirectional mail + HTTP/JSON API + STARTTLS + DKIM signing.
+DKIM is RSA-SHA256, RFC 6376 compliant with both `simple` and `relaxed`
+canonicalization. Ed25519 DKIM is deferred until .NET ships
+`System.Security.Cryptography.Ed25519` in the BCL.
 
 ## Modules
 
@@ -21,6 +20,7 @@ DKIM signing is the next phase.
 | `Anjal.Mime` | MIME parser and builder (RFC 5322, RFC 2045-2049) | none |
 | `Anjal.Smtp` | SMTP receiver and sender (RFC 5321), STARTTLS (RFC 3207) | none |
 | `Anjal.Dns` | DNS MX record resolver (RFC 1035) | none |
+| `Anjal.Dkim` | DKIM signer (RFC 6376), RSA-SHA256 | none |
 | `Anjal.Routing` | Inbound routing + signed webhook dispatcher | none |
 | `Anjal.Store` | Persistence: in-memory and PostgreSQL | Npgsql |
 | `Anjal.Api` | HTTP/JSON API on `HttpListener` + `System.Text.Json` | none |
@@ -36,14 +36,17 @@ DKIM signing is the next phase.
 
 ## Run the demos
 
-Four end-to-end demos prove inbound, outbound, full-stack HTTP, and
-STARTTLS pipelines in-process. No external setup needed - the TLS demo
-generates a self-signed cert in-process:
+Five end-to-end demos prove each pipeline in-process with no external setup:
 
     dotnet run --project examples/Anjal.InboundEndToEnd
     dotnet run --project examples/Anjal.OutboundEndToEnd
     dotnet run --project examples/Anjal.ApiClient
     dotnet run --project examples/Anjal.TlsEndToEnd
+    dotnet run --project examples/Anjal.DkimSigning
+
+The DKIM signing demo generates an RSA-2048 keypair in memory, signs a
+message, then verifies the resulting `DKIM-Signature` header using only
+the public key - the same path a receiving mail server would take.
 
 ## Run a real server
 
@@ -51,20 +54,19 @@ Set up the schema once:
 
     psql -d anjal -f tools/sql/schema.sql
 
-### Inbound-only, no API, no TLS
+### Full stack with TLS and DKIM (recommended for production)
 
-    $env:ANJAL_POSTGRES = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
-    dotnet run --project src/Anjal.Server
-
-### Full stack with STARTTLS (recommended for production)
-
-    $env:ANJAL_POSTGRES      = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
-    $env:ANJAL_HOSTNAME      = "mail.your-domain.example"
-    $env:ANJAL_TLS_CERT_PATH = "/etc/letsencrypt/live/mail.your-domain.example/fullchain.pem"
-    $env:ANJAL_TLS_KEY_PATH  = "/etc/letsencrypt/live/mail.your-domain.example/privkey.pem"
-    $env:ANJAL_OUTBOUND_MODE = "direct"
-    $env:ANJAL_API_PORT      = "8080"
-    $env:ANJAL_API_TOKEN     = "your-strong-secret-token-here"
+    $env:ANJAL_POSTGRES       = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
+    $env:ANJAL_HOSTNAME       = "mail.your-domain.example"
+    $env:ANJAL_TLS_CERT_PATH  = "/etc/letsencrypt/live/mail.your-domain.example/fullchain.pem"
+    $env:ANJAL_TLS_KEY_PATH   = "/etc/letsencrypt/live/mail.your-domain.example/privkey.pem"
+    $env:ANJAL_OUTBOUND_MODE  = "direct"
+    $env:ANJAL_DKIM_MODE      = "required"
+    $env:ANJAL_DKIM_DOMAIN    = "mail.your-domain.example"
+    $env:ANJAL_DKIM_SELECTOR  = "default"
+    $env:ANJAL_DKIM_KEY_PATH  = "/etc/anjal/dkim/default.private.pem"
+    $env:ANJAL_API_PORT       = "8080"
+    $env:ANJAL_API_TOKEN      = "your-strong-secret-token-here"
     dotnet run --project src/Anjal.Server
 
 ### Environment variables
@@ -78,41 +80,81 @@ Set up the schema once:
 | `ANJAL_OUTBOUND_MODE` | `none` | `direct`, `relay`, or `none` |
 | `ANJAL_RELAY_HOST` | - | Relay host (when mode=relay) |
 | `ANJAL_RELAY_PORT` | `587` | Relay port (when mode=relay) |
-| `ANJAL_API_PORT` | (disabled) | HTTP API port. Unset disables. |
+| `ANJAL_API_PORT` | (disabled) | HTTP API port |
 | `ANJAL_API_BIND` | `ANJAL_BIND` | HTTP API bind address |
-| `ANJAL_API_TOKEN` | - | Bearer token for the API. Empty disables auth. |
+| `ANJAL_API_TOKEN` | - | Bearer token for the API |
 | `ANJAL_TLS_CERT_PATH` | (disabled) | Path to fullchain.pem |
 | `ANJAL_TLS_KEY_PATH` | - | Path to privkey.pem (if not in fullchain) |
-| `ANJAL_TLS_REQUIRE` | `false` | If `true`, server rejects MAIL FROM until STARTTLS |
-| `ANJAL_TLS_DEFAULT_MODE` | `opportunistic` | Default outbound TLS mode if no per-domain policy |
-| `ANJAL_TLS_VALIDATE_PEER` | `true` | Validate remote server certificate. Set `false` only for testing |
+| `ANJAL_TLS_REQUIRE` | `false` | Server requires STARTTLS before MAIL |
+| `ANJAL_TLS_DEFAULT_MODE` | `opportunistic` | Default outbound TLS mode |
+| `ANJAL_TLS_VALIDATE_PEER` | `true` | Validate remote server certificates |
+| `ANJAL_DKIM_MODE` | `off` | `required`, `opportunistic`, or `off` |
+| `ANJAL_DKIM_DOMAIN` | - | Default sender domain (for env-var key) |
+| `ANJAL_DKIM_SELECTOR` | - | Default selector (for env-var key) |
+| `ANJAL_DKIM_KEY_PATH` | - | Path to default DKIM private PEM |
 
-## TLS overview
+## DKIM setup walkthrough
 
-**Receiver side.** When `ANJAL_TLS_CERT_PATH` is set, Anjal loads the PEM
-cert and key (via `X509Certificate2.CreateFromPemFile`) and advertises
-`STARTTLS` in the EHLO response. Clients can upgrade with the `STARTTLS`
-command; per RFC 3207 the session state resets and the client must
-re-issue EHLO over the encrypted channel. If `ANJAL_TLS_REQUIRE=true`,
-the server returns `530 Must issue a STARTTLS command first` to any
-`MAIL FROM` issued before STARTTLS.
+DKIM signs outbound mail so receivers can verify it genuinely came from
+your domain. Gmail and Outlook strongly prefer signed mail; an unsigned
+message has a much higher chance of landing in spam.
 
-**Sender side.** When connecting outbound, Anjal:
+### Step 1: Generate a keypair
 
-1. Sends the initial EHLO
-2. Looks at the EHLO response for the `STARTTLS` capability
-3. Looks up the destination's TLS mode in `outbound_tls_policies`, or
-   falls back to `ANJAL_TLS_DEFAULT_MODE`
-4. Depending on the mode:
-   - **opportunistic** - upgrade if offered, send plaintext if not
-   - **required** - upgrade if offered, fail transient if not
-   - **disabled** - skip STARTTLS even if offered
-5. After successful handshake, re-issue EHLO over TLS, then `MAIL FROM`,
-   `RCPT TO`, `DATA`, `QUIT`
+    dotnet run --project examples/Anjal.DkimKeygen -- mail.your-domain.example default ./keys
 
-The policy lookup is keyed by the **destination domain** (e.g.
-`gmail.com`), not by MX hostname. In relay mode the lookup is against
-the relay's hostname. This applies uniformly to direct and relay outbound modes.
+This writes `default.private.pem` and `default.public.pem` and prints
+the DNS TXT record to publish, of the form:
+
+    v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAO...
+
+### Step 2: Publish the DNS TXT record
+
+At your DNS provider, create a TXT record at:
+
+    default._domainkey.mail.your-domain.example
+
+with the value printed by step 1. Wait for DNS propagation (usually a
+few minutes; verify with `dig TXT default._domainkey.mail.your-domain.example`).
+
+### Step 3: Configure Anjal
+
+Either via env vars (single sender domain):
+
+    $env:ANJAL_DKIM_MODE     = "required"
+    $env:ANJAL_DKIM_DOMAIN   = "mail.your-domain.example"
+    $env:ANJAL_DKIM_SELECTOR = "default"
+    $env:ANJAL_DKIM_KEY_PATH = "./keys/default.private.pem"
+
+Or upload via API (one or more sender domains, with the env-var key as
+fallback default):
+
+    POST /api/dkim-keys
+    Authorization: Bearer <ANJAL_API_TOKEN>
+    Content-Type: application/json
+
+    {
+      "domain": "mail.your-domain.example",
+      "selector": "default",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+    }
+
+### Step 4: Verify
+
+Send mail to any address you control. The receiving server's headers
+will show `Authentication-Results: ... dkim=pass`. Tools like
+[mail-tester.com](https://www.mail-tester.com/) report a clear DKIM
+pass/fail.
+
+### Key rotation
+
+To rotate, repeat steps 1-3 with a new selector (e.g. `2026a`):
+
+    POST /api/dkim-keys
+    { "domain": "mail.your-domain.example", "selector": "2026a", "privateKeyPem": "..." }
+
+Mail signed with the old selector continues to verify until you remove
+the old DNS TXT record.
 
 ## HTTP API
 
@@ -146,6 +188,45 @@ the configured token is empty (test-only mode).
 
 `mode` is one of `opportunistic`, `required`, `disabled`.
 
+### DKIM keys
+
+    POST   /api/dkim-keys                     { domain, selector, privateKeyPem }
+    GET    /api/dkim-keys                     # never returns private keys
+    DELETE /api/dkim-keys/{domain}
+
+Private keys are never returned in API responses. To rotate, POST again
+with a new selector and/or private key.
+
+## TLS overview
+
+**Receiver side.** When `ANJAL_TLS_CERT_PATH` is set, Anjal advertises
+`STARTTLS` in EHLO and accepts upgrades. Per RFC 3207, the session
+state resets after STARTTLS and clients must re-issue EHLO. With
+`ANJAL_TLS_REQUIRE=true`, plain-text `MAIL FROM` is refused with
+`530 Must issue a STARTTLS command first`.
+
+**Sender side.** Outbound TLS is per-destination-domain. Policy entries
+in `outbound_tls_policies` (managed via the API) override the default
+`ANJAL_TLS_DEFAULT_MODE`. Modes:
+
+- `opportunistic` - try STARTTLS if offered, fall back to plaintext
+- `required` - fail transient if STARTTLS is not offered
+- `disabled` - skip STARTTLS even if offered
+
+## DKIM signing overview
+
+Every outbound message has its `From:` header parsed for the sender
+domain. The signer looks up the DKIM key for that domain (env-var key
+first, then the `dkim_keys` store), signs the message with RSA-SHA256,
+and prepends a `DKIM-Signature:` header before handing to the SMTP
+sender. With `ANJAL_DKIM_MODE=required`, sends fail permanently if no
+key is found for the sender domain.
+
+Canonicalization: `relaxed/relaxed` by default (RFC 6376 section 3.4).
+Signed headers default to: From, To, Subject, Date, Message-ID,
+MIME-Version, Content-Type. The `From` header is always included even
+if explicitly excluded from the list (required by the RFC).
+
 ## Webhook integration
 
 When a message is accepted for a registered local-part, Anjal POSTs a
@@ -168,7 +249,7 @@ reply.
 
 A recipient `local-part+tag@host` routes by `local-part`; the `tag` is
 exposed in the webhook payload. Tags must be authorised by an active
-`TagGrant` for the matching `(localPart, tag)`, otherwise SMTP returns 550.
+`TagGrant` for the matching `(localPart, tag)`.
 
 ## Regenerate API docs
 

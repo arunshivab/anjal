@@ -15,6 +15,7 @@ public sealed class InMemoryMessageStore : IMessageStore
     private readonly List<WebhookDelivery> deliveries = new();
     private readonly List<OutboundMessage> outbound = new();
     private readonly List<OutboundTlsPolicy> tlsPolicies = new();
+    private readonly List<DkimKeyRow> dkimKeys = new();
 
     /// <summary>The routing rules currently stored. Provided for inspection in tests.</summary>
     public IReadOnlyList<RoutingRule> Rules
@@ -338,6 +339,64 @@ public sealed class InMemoryMessageStore : IMessageStore
         {
             int removed = this.tlsPolicies.RemoveAll(p =>
                 string.Equals(p.Domain, domain, System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(removed > 0);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<DkimKeyRow> UpsertDkimKeyAsync(DkimKeyRow key, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(key);
+        lock (this.gate)
+        {
+            string keyDomain = key.Domain.ToLowerInvariant();
+            DkimKeyRow? existing = this.dkimKeys.Find(k =>
+                string.Equals(k.Domain, keyDomain, System.StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                key.Id = System.Guid.NewGuid();
+                key.Domain = keyDomain;
+                key.UpdatedAt = System.DateTimeOffset.UtcNow;
+                this.dkimKeys.Add(key);
+                return Task.FromResult(key);
+            }
+            existing.Selector = key.Selector;
+            existing.PrivateKeyPem = key.PrivateKeyPem;
+            existing.UpdatedAt = System.DateTimeOffset.UtcNow;
+            return Task.FromResult(existing);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<DkimKeyRow>> ListDkimKeysAsync(CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            IReadOnlyList<DkimKeyRow> snapshot = this.dkimKeys.ToArray();
+            return Task.FromResult(snapshot);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<DkimKeyRow?> GetDkimKeyAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+        lock (this.gate)
+        {
+            DkimKeyRow? found = this.dkimKeys.Find(k =>
+                string.Equals(k.Domain, domain, System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(found);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteDkimKeyAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+        lock (this.gate)
+        {
+            int removed = this.dkimKeys.RemoveAll(k =>
+                string.Equals(k.Domain, domain, System.StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(removed > 0);
         }
     }

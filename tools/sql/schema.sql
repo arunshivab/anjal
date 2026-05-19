@@ -88,4 +88,15 @@ CREATE TABLE IF NOT EXISTS outbound_tls_policies (
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- DKIM signing keys (v0.6.0). PEM is stored in plaintext - protect at
+-- the database access layer (TLS connection, restricted role grants,
+-- encryption at rest).
+CREATE TABLE IF NOT EXISTS dkim_keys (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain          CITEXT NOT NULL UNIQUE,
+    selector        TEXT NOT NULL,
+    private_key_pem TEXT NOT NULL,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 COMMIT;
