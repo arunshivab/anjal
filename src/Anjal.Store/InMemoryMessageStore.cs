@@ -14,6 +14,7 @@ public sealed class InMemoryMessageStore : IMessageStore
     private readonly List<InboundMessage> messages = new();
     private readonly List<WebhookDelivery> deliveries = new();
     private readonly List<OutboundMessage> outbound = new();
+    private readonly List<OutboundTlsPolicy> tlsPolicies = new();
 
     /// <summary>The routing rules currently stored. Provided for inspection in tests.</summary>
     public IReadOnlyList<RoutingRule> Rules
@@ -281,6 +282,63 @@ public sealed class InMemoryMessageStore : IMessageStore
         {
             InboundMessage? found = this.messages.Find(m => m.Id == id);
             return Task.FromResult(found);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<OutboundTlsPolicy> UpsertOutboundTlsPolicyAsync(OutboundTlsPolicy policy, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(policy);
+        lock (this.gate)
+        {
+            string key = policy.Domain.ToLowerInvariant();
+            OutboundTlsPolicy? existing = this.tlsPolicies.Find(p =>
+                string.Equals(p.Domain, key, System.StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                policy.Id = System.Guid.NewGuid();
+                policy.Domain = key;
+                policy.UpdatedAt = System.DateTimeOffset.UtcNow;
+                this.tlsPolicies.Add(policy);
+                return Task.FromResult(policy);
+            }
+            existing.Mode = policy.Mode;
+            existing.UpdatedAt = System.DateTimeOffset.UtcNow;
+            return Task.FromResult(existing);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<OutboundTlsPolicy>> ListOutboundTlsPoliciesAsync(CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            IReadOnlyList<OutboundTlsPolicy> snapshot = this.tlsPolicies.ToArray();
+            return Task.FromResult(snapshot);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<OutboundTlsPolicy?> GetOutboundTlsPolicyAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+        lock (this.gate)
+        {
+            OutboundTlsPolicy? found = this.tlsPolicies.Find(p =>
+                string.Equals(p.Domain, domain, System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(found);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteOutboundTlsPolicyAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+        lock (this.gate)
+        {
+            int removed = this.tlsPolicies.RemoveAll(p =>
+                string.Equals(p.Domain, domain, System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(removed > 0);
         }
     }
 }

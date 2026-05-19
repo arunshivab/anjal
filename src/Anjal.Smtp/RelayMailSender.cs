@@ -16,6 +16,9 @@ public sealed class RelayOptions
 
     /// <summary>Connect timeout.</summary>
     public System.TimeSpan ConnectTimeout { get; init; } = System.TimeSpan.FromSeconds(15);
+
+    /// <summary>TLS configuration. When null, TLS is disabled.</summary>
+    public TlsClientOptions? Tls { get; init; }
 }
 
 /// <summary>
@@ -65,6 +68,38 @@ public sealed class RelayMailSender : IMailSender
             {
                 await session.QuitAsync(ct).ConfigureAwait(false);
                 return ClassifyReply(ehlo, "EHLO");
+            }
+
+            // STARTTLS, then re-issue EHLO over the encrypted channel.
+            if (this.options.Tls is not null)
+            {
+                Anjal.Store.TlsMode mode = await this.options.Tls.ResolveModeAsync(this.options.Host, ct).ConfigureAwait(false);
+                bool offered = SmtpClientSession.EhloSupportsStartTls(ehlo);
+
+                if (mode == Anjal.Store.TlsMode.Required && !offered)
+                {
+                    await session.QuitAsync(ct).ConfigureAwait(false);
+                    return new SendResult
+                    {
+                        Outcome = SendOutcome.TransientFailure,
+                        Message = $"TLS required for {this.options.Host} but server did not advertise STARTTLS",
+                    };
+                }
+                if (mode != Anjal.Store.TlsMode.Disabled && offered)
+                {
+                    SmtpReply tlsReply = await session.StartTlsAsync(this.options.Host, this.options.Tls.ValidateCertificate, ct).ConfigureAwait(false);
+                    if (tlsReply.Code != 220)
+                    {
+                        await session.QuitAsync(ct).ConfigureAwait(false);
+                        return ClassifyReply(tlsReply, "STARTTLS");
+                    }
+                    SmtpReply ehlo2 = await session.EhloAsync(this.options.ClientHostName, ct).ConfigureAwait(false);
+                    if (ehlo2.Code != 250)
+                    {
+                        await session.QuitAsync(ct).ConfigureAwait(false);
+                        return ClassifyReply(ehlo2, "EHLO (after STARTTLS)");
+                    }
+                }
             }
 
             SmtpReply mailFrom = await session.MailFromAsync(delivery.EnvelopeFrom, ct).ConfigureAwait(false);

@@ -14,10 +14,11 @@ public sealed class SmtpSession
     private const int MaxLineLength = 998 + 2; // RFC 5321 section 4.5.3.1.6 + CRLF
 
     private readonly TcpClient client;
-    private readonly Stream stream;
+    private Stream stream;
     private readonly SmtpServerOptions options;
     private readonly IMessageSink sink;
     private readonly string remoteAddress;
+    private bool isTls;
 
     private State state;
     private string clientHostName = string.Empty;
@@ -101,6 +102,7 @@ public sealed class SmtpSession
         {
             case "EHLO": return await this.HandleEhloAsync(args, isExtended: true, ct).ConfigureAwait(false);
             case "HELO": return await this.HandleEhloAsync(args, isExtended: false, ct).ConfigureAwait(false);
+            case "STARTTLS": return await this.HandleStarttlsAsync(ct).ConfigureAwait(false);
             case "MAIL": return await this.HandleMailAsync(args, ct).ConfigureAwait(false);
             case "RCPT": return await this.HandleRcptAsync(args, ct).ConfigureAwait(false);
             case "DATA": return await this.HandleDataAsync(ct).ConfigureAwait(false);
@@ -137,6 +139,10 @@ public sealed class SmtpSession
             await this.WriteLineAsync($"250-{this.options.AdvertisedHostName} Hello {this.clientHostName} [{this.remoteAddress}]", ct).ConfigureAwait(false);
             await this.WriteLineAsync($"250-SIZE {this.options.MaxMessageBytes}", ct).ConfigureAwait(false);
             await this.WriteLineAsync("250-8BITMIME", ct).ConfigureAwait(false);
+            if (this.options.TlsCertificate is not null && !this.isTls)
+            {
+                await this.WriteLineAsync("250-STARTTLS", ct).ConfigureAwait(false);
+            }
             await this.WriteLineAsync("250 HELP", ct).ConfigureAwait(false);
         }
         else
@@ -146,11 +152,60 @@ public sealed class SmtpSession
         return true;
     }
 
+    private async System.Threading.Tasks.Task<bool> HandleStarttlsAsync(System.Threading.CancellationToken ct)
+    {
+        if (this.options.TlsCertificate is null)
+        {
+            await this.WriteLineAsync("502 STARTTLS not supported", ct).ConfigureAwait(false);
+            return true;
+        }
+        if (this.isTls)
+        {
+            await this.WriteLineAsync("503 STARTTLS already active", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        // Per RFC 3207, we send "220 Ready to start TLS" first, then immediately
+        // upgrade the stream. After upgrade the client must re-issue EHLO and the
+        // session state resets (clientHostName, envelope, etc.).
+        await this.WriteLineAsync("220 Ready to start TLS", ct).ConfigureAwait(false);
+
+        var ssl = new System.Net.Security.SslStream(this.stream, leaveInnerStreamOpen: false);
+        try
+        {
+            await ssl.AuthenticateAsServerAsync(
+                this.options.TlsCertificate,
+                clientCertificateRequired: false,
+                enabledSslProtocols: System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                checkCertificateRevocation: false).ConfigureAwait(false);
+        }
+        catch (System.Exception)
+        {
+            // RFC 3207 says we MUST close the connection on TLS handshake failure -
+            // not return to plain mode (which would let a MITM strip TLS).
+            try { ssl.Dispose(); } catch (System.Exception) { /* swallow */ }
+            return false;
+        }
+
+        this.stream = ssl;
+        this.isTls = true;
+        this.clientHostName = string.Empty;
+        this.envelopeFrom = string.Empty;
+        this.envelopeTo.Clear();
+        this.state = State.AwaitingHelo;
+        return true;
+    }
+
     private async System.Threading.Tasks.Task<bool> HandleMailAsync(string args, System.Threading.CancellationToken ct)
     {
         if (this.state == State.AwaitingHelo)
         {
             await this.WriteLineAsync("503 Bad sequence of commands, send HELO/EHLO first", ct).ConfigureAwait(false);
+            return true;
+        }
+        if (this.options.RequireTlsForMail && this.options.TlsCertificate is not null && !this.isTls)
+        {
+            await this.WriteLineAsync("530 Must issue a STARTTLS command first", ct).ConfigureAwait(false);
             return true;
         }
 

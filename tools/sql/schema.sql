@@ -80,4 +80,12 @@ CREATE INDEX IF NOT EXISTS outbound_messages_lease_idx
     ON outbound_messages (status, next_attempt_at)
     WHERE status = 0;
 
+-- Outbound TLS policies (v0.5.0)
+CREATE TABLE IF NOT EXISTS outbound_tls_policies (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain      CITEXT NOT NULL UNIQUE,
+    mode        INTEGER NOT NULL,  -- 0=Opportunistic, 1=Required, 2=Disabled
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 COMMIT;

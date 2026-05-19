@@ -1,6 +1,44 @@
 namespace Anjal.Store;
 
 /// <summary>
+/// TLS handling mode for an outbound send to a particular destination.
+/// </summary>
+public enum TlsMode
+{
+    /// <summary>Try STARTTLS, fall back to plaintext if the server does not advertise it.</summary>
+    Opportunistic = 0,
+
+    /// <summary>STARTTLS is mandatory. If the server does not advertise it, the send fails (transient).</summary>
+    Required = 1,
+
+    /// <summary>Do not use TLS even if advertised. Useful for testing and trusted local relays.</summary>
+    Disabled = 2,
+}
+
+/// <summary>
+/// TLS policy for outbound sends to a specific destination domain. If no
+/// policy exists for a domain, the configured default policy is used.
+/// </summary>
+public sealed class OutboundTlsPolicy
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>
+    /// Destination domain this policy applies to (case-insensitive). For
+    /// example, "gmail.com", "partner-hospital.example".
+    /// In relay mode, the lookup is against the relay's hostname.
+    /// </summary>
+    public string Domain { get; set; } = string.Empty;
+
+    /// <summary>The TLS mode to apply when sending to this domain.</summary>
+    public TlsMode Mode { get; set; }
+
+    /// <summary>When this policy was created or last updated.</summary>
+    public System.DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
 /// Status of a queued outbound message.
 /// </summary>
 public enum OutboundStatus

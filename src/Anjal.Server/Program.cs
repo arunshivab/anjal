@@ -12,14 +12,18 @@ namespace Anjal.Server;
 ///                             in-memory store is used (suitable for demos).
 ///   ANJAL_OUTBOUND_MODE     - "direct" (MX-based, requires port 25 outbound),
 ///                             "relay" (single upstream, requires ANJAL_RELAY_HOST),
-///                             or "none" (no outbound, inbound-only). Default "none".
+///                             or "none". Default "none".
 ///   ANJAL_RELAY_HOST        - upstream host for relay mode.
 ///   ANJAL_RELAY_PORT        - upstream port for relay mode, default 587.
 ///   ANJAL_API_PORT          - HTTP API port. If unset or 0, the API is disabled.
-///   ANJAL_API_TOKEN         - bearer token clients must present in
-///                             Authorization headers. Empty disables auth
-///                             (test-only mode).
+///   ANJAL_API_TOKEN         - bearer token clients must present.
 ///   ANJAL_API_BIND          - HTTP API bind address. Defaults to ANJAL_BIND.
+///   ANJAL_TLS_CERT_PATH     - path to fullchain.pem (with private key, or use ANJAL_TLS_KEY_PATH).
+///   ANJAL_TLS_KEY_PATH      - path to privkey.pem if not embedded in fullchain.
+///   ANJAL_TLS_REQUIRE       - if "true", server refuses MAIL FROM until STARTTLS. Default false.
+///   ANJAL_TLS_VALIDATE_PEER - if "false", outbound TLS skips cert validation (testing only). Default true.
+///   ANJAL_TLS_DEFAULT_MODE  - default outbound TLS mode if no per-domain policy:
+///                             "opportunistic" (default), "required", or "disabled".
 /// </summary>
 public static class Program
 {
@@ -50,11 +54,17 @@ public static class Program
 
         var sink = new RoutingMessageSink(store, routing, dispatcher, Log);
 
+        // TLS cert for SMTP receiver.
+        System.Security.Cryptography.X509Certificates.X509Certificate2? tlsCert = LoadServerCert(Log);
+        bool requireTls = string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_TLS_REQUIRE"), "true", System.StringComparison.OrdinalIgnoreCase);
+
         var smtpOptions = new Anjal.Smtp.SmtpServerOptions
         {
             BindAddress = System.Net.IPAddress.Parse(bind),
             Port = port,
             AdvertisedHostName = hostname,
+            TlsCertificate = tlsCert,
+            RequireTlsForMail = requireTls && tlsCert is not null,
         };
 
         using var cts = new System.Threading.CancellationTokenSource();
@@ -68,15 +78,25 @@ public static class Program
         using var server = new Anjal.Smtp.SmtpServer(smtpOptions, sink);
         Log($"Anjal SMTP listening on {bind}:{port} as {hostname}");
         Log(pg is null ? "Using in-memory store." : "Using PostgreSQL store.");
+        if (tlsCert is not null)
+        {
+            Log($"STARTTLS enabled (cert subject: {tlsCert.Subject}, expires {tlsCert.NotAfter:yyyy-MM-dd}).");
+            if (requireTls) Log("Receiver requires TLS before MAIL FROM.");
+        }
+        else
+        {
+            Log("STARTTLS disabled (set ANJAL_TLS_CERT_PATH to enable).");
+        }
 
-        // Outbound side.
+        // Outbound side with TLS policy lookup against the store.
         System.Threading.Tasks.Task? workerTask = null;
-        Anjal.Smtp.IMailSender? mailSender = ConfigureSender(outboundMode, hostname, Log);
+        Anjal.Smtp.TlsClientOptions tlsClient = BuildTlsClientOptions(store);
+        Anjal.Smtp.IMailSender? mailSender = ConfigureSender(outboundMode, hostname, tlsClient, Log);
         if (mailSender is not null)
         {
             var worker = new OutboundWorker(store, mailSender, new OutboundWorkerOptions(), log: Log);
             workerTask = worker.RunAsync(cts.Token);
-            Log($"Outbound worker started (mode={outboundMode}).");
+            Log($"Outbound worker started (mode={outboundMode}, tls.default={tlsClient.DefaultMode}).");
         }
         else
         {
@@ -117,37 +137,76 @@ public static class Program
         }
         catch (System.OperationCanceledException)
         {
-            // Expected on shutdown.
+            // Expected.
         }
 
         if (workerTask is not null)
         {
-            try
-            {
-                await workerTask.ConfigureAwait(false);
-            }
-            catch (System.OperationCanceledException)
-            {
-                // Expected.
-            }
+            try { await workerTask.ConfigureAwait(false); }
+            catch (System.OperationCanceledException) { /* expected */ }
         }
-
         if (apiTask is not null)
         {
-            try
-            {
-                await apiTask.ConfigureAwait(false);
-            }
-            catch (System.OperationCanceledException)
-            {
-                // Expected.
-            }
+            try { await apiTask.ConfigureAwait(false); }
+            catch (System.OperationCanceledException) { /* expected */ }
             apiServer?.Dispose();
         }
         return 0;
     }
 
-    private static Anjal.Smtp.IMailSender? ConfigureSender(string mode, string hostname, System.Action<string> log)
+    private static System.Security.Cryptography.X509Certificates.X509Certificate2? LoadServerCert(System.Action<string> log)
+    {
+        string? certPath = System.Environment.GetEnvironmentVariable("ANJAL_TLS_CERT_PATH");
+        if (string.IsNullOrEmpty(certPath))
+        {
+            return null;
+        }
+        if (!System.IO.File.Exists(certPath))
+        {
+            log($"ANJAL_TLS_CERT_PATH set to '{certPath}' but file does not exist; TLS disabled.");
+            return null;
+        }
+        string? keyPath = System.Environment.GetEnvironmentVariable("ANJAL_TLS_KEY_PATH");
+        try
+        {
+            if (!string.IsNullOrEmpty(keyPath) && System.IO.File.Exists(keyPath))
+            {
+                return System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(certPath, keyPath);
+            }
+            return System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(certPath);
+        }
+        catch (System.Exception ex)
+        {
+            log($"Failed to load TLS cert: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static Anjal.Smtp.TlsClientOptions BuildTlsClientOptions(Anjal.Store.IMessageStore store)
+    {
+        string defaultStr = (System.Environment.GetEnvironmentVariable("ANJAL_TLS_DEFAULT_MODE") ?? "opportunistic").ToLowerInvariant();
+        Anjal.Store.TlsMode defaultMode = defaultStr switch
+        {
+            "required" => Anjal.Store.TlsMode.Required,
+            "disabled" => Anjal.Store.TlsMode.Disabled,
+            _ => Anjal.Store.TlsMode.Opportunistic,
+        };
+
+        bool validate = !string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_TLS_VALIDATE_PEER"), "false", System.StringComparison.OrdinalIgnoreCase);
+
+        return new Anjal.Smtp.TlsClientOptions
+        {
+            DefaultMode = defaultMode,
+            ValidateCertificate = validate,
+            PolicyLookup = async (domain, ct) =>
+            {
+                Anjal.Store.OutboundTlsPolicy? p = await store.GetOutboundTlsPolicyAsync(domain, ct).ConfigureAwait(false);
+                return p?.Mode;
+            },
+        };
+    }
+
+    private static Anjal.Smtp.IMailSender? ConfigureSender(string mode, string hostname, Anjal.Smtp.TlsClientOptions tls, System.Action<string> log)
     {
         switch (mode)
         {
@@ -156,6 +215,7 @@ public static class Program
                 return new Anjal.Smtp.DirectMailSender(dns, new Anjal.Smtp.DirectSenderOptions
                 {
                     ClientHostName = hostname,
+                    Tls = tls,
                 });
 
             case "relay":
@@ -175,6 +235,7 @@ public static class Program
                     Host = relayHost,
                     Port = relayPort,
                     ClientHostName = hostname,
+                    Tls = tls,
                 });
 
             case "none":

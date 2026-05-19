@@ -12,3 +12,5 @@ Configuration for an instance.
 - **MaxMessageBytes** *(property)* - Maximum DATA size in bytes. Default 25 MB matches Gmail/Outlook for now.
 - **MaxRecipients** *(property)* - Maximum number of RCPT TO recipients per transaction. RFC 5321 minimum is 100.
 - **Port** *(property)* - TCP port to listen on. Default 2525 to avoid needing admin on dev machines.
+- **RequireTlsForMail** *(property)* - When true, the server refuses MAIL FROM, RCPT TO, and DATA on plaintext connections after EHLO - clients must STARTTLS first. Has no effect if is null. Defaults to false (TLS opportunistic on receiver side).
+- **TlsCertificate** *(property)* - X.509 certificate (with private key) used for STARTTLS. When set, the server advertises STARTTLS in EHLO and accepts upgrades. When null, STARTTLS is not advertised and the server runs plaintext only.

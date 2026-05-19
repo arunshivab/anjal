@@ -1,23 +1,25 @@
 # Anjal (அஞ்சல்)
 
 A .NET 10 mail server library. Protocol code (MIME, SMTP, DNS) and the
-HTTP API are hand-written with no external NuGet dependencies. The
-PostgreSQL store layer uses [Npgsql](https://www.npgsql.org/).
+HTTP API are hand-written with no external NuGet dependencies. TLS uses
+the BCL's `System.Net.Security.SslStream`. The PostgreSQL store layer
+uses [Npgsql](https://www.npgsql.org/).
 
 ## Status
 
-**v0.4.0** - bidirectional mail + HTTP/JSON API. Apps like SIGMA and
-Lipi HIS can drive Anjal entirely through HTTP: register routing rules,
-issue tag grants, enqueue outbound mail, and fetch message status.
+**v0.5.0** - bidirectional mail + HTTP/JSON API + STARTTLS. Anjal now
+accepts STARTTLS on the receiver side and uses STARTTLS opportunistically
+on the sender side, with per-destination policy control. RFC 3207 wire
+format. RFC 5246 / 8446 (TLS 1.2 / 1.3) via the BCL.
 
-No TLS, DKIM, SPF, or DMARC yet - Phase 2.
+DKIM signing is the next phase.
 
 ## Modules
 
 | Module | Purpose | NuGet |
 |---|---|---|
 | `Anjal.Mime` | MIME parser and builder (RFC 5322, RFC 2045-2049) | none |
-| `Anjal.Smtp` | SMTP receiver and sender (RFC 5321) | none |
+| `Anjal.Smtp` | SMTP receiver and sender (RFC 5321), STARTTLS (RFC 3207) | none |
 | `Anjal.Dns` | DNS MX record resolver (RFC 1035) | none |
 | `Anjal.Routing` | Inbound routing + signed webhook dispatcher | none |
 | `Anjal.Store` | Persistence: in-memory and PostgreSQL | Npgsql |
@@ -34,15 +36,14 @@ No TLS, DKIM, SPF, or DMARC yet - Phase 2.
 
 ## Run the demos
 
-Three end-to-end demos prove the inbound, outbound, and full-stack
-HTTP pipelines in-process, no PostgreSQL or external network needed:
+Four end-to-end demos prove inbound, outbound, full-stack HTTP, and
+STARTTLS pipelines in-process. No external setup needed - the TLS demo
+generates a self-signed cert in-process:
 
     dotnet run --project examples/Anjal.InboundEndToEnd
     dotnet run --project examples/Anjal.OutboundEndToEnd
     dotnet run --project examples/Anjal.ApiClient
-
-The third demo brings up the SMTP receiver, outbound worker, and API
-server in one process and uses `HttpClient` to call the API end-to-end.
+    dotnet run --project examples/Anjal.TlsEndToEnd
 
 ## Run a real server
 
@@ -50,17 +51,18 @@ Set up the schema once:
 
     psql -d anjal -f tools/sql/schema.sql
 
-Then run the server. Inbound-only (no outbound, no API):
+### Inbound-only, no API, no TLS
 
     $env:ANJAL_POSTGRES = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
     dotnet run --project src/Anjal.Server
 
-Full stack (recommended): SMTP receiver + outbound relay + HTTP API:
+### Full stack with STARTTLS (recommended for production)
 
     $env:ANJAL_POSTGRES      = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
-    $env:ANJAL_OUTBOUND_MODE = "relay"
-    $env:ANJAL_RELAY_HOST    = "smtp.your-relay.example"
-    $env:ANJAL_RELAY_PORT    = "587"
+    $env:ANJAL_HOSTNAME      = "mail.your-domain.example"
+    $env:ANJAL_TLS_CERT_PATH = "/etc/letsencrypt/live/mail.your-domain.example/fullchain.pem"
+    $env:ANJAL_TLS_KEY_PATH  = "/etc/letsencrypt/live/mail.your-domain.example/privkey.pem"
+    $env:ANJAL_OUTBOUND_MODE = "direct"
     $env:ANJAL_API_PORT      = "8080"
     $env:ANJAL_API_TOKEN     = "your-strong-secret-token-here"
     dotnet run --project src/Anjal.Server
@@ -79,6 +81,38 @@ Full stack (recommended): SMTP receiver + outbound relay + HTTP API:
 | `ANJAL_API_PORT` | (disabled) | HTTP API port. Unset disables. |
 | `ANJAL_API_BIND` | `ANJAL_BIND` | HTTP API bind address |
 | `ANJAL_API_TOKEN` | - | Bearer token for the API. Empty disables auth. |
+| `ANJAL_TLS_CERT_PATH` | (disabled) | Path to fullchain.pem |
+| `ANJAL_TLS_KEY_PATH` | - | Path to privkey.pem (if not in fullchain) |
+| `ANJAL_TLS_REQUIRE` | `false` | If `true`, server rejects MAIL FROM until STARTTLS |
+| `ANJAL_TLS_DEFAULT_MODE` | `opportunistic` | Default outbound TLS mode if no per-domain policy |
+| `ANJAL_TLS_VALIDATE_PEER` | `true` | Validate remote server certificate. Set `false` only for testing |
+
+## TLS overview
+
+**Receiver side.** When `ANJAL_TLS_CERT_PATH` is set, Anjal loads the PEM
+cert and key (via `X509Certificate2.CreateFromPemFile`) and advertises
+`STARTTLS` in the EHLO response. Clients can upgrade with the `STARTTLS`
+command; per RFC 3207 the session state resets and the client must
+re-issue EHLO over the encrypted channel. If `ANJAL_TLS_REQUIRE=true`,
+the server returns `530 Must issue a STARTTLS command first` to any
+`MAIL FROM` issued before STARTTLS.
+
+**Sender side.** When connecting outbound, Anjal:
+
+1. Sends the initial EHLO
+2. Looks at the EHLO response for the `STARTTLS` capability
+3. Looks up the destination's TLS mode in `outbound_tls_policies`, or
+   falls back to `ANJAL_TLS_DEFAULT_MODE`
+4. Depending on the mode:
+   - **opportunistic** - upgrade if offered, send plaintext if not
+   - **required** - upgrade if offered, fail transient if not
+   - **disabled** - skip STARTTLS even if offered
+5. After successful handshake, re-issue EHLO over TLS, then `MAIL FROM`,
+   `RCPT TO`, `DATA`, `QUIT`
+
+The policy lookup is keyed by the **destination domain** (e.g.
+`gmail.com`), not by MX hostname. In relay mode the lookup is against
+the relay's hostname. This applies uniformly to direct and relay outbound modes.
 
 ## HTTP API
 
@@ -87,34 +121,30 @@ the configured token is empty (test-only mode).
 
 ### Routing rules
 
-    POST   /api/routing-rules         { localPart, webhookUrl, webhookSecret }  -> 200 RoutingRuleResponse
-    GET    /api/routing-rules                                                    -> 200 [RoutingRuleResponse]
-    DELETE /api/routing-rules/{localPart}                                        -> 204 / 404
+    POST   /api/routing-rules                 { localPart, webhookUrl, webhookSecret }
+    GET    /api/routing-rules
+    DELETE /api/routing-rules/{localPart}
 
 ### Tag grants
 
-    POST   /api/tag-grants            { localPart, tag, correlationKey, ttlSeconds }
-                                                                                 -> 200 TagGrantResponse
+    POST   /api/tag-grants                    { localPart, tag, correlationKey, ttlSeconds }
 
 ### Outbound
 
-    POST   /api/outbound              { envelopeFrom, envelopeTo, subject?, bodyText?, rawBytesBase64?, giveUpHours? }
-                                                                                 -> 202 OutboundResponse
-    GET    /api/outbound/{id}                                                    -> 200 OutboundResponse / 404
+    POST   /api/outbound                      { envelopeFrom, envelopeTo, subject?, bodyText?, rawBytesBase64?, giveUpHours? }
+    GET    /api/outbound/{id}
 
 ### Inbound
 
-    GET    /api/inbound/{id}                                                     -> 200 InboundResponse / 404
+    GET    /api/inbound/{id}
 
-### Error responses
+### Outbound TLS policies
 
-All non-2xx responses share a uniform body:
+    POST   /api/outbound-tls-policies         { domain, mode }
+    GET    /api/outbound-tls-policies
+    DELETE /api/outbound-tls-policies/{domain}
 
-    { "error": "machine_code", "message": "human-readable description" }
-
-Codes: `unauthorized` (401), `not_found` (404), `method_not_allowed`
-(405), `payload_too_large` (413), `invalid_request` / `invalid_json`
-(400), `internal_error` (500).
+`mode` is one of `opportunistic`, `required`, `disabled`.
 
 ## Webhook integration
 
@@ -128,18 +158,17 @@ See `examples/Anjal.InboundEndToEnd` for the payload schema.
 
 ## Outbound queue
 
-Outbound messages are queued in the `outbound_messages` table and drained
-by the `OutboundWorker` background task. Failed attempts retry with
-exponential backoff (1m, 5m, 15m, 1h, 6h, 24h). Messages are permanently
-marked Failed if they reach their `give_up_at` deadline (default 24
-hours from creation) or receive a 5xx reply.
+Outbound messages are queued in `outbound_messages` and drained by the
+`OutboundWorker` background task. Failed attempts retry with exponential
+backoff (1m, 5m, 15m, 1h, 6h, 24h). Messages are marked Failed if they
+reach their `give_up_at` deadline (default 24 hours) or receive a 5xx
+reply.
 
 ## Sub-addressing
 
-A recipient of the form `local-part+tag@host` routes by `local-part`;
-the `tag` is exposed in the webhook payload. Tags must be authorised by
-an active `TagGrant` for the matching `(localPart, tag)` pair, otherwise
-SMTP returns 550.
+A recipient `local-part+tag@host` routes by `local-part`; the `tag` is
+exposed in the webhook payload. Tags must be authorised by an active
+`TagGrant` for the matching `(localPart, tag)`, otherwise SMTP returns 550.
 
 ## Regenerate API docs
 

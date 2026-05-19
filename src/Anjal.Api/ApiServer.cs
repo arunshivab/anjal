@@ -19,6 +19,7 @@ public sealed class ApiServer : System.IDisposable
     private readonly TagGrantsHandler tagGrants;
     private readonly OutboundHandler outbound;
     private readonly InboundHandler inbound;
+    private readonly OutboundTlsPoliciesHandler tlsPolicies;
     private readonly System.Action<string>? log;
     private bool started;
     private bool disposed;
@@ -40,6 +41,7 @@ public sealed class ApiServer : System.IDisposable
         this.tagGrants = new TagGrantsHandler(store);
         this.outbound = new OutboundHandler(store);
         this.inbound = new InboundHandler(store);
+        this.tlsPolicies = new OutboundTlsPoliciesHandler(store);
 
         this.listener = new HttpListener();
         // HttpListener takes a URI-style prefix like "http://127.0.0.1:8080/".
@@ -284,6 +286,32 @@ public sealed class ApiServer : System.IDisposable
             if (ctx.Method == "GET" && id.Length > 0)
             {
                 await this.inbound.GetAsync(ctx, id).ConfigureAwait(false);
+                return;
+            }
+            await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+            return;
+        }
+
+        if (path.Equals("/api/outbound-tls-policies", System.StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/outbound-tls-policies/", System.StringComparison.OrdinalIgnoreCase))
+        {
+            switch (ctx.Method)
+            {
+                case "POST": await this.tlsPolicies.PostAsync(ctx).ConfigureAwait(false); return;
+                case "GET": await this.tlsPolicies.ListAsync(ctx).ConfigureAwait(false); return;
+                default:
+                    await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+                    return;
+            }
+        }
+
+        const string tlsPolicyPrefix = "/api/outbound-tls-policies/";
+        if (path.StartsWith(tlsPolicyPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string domain = path.Substring(tlsPolicyPrefix.Length);
+            if (ctx.Method == "DELETE" && domain.Length > 0)
+            {
+                await this.tlsPolicies.DeleteAsync(ctx, domain).ConfigureAwait(false);
                 return;
             }
             await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
