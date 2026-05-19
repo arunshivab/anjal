@@ -31,16 +31,40 @@
 
 ## Anjal.Routing
 
+- [Anjal.Routing.AddressResolution](Anjal.Routing/AddressResolution.md)
+- [Anjal.Routing.HttpWebhookDispatcher](Anjal.Routing/HttpWebhookDispatcher.md)
+- [Anjal.Routing.IRoutingTable](Anjal.Routing/IRoutingTable.md)
+- [Anjal.Routing.IWebhookDispatcher](Anjal.Routing/IWebhookDispatcher.md)
 - [Anjal.Routing.ModuleInfo](Anjal.Routing/ModuleInfo.md)
+- [Anjal.Routing.RoutingDecision](Anjal.Routing/RoutingDecision.md)
+- [Anjal.Routing.RoutingOutcome](Anjal.Routing/RoutingOutcome.md)
+- [Anjal.Routing.StoreBackedRoutingTable](Anjal.Routing/StoreBackedRoutingTable.md)
+- [Anjal.Routing.WebhookDispatchResult](Anjal.Routing/WebhookDispatchResult.md)
+- [Anjal.Routing.WebhookPayload](Anjal.Routing/WebhookPayload.md)
 
 ## Anjal.Server
 
 - [Anjal.Server.Program](Anjal.Server/Program.md)
+- [Anjal.Server.RoutingMessageSink](Anjal.Server/RoutingMessageSink.md)
 
 ## Anjal.Smtp
 
+- [Anjal.Smtp.DeliveryContext](Anjal.Smtp/DeliveryContext.md)
+- [Anjal.Smtp.DeliveryOutcome](Anjal.Smtp/DeliveryOutcome.md)
+- [Anjal.Smtp.DeliveryResult](Anjal.Smtp/DeliveryResult.md)
+- [Anjal.Smtp.IMessageSink](Anjal.Smtp/IMessageSink.md)
 - [Anjal.Smtp.ModuleInfo](Anjal.Smtp/ModuleInfo.md)
+- [Anjal.Smtp.SmtpServer](Anjal.Smtp/SmtpServer.md)
+- [Anjal.Smtp.SmtpServerOptions](Anjal.Smtp/SmtpServerOptions.md)
+- [Anjal.Smtp.SmtpSession](Anjal.Smtp/SmtpSession.md)
 
 ## Anjal.Store
 
+- [Anjal.Store.IMessageStore](Anjal.Store/IMessageStore.md)
+- [Anjal.Store.InMemoryMessageStore](Anjal.Store/InMemoryMessageStore.md)
+- [Anjal.Store.InboundMessage](Anjal.Store/InboundMessage.md)
 - [Anjal.Store.ModuleInfo](Anjal.Store/ModuleInfo.md)
+- [Anjal.Store.PostgresMessageStore](Anjal.Store/PostgresMessageStore.md)
+- [Anjal.Store.RoutingRule](Anjal.Store/RoutingRule.md)
+- [Anjal.Store.TagGrant](Anjal.Store/TagGrant.md)
+- [Anjal.Store.WebhookDelivery](Anjal.Store/WebhookDelivery.md)

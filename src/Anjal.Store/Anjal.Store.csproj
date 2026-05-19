@@ -1,9 +1,19 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Npgsql is the standard PostgreSQL .NET driver. It is allowed here
+      because rolling our own PostgreSQL wire-protocol client buys nothing
+      relative to the rule's purpose, which is owning the mail protocols
+      themselves (MIME, SMTP, DNS). The protocol layers stay zero-NuGet.
+    -->
+    <PackageReference Include="Npgsql" Version="9.0.3" />
+  </ItemGroup>
 
 </Project>
