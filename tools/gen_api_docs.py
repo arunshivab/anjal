@@ -10,6 +10,11 @@ Run from repo root:
 
 The docs CI workflow runs this and fails if docs/api has any uncommitted
 changes, so regenerate and commit after any public API change.
+
+Output is always written with CRLF line endings to match the .gitattributes
+rule for *.md files. Without this, Linux runners write LF and the docs-up-
+to-date check fails when run on a tree where Windows previously normalised
+the files to CRLF.
 """
 from __future__ import annotations
 
@@ -81,6 +86,19 @@ def clean_docs_dir() -> None:
             pass
 
 
+def write_crlf(path: Path, content: str) -> None:
+    """Write text with CRLF line endings, regardless of host OS.
+
+    Matches the .gitattributes rule `*.md text eol=crlf`. Without this,
+    Linux runners write LF and the docs-up-to-date CI check sees spurious
+    diffs against files committed from Windows.
+    """
+    # Normalise any existing CRLF to LF first so we don't end up with CRCRLF.
+    normalised = content.replace("\r\n", "\n")
+    with open(path, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write(normalised)
+
+
 def generate() -> None:
     DOCS.mkdir(parents=True, exist_ok=True)
     clean_docs_dir()
@@ -133,12 +151,12 @@ def generate() -> None:
                     desc = m["summary"] or "_(no description)_"
                     md.append(f"- **{m['name']}** *({m['kind']})* - {desc}")
                 md.append("")
-            (module_dir / f"{type_name}.md").write_text("\n".join(md), encoding="utf-8")
+            write_crlf(module_dir / f"{type_name}.md", "\n".join(md))
             index_lines.append(f"- [{module_name}.{type_name}]({module_name}/{type_name}.md)")
             total_types += 1
         index_lines.append("")
 
-    (DOCS / "index.md").write_text("\n".join(index_lines), encoding="utf-8")
+    write_crlf(DOCS / "index.md", "\n".join(index_lines))
     print(f"Generated docs for {total_types} types across {modules_with_types} modules.")
 
 
