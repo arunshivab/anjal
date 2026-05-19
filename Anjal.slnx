@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/examples/">
+    <Project Path="examples/Anjal.InboundEndToEnd/Anjal.InboundEndToEnd.csproj" />
     <Project Path="examples/Anjal.Mime.Build/Anjal.Mime.Build.csproj" />
     <Project Path="examples/Anjal.Mime.Parse/Anjal.Mime.Parse.csproj" />
   </Folder>
