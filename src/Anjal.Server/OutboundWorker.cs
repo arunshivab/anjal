@@ -26,6 +26,9 @@ public sealed class OutboundWorker
     private readonly OutboundWorkerOptions options;
     private readonly System.Func<System.DateTimeOffset> clock;
     private readonly System.Action<string>? log;
+    private readonly Anjal.Dkim.IDkimKeyResolver? dkimResolver;
+    private readonly Anjal.Dkim.DkimSigner? dkimSigner;
+    private readonly bool requireDkim;
 
     /// <summary>
     /// Construct an outbound worker.
@@ -35,12 +38,21 @@ public sealed class OutboundWorker
     /// <param name="options">Worker configuration.</param>
     /// <param name="clock">Optional clock for tests.</param>
     /// <param name="log">Optional log callback.</param>
+    /// <param name="dkimResolver">Optional DKIM key resolver. When supplied,
+    /// outbound messages are signed before send. When <paramref name="requireDkim"/>
+    /// is true and no key is found for the sender domain, the send hard-fails.</param>
+    /// <param name="dkimSigner">Optional pre-configured DKIM signer.</param>
+    /// <param name="requireDkim">When true, refuse to send messages whose
+    /// sender domain has no configured DKIM key.</param>
     public OutboundWorker(
         Anjal.Store.IMessageStore store,
         Anjal.Smtp.IMailSender sender,
         OutboundWorkerOptions options,
         System.Func<System.DateTimeOffset>? clock = null,
-        System.Action<string>? log = null)
+        System.Action<string>? log = null,
+        Anjal.Dkim.IDkimKeyResolver? dkimResolver = null,
+        Anjal.Dkim.DkimSigner? dkimSigner = null,
+        bool requireDkim = false)
     {
         System.ArgumentNullException.ThrowIfNull(store);
         System.ArgumentNullException.ThrowIfNull(sender);
@@ -50,6 +62,9 @@ public sealed class OutboundWorker
         this.options = options;
         this.clock = clock ?? (() => System.DateTimeOffset.UtcNow);
         this.log = log;
+        this.dkimResolver = dkimResolver;
+        this.dkimSigner = dkimSigner;
+        this.requireDkim = requireDkim;
     }
 
     /// <summary>
@@ -106,11 +121,67 @@ public sealed class OutboundWorker
 
     private async System.Threading.Tasks.Task ProcessOneAsync(Anjal.Store.OutboundMessage m, System.Threading.CancellationToken ct)
     {
+        byte[] bytesToSend = m.RawBytes;
+
+        // DKIM signing (RFC 6376): sign before handing to the sender so the
+        // wire bytes match the signed canonicalization. If signing is required
+        // and no key is found, hard-fail this message permanently.
+        if (this.dkimResolver is not null && this.dkimSigner is not null)
+        {
+            string? senderDomain = ExtractFromDomain(bytesToSend);
+            if (senderDomain is null)
+            {
+                if (this.requireDkim)
+                {
+                    await this.MarkPermanentFailureAsync(m, "DKIM signing required but no From header found", ct).ConfigureAwait(false);
+                    return;
+                }
+                this.log?.Invoke($"DKIM: {m.Id} has no From header; sending unsigned (requireDkim=false)");
+            }
+            else
+            {
+                Anjal.Dkim.DkimKey? key = await this.dkimResolver.ResolveAsync(senderDomain, ct).ConfigureAwait(false);
+                if (key is null)
+                {
+                    if (this.requireDkim)
+                    {
+                        await this.MarkPermanentFailureAsync(m, $"DKIM signing required but no key configured for sender domain '{senderDomain}'", ct).ConfigureAwait(false);
+                        return;
+                    }
+                    this.log?.Invoke($"DKIM: no key for {senderDomain}; sending unsigned (requireDkim=false)");
+                }
+                else
+                {
+                    try
+                    {
+                        bytesToSend = this.dkimSigner.Sign(bytesToSend, key);
+                    }
+#pragma warning disable CA1031 // Failed signing should not crash the worker.
+                    catch (System.Exception ex)
+                    {
+                        if (this.requireDkim)
+                        {
+                            await this.MarkPermanentFailureAsync(m, $"DKIM signing failed for {senderDomain}: {ex.GetType().Name}: {ex.Message}", ct).ConfigureAwait(false);
+                            return;
+                        }
+                        this.log?.Invoke($"DKIM signing failed for {senderDomain}, sending unsigned: {ex.GetType().Name}: {ex.Message}");
+                    }
+#pragma warning restore CA1031
+                }
+            }
+        }
+        else if (this.requireDkim)
+        {
+            // Configuration error: requireDkim is true but no resolver/signer was supplied.
+            await this.MarkPermanentFailureAsync(m, "DKIM signing required but no resolver or signer was configured", ct).ConfigureAwait(false);
+            return;
+        }
+
         var delivery = new Anjal.Smtp.OutboundDelivery
         {
             EnvelopeFrom = m.EnvelopeFrom,
             EnvelopeTo = new[] { m.EnvelopeTo },
-            RawBytes = m.RawBytes,
+            RawBytes = bytesToSend,
         };
 
         Anjal.Smtp.SendResult result;
@@ -160,6 +231,41 @@ public sealed class OutboundWorker
                 }
                 break;
         }
+    }
+
+    /// <summary>
+    /// Extract the domain from the message's <c>From:</c> header. Returns
+    /// null if no From header is found or its value has no @-domain.
+    /// </summary>
+    private static string? ExtractFromDomain(byte[] rawBytes)
+    {
+        try
+        {
+            Anjal.Dkim.DkimMessage parsed = Anjal.Dkim.DkimMessage.Parse(rawBytes);
+            string? fromValue = parsed.GetHeaderValue("From");
+            if (fromValue is null) return null;
+
+            // From may be "Display Name <user@domain>" or just "user@domain".
+            int lt = fromValue.IndexOf('<', System.StringComparison.Ordinal);
+            int gt = fromValue.IndexOf('>', System.StringComparison.Ordinal);
+            string addr = (lt >= 0 && gt > lt) ? fromValue.Substring(lt + 1, gt - lt - 1) : fromValue.Trim();
+            int at = addr.LastIndexOf('@');
+            if (at < 0 || at == addr.Length - 1) return null;
+            return addr.Substring(at + 1).Trim().ToLowerInvariant();
+        }
+#pragma warning disable CA1031
+        catch (System.Exception)
+        {
+            return null;
+        }
+#pragma warning restore CA1031
+    }
+
+    private async System.Threading.Tasks.Task MarkPermanentFailureAsync(Anjal.Store.OutboundMessage m, string reason, System.Threading.CancellationToken ct)
+    {
+        System.DateTimeOffset now = this.clock();
+        await this.store.MarkOutboundResultAsync(m.Id, Anjal.Store.OutboundStatus.Failed, now, reason, ct).ConfigureAwait(false);
+        this.log?.Invoke($"failed (DKIM) {m.Id} -> {m.EnvelopeTo}: {reason}");
     }
 }
 

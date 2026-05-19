@@ -8,4 +8,5 @@ Background worker that drains the outbound queue. Leases batches of pending mess
 
 - **#ctor** *(method)* - Construct an outbound worker.
 - **DrainOnceAsync** *(method)* - Run a single iteration: lease one batch, process every message in it, then return. Exposed so tests and demos can drive the worker manually without waiting on the polling interval.
+- **ExtractFromDomain** *(method)* - Extract the domain from the message's From: header. Returns null if no From header is found or its value has no @-domain.
 - **RunAsync** *(method)* - Run the worker loop until is signalled. Each iteration: lease a batch, send each, mark each, sleep .

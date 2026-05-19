@@ -154,4 +154,39 @@ public interface IMessageStore
     /// <param name="ct">Cancellation.</param>
     /// <returns><see langword="true"/> if a policy was removed, <see langword="false"/> if none existed.</returns>
     System.Threading.Tasks.Task<bool> DeleteOutboundTlsPolicyAsync(string domain, System.Threading.CancellationToken ct = default);
+
+    // -------- DKIM keys --------
+
+    /// <summary>
+    /// Create or update a DKIM signing key for a sender domain. The
+    /// (domain, selector) pair is unique - upserting with the same domain
+    /// rotates the key or selector.
+    /// </summary>
+    /// <param name="key">The key to upsert.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The persisted key with <see cref="DkimKeyRow.Id"/> populated.</returns>
+    System.Threading.Tasks.Task<DkimKeyRow> UpsertDkimKeyAsync(DkimKeyRow key, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// List all configured DKIM keys. The <see cref="DkimKeyRow.PrivateKeyPem"/>
+    /// field IS populated; callers handling API responses should redact it.
+    /// </summary>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<DkimKeyRow>> ListDkimKeysAsync(System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Look up the DKIM signing key for a sender domain.
+    /// </summary>
+    /// <param name="domain">The sender domain (case-insensitive).</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The key, or <see langword="null"/> if none configured for that domain.</returns>
+    System.Threading.Tasks.Task<DkimKeyRow?> GetDkimKeyAsync(string domain, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove the DKIM key for a sender domain.
+    /// </summary>
+    /// <param name="domain">The sender domain (case-insensitive).</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns><see langword="true"/> if a key was removed.</returns>
+    System.Threading.Tasks.Task<bool> DeleteDkimKeyAsync(string domain, System.Threading.CancellationToken ct = default);
 }

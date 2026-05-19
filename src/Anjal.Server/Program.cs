@@ -94,9 +94,23 @@ public static class Program
         Anjal.Smtp.IMailSender? mailSender = ConfigureSender(outboundMode, hostname, tlsClient, Log);
         if (mailSender is not null)
         {
-            var worker = new OutboundWorker(store, mailSender, new OutboundWorkerOptions(), log: Log);
+            // DKIM signing: env-var default key (if configured) chained with store-backed per-domain lookup.
+            (Anjal.Dkim.IDkimKeyResolver? dkimResolver, bool requireDkim) = BuildDkimResolver(store, Log);
+            var dkimSigner = new Anjal.Dkim.DkimSigner();
+
+            var worker = new OutboundWorker(
+                store,
+                mailSender,
+                new OutboundWorkerOptions(),
+                log: Log,
+                dkimResolver: dkimResolver,
+                dkimSigner: dkimSigner,
+                requireDkim: requireDkim);
             workerTask = worker.RunAsync(cts.Token);
-            Log($"Outbound worker started (mode={outboundMode}, tls.default={tlsClient.DefaultMode}).");
+            string dkimNote = dkimResolver is not null
+                ? (requireDkim ? "DKIM=required" : "DKIM=opportunistic")
+                : "DKIM=disabled";
+            Log($"Outbound worker started (mode={outboundMode}, tls.default={tlsClient.DefaultMode}, {dkimNote}).");
         }
         else
         {
@@ -204,6 +218,72 @@ public static class Program
                 return p?.Mode;
             },
         };
+    }
+
+    /// <summary>
+    /// Build a DKIM key resolver from env vars (single default key) chained
+    /// with the store (per-domain overrides). Returns (resolver, requireDkim).
+    /// If nothing is configured, resolver is null and DKIM is fully disabled.
+    /// </summary>
+    private static (Anjal.Dkim.IDkimKeyResolver?, bool) BuildDkimResolver(Anjal.Store.IMessageStore store, System.Action<string> log)
+    {
+        string mode = (System.Environment.GetEnvironmentVariable("ANJAL_DKIM_MODE") ?? "off").ToLowerInvariant();
+        if (mode != "required" && mode != "opportunistic")
+        {
+            return (null, false);
+        }
+        bool requireDkim = mode == "required";
+
+        var resolvers = new System.Collections.Generic.List<Anjal.Dkim.IDkimKeyResolver>();
+
+        // Env-var key, if configured.
+        Anjal.Dkim.DkimKey? envKey = TryLoadEnvDkimKey(log);
+        if (envKey is not null)
+        {
+            resolvers.Add(new Anjal.Dkim.SingleKeyResolver(envKey));
+            log($"DKIM: env-var key loaded (domain={envKey.Domain}, selector={envKey.Selector}).");
+        }
+
+        // Store-backed lookup (per-domain).
+        resolvers.Add(new StoreBackedDkimResolver(store));
+        log("DKIM: store-backed per-domain lookup enabled.");
+
+        return (new Anjal.Dkim.ChainedKeyResolver(resolvers.ToArray()), requireDkim);
+    }
+
+    private static Anjal.Dkim.DkimKey? TryLoadEnvDkimKey(System.Action<string> log)
+    {
+        string? path = System.Environment.GetEnvironmentVariable("ANJAL_DKIM_KEY_PATH");
+        string? domain = System.Environment.GetEnvironmentVariable("ANJAL_DKIM_DOMAIN");
+        string? selector = System.Environment.GetEnvironmentVariable("ANJAL_DKIM_SELECTOR");
+
+        if (string.IsNullOrEmpty(path) || string.IsNullOrEmpty(domain) || string.IsNullOrEmpty(selector))
+        {
+            return null;
+        }
+        if (!System.IO.File.Exists(path))
+        {
+            log($"ANJAL_DKIM_KEY_PATH '{path}' does not exist; env-var DKIM key skipped.");
+            return null;
+        }
+        try
+        {
+            string pem = System.IO.File.ReadAllText(path);
+            // Validate by import.
+            using var rsa = System.Security.Cryptography.RSA.Create();
+            rsa.ImportFromPem(pem);
+            return new Anjal.Dkim.DkimKey
+            {
+                Domain = domain,
+                Selector = selector,
+                PrivateKeyPem = pem,
+            };
+        }
+        catch (System.Exception ex)
+        {
+            log($"Failed to load DKIM key from '{path}': {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
     }
 
     private static Anjal.Smtp.IMailSender? ConfigureSender(string mode, string hostname, Anjal.Smtp.TlsClientOptions tls, System.Action<string> log)

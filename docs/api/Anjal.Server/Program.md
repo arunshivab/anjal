@@ -6,4 +6,5 @@ Composition root for the Anjal mail server host process. Wires Store + Routing +
 
 ## Members
 
+- **BuildDkimResolver** *(method)* - Build a DKIM key resolver from env vars (single default key) chained with the store (per-domain overrides). Returns (resolver, requireDkim). If nothing is configured, resolver is null and DKIM is fully disabled.
 - **Main** *(method)* - Entry point.

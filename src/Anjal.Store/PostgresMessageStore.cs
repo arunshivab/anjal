@@ -437,6 +437,94 @@ LIMIT 1;";
         return affected > 0;
     }
 
+    /// <inheritdoc/>
+    public async Task<DkimKeyRow> UpsertDkimKeyAsync(DkimKeyRow key, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(key);
+
+        const string sql = @"
+INSERT INTO dkim_keys (domain, selector, private_key_pem, updated_at)
+VALUES (lower(@domain), @selector, @pem, now())
+ON CONFLICT (domain) DO UPDATE
+    SET selector = EXCLUDED.selector,
+        private_key_pem = EXCLUDED.private_key_pem,
+        updated_at = now()
+RETURNING id, domain, selector, private_key_pem, updated_at;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", key.Domain ?? string.Empty);
+        cmd.Parameters.AddWithValue("selector", key.Selector ?? string.Empty);
+        cmd.Parameters.AddWithValue("pem", key.PrivateKeyPem ?? string.Empty);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadDkimKey(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<DkimKeyRow>> ListDkimKeysAsync(CancellationToken ct = default)
+    {
+        const string sql = @"
+SELECT id, domain, selector, private_key_pem, updated_at FROM dkim_keys ORDER BY domain;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<DkimKeyRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadDkimKey(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<DkimKeyRow?> GetDkimKeyAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+
+        const string sql = @"
+SELECT id, domain, selector, private_key_pem, updated_at
+FROM dkim_keys
+WHERE domain = lower(@domain)
+LIMIT 1;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", domain);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+        return ReadDkimKey(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteDkimKeyAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+
+        const string sql = "DELETE FROM dkim_keys WHERE domain = lower(@domain);";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", domain);
+        int affected = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    private static DkimKeyRow ReadDkimKey(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        Domain = r.GetString(1),
+        Selector = r.GetString(2),
+        PrivateKeyPem = r.GetString(3),
+        UpdatedAt = r.GetFieldValue<System.DateTimeOffset>(4),
+    };
+
     private static OutboundTlsPolicy ReadTlsPolicy(NpgsqlDataReader r) => new()
     {
         Id = r.GetGuid(0),

@@ -1,6 +1,31 @@
 namespace Anjal.Store;
 
 /// <summary>
+/// A DKIM signing key persisted by Anjal.Store. The PEM is stored in
+/// plaintext; protect at the database access layer (encryption at rest,
+/// connection-level TLS, restricted role grants).
+/// </summary>
+public sealed class DkimKeyRow
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>Sender domain this key signs for (case-insensitive). For
+    /// example "mail.lipihis.in" or "noreply.sigma.com".</summary>
+    public string Domain { get; set; } = string.Empty;
+
+    /// <summary>The DKIM selector, e.g. "default" or "2026a". Joins with the
+    /// domain to form the DNS TXT record name <c>selector._domainkey.domain</c>.</summary>
+    public string Selector { get; set; } = string.Empty;
+
+    /// <summary>RSA private key in PKCS#8 PEM form.</summary>
+    public string PrivateKeyPem { get; set; } = string.Empty;
+
+    /// <summary>When the key was created or last updated.</summary>
+    public System.DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
 /// TLS handling mode for an outbound send to a particular destination.
 /// </summary>
 public enum TlsMode
