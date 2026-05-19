@@ -360,6 +360,91 @@ LIMIT 1;";
         return ReadMessage(reader);
     }
 
+    /// <inheritdoc/>
+    public async Task<OutboundTlsPolicy> UpsertOutboundTlsPolicyAsync(OutboundTlsPolicy policy, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(policy);
+
+        const string sql = @"
+INSERT INTO outbound_tls_policies (domain, mode, updated_at)
+VALUES (lower(@domain), @mode, now())
+ON CONFLICT (domain) DO UPDATE
+    SET mode = EXCLUDED.mode,
+        updated_at = now()
+RETURNING id, domain, mode, updated_at;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", policy.Domain ?? string.Empty);
+        cmd.Parameters.AddWithValue("mode", (int)policy.Mode);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadTlsPolicy(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<OutboundTlsPolicy>> ListOutboundTlsPoliciesAsync(CancellationToken ct = default)
+    {
+        const string sql = @"
+SELECT id, domain, mode, updated_at FROM outbound_tls_policies ORDER BY domain;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<OutboundTlsPolicy>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadTlsPolicy(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<OutboundTlsPolicy?> GetOutboundTlsPolicyAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+
+        const string sql = @"
+SELECT id, domain, mode, updated_at
+FROM outbound_tls_policies
+WHERE domain = lower(@domain)
+LIMIT 1;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", domain);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+        return ReadTlsPolicy(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteOutboundTlsPolicyAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+
+        const string sql = "DELETE FROM outbound_tls_policies WHERE domain = lower(@domain);";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", domain);
+        int affected = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        return affected > 0;
+    }
+
+    private static OutboundTlsPolicy ReadTlsPolicy(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        Domain = r.GetString(1),
+        Mode = (TlsMode)r.GetInt32(2),
+        UpdatedAt = r.GetFieldValue<System.DateTimeOffset>(3),
+    };
+
     private static RoutingRule ReadRule(NpgsqlDataReader r) => new()
     {
         Id = r.GetGuid(0),

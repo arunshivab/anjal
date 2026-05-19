@@ -12,9 +12,10 @@ namespace Anjal.Smtp;
 public sealed class SmtpClientSession : System.IDisposable
 {
     private readonly TcpClient client;
-    private readonly System.IO.Stream stream;
-    private readonly System.IO.StreamReader reader;
-    private readonly System.IO.StreamWriter writer;
+    private System.IO.Stream stream;
+    private System.IO.StreamReader reader;
+    private System.IO.StreamWriter writer;
+    private bool isTls;
     private bool disposed;
 
     private SmtpClientSession(TcpClient client)
@@ -24,6 +25,9 @@ public sealed class SmtpClientSession : System.IDisposable
         this.reader = new System.IO.StreamReader(this.stream, Encoding.ASCII);
         this.writer = new System.IO.StreamWriter(this.stream, Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true };
     }
+
+    /// <summary>True after a successful STARTTLS handshake.</summary>
+    public bool IsTls => this.isTls;
 
     /// <summary>
     /// Connect to <paramref name="host"/>:<paramref name="port"/> and read the
@@ -74,6 +78,89 @@ public sealed class SmtpClientSession : System.IDisposable
         System.ArgumentNullException.ThrowIfNull(clientHostname);
         await this.WriteLineAsync($"EHLO {clientHostname}", ct).ConfigureAwait(false);
         return await this.ReadReplyAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Issue <c>STARTTLS</c> and, on a <c>220</c> reply, upgrade the
+    /// underlying stream to TLS. The caller MUST re-issue <c>EHLO</c>
+    /// after this returns successfully, per RFC 3207.
+    /// </summary>
+    /// <param name="targetHostname">The hostname expected on the server certificate.</param>
+    /// <param name="validateCertificate">When true, server certificate is validated
+    /// against the system trust store. When false, any certificate is accepted -
+    /// only set false for testing against self-signed certs.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The 220 reply on success. If the server replies with anything
+    /// other than 2xx, this returns the reply without performing the upgrade.</returns>
+    public async System.Threading.Tasks.Task<SmtpReply> StartTlsAsync(
+        string targetHostname,
+        bool validateCertificate,
+        System.Threading.CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(targetHostname);
+        if (this.isTls)
+        {
+            throw new System.InvalidOperationException("STARTTLS already negotiated on this session.");
+        }
+
+        await this.WriteLineAsync("STARTTLS", ct).ConfigureAwait(false);
+        SmtpReply reply = await this.ReadReplyAsync(ct).ConfigureAwait(false);
+        if (reply.Code != 220)
+        {
+            return reply;
+        }
+
+        // RFC 3207: after the 220, immediately negotiate TLS. We dispose the
+        // text reader/writer because they have ASCII-encoded internal buffers
+        // pinned to the plaintext stream; we replace them with new ones bound
+        // to the SslStream after handshake.
+#pragma warning disable CA5359 // Accept-any-cert is deliberate when validateCertificate=false; caller opts in for testing.
+        var ssl = new System.Net.Security.SslStream(
+            this.stream,
+            leaveInnerStreamOpen: false,
+            validateCertificate
+                ? null
+                : (sender, certificate, chain, errors) => true);
+#pragma warning restore CA5359
+        try
+        {
+            await ssl.AuthenticateAsClientAsync(
+                targetHostname,
+                clientCertificates: null,
+                enabledSslProtocols: System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                checkCertificateRevocation: false).ConfigureAwait(false);
+        }
+        catch (System.Exception ex)
+        {
+            try { ssl.Dispose(); } catch (System.Exception) { /* swallow */ }
+            throw new SmtpProtocolException($"TLS handshake to {targetHostname} failed: {ex.Message}", ex);
+        }
+
+        this.stream = ssl;
+        this.reader = new System.IO.StreamReader(this.stream, Encoding.ASCII);
+        this.writer = new System.IO.StreamWriter(this.stream, Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true };
+        this.isTls = true;
+        return reply;
+    }
+
+    /// <summary>
+    /// Inspect a multi-line EHLO response to see whether the server advertises
+    /// the <c>STARTTLS</c> capability.
+    /// </summary>
+    /// <param name="ehloReply">The reply returned from <see cref="EhloAsync"/>.</param>
+    /// <returns>True if the EHLO advertised STARTTLS.</returns>
+    public static bool EhloSupportsStartTls(SmtpReply ehloReply)
+    {
+        System.ArgumentNullException.ThrowIfNull(ehloReply);
+        // The reply text is multi-line joined by '\n'. Each line is a capability.
+        foreach (string line in ehloReply.Text.Split('\n'))
+        {
+            if (string.Equals(line.Trim(), "STARTTLS", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>

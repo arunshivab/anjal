@@ -120,4 +120,38 @@ public interface IMessageStore
     /// <param name="id">The inbound message identifier.</param>
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<InboundMessage?> GetInboundByIdAsync(System.Guid id, System.Threading.CancellationToken ct = default);
+
+    // -------- Outbound TLS policies --------
+
+    /// <summary>
+    /// Create or update a TLS policy for a destination domain. The domain
+    /// is matched case-insensitively.
+    /// </summary>
+    /// <param name="policy">The policy to upsert.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The persisted policy with <see cref="OutboundTlsPolicy.Id"/> populated.</returns>
+    System.Threading.Tasks.Task<OutboundTlsPolicy> UpsertOutboundTlsPolicyAsync(OutboundTlsPolicy policy, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// List all configured TLS policies.
+    /// </summary>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<OutboundTlsPolicy>> ListOutboundTlsPoliciesAsync(System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Look up the TLS policy for a destination domain. Returns
+    /// <see langword="null"/> if no specific policy exists - the caller
+    /// applies the configured default in that case.
+    /// </summary>
+    /// <param name="domain">The destination domain (case-insensitive).</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<OutboundTlsPolicy?> GetOutboundTlsPolicyAsync(string domain, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove a policy for a destination domain.
+    /// </summary>
+    /// <param name="domain">The destination domain (case-insensitive).</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns><see langword="true"/> if a policy was removed, <see langword="false"/> if none existed.</returns>
+    System.Threading.Tasks.Task<bool> DeleteOutboundTlsPolicyAsync(string domain, System.Threading.CancellationToken ct = default);
 }

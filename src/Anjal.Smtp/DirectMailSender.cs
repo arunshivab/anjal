@@ -13,6 +13,12 @@ public sealed class DirectSenderOptions
 
     /// <summary>Connect timeout per MX attempt.</summary>
     public System.TimeSpan ConnectTimeout { get; init; } = System.TimeSpan.FromSeconds(15);
+
+    /// <summary>
+    /// TLS configuration. When null, TLS is disabled. The policy lookup is
+    /// keyed by destination domain (e.g. "gmail.com"), not MX hostname.
+    /// </summary>
+    public TlsClientOptions? Tls { get; init; }
 }
 
 /// <summary>
@@ -87,7 +93,7 @@ public sealed class DirectMailSender : IMailSender
         SendResult? lastResult = null;
         foreach (Anjal.Dns.MxRecord mx in mxs)
         {
-            SendResult attempt = await this.TryDeliverToHostAsync(mx.Exchange, delivery, ct).ConfigureAwait(false);
+            SendResult attempt = await this.TryDeliverToHostAsync(mx.Exchange, domain, delivery, ct).ConfigureAwait(false);
             lastResult = attempt;
             if (attempt.Outcome == SendOutcome.Sent)
             {
@@ -104,6 +110,7 @@ public sealed class DirectMailSender : IMailSender
 
     private async System.Threading.Tasks.Task<SendResult> TryDeliverToHostAsync(
         string host,
+        string domain,
         OutboundDelivery delivery,
         System.Threading.CancellationToken ct)
     {
@@ -118,6 +125,38 @@ public sealed class DirectMailSender : IMailSender
             {
                 await session.QuitAsync(ct).ConfigureAwait(false);
                 return RelayMailSender.ClassifyReply(ehlo, $"EHLO to {host}");
+            }
+
+            // STARTTLS using policy keyed by destination domain, then re-issue EHLO.
+            if (this.options.Tls is not null)
+            {
+                Anjal.Store.TlsMode mode = await this.options.Tls.ResolveModeAsync(domain, ct).ConfigureAwait(false);
+                bool offered = SmtpClientSession.EhloSupportsStartTls(ehlo);
+
+                if (mode == Anjal.Store.TlsMode.Required && !offered)
+                {
+                    await session.QuitAsync(ct).ConfigureAwait(false);
+                    return new SendResult
+                    {
+                        Outcome = SendOutcome.TransientFailure,
+                        Message = $"TLS required for {domain} but {host} did not advertise STARTTLS",
+                    };
+                }
+                if (mode != Anjal.Store.TlsMode.Disabled && offered)
+                {
+                    SmtpReply tlsReply = await session.StartTlsAsync(host, this.options.Tls.ValidateCertificate, ct).ConfigureAwait(false);
+                    if (tlsReply.Code != 220)
+                    {
+                        await session.QuitAsync(ct).ConfigureAwait(false);
+                        return RelayMailSender.ClassifyReply(tlsReply, $"STARTTLS at {host}");
+                    }
+                    SmtpReply ehlo2 = await session.EhloAsync(this.options.ClientHostName, ct).ConfigureAwait(false);
+                    if (ehlo2.Code != 250)
+                    {
+                        await session.QuitAsync(ct).ConfigureAwait(false);
+                        return RelayMailSender.ClassifyReply(ehlo2, $"EHLO (after STARTTLS) at {host}");
+                    }
+                }
             }
 
             SmtpReply mailFrom = await session.MailFromAsync(delivery.EnvelopeFrom, ct).ConfigureAwait(false);
