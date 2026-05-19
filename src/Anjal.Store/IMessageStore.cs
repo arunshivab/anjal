@@ -104,4 +104,20 @@ public interface IMessageStore
         System.DateTimeOffset nextAttemptAt,
         string lastError,
         System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetch a single outbound message by id. Returns <see langword="null"/>
+    /// if not found.
+    /// </summary>
+    /// <param name="id">The outbound message identifier.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<OutboundMessage?> GetOutboundByIdAsync(System.Guid id, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetch a single inbound message by id. Returns <see langword="null"/>
+    /// if not found.
+    /// </summary>
+    /// <param name="id">The inbound message identifier.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<InboundMessage?> GetInboundByIdAsync(System.Guid id, System.Threading.CancellationToken ct = default);
 }

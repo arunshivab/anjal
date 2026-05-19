@@ -2,7 +2,7 @@ namespace Anjal.Server;
 
 /// <summary>
 /// Composition root for the Anjal mail server host process. Wires
-/// Store + Routing + Smtp + Mime together and runs until cancellation.
+/// Store + Routing + Smtp + Mime + Api together and runs until cancellation.
 ///
 /// Environment variables:
 ///   ANJAL_BIND              - bind address, default "127.0.0.1"
@@ -15,6 +15,11 @@ namespace Anjal.Server;
 ///                             or "none" (no outbound, inbound-only). Default "none".
 ///   ANJAL_RELAY_HOST        - upstream host for relay mode.
 ///   ANJAL_RELAY_PORT        - upstream port for relay mode, default 587.
+///   ANJAL_API_PORT          - HTTP API port. If unset or 0, the API is disabled.
+///   ANJAL_API_TOKEN         - bearer token clients must present in
+///                             Authorization headers. Empty disables auth
+///                             (test-only mode).
+///   ANJAL_API_BIND          - HTTP API bind address. Defaults to ANJAL_BIND.
 /// </summary>
 public static class Program
 {
@@ -45,7 +50,7 @@ public static class Program
 
         var sink = new RoutingMessageSink(store, routing, dispatcher, Log);
 
-        var options = new Anjal.Smtp.SmtpServerOptions
+        var smtpOptions = new Anjal.Smtp.SmtpServerOptions
         {
             BindAddress = System.Net.IPAddress.Parse(bind),
             Port = port,
@@ -60,11 +65,11 @@ public static class Program
             Log("Shutdown requested.");
         };
 
-        using var server = new Anjal.Smtp.SmtpServer(options, sink);
+        using var server = new Anjal.Smtp.SmtpServer(smtpOptions, sink);
         Log($"Anjal SMTP listening on {bind}:{port} as {hostname}");
         Log(pg is null ? "Using in-memory store." : "Using PostgreSQL store.");
 
-        // Optional outbound side.
+        // Outbound side.
         System.Threading.Tasks.Task? workerTask = null;
         Anjal.Smtp.IMailSender? mailSender = ConfigureSender(outboundMode, hostname, Log);
         if (mailSender is not null)
@@ -76,6 +81,32 @@ public static class Program
         else
         {
             Log("Outbound disabled (set ANJAL_OUTBOUND_MODE=direct or relay to enable).");
+        }
+
+        // HTTP API side.
+        System.Threading.Tasks.Task? apiTask = null;
+        Anjal.Api.ApiServer? apiServer = null;
+        string apiPortStr = System.Environment.GetEnvironmentVariable("ANJAL_API_PORT") ?? string.Empty;
+        if (!string.IsNullOrEmpty(apiPortStr) &&
+            int.TryParse(apiPortStr, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int apiPort) &&
+            apiPort > 0)
+        {
+            string apiBind = System.Environment.GetEnvironmentVariable("ANJAL_API_BIND") ?? bind;
+            string token = System.Environment.GetEnvironmentVariable("ANJAL_API_TOKEN") ?? string.Empty;
+
+            apiServer = new Anjal.Api.ApiServer(new Anjal.Api.ApiOptions
+            {
+                BindAddress = System.Net.IPAddress.Parse(apiBind),
+                Port = apiPort,
+                BearerToken = token,
+            }, store, Log);
+            apiTask = apiServer.StartAsync(cts.Token);
+            string authNote = string.IsNullOrEmpty(token) ? " (auth disabled - DO NOT use in production)" : string.Empty;
+            Log($"API listening on http://{apiBind}:{apiPort}/api/...{authNote}");
+        }
+        else
+        {
+            Log("API disabled (set ANJAL_API_PORT to enable).");
         }
 
         Log("Press Ctrl+C to stop.");
@@ -99,6 +130,19 @@ public static class Program
             {
                 // Expected.
             }
+        }
+
+        if (apiTask is not null)
+        {
+            try
+            {
+                await apiTask.ConfigureAwait(false);
+            }
+            catch (System.OperationCanceledException)
+            {
+                // Expected.
+            }
+            apiServer?.Dispose();
         }
         return 0;
     }
