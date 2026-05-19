@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/examples/">
+    <Project Path="examples/Anjal.Mime.Build/Anjal.Mime.Build.csproj" />
+    <Project Path="examples/Anjal.Mime.Parse/Anjal.Mime.Parse.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Anjal.Api/Anjal.Api.csproj" />
     <Project Path="src/Anjal.Dns/Anjal.Dns.csproj" />
