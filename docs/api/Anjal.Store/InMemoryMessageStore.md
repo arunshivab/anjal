@@ -8,12 +8,16 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DeleteRoutingRuleAsync** *(method)* - _(no description)_
+- **EnqueueOutboundAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
 - **GetRoutingRuleAsync** *(method)* - _(no description)_
+- **LeaseOutboundBatchAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
+- **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
 - **UpsertRoutingRuleAsync** *(method)* - _(no description)_
 - **Deliveries** *(property)* - The webhook deliveries currently stored. Provided for inspection in tests.
 - **Messages** *(property)* - The inbound messages currently stored. Provided for inspection in tests.
+- **Outbound** *(property)* - The outbound messages currently queued or completed. Provided for inspection in tests.
 - **Rules** *(property)* - The routing rules currently stored. Provided for inspection in tests.

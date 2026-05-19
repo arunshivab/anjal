@@ -62,4 +62,22 @@ CREATE TABLE IF NOT EXISTS webhook_deliveries (
 CREATE INDEX IF NOT EXISTS webhook_deliveries_message_idx
     ON webhook_deliveries (inbound_message_id, attempted_at DESC);
 
+-- Outbound queue (v0.3.0)
+CREATE TABLE IF NOT EXISTS outbound_messages (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    envelope_from   TEXT NOT NULL,
+    envelope_to     TEXT NOT NULL,
+    raw_bytes       BYTEA NOT NULL,
+    status          INTEGER NOT NULL DEFAULT 0,  -- 0=Pending, 1=Sending, 2=Sent, 3=Failed
+    attempts        INTEGER NOT NULL DEFAULT 0,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    give_up_at      TIMESTAMPTZ NOT NULL,
+    last_error      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS outbound_messages_lease_idx
+    ON outbound_messages (status, next_attempt_at)
+    WHERE status = 0;
+
 COMMIT;
