@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/examples/">
+    <Project Path="examples/Anjal.ApiClient/Anjal.ApiClient.csproj" />
     <Project Path="examples/Anjal.InboundEndToEnd/Anjal.InboundEndToEnd.csproj" />
     <Project Path="examples/Anjal.Mime.Build/Anjal.Mime.Build.csproj" />
     <Project Path="examples/Anjal.Mime.Parse/Anjal.Mime.Parse.csproj" />
@@ -15,6 +16,7 @@
     <Project Path="src/Anjal.Store/Anjal.Store.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Anjal.Api.Tests/Anjal.Api.Tests.csproj" />
     <Project Path="tests/Anjal.Mime.Tests/Anjal.Mime.Tests.csproj" />
     <Project Path="tests/Anjal.Routing.Tests/Anjal.Routing.Tests.csproj" />
     <Project Path="tests/Anjal.Smtp.Tests/Anjal.Smtp.Tests.csproj" />

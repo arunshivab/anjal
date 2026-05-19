@@ -318,6 +318,48 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
         return ReadOutbound(reader);
     }
 
+    /// <inheritdoc/>
+    public async Task<OutboundMessage?> GetOutboundByIdAsync(System.Guid id, CancellationToken ct = default)
+    {
+        const string sql = @"
+SELECT id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error
+FROM outbound_messages
+WHERE id = @id
+LIMIT 1;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+        return ReadOutbound(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<InboundMessage?> GetInboundByIdAsync(System.Guid id, CancellationToken ct = default)
+    {
+        const string sql = @"
+SELECT id, envelope_from, envelope_to, local_part, tag, message_id, subject, received_at, raw_bytes
+FROM inbound_messages
+WHERE id = @id
+LIMIT 1;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+        return ReadMessage(reader);
+    }
+
     private static RoutingRule ReadRule(NpgsqlDataReader r) => new()
     {
         Id = r.GetGuid(0),

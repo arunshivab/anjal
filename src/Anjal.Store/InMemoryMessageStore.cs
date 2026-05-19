@@ -263,4 +263,24 @@ public sealed class InMemoryMessageStore : IMessageStore
             return Task.FromResult<OutboundMessage?>(found);
         }
     }
+
+    /// <inheritdoc/>
+    public Task<OutboundMessage?> GetOutboundByIdAsync(System.Guid id, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            OutboundMessage? found = this.outbound.Find(m => m.Id == id);
+            return Task.FromResult(found);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<InboundMessage?> GetInboundByIdAsync(System.Guid id, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            InboundMessage? found = this.messages.Find(m => m.Id == id);
+            return Task.FromResult(found);
+        }
+    }
 }

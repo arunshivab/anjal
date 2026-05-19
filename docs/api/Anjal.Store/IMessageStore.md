@@ -10,6 +10,8 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 - **DeleteRoutingRuleAsync** *(method)* - Remove the rule for a given local-part. Returns if a rule was deleted.
 - **EnqueueOutboundAsync** *(method)* - Enqueue an outbound message for delivery. Sets status to and assigns identifiers.
 - **GetActiveTagGrantAsync** *(method)* - Look up an active (unexpired) grant by (local-part, tag). Returns if no matching grant exists or all matching grants have expired.
+- **GetInboundByIdAsync** *(method)* - Fetch a single inbound message by id. Returns if not found.
+- **GetOutboundByIdAsync** *(method)* - Fetch a single outbound message by id. Returns if not found.
 - **GetRoutingRuleAsync** *(method)* - Look up the routing rule for a given local-part (case-insensitive). Returns if no rule exists.
 - **LeaseOutboundBatchAsync** *(method)* - Lease up to messages whose next-attempt time has passed. Leased messages have their status flipped to so other workers won't pick them up. The worker must call after each attempt to release the lease (success, retry, or give up).
 - **ListRoutingRulesAsync** *(method)* - List all routing rules in insertion order.
