@@ -212,6 +212,112 @@ RETURNING id, inbound_message_id, url, status_code, attempted_at, error_message;
         return ReadDelivery(reader);
     }
 
+    /// <inheritdoc/>
+    public async Task<OutboundMessage> EnqueueOutboundAsync(OutboundMessage message, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(message);
+
+        System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
+        System.DateTimeOffset next = message.NextAttemptAt == default ? now : message.NextAttemptAt;
+        System.DateTimeOffset giveUp = message.GiveUpAt == default ? now.AddHours(24) : message.GiveUpAt;
+
+        const string sql = @"
+INSERT INTO outbound_messages
+    (envelope_from, envelope_to, raw_bytes, status, attempts, next_attempt_at, give_up_at, last_error)
+VALUES
+    (@envelope_from, @envelope_to, @raw_bytes, @status, 0, @next_attempt_at, @give_up_at, '')
+RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("envelope_from", message.EnvelopeFrom ?? string.Empty);
+        cmd.Parameters.AddWithValue("envelope_to", message.EnvelopeTo ?? string.Empty);
+        cmd.Parameters.AddWithValue("raw_bytes", message.RawBytes ?? System.Array.Empty<byte>());
+        cmd.Parameters.AddWithValue("status", (int)OutboundStatus.Pending);
+        cmd.Parameters.AddWithValue("next_attempt_at", next);
+        cmd.Parameters.AddWithValue("give_up_at", giveUp);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadOutbound(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<OutboundMessage>> LeaseOutboundBatchAsync(int batchSize, System.DateTimeOffset now, CancellationToken ct = default)
+    {
+        if (batchSize <= 0)
+        {
+            throw new System.ArgumentOutOfRangeException(nameof(batchSize), "Batch size must be positive.");
+        }
+
+        // CTE pattern with SELECT ... FOR UPDATE SKIP LOCKED to safely lease
+        // rows across multiple workers. UPDATE then RETURNING to flip status.
+        const string sql = @"
+WITH due AS (
+    SELECT id
+    FROM outbound_messages
+    WHERE status = @pending_status
+      AND next_attempt_at <= @now
+    ORDER BY next_attempt_at ASC
+    LIMIT @batch_size
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE outbound_messages o
+SET status = @sending_status
+FROM due
+WHERE o.id = due.id
+RETURNING o.id, o.envelope_from, o.envelope_to, o.raw_bytes, o.status, o.attempts, o.created_at, o.next_attempt_at, o.give_up_at, o.last_error;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("pending_status", (int)OutboundStatus.Pending);
+        cmd.Parameters.AddWithValue("sending_status", (int)OutboundStatus.Sending);
+        cmd.Parameters.AddWithValue("now", now);
+        cmd.Parameters.AddWithValue("batch_size", batchSize);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<OutboundMessage>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadOutbound(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<OutboundMessage?> MarkOutboundResultAsync(
+        System.Guid id,
+        OutboundStatus newStatus,
+        System.DateTimeOffset nextAttemptAt,
+        string lastError,
+        CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(lastError);
+
+        const string sql = @"
+UPDATE outbound_messages
+SET status          = @status,
+    attempts        = attempts + 1,
+    next_attempt_at = @next_attempt_at,
+    last_error      = @last_error
+WHERE id = @id
+RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("status", (int)newStatus);
+        cmd.Parameters.AddWithValue("next_attempt_at", nextAttemptAt);
+        cmd.Parameters.AddWithValue("last_error", lastError);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+        return ReadOutbound(reader);
+    }
+
     private static RoutingRule ReadRule(NpgsqlDataReader r) => new()
     {
         Id = r.GetGuid(0),
@@ -252,5 +358,19 @@ RETURNING id, inbound_message_id, url, status_code, attempted_at, error_message;
         StatusCode = r.GetInt32(3),
         AttemptedAt = r.GetFieldValue<System.DateTimeOffset>(4),
         ErrorMessage = r.GetString(5),
+    };
+
+    private static OutboundMessage ReadOutbound(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        EnvelopeFrom = r.GetString(1),
+        EnvelopeTo = r.GetString(2),
+        RawBytes = (byte[])r.GetValue(3),
+        Status = (OutboundStatus)r.GetInt32(4),
+        Attempts = r.GetInt32(5),
+        CreatedAt = r.GetFieldValue<System.DateTimeOffset>(6),
+        NextAttemptAt = r.GetFieldValue<System.DateTimeOffset>(7),
+        GiveUpAt = r.GetFieldValue<System.DateTimeOffset>(8),
+        LastError = r.GetString(9),
     };
 }

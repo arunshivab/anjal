@@ -13,6 +13,7 @@ public sealed class InMemoryMessageStore : IMessageStore
     private readonly List<TagGrant> grants = new();
     private readonly List<InboundMessage> messages = new();
     private readonly List<WebhookDelivery> deliveries = new();
+    private readonly List<OutboundMessage> outbound = new();
 
     /// <summary>The routing rules currently stored. Provided for inspection in tests.</summary>
     public IReadOnlyList<RoutingRule> Rules
@@ -46,6 +47,18 @@ public sealed class InMemoryMessageStore : IMessageStore
             lock (this.gate)
             {
                 return this.deliveries.ToArray();
+            }
+        }
+    }
+
+    /// <summary>The outbound messages currently queued or completed. Provided for inspection in tests.</summary>
+    public IReadOnlyList<OutboundMessage> Outbound
+    {
+        get
+        {
+            lock (this.gate)
+            {
+                return this.outbound.ToArray();
             }
         }
     }
@@ -168,6 +181,86 @@ public sealed class InMemoryMessageStore : IMessageStore
             }
             this.deliveries.Add(delivery);
             return Task.FromResult(delivery);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<OutboundMessage> EnqueueOutboundAsync(OutboundMessage message, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(message);
+        lock (this.gate)
+        {
+            message.Id = System.Guid.NewGuid();
+            message.Status = OutboundStatus.Pending;
+            message.Attempts = 0;
+            if (message.CreatedAt == default)
+            {
+                message.CreatedAt = System.DateTimeOffset.UtcNow;
+            }
+            if (message.NextAttemptAt == default)
+            {
+                message.NextAttemptAt = message.CreatedAt;
+            }
+            if (message.GiveUpAt == default)
+            {
+                message.GiveUpAt = message.CreatedAt.AddHours(24);
+            }
+            this.outbound.Add(message);
+            return Task.FromResult(message);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<OutboundMessage>> LeaseOutboundBatchAsync(int batchSize, System.DateTimeOffset now, CancellationToken ct = default)
+    {
+        if (batchSize <= 0)
+        {
+            throw new System.ArgumentOutOfRangeException(nameof(batchSize), "Batch size must be positive.");
+        }
+        lock (this.gate)
+        {
+            var leased = new List<OutboundMessage>();
+            foreach (OutboundMessage m in this.outbound)
+            {
+                if (leased.Count >= batchSize)
+                {
+                    break;
+                }
+                if (m.Status == OutboundStatus.Pending && m.NextAttemptAt <= now)
+                {
+                    m.Status = OutboundStatus.Sending;
+                    leased.Add(m);
+                }
+            }
+            IReadOnlyList<OutboundMessage> result = leased.ToArray();
+            return Task.FromResult(result);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<OutboundMessage?> MarkOutboundResultAsync(
+        System.Guid id,
+        OutboundStatus newStatus,
+        System.DateTimeOffset nextAttemptAt,
+        string lastError,
+        CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(lastError);
+        lock (this.gate)
+        {
+            OutboundMessage? found = this.outbound.Find(m => m.Id == id);
+            if (found is null)
+            {
+                return Task.FromResult<OutboundMessage?>(null);
+            }
+            found.Status = newStatus;
+            found.LastError = lastError;
+            found.Attempts++;
+            if (newStatus == OutboundStatus.Pending)
+            {
+                found.NextAttemptAt = nextAttemptAt;
+            }
+            return Task.FromResult<OutboundMessage?>(found);
         }
     }
 }

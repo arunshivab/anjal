@@ -6,6 +6,7 @@
     <ProjectReference Include="..\Anjal.Store\Anjal.Store.csproj" />
     <ProjectReference Include="..\Anjal.Routing\Anjal.Routing.csproj" />
     <ProjectReference Include="..\Anjal.Mime\Anjal.Mime.csproj" />
+    <ProjectReference Include="..\Anjal.Dns\Anjal.Dns.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

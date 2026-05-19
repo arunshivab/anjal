@@ -1,6 +1,66 @@
 namespace Anjal.Store;
 
 /// <summary>
+/// Status of a queued outbound message.
+/// </summary>
+public enum OutboundStatus
+{
+    /// <summary>Waiting to be sent (or retried after a transient failure).</summary>
+    Pending = 0,
+
+    /// <summary>Currently leased by a worker for a send attempt.</summary>
+    Sending = 1,
+
+    /// <summary>Successfully accepted by the destination.</summary>
+    Sent = 2,
+
+    /// <summary>Bounced (permanent failure or maximum retries reached).</summary>
+    Failed = 3,
+}
+
+/// <summary>
+/// A queued outbound message. Created by the API layer or by a webhook
+/// auto-reply rule; consumed by an <c>OutboundWorker</c> background task
+/// that runs send attempts with exponential backoff.
+/// </summary>
+public sealed class OutboundMessage
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>The SMTP envelope sender (no angle brackets).</summary>
+    public string EnvelopeFrom { get; set; } = string.Empty;
+
+    /// <summary>The SMTP envelope recipient (no angle brackets). One row per recipient.</summary>
+    public string EnvelopeTo { get; set; } = string.Empty;
+
+    /// <summary>The raw RFC 5322 message bytes to send in the DATA phase.</summary>
+    public byte[] RawBytes { get; set; } = System.Array.Empty<byte>();
+
+    /// <summary>Current status.</summary>
+    public OutboundStatus Status { get; set; }
+
+    /// <summary>Number of send attempts made so far.</summary>
+    public int Attempts { get; set; }
+
+    /// <summary>Earliest time the next send attempt should be tried.</summary>
+    public System.DateTimeOffset NextAttemptAt { get; set; }
+
+    /// <summary>Time the message was enqueued.</summary>
+    public System.DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// Cutoff after which the message should be permanently failed regardless
+    /// of remaining retry budget. Default is 24 hours after creation; the
+    /// caller can override per-message.
+    /// </summary>
+    public System.DateTimeOffset GiveUpAt { get; set; }
+
+    /// <summary>The reply text of the most recent attempt (success or failure).</summary>
+    public string LastError { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// A stored inbound message. The <see cref="Id"/> is assigned by the store
 /// on save; callers should ignore the value they pass in.
 /// </summary>
