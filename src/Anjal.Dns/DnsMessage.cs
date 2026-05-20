@@ -64,11 +64,27 @@ public sealed class DnsMessage
             int rdEnd = rdStart + rdLength;
 
             MxRecord? mx = null;
+            System.Collections.Generic.IReadOnlyList<string>? txtStrings = null;
             if (type == 15) // MX
             {
                 ushort preference = reader.ReadU16();
                 string exchange = reader.ReadName();
                 mx = new MxRecord { Priority = preference, Exchange = exchange.ToLowerInvariant() };
+            }
+            else if (type == 16) // TXT
+            {
+                // TXT rdata is one or more <length-prefixed string> chunks.
+                // Most records are a single chunk but the wire format allows
+                // multiple. Each chunk is up to 255 bytes.
+                var chunks = new System.Collections.Generic.List<string>();
+                while (reader.Position < rdEnd)
+                {
+                    int chunkLen = reader.ReadByte();
+                    if (chunkLen == 0) break;
+                    if (reader.Position + chunkLen > rdEnd) break;
+                    chunks.Add(System.Text.Encoding.UTF8.GetString(reader.ReadBytes(chunkLen)));
+                }
+                txtStrings = chunks;
             }
             reader.Position = rdEnd; // Skip rdata even if we didn't parse it.
 
@@ -79,6 +95,7 @@ public sealed class DnsMessage
                 Class = cls,
                 Ttl = ttl,
                 MxRecord = mx,
+                TxtStrings = txtStrings,
             });
         }
 
@@ -112,6 +129,13 @@ public sealed class DnsAnswer
 
     /// <summary>Parsed MX content if <see cref="Type"/> is 15; otherwise null.</summary>
     public MxRecord? MxRecord { get; init; }
+
+    /// <summary>Parsed TXT content if <see cref="Type"/> is 16; otherwise null.
+    /// A single DNS TXT record may contain multiple length-prefixed string
+    /// chunks per RFC 1035 section 3.3.14; consumers typically concatenate
+    /// them to recover the logical value (this is how SPF, DKIM, and DMARC
+    /// records can exceed 255 bytes).</summary>
+    public System.Collections.Generic.IReadOnlyList<string>? TxtStrings { get; init; }
 }
 
 /// <summary>
@@ -152,6 +176,29 @@ internal sealed class DnsReader
         }
         ushort v = (ushort)((this.data[this.Position] << 8) | this.data[this.Position + 1]);
         this.Position += 2;
+        return v;
+    }
+
+    public int ReadByte()
+    {
+        if (this.Position + 1 > this.data.Length)
+        {
+            throw new DnsException("Unexpected end of DNS message reading byte.");
+        }
+        int v = this.data[this.Position];
+        this.Position += 1;
+        return v;
+    }
+
+    public byte[] ReadBytes(int count)
+    {
+        if (this.Position + count > this.data.Length)
+        {
+            throw new DnsException("Unexpected end of DNS message reading bytes.");
+        }
+        byte[] v = new byte[count];
+        System.Buffer.BlockCopy(this.data, this.Position, v, 0, count);
+        this.Position += count;
         return v;
     }
 

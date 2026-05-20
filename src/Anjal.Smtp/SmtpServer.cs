@@ -10,6 +10,8 @@ public sealed class SmtpServer : System.IDisposable
 {
     private readonly SmtpServerOptions options;
     private readonly IMessageSink sink;
+    private readonly IInboundAuthenticator? authenticator;
+    private readonly bool enforceReject;
     private readonly TcpListener listener;
     private bool started;
     private bool disposed;
@@ -21,11 +23,24 @@ public sealed class SmtpServer : System.IDisposable
     /// <param name="options">Server configuration.</param>
     /// <param name="sink">Sink for delivered messages.</param>
     public SmtpServer(SmtpServerOptions options, IMessageSink sink)
+        : this(options, sink, authenticator: null, enforceReject: false) { }
+
+    /// <summary>
+    /// Construct a server with inbound authentication.
+    /// </summary>
+    /// <param name="options">Server configuration.</param>
+    /// <param name="sink">Sink for delivered messages.</param>
+    /// <param name="authenticator">Inbound SPF/DKIM/DMARC authenticator.</param>
+    /// <param name="enforceReject">Refuse messages with SMTP 550 when DMARC says reject.</param>
+    public SmtpServer(SmtpServerOptions options, IMessageSink sink,
+        IInboundAuthenticator? authenticator, bool enforceReject)
     {
         System.ArgumentNullException.ThrowIfNull(options);
         System.ArgumentNullException.ThrowIfNull(sink);
         this.options = options;
         this.sink = sink;
+        this.authenticator = authenticator;
+        this.enforceReject = enforceReject;
         this.listener = new TcpListener(options.BindAddress, options.Port);
     }
 
@@ -77,7 +92,7 @@ public sealed class SmtpServer : System.IDisposable
                 // Fire and forget - exceptions inside the session are handled there.
                 _ = System.Threading.Tasks.Task.Run(async () =>
                 {
-                    var session = new SmtpSession(client, this.options, this.sink);
+                    var session = new SmtpSession(client, this.options, this.sink, this.authenticator, this.enforceReject);
                     await session.RunAsync(ct).ConfigureAwait(false);
                 }, ct);
             }

@@ -1,17 +1,19 @@
 # Anjal (அஞ்சல்)
 
-A .NET 10 mail server library. Protocol code (MIME, SMTP, DNS, DKIM) and
-the HTTP API are hand-written with no external NuGet dependencies. TLS
-uses the BCL's `System.Net.Security.SslStream`. DKIM uses the BCL's
+A .NET 10 mail server library. Protocol code (MIME, SMTP, DNS, DKIM, SPF,
+DMARC) and the HTTP API are hand-written with no external NuGet
+dependencies. TLS uses the BCL's `System.Net.Security.SslStream`. DKIM
+and DMARC signature verification use the BCL's
 `System.Security.Cryptography.RSA`. The PostgreSQL store layer uses
 [Npgsql](https://www.npgsql.org/).
 
 ## Status
 
-**v0.6.0** - bidirectional mail + HTTP/JSON API + STARTTLS + DKIM signing.
-DKIM is RSA-SHA256, RFC 6376 compliant with both `simple` and `relaxed`
-canonicalization. Ed25519 DKIM is deferred until .NET ships
-`System.Security.Cryptography.Ed25519` in the BCL.
+**v0.7.0** - bidirectional mail + HTTP/JSON API + STARTTLS + DKIM signing
+**+ SPF/DKIM/DMARC inbound verification**. Anjal now signs every outbound
+message and verifies every inbound message. With DMARC enforcement enabled,
+messages whose sending domain publishes `p=reject` and which fail
+authentication are refused with SMTP 550 before reaching the routing layer.
 
 ## Modules
 
@@ -19,8 +21,9 @@ canonicalization. Ed25519 DKIM is deferred until .NET ships
 |---|---|---|
 | `Anjal.Mime` | MIME parser and builder (RFC 5322, RFC 2045-2049) | none |
 | `Anjal.Smtp` | SMTP receiver and sender (RFC 5321), STARTTLS (RFC 3207) | none |
-| `Anjal.Dns` | DNS MX record resolver (RFC 1035) | none |
+| `Anjal.Dns` | DNS MX + TXT resolver (RFC 1035) | none |
 | `Anjal.Dkim` | DKIM signer (RFC 6376), RSA-SHA256 | none |
+| `Anjal.Auth` | SPF (RFC 7208) + DKIM verifier (RFC 6376) + DMARC (RFC 7489) + Authentication-Results (RFC 8601) | none |
 | `Anjal.Routing` | Inbound routing + signed webhook dispatcher | none |
 | `Anjal.Store` | Persistence: in-memory and PostgreSQL | Npgsql |
 | `Anjal.Api` | HTTP/JSON API on `HttpListener` + `System.Text.Json` | none |
@@ -36,17 +39,22 @@ canonicalization. Ed25519 DKIM is deferred until .NET ships
 
 ## Run the demos
 
-Five end-to-end demos prove each pipeline in-process with no external setup:
+Six in-process demos prove each pipeline with no external setup:
 
     dotnet run --project examples/Anjal.InboundEndToEnd
     dotnet run --project examples/Anjal.OutboundEndToEnd
     dotnet run --project examples/Anjal.ApiClient
     dotnet run --project examples/Anjal.TlsEndToEnd
     dotnet run --project examples/Anjal.DkimSigning
+    dotnet run --project examples/Anjal.InboundAuthCheck
 
-The DKIM signing demo generates an RSA-2048 keypair in memory, signs a
-message, then verifies the resulting `DKIM-Signature` header using only
-the public key - the same path a receiving mail server would take.
+`Anjal.InboundAuthCheck` exercises three scenarios:
+1. A properly DKIM-signed message verifies successfully.
+2. A message with a tampered body produces a body-hash mismatch (DKIM fail).
+3. An unsigned message reports no signature.
+
+It prints the formatted `Authentication-Results` header and the JSON
+fragment Anjal would attach to the webhook payload.
 
 ## Run a real server
 
@@ -54,19 +62,20 @@ Set up the schema once:
 
     psql -d anjal -f tools/sql/schema.sql
 
-### Full stack with TLS and DKIM (recommended for production)
+### Full stack with TLS, DKIM signing, and inbound authentication
 
-    $env:ANJAL_POSTGRES       = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
-    $env:ANJAL_HOSTNAME       = "mail.your-domain.example"
-    $env:ANJAL_TLS_CERT_PATH  = "/etc/letsencrypt/live/mail.your-domain.example/fullchain.pem"
-    $env:ANJAL_TLS_KEY_PATH   = "/etc/letsencrypt/live/mail.your-domain.example/privkey.pem"
-    $env:ANJAL_OUTBOUND_MODE  = "direct"
-    $env:ANJAL_DKIM_MODE      = "required"
-    $env:ANJAL_DKIM_DOMAIN    = "mail.your-domain.example"
-    $env:ANJAL_DKIM_SELECTOR  = "default"
-    $env:ANJAL_DKIM_KEY_PATH  = "/etc/anjal/dkim/default.private.pem"
-    $env:ANJAL_API_PORT       = "8080"
-    $env:ANJAL_API_TOKEN      = "your-strong-secret-token-here"
+    $env:ANJAL_POSTGRES               = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
+    $env:ANJAL_HOSTNAME               = "mail.your-domain.example"
+    $env:ANJAL_TLS_CERT_PATH          = "/etc/letsencrypt/live/mail.your-domain.example/fullchain.pem"
+    $env:ANJAL_TLS_KEY_PATH           = "/etc/letsencrypt/live/mail.your-domain.example/privkey.pem"
+    $env:ANJAL_OUTBOUND_MODE          = "direct"
+    $env:ANJAL_DKIM_MODE              = "required"
+    $env:ANJAL_DKIM_DOMAIN            = "mail.your-domain.example"
+    $env:ANJAL_DKIM_SELECTOR          = "default"
+    $env:ANJAL_DKIM_KEY_PATH          = "/etc/anjal/dkim/default.private.pem"
+    $env:ANJAL_INBOUND_AUTH_ENFORCE   = "dmarc-reject"
+    $env:ANJAL_API_PORT               = "8080"
+    $env:ANJAL_API_TOKEN              = "your-strong-secret-token-here"
     dotnet run --project src/Anjal.Server
 
 ### Environment variables
@@ -75,7 +84,7 @@ Set up the schema once:
 |---|---|---|
 | `ANJAL_BIND` | `127.0.0.1` | SMTP bind address |
 | `ANJAL_PORT` | `2525` | SMTP receiver port |
-| `ANJAL_HOSTNAME` | `anjal.localhost` | Hostname in banner and EHLO |
+| `ANJAL_HOSTNAME` | `anjal.localhost` | Hostname in banner, EHLO, and `Authentication-Results` |
 | `ANJAL_POSTGRES` | (in-memory) | PostgreSQL connection string |
 | `ANJAL_OUTBOUND_MODE` | `none` | `direct`, `relay`, or `none` |
 | `ANJAL_RELAY_HOST` | - | Relay host (when mode=relay) |
@@ -92,6 +101,63 @@ Set up the schema once:
 | `ANJAL_DKIM_DOMAIN` | - | Default sender domain (for env-var key) |
 | `ANJAL_DKIM_SELECTOR` | - | Default selector (for env-var key) |
 | `ANJAL_DKIM_KEY_PATH` | - | Path to default DKIM private PEM |
+| `ANJAL_INBOUND_AUTH_ENFORCE` | `dmarc-reject` | `dmarc-reject` enforces DMARC; `none`/`off` annotates only |
+
+## Inbound authentication (SPF + DKIM + DMARC)
+
+For every inbound message, Anjal runs three checks in parallel:
+
+- **SPF (RFC 7208)**: looks up the SPF TXT record for the MAIL FROM
+  domain, walks any `include:` chain (10-lookup limit), and matches the
+  peer IP against `ip4:`, `ip6:`, `a`, `mx`, and `exists` mechanisms.
+- **DKIM (RFC 6376)**: finds the first `DKIM-Signature` header, fetches
+  the public key from `<selector>._domainkey.<domain>` TXT, canonicalizes
+  the body and signed headers per the algorithm tags, and verifies the
+  RSA-SHA256 signature.
+- **DMARC (RFC 7489)**: looks up `_dmarc.<from-domain>` TXT (falling back
+  to the organizational domain), checks SPF and DKIM alignment with the
+  From-header domain, and applies the published policy.
+
+The verdicts are formatted into an RFC 8601 `Authentication-Results`
+header prepended to the message, and the full per-verifier detail is
+attached to the webhook payload as `authResults`.
+
+### Enforcement
+
+With `ANJAL_INBOUND_AUTH_ENFORCE=dmarc-reject` (the default), Anjal
+refuses messages at the SMTP layer (550 reply) when the From-domain
+publishes `p=reject` and authentication fails. The message never reaches
+the sink or the webhook. Policies `p=quarantine` and `p=none` are
+advisory; Anjal annotates them but does not refuse the message.
+
+To disable enforcement entirely, set `ANJAL_INBOUND_AUTH_ENFORCE=none`.
+Authentication still runs and the verdicts are still attached to the
+webhook payload, but messages are always accepted.
+
+### Webhook payload schema (with auth)
+
+```json
+{
+  "inboundMessageId": "...",
+  "recipient": "...",
+  "envelopeFrom": "...",
+  "subject": "...",
+  "messageId": "...",
+  "receivedAt": "2026-05-19T12:00:00.0000000+00:00",
+  "rawBytesBase64": "...",
+  "authResults": {
+    "spf":   { "result": "pass",  "domain": "...", "peerAddress": "...", "matchedMechanism": "ip4:...", "lookupCount": 2, "explanation": "..." },
+    "dkim":  { "result": "pass",  "domain": "...", "selector": "...",    "algorithm": "rsa-sha256",     "explanation": "..." },
+    "dmarc": { "result": "pass",  "fromDomain": "...", "policy": "reject", "spfAlignment": "relaxed",
+               "dkimAlignment": "relaxed", "spfAligned": true, "dkimAligned": true, "alignedDomain": "...",
+               "explanation": "..." },
+    "headerValue": "<the full Authentication-Results header line>"
+  }
+}
+```
+
+When authentication is disabled, the `authResults` key is omitted from
+the payload.
 
 ## DKIM setup walkthrough
 
@@ -186,16 +252,11 @@ the configured token is empty (test-only mode).
     GET    /api/outbound-tls-policies
     DELETE /api/outbound-tls-policies/{domain}
 
-`mode` is one of `opportunistic`, `required`, `disabled`.
-
 ### DKIM keys
 
     POST   /api/dkim-keys                     { domain, selector, privateKeyPem }
     GET    /api/dkim-keys                     # never returns private keys
     DELETE /api/dkim-keys/{domain}
-
-Private keys are never returned in API responses. To rotate, POST again
-with a new selector and/or private key.
 
 ## TLS overview
 
@@ -235,7 +296,9 @@ signed JSON payload to the registered webhook URL:
 - `X-Anjal-Timestamp` - Unix seconds at the time of send
 - `X-Anjal-Signature` - `sha256=<hex>` of HMAC-SHA256 over `timestamp + "." + body`
 
-See `examples/Anjal.InboundEndToEnd` for the payload schema.
+See `examples/Anjal.InboundEndToEnd` for the payload schema. When
+inbound authentication is enabled, the payload includes an `authResults`
+block (schema above).
 
 ## Outbound queue
 

@@ -40,6 +40,15 @@ public sealed class WebhookPayload
 
     /// <summary>The raw RFC 5322 bytes of the message, base64-encoded.</summary>
     public string RawBytesBase64 { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Inbound authentication results (SPF/DKIM/DMARC) as a JSON object
+    /// fragment (without surrounding braces, e.g. <c>"spf":{...},"dkim":{...},"dmarc":{...}</c>).
+    /// Empty when inbound authentication is disabled. When populated, the
+    /// payload's <c>authResults</c> key embeds this fragment. Produced by
+    /// <c>Anjal.Auth.AuthResultsJson.Serialize</c>.
+    /// </summary>
+    public string AuthResultsJson { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -196,6 +205,12 @@ public sealed class HttpWebhookDispatcher : IWebhookDispatcher
         AppendField(sb, "messageId", payload.MessageId, first: false);
         AppendField(sb, "receivedAt", payload.ReceivedAt.ToString("O", CultureInfo.InvariantCulture), first: false);
         AppendField(sb, "rawBytesBase64", payload.RawBytesBase64, first: false);
+        if (!string.IsNullOrEmpty(payload.AuthResultsJson))
+        {
+            // The fragment is already a complete JSON object including
+            // surrounding braces; embed verbatim under the authResults key.
+            sb.Append(",\"authResults\":").Append(payload.AuthResultsJson);
+        }
         sb.Append('}');
         return sb.ToString();
     }

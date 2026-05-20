@@ -21,6 +21,13 @@ public sealed class DeliveryContext
 
     /// <summary>The EHLO/HELO hostname the client claimed.</summary>
     public string ClientHostName { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Authentication detail (SPF/DKIM/DMARC verdicts) if an authenticator
+    /// was configured. Null if inbound auth is disabled. The concrete type
+    /// is <c>Anjal.Auth.AuthenticationResults</c> when populated.
+    /// </summary>
+    public object? AuthResults { get; init; }
 }
 
 /// <summary>
@@ -70,4 +77,66 @@ public interface IMessageSink
     /// <param name="ctx">The delivery context.</param>
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<DeliveryResult> DeliverAsync(DeliveryContext ctx, System.Threading.CancellationToken ct = default);
+}
+
+/// <summary>
+/// Optional pluggable authenticator for inbound mail. Runs after DATA
+/// but before the message is handed to the sink. Lets the server enforce
+/// SPF/DKIM/DMARC verdicts at the SMTP layer (e.g. reject 550 when DMARC
+/// says p=reject).
+/// </summary>
+public interface IInboundAuthenticator
+{
+    /// <summary>
+    /// Authenticate an inbound message. Returns a structured result
+    /// containing per-verifier verdicts and the formatted
+    /// <c>Authentication-Results</c> header value. The implementation
+    /// MUST NOT throw - it should return TempError/PermError verdicts
+    /// instead of raising.
+    /// </summary>
+    /// <param name="remoteAddress">Connecting client's IP as a string.</param>
+    /// <param name="envelopeFrom">SMTP MAIL FROM value.</param>
+    /// <param name="messageBytes">Full RFC 5322 message bytes.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Authentication result for the message.</returns>
+    System.Threading.Tasks.Task<InboundAuthResult> AuthenticateAsync(
+        string remoteAddress,
+        string envelopeFrom,
+        byte[] messageBytes,
+        System.Threading.CancellationToken ct = default);
+}
+
+/// <summary>
+/// Outcome of inbound authentication. Carries the formatted
+/// <c>Authentication-Results</c> header value to prepend to the message,
+/// and a flag indicating whether DMARC policy requires this server to
+/// reject the message.
+/// </summary>
+public sealed class InboundAuthResult
+{
+    /// <summary>
+    /// The <c>Authentication-Results</c> header value to prepend (no
+    /// field-name prefix, no terminating CRLF).
+    /// </summary>
+    public string HeaderValue { get; init; } = string.Empty;
+
+    /// <summary>
+    /// True if DMARC published <c>p=reject</c> and authentication failed.
+    /// When the server is configured to enforce DMARC, set this to refuse
+    /// the message with SMTP 550 before sink dispatch.
+    /// </summary>
+    public bool ShouldReject { get; init; }
+
+    /// <summary>
+    /// Opaque structured data exposed to the sink. The Smtp layer doesn't
+    /// interpret this; it's passed through to <see cref="DeliveryContext.AuthResults"/>
+    /// so the webhook payload can include full per-verifier detail.
+    /// </summary>
+    public object? Detail { get; init; }
+
+    /// <summary>
+    /// SMTP reply text to send with the 550 when <see cref="ShouldReject"/>
+    /// is true. Empty falls back to a generic message.
+    /// </summary>
+    public string RejectReason { get; init; } = string.Empty;
 }
