@@ -17,6 +17,8 @@ public sealed class SmtpSession
     private Stream stream;
     private readonly SmtpServerOptions options;
     private readonly IMessageSink sink;
+    private readonly IInboundAuthenticator? authenticator;
+    private readonly bool enforceReject;
     private readonly string remoteAddress;
     private bool isTls;
 
@@ -32,6 +34,20 @@ public sealed class SmtpSession
     /// <param name="options">Server configuration.</param>
     /// <param name="sink">Where delivered messages go.</param>
     public SmtpSession(TcpClient client, SmtpServerOptions options, IMessageSink sink)
+        : this(client, options, sink, authenticator: null, enforceReject: false) { }
+
+    /// <summary>
+    /// Construct a session for an accepted TCP client, with optional
+    /// inbound authentication.
+    /// </summary>
+    /// <param name="client">Accepted TCP client.</param>
+    /// <param name="options">Server options.</param>
+    /// <param name="sink">Message sink.</param>
+    /// <param name="authenticator">Optional inbound authenticator (SPF/DKIM/DMARC).</param>
+    /// <param name="enforceReject">When true and authenticator says DMARC reject,
+    /// refuse the message with SMTP 550 before invoking the sink.</param>
+    public SmtpSession(TcpClient client, SmtpServerOptions options, IMessageSink sink,
+        IInboundAuthenticator? authenticator, bool enforceReject)
     {
         System.ArgumentNullException.ThrowIfNull(client);
         System.ArgumentNullException.ThrowIfNull(options);
@@ -40,6 +56,8 @@ public sealed class SmtpSession
         this.client = client;
         this.options = options;
         this.sink = sink;
+        this.authenticator = authenticator;
+        this.enforceReject = enforceReject;
         this.stream = client.GetStream();
         this.remoteAddress = (client.Client.RemoteEndPoint as System.Net.IPEndPoint)?.Address.ToString() ?? string.Empty;
         this.state = State.AwaitingGreeting;
@@ -268,13 +286,58 @@ public sealed class SmtpSession
             return true;
         }
 
+        // Inbound authentication (SPF/DKIM/DMARC). Runs only if an
+        // authenticator was supplied. Failures here MUST NOT crash the
+        // session; the authenticator returns TempError/PermError verdicts.
+        InboundAuthResult? authResult = null;
+        byte[] bodyToDeliver = body;
+        if (this.authenticator is not null)
+        {
+            try
+            {
+                authResult = await this.authenticator.AuthenticateAsync(
+                    this.remoteAddress, this.envelopeFrom, body, ct).ConfigureAwait(false);
+
+                // Reject before sink dispatch when enforcement is on and DMARC said reject.
+                if (this.enforceReject && authResult.ShouldReject)
+                {
+                    string why = string.IsNullOrEmpty(authResult.RejectReason)
+                        ? "Message failed DMARC policy (p=reject)"
+                        : authResult.RejectReason;
+                    await this.WriteLineAsync($"550 {why}", ct).ConfigureAwait(false);
+                    this.ResetTransaction();
+                    return true;
+                }
+
+                // Prepend Authentication-Results header to the bytes the sink sees.
+                if (!string.IsNullOrEmpty(authResult.HeaderValue))
+                {
+                    string hdrLine = "Authentication-Results: " + authResult.HeaderValue + "\r\n";
+                    byte[] hdrBytes = System.Text.Encoding.UTF8.GetBytes(hdrLine);
+                    byte[] combined = new byte[hdrBytes.Length + body.Length];
+                    System.Buffer.BlockCopy(hdrBytes, 0, combined, 0, hdrBytes.Length);
+                    System.Buffer.BlockCopy(body, 0, combined, hdrBytes.Length, body.Length);
+                    bodyToDeliver = combined;
+                }
+            }
+#pragma warning disable CA1031 // Authenticator failures must not crash the session.
+            catch (System.Exception)
+            {
+                // Treat any authenticator failure as auth-not-performed.
+                authResult = null;
+                bodyToDeliver = body;
+            }
+#pragma warning restore CA1031
+        }
+
         var deliveryCtx = new DeliveryContext
         {
             EnvelopeFrom = this.envelopeFrom,
             EnvelopeTo = this.envelopeTo.ToArray(),
-            RawBytes = body,
+            RawBytes = bodyToDeliver,
             RemoteAddress = this.remoteAddress,
             ClientHostName = this.clientHostName,
+            AuthResults = authResult?.Detail,
         };
 
         DeliveryResult result;

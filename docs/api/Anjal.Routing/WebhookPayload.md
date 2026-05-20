@@ -6,6 +6,7 @@ Payload sent to a webhook subscriber. The receiver should validate the signature
 
 ## Members
 
+- **AuthResultsJson** *(property)* - Inbound authentication results (SPF/DKIM/DMARC) as a JSON object fragment (without surrounding braces, e.g. "spf":{...},"dkim":{...},"dmarc":{...}). Empty when inbound authentication is disabled. When populated, the payload's authResults key embeds this fragment. Produced by Anjal.Auth.AuthResultsJson.Serialize.
 - **CorrelationKey** *(property)* - Correlation key from the matched tag grant, or empty.
 - **EnvelopeFrom** *(property)* - The SMTP envelope sender.
 - **InboundMessageId** *(property)* - Identifier of the persisted inbound message.

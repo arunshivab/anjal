@@ -75,7 +75,12 @@ public static class Program
             Log("Shutdown requested.");
         };
 
-        using var server = new Anjal.Smtp.SmtpServer(smtpOptions, sink);
+        // Inbound auth (SPF + DKIM + DMARC). Configurable via ANJAL_INBOUND_AUTH_ENFORCE:
+        //   "dmarc-reject" -> enforce DMARC p=reject as SMTP 550 refusal (default)
+        //   "none"         -> annotate only (always 250)
+        (Anjal.Smtp.IInboundAuthenticator? inboundAuth, bool enforceReject) = BuildInboundAuth(hostname, Log);
+
+        using var server = new Anjal.Smtp.SmtpServer(smtpOptions, sink, inboundAuth, enforceReject);
         Log($"Anjal SMTP listening on {bind}:{port} as {hostname}");
         Log(pg is null ? "Using in-memory store." : "Using PostgreSQL store.");
         if (tlsCert is not null)
@@ -284,6 +289,37 @@ public static class Program
             log($"Failed to load DKIM key from '{path}': {ex.GetType().Name}: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Build the inbound SPF/DKIM/DMARC authenticator from env-var config.
+    /// </summary>
+    /// <returns>(authenticator, enforceReject). Returns (null, false) when disabled.</returns>
+    private static (Anjal.Smtp.IInboundAuthenticator?, bool) BuildInboundAuth(string hostname, System.Action<string> log)
+    {
+        // ANJAL_INBOUND_AUTH_ENFORCE:
+        //   unset/"" -> default to "dmarc-reject"
+        //   "none"        -> annotate only, never reject
+        //   "dmarc-reject" -> reject when DMARC fails and policy is p=reject
+        string mode = (System.Environment.GetEnvironmentVariable("ANJAL_INBOUND_AUTH_ENFORCE") ?? "dmarc-reject")
+            .ToLowerInvariant();
+
+        if (mode == "off" || mode == "disabled")
+        {
+            log("Inbound authentication: DISABLED.");
+            return (null, false);
+        }
+
+        bool enforceReject = mode == "dmarc-reject";
+
+        // Use system DNS server for lookups.
+        var dns = Anjal.Dns.DnsResolver.CreateFromSystem();
+        var inner = new Anjal.Auth.InboundAuthenticator(dns, hostname);
+        var adapter = new ServerInboundAuthenticator(inner, enforceReject);
+        log(enforceReject
+            ? "Inbound authentication: SPF+DKIM+DMARC enabled, DMARC p=reject ENFORCED."
+            : "Inbound authentication: SPF+DKIM+DMARC enabled, annotate only.");
+        return (adapter, enforceReject);
     }
 
     private static Anjal.Smtp.IMailSender? ConfigureSender(string mode, string hostname, Anjal.Smtp.TlsClientOptions tls, System.Action<string> log)

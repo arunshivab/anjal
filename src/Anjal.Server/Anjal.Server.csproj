@@ -8,6 +8,7 @@
     <ProjectReference Include="..\Anjal.Mime\Anjal.Mime.csproj" />
     <ProjectReference Include="..\Anjal.Dns\Anjal.Dns.csproj" />
     <ProjectReference Include="..\Anjal.Dkim\Anjal.Dkim.csproj" />
+    <ProjectReference Include="..\Anjal.Auth\Anjal.Auth.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

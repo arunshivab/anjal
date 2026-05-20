@@ -13,6 +13,7 @@ public sealed class DnsResolver
 {
     private const int DnsPort = 53;
     private const ushort TypeMx = 15;
+    private const ushort TypeTxt = 16;
     private const ushort ClassIn = 1;
     private const int UdpReceiveTimeoutMs = 5000;
     private const int TcpTimeoutMs = 8000;
@@ -104,6 +105,60 @@ public sealed class DnsResolver
             }
         }
         result.Sort((x, y) => x.Priority.CompareTo(y.Priority));
+        return result;
+    }
+
+    /// <summary>
+    /// Look up TXT records for a domain. Returns the list of TXT records,
+    /// each as a single concatenated string (per RFC 6376 / 7208 / 7489
+    /// conventions, multiple length-prefixed chunks in one TXT record are
+    /// joined). Returns an empty list if the domain has no TXT records or
+    /// does not exist (NXDOMAIN treated as empty).
+    /// </summary>
+    /// <param name="domain">Domain name to query, e.g. "gmail.com" or
+    /// "default._domainkey.example.com".</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <exception cref="DnsException">If the query fails (server error,
+    /// timeout, malformed response).</exception>
+    public async System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> LookupTxtAsync(
+        string domain,
+        System.Threading.CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+        if (string.IsNullOrWhiteSpace(domain))
+        {
+            throw new System.ArgumentException("Domain cannot be empty.", nameof(domain));
+        }
+
+        ushort transactionId = (ushort)System.Random.Shared.Next(1, 0xFFFF);
+        byte[] query = BuildQuery(transactionId, domain, TypeTxt);
+
+        byte[] response = await this.SendQueryAsync(query, ct).ConfigureAwait(false);
+        DnsMessage parsed = DnsMessage.Parse(response);
+
+        if (parsed.TransactionId != transactionId)
+        {
+            throw new DnsException($"Transaction ID mismatch: sent {transactionId}, got {parsed.TransactionId}.");
+        }
+        if (parsed.Truncated)
+        {
+            byte[] tcpResponse = await this.SendQueryViaTcpAsync(query, ct).ConfigureAwait(false);
+            parsed = DnsMessage.Parse(tcpResponse);
+        }
+        if (parsed.ResponseCode != 0 && parsed.ResponseCode != 3)
+        {
+            throw new DnsException($"DNS server returned RCODE {parsed.ResponseCode} for TXT {domain}.");
+        }
+
+        var result = new System.Collections.Generic.List<string>(parsed.Answers.Count);
+        foreach (DnsAnswer a in parsed.Answers)
+        {
+            if (a.Type == TypeTxt && a.TxtStrings is not null)
+            {
+                // Join multiple length-prefixed chunks into one logical record value.
+                result.Add(string.Concat(a.TxtStrings));
+            }
+        }
         return result;
     }
 

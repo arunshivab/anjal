@@ -104,6 +104,9 @@ public sealed class RoutingMessageSink : Anjal.Smtp.IMessageSink
                 MessageId = parsed.MessageId,
                 ReceivedAt = stored.ReceivedAt,
                 RawBytesBase64 = Anjal.Mime.Base64Codec.Encode(ctx.RawBytes),
+                AuthResultsJson = ctx.AuthResults is Anjal.Auth.AuthenticationResults ar
+                    ? Anjal.Auth.AuthResultsJson.Serialize(ar)
+                    : string.Empty,
             };
 
             Anjal.Routing.WebhookDispatchResult dispatch = await this.dispatcher

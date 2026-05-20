@@ -7,4 +7,5 @@ One connected SMTP client. Implements the RFC 5321 command grammar for the subse
 ## Members
 
 - **#ctor** *(method)* - Construct a session for an accepted TCP client.
+- **#ctor** *(method)* - Construct a session for an accepted TCP client, with optional inbound authentication.
 - **RunAsync** *(method)* - Run the session until the client quits or disconnects. Safe to call once per session.

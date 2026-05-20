@@ -26,6 +26,25 @@
 - [Anjal.Api.TagGrantResponse](Anjal.Api/TagGrantResponse.md)
 - [Anjal.Api.TagGrantsHandler](Anjal.Api/TagGrantsHandler.md)
 
+## Anjal.Auth
+
+- [Anjal.Auth.AlignmentMode](Anjal.Auth/AlignmentMode.md)
+- [Anjal.Auth.AuthResultsJson](Anjal.Auth/AuthResultsJson.md)
+- [Anjal.Auth.AuthenticationResults](Anjal.Auth/AuthenticationResults.md)
+- [Anjal.Auth.AuthenticationResultsBuilder](Anjal.Auth/AuthenticationResultsBuilder.md)
+- [Anjal.Auth.DkimDetail](Anjal.Auth/DkimDetail.md)
+- [Anjal.Auth.DkimResult](Anjal.Auth/DkimResult.md)
+- [Anjal.Auth.DkimVerifier](Anjal.Auth/DkimVerifier.md)
+- [Anjal.Auth.DmarcDetail](Anjal.Auth/DmarcDetail.md)
+- [Anjal.Auth.DmarcEvaluator](Anjal.Auth/DmarcEvaluator.md)
+- [Anjal.Auth.DmarcPolicy](Anjal.Auth/DmarcPolicy.md)
+- [Anjal.Auth.DmarcResult](Anjal.Auth/DmarcResult.md)
+- [Anjal.Auth.InboundAuthenticator](Anjal.Auth/InboundAuthenticator.md)
+- [Anjal.Auth.ModuleInfo](Anjal.Auth/ModuleInfo.md)
+- [Anjal.Auth.SpfDetail](Anjal.Auth/SpfDetail.md)
+- [Anjal.Auth.SpfResult](Anjal.Auth/SpfResult.md)
+- [Anjal.Auth.SpfVerifier](Anjal.Auth/SpfVerifier.md)
+
 ## Anjal.Dkim
 
 - [Anjal.Dkim.BodyCanonicalization](Anjal.Dkim/BodyCanonicalization.md)
@@ -90,6 +109,7 @@
 - [Anjal.Server.OutboundWorkerOptions](Anjal.Server/OutboundWorkerOptions.md)
 - [Anjal.Server.Program](Anjal.Server/Program.md)
 - [Anjal.Server.RoutingMessageSink](Anjal.Server/RoutingMessageSink.md)
+- [Anjal.Server.ServerInboundAuthenticator](Anjal.Server/ServerInboundAuthenticator.md)
 - [Anjal.Server.StoreBackedDkimResolver](Anjal.Server/StoreBackedDkimResolver.md)
 
 ## Anjal.Smtp
@@ -99,8 +119,10 @@
 - [Anjal.Smtp.DeliveryResult](Anjal.Smtp/DeliveryResult.md)
 - [Anjal.Smtp.DirectMailSender](Anjal.Smtp/DirectMailSender.md)
 - [Anjal.Smtp.DirectSenderOptions](Anjal.Smtp/DirectSenderOptions.md)
+- [Anjal.Smtp.IInboundAuthenticator](Anjal.Smtp/IInboundAuthenticator.md)
 - [Anjal.Smtp.IMailSender](Anjal.Smtp/IMailSender.md)
 - [Anjal.Smtp.IMessageSink](Anjal.Smtp/IMessageSink.md)
+- [Anjal.Smtp.InboundAuthResult](Anjal.Smtp/InboundAuthResult.md)
 - [Anjal.Smtp.ModuleInfo](Anjal.Smtp/ModuleInfo.md)
 - [Anjal.Smtp.OutboundDelivery](Anjal.Smtp/OutboundDelivery.md)
 - [Anjal.Smtp.RelayMailSender](Anjal.Smtp/RelayMailSender.md)
