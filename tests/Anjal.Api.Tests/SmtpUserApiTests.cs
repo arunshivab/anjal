@@ -199,8 +199,8 @@ public class SmtpUserApiTests : System.IDisposable
         var row = await this.store.GetSmtpUserAsync("alice");
         Assert.NotNull(row);
         Assert.Equal(2, row!.AllowedFromDomains.Count);
-        Assert.True(System.Linq.Enumerable.Contains(row.AllowedFromDomains, "hospital-a.test"));
-        Assert.True(System.Linq.Enumerable.Contains(row.AllowedFromDomains, "hospital-b.test"));
+        Assert.Contains("hospital-a.test", row.AllowedFromDomains);
+        Assert.Contains("hospital-b.test", row.AllowedFromDomains);
     }
 
     [Fact]

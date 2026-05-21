@@ -2,6 +2,9 @@ namespace Anjal.Store.Tests;
 
 public class SmtpUserStoreTests
 {
+    private static readonly string[] HospitalA = new[] { "hospital-a.test" };
+    private static readonly string[] NewTestDomain = new[] { "new.test" };
+
     [Fact]
     public async System.Threading.Tasks.Task Upsert_Insert_AssignsId()
     {
@@ -10,8 +13,8 @@ public class SmtpUserStoreTests
         {
             Username = "alice",
             PasswordPbkdf2 = "pbkdf2$1000$abc$def",
-            AllowedFromDomains = new[] { "hospital-a.test" },
-        }).ConfigureAwait(false);
+            AllowedFromDomains = HospitalA,
+        });
 
         Assert.NotEqual(System.Guid.Empty, saved.Id);
         Assert.Equal("alice", saved.Username);
@@ -25,14 +28,14 @@ public class SmtpUserStoreTests
         {
             Username = "alice",
             PasswordPbkdf2 = "hash1",
-        }).ConfigureAwait(false);
+        });
 
         var updated = await store.UpsertSmtpUserAsync(new SmtpUserRow
         {
             Username = "alice",
             PasswordPbkdf2 = "hash2",
-            AllowedFromDomains = new[] { "new.test" },
-        }).ConfigureAwait(false);
+            AllowedFromDomains = NewTestDomain,
+        });
 
         Assert.Equal(first.Id, updated.Id);
         Assert.Equal("hash2", updated.PasswordPbkdf2);
@@ -47,9 +50,9 @@ public class SmtpUserStoreTests
         {
             Username = "bob",
             PasswordPbkdf2 = "hash",
-        }).ConfigureAwait(false);
+        });
 
-        var found = await store.GetSmtpUserAsync("bob").ConfigureAwait(false);
+        var found = await store.GetSmtpUserAsync("bob");
         Assert.NotNull(found);
         Assert.Equal("bob", found!.Username);
     }
@@ -62,9 +65,9 @@ public class SmtpUserStoreTests
         {
             Username = "Bob",
             PasswordPbkdf2 = "hash",
-        }).ConfigureAwait(false);
+        });
 
-        var found = await store.GetSmtpUserAsync("BOB").ConfigureAwait(false);
+        var found = await store.GetSmtpUserAsync("BOB");
         Assert.NotNull(found);
     }
 
@@ -72,7 +75,7 @@ public class SmtpUserStoreTests
     public async System.Threading.Tasks.Task Get_Missing_ReturnsNull()
     {
         var store = new InMemoryMessageStore();
-        var found = await store.GetSmtpUserAsync("missing").ConfigureAwait(false);
+        var found = await store.GetSmtpUserAsync("missing");
         Assert.Null(found);
     }
 
@@ -80,10 +83,10 @@ public class SmtpUserStoreTests
     public async System.Threading.Tasks.Task List_ReturnsAll()
     {
         var store = new InMemoryMessageStore();
-        await store.UpsertSmtpUserAsync(new SmtpUserRow { Username = "a", PasswordPbkdf2 = "x" }).ConfigureAwait(false);
-        await store.UpsertSmtpUserAsync(new SmtpUserRow { Username = "b", PasswordPbkdf2 = "y" }).ConfigureAwait(false);
+        await store.UpsertSmtpUserAsync(new SmtpUserRow { Username = "a", PasswordPbkdf2 = "x" });
+        await store.UpsertSmtpUserAsync(new SmtpUserRow { Username = "b", PasswordPbkdf2 = "y" });
 
-        var all = await store.ListSmtpUsersAsync().ConfigureAwait(false);
+        var all = await store.ListSmtpUsersAsync();
         Assert.Equal(2, all.Count);
     }
 
@@ -91,18 +94,18 @@ public class SmtpUserStoreTests
     public async System.Threading.Tasks.Task Delete_ExistingUser_ReturnsTrue()
     {
         var store = new InMemoryMessageStore();
-        await store.UpsertSmtpUserAsync(new SmtpUserRow { Username = "alice", PasswordPbkdf2 = "x" }).ConfigureAwait(false);
+        await store.UpsertSmtpUserAsync(new SmtpUserRow { Username = "alice", PasswordPbkdf2 = "x" });
 
-        bool removed = await store.DeleteSmtpUserAsync("alice").ConfigureAwait(false);
+        bool removed = await store.DeleteSmtpUserAsync("alice");
         Assert.True(removed);
-        Assert.Null(await store.GetSmtpUserAsync("alice").ConfigureAwait(false));
+        Assert.Null(await store.GetSmtpUserAsync("alice"));
     }
 
     [Fact]
     public async System.Threading.Tasks.Task Delete_MissingUser_ReturnsFalse()
     {
         var store = new InMemoryMessageStore();
-        bool removed = await store.DeleteSmtpUserAsync("nobody").ConfigureAwait(false);
+        bool removed = await store.DeleteSmtpUserAsync("nobody");
         Assert.False(removed);
     }
 }

@@ -10,20 +10,22 @@ namespace Anjal.Smtp.Tests;
 /// </summary>
 public class SmtpAuthTests
 {
+    private static readonly string[] DefaultAllowedDomains = new[] { "hospital-a.test" };
+
     [Fact]
     public async System.Threading.Tasks.Task AuthPlain_CorrectCredentials_Succeeds()
     {
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false); // 220 banner
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync(); // 220 banner
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0alice\0Sekret123"));
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
 
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        string? reply = await conn.ReadLineAsync();
         Assert.NotNull(reply);
         Assert.StartsWith("235", reply!, System.StringComparison.Ordinal);
     }
@@ -31,17 +33,17 @@ public class SmtpAuthTests
     [Fact]
     public async System.Threading.Tasks.Task AuthPlain_WrongPassword_Fails535()
     {
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0alice\0WrongPassword"));
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
 
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        string? reply = await conn.ReadLineAsync();
         Assert.NotNull(reply);
         Assert.StartsWith("535", reply!, System.StringComparison.Ordinal);
     }
@@ -49,80 +51,80 @@ public class SmtpAuthTests
     [Fact]
     public async System.Threading.Tasks.Task AuthPlain_UnknownUser_Fails535()
     {
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0nobody\0anything"));
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
 
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("535", reply!, System.StringComparison.Ordinal);
     }
 
     [Fact]
     public async System.Threading.Tasks.Task AuthLogin_Succeeds_WithStepwiseExchange()
     {
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
-        await conn.WriteLineAsync("AUTH LOGIN").ConfigureAwait(false);
-        string? prompt1 = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("AUTH LOGIN");
+        string? prompt1 = await conn.ReadLineAsync();
         // Server prompts base64("Username:") = "VXNlcm5hbWU6"
         Assert.StartsWith("334 ", prompt1!, System.StringComparison.Ordinal);
         Assert.Contains("VXNlcm5hbWU6", prompt1!, System.StringComparison.Ordinal);
 
         string b64User = Convert.ToBase64String(Encoding.UTF8.GetBytes("alice"));
-        await conn.WriteLineAsync(b64User).ConfigureAwait(false);
+        await conn.WriteLineAsync(b64User);
 
-        string? prompt2 = await conn.ReadLineAsync().ConfigureAwait(false);
+        string? prompt2 = await conn.ReadLineAsync();
         Assert.StartsWith("334 ", prompt2!, System.StringComparison.Ordinal);
         Assert.Contains("UGFzc3dvcmQ6", prompt2!, System.StringComparison.Ordinal);
 
         string b64Pass = Convert.ToBase64String(Encoding.UTF8.GetBytes("Sekret123"));
-        await conn.WriteLineAsync(b64Pass).ConfigureAwait(false);
+        await conn.WriteLineAsync(b64Pass);
 
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("235", reply!, System.StringComparison.Ordinal);
     }
 
     [Fact]
     public async System.Threading.Tasks.Task Auth_Cancellation_RespondsWith501()
     {
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
-        await conn.WriteLineAsync("AUTH LOGIN").ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false); // username prompt
-        await conn.WriteLineAsync("*").ConfigureAwait(false); // client cancels
+        await conn.WriteLineAsync("AUTH LOGIN");
+        await conn.ReadLineAsync(); // username prompt
+        await conn.WriteLineAsync("*"); // client cancels
 
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("501", reply!, System.StringComparison.Ordinal);
     }
 
     [Fact]
     public async System.Threading.Tasks.Task SubmissionPort_MailWithoutAuth_Returns530()
     {
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
-        await conn.WriteLineAsync("MAIL FROM:<a@example.test>").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("MAIL FROM:<a@example.test>");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("530", reply!, System.StringComparison.Ordinal);
     }
 
@@ -130,38 +132,38 @@ public class SmtpAuthTests
     public async System.Threading.Tasks.Task SubmissionPort_MailFromDisallowedDomain_Returns550()
     {
         // Set up user with allowed_from_domains = ["hospital-a.test"]
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0alice\0Sekret123"));
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false); // 235
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
+        await conn.ReadLineAsync(); // 235
 
-        await conn.WriteLineAsync("MAIL FROM:<evil@other-domain.test>").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("MAIL FROM:<evil@other-domain.test>");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("550", reply!, System.StringComparison.Ordinal);
     }
 
     [Fact]
     public async System.Threading.Tasks.Task SubmissionPort_MailFromAllowedDomain_Accepted()
     {
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0alice\0Sekret123"));
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false); // 235
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
+        await conn.ReadLineAsync(); // 235
 
-        await conn.WriteLineAsync("MAIL FROM:<notify@hospital-a.test>").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("MAIL FROM:<notify@hospital-a.test>");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("250", reply!, System.StringComparison.Ordinal);
     }
 
@@ -171,56 +173,56 @@ public class SmtpAuthTests
         // Admin user has empty allowed_from_domains -> any domain.
         using var fixture = await StartSubmissionServerAsync(
             user: "root", password: "RootPass", allowedDomains: System.Array.Empty<string>())
-            .ConfigureAwait(false);
+            ;
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0root\0RootPass"));
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
+        await conn.ReadLineAsync();
 
         // Send from any domain - should work because admin has no restrictions.
-        await conn.WriteLineAsync("MAIL FROM:<anywhere@anything.test>").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("MAIL FROM:<anywhere@anything.test>");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("250", reply!, System.StringComparison.Ordinal);
     }
 
     [Fact]
     public async System.Threading.Tasks.Task Auth_OnMtaPort_NotAvailable()
     {
-        using var fixture = await StartMtaServerAsync().ConfigureAwait(false);
+        using var fixture = await StartMtaServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0alice\0Sekret123"));
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("502", reply!, System.StringComparison.Ordinal);
     }
 
     [Fact]
     public async System.Threading.Tasks.Task Auth_AfterAlreadyAuthenticated_Returns503()
     {
-        using var fixture = await StartSubmissionServerAsync().ConfigureAwait(false);
+        using var fixture = await StartSubmissionServerAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
         string b64 = Convert.ToBase64String(Encoding.UTF8.GetBytes("\0alice\0Sekret123"));
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
+        await conn.ReadLineAsync();
 
         // Try to AUTH again.
-        await conn.WriteLineAsync($"AUTH PLAIN {b64}").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync($"AUTH PLAIN {b64}");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("503", reply!, System.StringComparison.Ordinal);
     }
 
@@ -232,7 +234,7 @@ public class SmtpAuthTests
         string[]? allowedDomains = null)
     {
         string hash = Pbkdf2Hasher.Hash(password, iterations: 1000);
-        var authenticator = new TestAuthenticator(user, hash, allowedDomains ?? new[] { "hospital-a.test" });
+        var authenticator = new TestAuthenticator(user, hash, allowedDomains ?? DefaultAllowedDomains);
         var sink = new NoopSink();
         var options = new SmtpServerOptions
         {
@@ -247,7 +249,7 @@ public class SmtpAuthTests
             authenticator: null, enforceReject: false,
             smtpAuthenticator: authenticator, localDomains: null);
         var task = server.StartAsync(cts.Token);
-        await System.Threading.Tasks.Task.Delay(50).ConfigureAwait(false);
+        await System.Threading.Tasks.Task.Delay(50);
         return new ServerFixture(server, task, cts);
     }
 
@@ -264,14 +266,14 @@ public class SmtpAuthTests
         var cts = new System.Threading.CancellationTokenSource();
         var server = new SmtpServer(options, sink);
         var task = server.StartAsync(cts.Token);
-        await System.Threading.Tasks.Task.Delay(50).ConfigureAwait(false);
+        await System.Threading.Tasks.Task.Delay(50);
         return new ServerFixture(server, task, cts);
     }
 
     private static async System.Threading.Tasks.Task<SocketConn> ConnectAsync(int port)
     {
         var client = new TcpClient();
-        await client.ConnectAsync(IPAddress.Loopback, port).ConfigureAwait(false);
+        await client.ConnectAsync(IPAddress.Loopback, port);
         return new SocketConn(client);
     }
 
@@ -281,7 +283,7 @@ public class SmtpAuthTests
         string? line;
         do
         {
-            line = await conn.ReadLineAsync().ConfigureAwait(false);
+            line = await conn.ReadLineAsync();
         } while (line is not null && line.StartsWith("250-", System.StringComparison.Ordinal));
     }
 

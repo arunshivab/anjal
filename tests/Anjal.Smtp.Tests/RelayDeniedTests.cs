@@ -14,19 +14,19 @@ public class RelayDeniedTests
     [Fact]
     public async System.Threading.Tasks.Task MtaPort_RcptForNonLocalDomain_Returns550()
     {
-        using var fixture = await StartMtaWithLocalDomainsAsync("hospital-a.test").ConfigureAwait(false);
+        using var fixture = await StartMtaWithLocalDomainsAsync("hospital-a.test");
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
-        await conn.WriteLineAsync("MAIL FROM:<sender@other.test>").ConfigureAwait(false);
-        string? mailReply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("MAIL FROM:<sender@other.test>");
+        string? mailReply = await conn.ReadLineAsync();
         Assert.StartsWith("250", mailReply!, System.StringComparison.Ordinal);
 
-        await conn.WriteLineAsync("RCPT TO:<patient@gmail.com>").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("RCPT TO:<patient@gmail.com>");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("550", reply!, System.StringComparison.Ordinal);
         Assert.Contains("Relaying denied", reply!, System.StringComparison.Ordinal);
     }
@@ -34,36 +34,36 @@ public class RelayDeniedTests
     [Fact]
     public async System.Threading.Tasks.Task MtaPort_RcptForLocalDomain_Accepted()
     {
-        using var fixture = await StartMtaWithLocalDomainsAsync("hospital-a.test").ConfigureAwait(false);
+        using var fixture = await StartMtaWithLocalDomainsAsync("hospital-a.test");
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
-        await conn.WriteLineAsync("MAIL FROM:<sender@gmail.com>").ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("MAIL FROM:<sender@gmail.com>");
+        await conn.ReadLineAsync();
 
-        await conn.WriteLineAsync("RCPT TO:<patient@hospital-a.test>").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("RCPT TO:<patient@hospital-a.test>");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("250", reply!, System.StringComparison.Ordinal);
     }
 
     [Fact]
     public async System.Threading.Tasks.Task MtaPort_RcptForLocalDomain_CaseInsensitive()
     {
-        using var fixture = await StartMtaWithLocalDomainsAsync("hospital-a.test").ConfigureAwait(false);
+        using var fixture = await StartMtaWithLocalDomainsAsync("hospital-a.test");
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
-        await conn.WriteLineAsync("MAIL FROM:<sender@gmail.com>").ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("MAIL FROM:<sender@gmail.com>");
+        await conn.ReadLineAsync();
 
-        await conn.WriteLineAsync("RCPT TO:<patient@HOSPITAL-A.TEST>").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("RCPT TO:<patient@HOSPITAL-A.TEST>");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("250", reply!, System.StringComparison.Ordinal);
     }
 
@@ -71,18 +71,18 @@ public class RelayDeniedTests
     public async System.Threading.Tasks.Task MtaPort_NoLocalDomainsResolver_AcceptsAll()
     {
         // Without a resolver, MTA accepts all RCPTs (legacy behavior).
-        using var fixture = await StartMtaWithoutLocalDomainsAsync().ConfigureAwait(false);
+        using var fixture = await StartMtaWithoutLocalDomainsAsync();
 
-        using var conn = await ConnectAsync(fixture.Port).ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
-        await conn.WriteLineAsync("EHLO test.local").ConfigureAwait(false);
-        await DrainEhloAsync(conn).ConfigureAwait(false);
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
 
-        await conn.WriteLineAsync("MAIL FROM:<sender@anywhere.test>").ConfigureAwait(false);
-        await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("MAIL FROM:<sender@anywhere.test>");
+        await conn.ReadLineAsync();
 
-        await conn.WriteLineAsync("RCPT TO:<patient@anywhere-else.test>").ConfigureAwait(false);
-        string? reply = await conn.ReadLineAsync().ConfigureAwait(false);
+        await conn.WriteLineAsync("RCPT TO:<patient@anywhere-else.test>");
+        string? reply = await conn.ReadLineAsync();
         Assert.StartsWith("250", reply!, System.StringComparison.Ordinal);
     }
 
@@ -104,7 +104,7 @@ public class RelayDeniedTests
             authenticator: null, enforceReject: false,
             smtpAuthenticator: null, localDomains: resolver);
         var task = server.StartAsync(cts.Token);
-        await System.Threading.Tasks.Task.Delay(50).ConfigureAwait(false);
+        await System.Threading.Tasks.Task.Delay(50);
         return new Fixture(server, task, cts);
     }
 
@@ -121,14 +121,14 @@ public class RelayDeniedTests
         var cts = new System.Threading.CancellationTokenSource();
         var server = new SmtpServer(options, sink);
         var task = server.StartAsync(cts.Token);
-        await System.Threading.Tasks.Task.Delay(50).ConfigureAwait(false);
+        await System.Threading.Tasks.Task.Delay(50);
         return new Fixture(server, task, cts);
     }
 
     private static async System.Threading.Tasks.Task<SocketConn> ConnectAsync(int port)
     {
         var client = new TcpClient();
-        await client.ConnectAsync(IPAddress.Loopback, port).ConfigureAwait(false);
+        await client.ConnectAsync(IPAddress.Loopback, port);
         return new SocketConn(client);
     }
 
@@ -137,7 +137,7 @@ public class RelayDeniedTests
         string? line;
         do
         {
-            line = await conn.ReadLineAsync().ConfigureAwait(false);
+            line = await conn.ReadLineAsync();
         } while (line is not null && line.StartsWith("250-", System.StringComparison.Ordinal));
     }
 

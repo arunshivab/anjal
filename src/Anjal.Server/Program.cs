@@ -124,7 +124,7 @@ public static class Program
             };
 
             submissionServer = new Anjal.Smtp.SmtpServer(submissionOptions, sink,
-                inboundAuth: null, enforceReject: false,
+                authenticator: null, enforceReject: false,
                 smtpAuthenticator: submissionAuth, localDomains: null);
 
             Log($"Anjal SMTP (Submission, port {submissionPort}) listening on {bind} as {hostname}");
@@ -368,7 +368,7 @@ public static class Program
     /// at startup via <see cref="Anjal.Smtp.Pbkdf2Hasher"/> so the plain
     /// password is never compared directly at runtime.
     /// </summary>
-    private static Anjal.Smtp.ISmtpAuthenticator BuildSmtpAuthenticator(
+    private static ServerSmtpAuthenticator BuildSmtpAuthenticator(
         Anjal.Store.IMessageStore store,
         System.Action<string> log)
     {
@@ -410,7 +410,7 @@ public static class Program
     /// has rows without querying it, so we always wire the store when
     /// available - the resolver checks env first, store second).
     /// </summary>
-    private static Anjal.Smtp.ILocalDomainResolver? BuildLocalDomainResolver(
+    private static ServerLocalDomainResolver? BuildLocalDomainResolver(
         Anjal.Store.IMessageStore store,
         System.Action<string> log)
     {

@@ -116,6 +116,8 @@
 - [Anjal.Server.Program](Anjal.Server/Program.md)
 - [Anjal.Server.RoutingMessageSink](Anjal.Server/RoutingMessageSink.md)
 - [Anjal.Server.ServerInboundAuthenticator](Anjal.Server/ServerInboundAuthenticator.md)
+- [Anjal.Server.ServerLocalDomainResolver](Anjal.Server/ServerLocalDomainResolver.md)
+- [Anjal.Server.ServerSmtpAuthenticator](Anjal.Server/ServerSmtpAuthenticator.md)
 - [Anjal.Server.StoreBackedDkimResolver](Anjal.Server/StoreBackedDkimResolver.md)
 
 ## Anjal.Smtp
