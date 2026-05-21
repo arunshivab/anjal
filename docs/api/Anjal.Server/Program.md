@@ -8,4 +8,7 @@ Composition root for the Anjal mail server host process. Wires Store + Routing +
 
 - **BuildDkimResolver** *(method)* - Build a DKIM key resolver from env vars (single default key) chained with the store (per-domain overrides). Returns (resolver, requireDkim). If nothing is configured, resolver is null and DKIM is fully disabled.
 - **BuildInboundAuth** *(method)* - Build the inbound SPF/DKIM/DMARC authenticator from env-var config.
+- **BuildLocalDomainResolver** *(method)* - Build the local-domain resolver. Returns null when neither env-var list nor store-backed table has any entries, signaling "accept-all" legacy behavior. Returns a real resolver when at least the env-var list is non-empty (we can't know if the store has rows without querying it, so we always wire the store when available - the resolver checks env first, store second).
+- **BuildSmtpAuthenticator** *(method)* - Build the SMTP submission authenticator. Combines an optional env-var single-user (ANJAL_SUBMISSION_USER + ANJAL_SUBMISSION_PASSWORD + ANJAL_SUBMISSION_DOMAINS) with the store-backed user table. The env-var password is hashed at startup via so the plain password is never compared directly at runtime.
 - **Main** *(method)* - Entry point.
+- **ParsePortOrZero** *(method)* - Parse an integer from an env-var. Returns 0 when null, empty, or unparseable - the caller treats 0 as "feature disabled".

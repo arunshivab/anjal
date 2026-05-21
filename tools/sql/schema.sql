@@ -99,4 +99,27 @@ CREATE TABLE IF NOT EXISTS dkim_keys (
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- SMTP submission users (v0.8.0). Authenticates clients connecting to
+-- the submission port (typically 587). Passwords are stored as PBKDF2
+-- hashes in the form "pbkdf2$iterations$salt-b64$hash-b64". The
+-- allowed_from_domains array restricts which MAIL FROM domains the user
+-- can submit as; empty array means admin authority.
+CREATE TABLE IF NOT EXISTS smtp_users (
+    id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username             CITEXT NOT NULL UNIQUE,
+    password_pbkdf2      TEXT NOT NULL,
+    allowed_from_domains TEXT[] NOT NULL DEFAULT '{}',
+    enabled              BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Local domains (v0.8.0). The MTA listener refuses RCPT TO for domains
+-- not in this list ("relaying denied"). Empty list means the legacy
+-- "accept all RCPT" behavior - safe only on closed networks.
+CREATE TABLE IF NOT EXISTS local_domains (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    domain      CITEXT NOT NULL UNIQUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 COMMIT;

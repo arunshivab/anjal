@@ -4,23 +4,25 @@ A .NET 10 mail server library. Protocol code (MIME, SMTP, DNS, DKIM, SPF,
 DMARC) and the HTTP API are hand-written with no external NuGet
 dependencies. TLS uses the BCL's `System.Net.Security.SslStream`. DKIM
 and DMARC signature verification use the BCL's
-`System.Security.Cryptography.RSA`. The PostgreSQL store layer uses
+`System.Security.Cryptography.RSA`. Password hashing uses the BCL's
+`Rfc2898DeriveBytes.Pbkdf2`. The PostgreSQL store layer uses
 [Npgsql](https://www.npgsql.org/).
 
 ## Status
 
-**v0.7.0** - bidirectional mail + HTTP/JSON API + STARTTLS + DKIM signing
-**+ SPF/DKIM/DMARC inbound verification**. Anjal now signs every outbound
-message and verifies every inbound message. With DMARC enforcement enabled,
-messages whose sending domain publishes `p=reject` and which fail
-authentication are refused with SMTP 550 before reaching the routing layer.
+**v0.8.0** - full SMTP server with bidirectional mail + DKIM signing +
+SPF/DKIM/DMARC inbound verification + **SMTP submission authentication
+on dual-port (25/587) with open-relay guard**. Anjal can now be safely
+exposed to the internet: port 25 accepts inbound from other servers only
+for local domains, port 587 requires authenticated submission from
+clients with per-user from-domain authorization.
 
 ## Modules
 
 | Module | Purpose | NuGet |
 |---|---|---|
 | `Anjal.Mime` | MIME parser and builder (RFC 5322, RFC 2045-2049) | none |
-| `Anjal.Smtp` | SMTP receiver and sender (RFC 5321), STARTTLS (RFC 3207) | none |
+| `Anjal.Smtp` | SMTP receiver and sender (RFC 5321), STARTTLS (RFC 3207), AUTH PLAIN/LOGIN (RFC 4954), PBKDF2 password hasher | none |
 | `Anjal.Dns` | DNS MX + TXT resolver (RFC 1035) | none |
 | `Anjal.Dkim` | DKIM signer (RFC 6376), RSA-SHA256 | none |
 | `Anjal.Auth` | SPF (RFC 7208) + DKIM verifier (RFC 6376) + DMARC (RFC 7489) + Authentication-Results (RFC 8601) | none |
@@ -39,7 +41,7 @@ authentication are refused with SMTP 550 before reaching the routing layer.
 
 ## Run the demos
 
-Six in-process demos prove each pipeline with no external setup:
+Seven in-process demos prove each pipeline with no external setup:
 
     dotnet run --project examples/Anjal.InboundEndToEnd
     dotnet run --project examples/Anjal.OutboundEndToEnd
@@ -47,14 +49,13 @@ Six in-process demos prove each pipeline with no external setup:
     dotnet run --project examples/Anjal.TlsEndToEnd
     dotnet run --project examples/Anjal.DkimSigning
     dotnet run --project examples/Anjal.InboundAuthCheck
+    dotnet run --project examples/Anjal.SubmissionAuth
 
-`Anjal.InboundAuthCheck` exercises three scenarios:
-1. A properly DKIM-signed message verifies successfully.
-2. A message with a tampered body produces a body-hash mismatch (DKIM fail).
-3. An unsigned message reports no signature.
-
-It prints the formatted `Authentication-Results` header and the JSON
-fragment Anjal would attach to the webhook payload.
+`Anjal.SubmissionAuth` exercises four scenarios on a submission listener:
+1. Correct credentials → AUTH 235 success, message accepted.
+2. Wrong password → 535 5.7.8 Authentication credentials invalid.
+3. MAIL FROM without AUTH → 530 5.7.0 Authentication required.
+4. From-domain not in allowed list → 550 5.7.1 Not authorized.
 
 ## Run a real server
 
@@ -62,15 +63,33 @@ Set up the schema once:
 
     psql -d anjal -f tools/sql/schema.sql
 
-### Full stack with TLS, DKIM signing, and inbound authentication
+### Single-port (MTA only) - receive mail for local domains
 
     $env:ANJAL_POSTGRES               = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
     $env:ANJAL_HOSTNAME               = "mail.your-domain.example"
+    $env:ANJAL_PORT                   = "25"
     $env:ANJAL_TLS_CERT_PATH          = "/etc/letsencrypt/live/mail.your-domain.example/fullchain.pem"
     $env:ANJAL_TLS_KEY_PATH           = "/etc/letsencrypt/live/mail.your-domain.example/privkey.pem"
-    $env:ANJAL_OUTBOUND_MODE          = "direct"
+    $env:ANJAL_INBOUND_AUTH_ENFORCE   = "dmarc-reject"
+    $env:ANJAL_LOCAL_DOMAINS          = "your-domain.example,clinic-a.your-domain.example"
+    $env:ANJAL_API_PORT               = "8080"
+    $env:ANJAL_API_TOKEN              = "your-strong-secret-token-here"
+    dotnet run --project src/Anjal.Server
+
+### Dual-port (MTA + submission) - receive AND let clients send
+
+    $env:ANJAL_POSTGRES               = "Host=localhost;Database=anjal;Username=postgres;Password=YOUR-PASSWORD"
+    $env:ANJAL_HOSTNAME               = "mail.your-domain.example"
+    $env:ANJAL_PORT                   = "25"
+    $env:ANJAL_SUBMISSION_PORT        = "587"
+    $env:ANJAL_TLS_CERT_PATH          = "/etc/letsencrypt/live/mail.your-domain.example/fullchain.pem"
+    $env:ANJAL_TLS_KEY_PATH           = "/etc/letsencrypt/live/mail.your-domain.example/privkey.pem"
+    $env:ANJAL_LOCAL_DOMAINS          = "your-domain.example"
+    $env:ANJAL_SUBMISSION_USER        = "lipi-bootstrap"
+    $env:ANJAL_SUBMISSION_PASSWORD    = "use-a-strong-password-here"
+    $env:ANJAL_SUBMISSION_DOMAINS     = "your-domain.example"
     $env:ANJAL_DKIM_MODE              = "required"
-    $env:ANJAL_DKIM_DOMAIN            = "mail.your-domain.example"
+    $env:ANJAL_DKIM_DOMAIN            = "your-domain.example"
     $env:ANJAL_DKIM_SELECTOR          = "default"
     $env:ANJAL_DKIM_KEY_PATH          = "/etc/anjal/dkim/default.private.pem"
     $env:ANJAL_INBOUND_AUTH_ENFORCE   = "dmarc-reject"
@@ -78,12 +97,16 @@ Set up the schema once:
     $env:ANJAL_API_TOKEN              = "your-strong-secret-token-here"
     dotnet run --project src/Anjal.Server
 
+The env-var user is a bootstrap credential - good for one client (e.g.
+the local Lipi instance). Add more users via the API as needed.
+
 ### Environment variables
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANJAL_BIND` | `127.0.0.1` | SMTP bind address |
-| `ANJAL_PORT` | `2525` | SMTP receiver port |
+| `ANJAL_PORT` | `2525` | MTA port (inbound from other mail servers) |
+| `ANJAL_SUBMISSION_PORT` | (disabled) | Submission port for authenticated clients (e.g. 587) |
 | `ANJAL_HOSTNAME` | `anjal.localhost` | Hostname in banner, EHLO, and `Authentication-Results` |
 | `ANJAL_POSTGRES` | (in-memory) | PostgreSQL connection string |
 | `ANJAL_OUTBOUND_MODE` | `none` | `direct`, `relay`, or `none` |
@@ -94,7 +117,7 @@ Set up the schema once:
 | `ANJAL_API_TOKEN` | - | Bearer token for the API |
 | `ANJAL_TLS_CERT_PATH` | (disabled) | Path to fullchain.pem |
 | `ANJAL_TLS_KEY_PATH` | - | Path to privkey.pem (if not in fullchain) |
-| `ANJAL_TLS_REQUIRE` | `false` | Server requires STARTTLS before MAIL |
+| `ANJAL_TLS_REQUIRE` | `false` | MTA port requires STARTTLS before MAIL |
 | `ANJAL_TLS_DEFAULT_MODE` | `opportunistic` | Default outbound TLS mode |
 | `ANJAL_TLS_VALIDATE_PEER` | `true` | Validate remote server certificates |
 | `ANJAL_DKIM_MODE` | `off` | `required`, `opportunistic`, or `off` |
@@ -102,10 +125,91 @@ Set up the schema once:
 | `ANJAL_DKIM_SELECTOR` | - | Default selector (for env-var key) |
 | `ANJAL_DKIM_KEY_PATH` | - | Path to default DKIM private PEM |
 | `ANJAL_INBOUND_AUTH_ENFORCE` | `dmarc-reject` | `dmarc-reject` enforces DMARC; `none`/`off` annotates only |
+| `ANJAL_LOCAL_DOMAINS` | (empty) | Comma-separated list of local domains. When set, MTA port refuses RCPT TO for non-local destinations. |
+| `ANJAL_SUBMISSION_USER` | - | Env-var bootstrap username for submission AUTH |
+| `ANJAL_SUBMISSION_PASSWORD` | - | Env-var bootstrap plaintext password (hashed on startup with PBKDF2) |
+| `ANJAL_SUBMISSION_DOMAINS` | - | Env-var user's allowed-from domains (comma-separated). Empty = admin authority. |
+| `ANJAL_AUTH_ALLOW_PLAINTEXT` | `false` | Allow AUTH on plaintext channels. ONLY for local dev. |
+
+## SMTP submission authentication
+
+Anjal's submission listener (port 587 by convention) accepts mail only
+from clients that authenticate via SMTP `AUTH PLAIN` or `AUTH LOGIN`
+(RFC 4954). Authenticated clients can send mail with any destination
+(relay), but only from sender domains they're authorized for.
+
+### Security model
+
+- **Strict TLS-before-AUTH.** The submission port advertises and accepts
+  AUTH only after STARTTLS. AUTH on a plaintext channel is refused with
+  `538 5.7.11 Encryption required`. For local development, set
+  `ANJAL_AUTH_ALLOW_PLAINTEXT=true`.
+- **Strict envelope-domain authorization.** A user with
+  `allowedFromDomains = ["clinic-a.com"]` who tries
+  `MAIL FROM:<x@evil.com>` gets `550 5.7.1 Not authorized to send as
+  evil.com`. Empty `allowedFromDomains` means admin authority (any
+  domain).
+- **Open-relay guard on port 25.** When `ANJAL_LOCAL_DOMAINS` is set (or
+  the `local_domains` table has rows), the MTA listener refuses RCPT TO
+  for non-local destinations with `550 5.7.1 Relaying denied`. This is
+  what prevents Anjal from being used by spammers.
+- **PBKDF2-SHA256 password storage.** Plaintext passwords are hashed
+  with 100,000 iterations and a 128-bit salt before persisting. The
+  stored hash format is `pbkdf2$iterations$salt-b64$hash-b64`. The
+  Anjal.Api layer never returns hashes in responses.
+
+### Manage users via the API
+
+Add a submission user (the password is plaintext on the wire, hashed
+by Anjal before persisting; use HTTPS in production):
+
+    POST /api/smtp-users
+    Authorization: Bearer <ANJAL_API_TOKEN>
+    Content-Type: application/json
+
+    {
+      "username": "lipi-tenant-A",
+      "password": "use-a-strong-password",
+      "allowedFromDomains": ["clinic-a.com", "*.clinic-a.com"],
+      "enabled": true
+    }
+
+List users (hashes never returned):
+
+    GET /api/smtp-users
+    Authorization: Bearer <ANJAL_API_TOKEN>
+
+Remove a user:
+
+    DELETE /api/smtp-users/lipi-tenant-A
+    Authorization: Bearer <ANJAL_API_TOKEN>
+
+### Manage local domains via the API
+
+The list of local domains can be managed at runtime via the API in
+addition to the `ANJAL_LOCAL_DOMAINS` env var (the env var serves as a
+bootstrap default; the API table is checked second):
+
+    POST /api/local-domains
+    Authorization: Bearer <ANJAL_API_TOKEN>
+    Content-Type: application/json
+
+    {"domain": "clinic-a.com"}
+
+List:
+
+    GET /api/local-domains
+    Authorization: Bearer <ANJAL_API_TOKEN>
+
+Remove:
+
+    DELETE /api/local-domains/clinic-a.com
+    Authorization: Bearer <ANJAL_API_TOKEN>
 
 ## Inbound authentication (SPF + DKIM + DMARC)
 
-For every inbound message, Anjal runs three checks in parallel:
+For every inbound message on port 25, Anjal runs three checks in
+parallel:
 
 - **SPF (RFC 7208)**: looks up the SPF TXT record for the MAIL FROM
   domain, walks any `include:` chain (10-lookup limit), and matches the
@@ -131,48 +235,15 @@ the sink or the webhook. Policies `p=quarantine` and `p=none` are
 advisory; Anjal annotates them but does not refuse the message.
 
 To disable enforcement entirely, set `ANJAL_INBOUND_AUTH_ENFORCE=none`.
-Authentication still runs and the verdicts are still attached to the
-webhook payload, but messages are always accepted.
-
-### Webhook payload schema (with auth)
-
-```json
-{
-  "inboundMessageId": "...",
-  "recipient": "...",
-  "envelopeFrom": "...",
-  "subject": "...",
-  "messageId": "...",
-  "receivedAt": "2026-05-19T12:00:00.0000000+00:00",
-  "rawBytesBase64": "...",
-  "authResults": {
-    "spf":   { "result": "pass",  "domain": "...", "peerAddress": "...", "matchedMechanism": "ip4:...", "lookupCount": 2, "explanation": "..." },
-    "dkim":  { "result": "pass",  "domain": "...", "selector": "...",    "algorithm": "rsa-sha256",     "explanation": "..." },
-    "dmarc": { "result": "pass",  "fromDomain": "...", "policy": "reject", "spfAlignment": "relaxed",
-               "dkimAlignment": "relaxed", "spfAligned": true, "dkimAligned": true, "alignedDomain": "...",
-               "explanation": "..." },
-    "headerValue": "<the full Authentication-Results header line>"
-  }
-}
-```
-
-When authentication is disabled, the `authResults` key is omitted from
-the payload.
 
 ## DKIM setup walkthrough
 
 DKIM signs outbound mail so receivers can verify it genuinely came from
-your domain. Gmail and Outlook strongly prefer signed mail; an unsigned
-message has a much higher chance of landing in spam.
+your domain.
 
 ### Step 1: Generate a keypair
 
     dotnet run --project examples/Anjal.DkimKeygen -- mail.your-domain.example default ./keys
-
-This writes `default.private.pem` and `default.public.pem` and prints
-the DNS TXT record to publish, of the form:
-
-    v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAO...
 
 ### Step 2: Publish the DNS TXT record
 
@@ -180,47 +251,21 @@ At your DNS provider, create a TXT record at:
 
     default._domainkey.mail.your-domain.example
 
-with the value printed by step 1. Wait for DNS propagation (usually a
-few minutes; verify with `dig TXT default._domainkey.mail.your-domain.example`).
+with the value printed by step 1.
 
 ### Step 3: Configure Anjal
 
-Either via env vars (single sender domain):
-
-    $env:ANJAL_DKIM_MODE     = "required"
-    $env:ANJAL_DKIM_DOMAIN   = "mail.your-domain.example"
-    $env:ANJAL_DKIM_SELECTOR = "default"
-    $env:ANJAL_DKIM_KEY_PATH = "./keys/default.private.pem"
-
-Or upload via API (one or more sender domains, with the env-var key as
-fallback default):
+Either via env vars (single sender domain) or via the API for
+multi-domain setups:
 
     POST /api/dkim-keys
     Authorization: Bearer <ANJAL_API_TOKEN>
-    Content-Type: application/json
 
     {
       "domain": "mail.your-domain.example",
       "selector": "default",
       "privateKeyPem": "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
     }
-
-### Step 4: Verify
-
-Send mail to any address you control. The receiving server's headers
-will show `Authentication-Results: ... dkim=pass`. Tools like
-[mail-tester.com](https://www.mail-tester.com/) report a clear DKIM
-pass/fail.
-
-### Key rotation
-
-To rotate, repeat steps 1-3 with a new selector (e.g. `2026a`):
-
-    POST /api/dkim-keys
-    { "domain": "mail.your-domain.example", "selector": "2026a", "privateKeyPem": "..." }
-
-Mail signed with the old selector continues to verify until you remove
-the old DNS TXT record.
 
 ## HTTP API
 
@@ -258,61 +303,17 @@ the configured token is empty (test-only mode).
     GET    /api/dkim-keys                     # never returns private keys
     DELETE /api/dkim-keys/{domain}
 
-## TLS overview
+### SMTP submission users (v0.8.0)
 
-**Receiver side.** When `ANJAL_TLS_CERT_PATH` is set, Anjal advertises
-`STARTTLS` in EHLO and accepts upgrades. Per RFC 3207, the session
-state resets after STARTTLS and clients must re-issue EHLO. With
-`ANJAL_TLS_REQUIRE=true`, plain-text `MAIL FROM` is refused with
-`530 Must issue a STARTTLS command first`.
+    POST   /api/smtp-users                    { username, password, allowedFromDomains, enabled }
+    GET    /api/smtp-users                    # never returns password hashes
+    DELETE /api/smtp-users/{username}
 
-**Sender side.** Outbound TLS is per-destination-domain. Policy entries
-in `outbound_tls_policies` (managed via the API) override the default
-`ANJAL_TLS_DEFAULT_MODE`. Modes:
+### Local domains (v0.8.0)
 
-- `opportunistic` - try STARTTLS if offered, fall back to plaintext
-- `required` - fail transient if STARTTLS is not offered
-- `disabled` - skip STARTTLS even if offered
-
-## DKIM signing overview
-
-Every outbound message has its `From:` header parsed for the sender
-domain. The signer looks up the DKIM key for that domain (env-var key
-first, then the `dkim_keys` store), signs the message with RSA-SHA256,
-and prepends a `DKIM-Signature:` header before handing to the SMTP
-sender. With `ANJAL_DKIM_MODE=required`, sends fail permanently if no
-key is found for the sender domain.
-
-Canonicalization: `relaxed/relaxed` by default (RFC 6376 section 3.4).
-Signed headers default to: From, To, Subject, Date, Message-ID,
-MIME-Version, Content-Type. The `From` header is always included even
-if explicitly excluded from the list (required by the RFC).
-
-## Webhook integration
-
-When a message is accepted for a registered local-part, Anjal POSTs a
-signed JSON payload to the registered webhook URL:
-
-- `X-Anjal-Timestamp` - Unix seconds at the time of send
-- `X-Anjal-Signature` - `sha256=<hex>` of HMAC-SHA256 over `timestamp + "." + body`
-
-See `examples/Anjal.InboundEndToEnd` for the payload schema. When
-inbound authentication is enabled, the payload includes an `authResults`
-block (schema above).
-
-## Outbound queue
-
-Outbound messages are queued in `outbound_messages` and drained by the
-`OutboundWorker` background task. Failed attempts retry with exponential
-backoff (1m, 5m, 15m, 1h, 6h, 24h). Messages are marked Failed if they
-reach their `give_up_at` deadline (default 24 hours) or receive a 5xx
-reply.
-
-## Sub-addressing
-
-A recipient `local-part+tag@host` routes by `local-part`; the `tag` is
-exposed in the webhook payload. Tags must be authorised by an active
-`TagGrant` for the matching `(localPart, tag)`.
+    POST   /api/local-domains                 { domain }
+    GET    /api/local-domains
+    DELETE /api/local-domains/{domain}
 
 ## Regenerate API docs
 

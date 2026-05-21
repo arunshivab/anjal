@@ -40,4 +40,21 @@ public sealed class SmtpServerOptions
     /// is null. Defaults to false (TLS opportunistic on receiver side).
     /// </summary>
     public bool RequireTlsForMail { get; init; }
+
+    /// <summary>
+    /// The role this listener plays. Determines which commands are
+    /// accepted and which authorization checks apply. Defaults to
+    /// <see cref="SmtpServerRole.Mta"/> which is correct for a public
+    /// port 25 listener.
+    /// </summary>
+    public SmtpServerRole Role { get; init; } = SmtpServerRole.Mta;
+
+    /// <summary>
+    /// For <see cref="SmtpServerRole.Submission"/>, allow <c>AUTH</c>
+    /// commands on plaintext connections (no STARTTLS). DEFAULT IS FALSE.
+    /// Enable ONLY for local development or controlled networks - AUTH
+    /// without TLS leaks credentials. The submission port refuses
+    /// authentication unless this is true or TLS is active.
+    /// </summary>
+    public bool AllowPlaintextAuth { get; init; }
 }
