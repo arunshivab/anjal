@@ -12,6 +12,8 @@ public sealed class SmtpServer : System.IDisposable
     private readonly IMessageSink sink;
     private readonly IInboundAuthenticator? authenticator;
     private readonly bool enforceReject;
+    private readonly ISmtpAuthenticator? smtpAuthenticator;
+    private readonly ILocalDomainResolver? localDomains;
     private readonly TcpListener listener;
     private bool started;
     private bool disposed;
@@ -23,10 +25,12 @@ public sealed class SmtpServer : System.IDisposable
     /// <param name="options">Server configuration.</param>
     /// <param name="sink">Sink for delivered messages.</param>
     public SmtpServer(SmtpServerOptions options, IMessageSink sink)
-        : this(options, sink, authenticator: null, enforceReject: false) { }
+        : this(options, sink, authenticator: null, enforceReject: false,
+               smtpAuthenticator: null, localDomains: null)
+    { }
 
     /// <summary>
-    /// Construct a server with inbound authentication.
+    /// Construct a server with inbound authentication only (PR 8 ctor).
     /// </summary>
     /// <param name="options">Server configuration.</param>
     /// <param name="sink">Sink for delivered messages.</param>
@@ -34,6 +38,29 @@ public sealed class SmtpServer : System.IDisposable
     /// <param name="enforceReject">Refuse messages with SMTP 550 when DMARC says reject.</param>
     public SmtpServer(SmtpServerOptions options, IMessageSink sink,
         IInboundAuthenticator? authenticator, bool enforceReject)
+        : this(options, sink, authenticator, enforceReject,
+               smtpAuthenticator: null, localDomains: null)
+    { }
+
+    /// <summary>
+    /// Construct a server with full PR 9 feature set: inbound (SPF/DKIM/DMARC)
+    /// authentication, optional submission-side (AUTH PLAIN/LOGIN) authentication,
+    /// and optional local-domain resolution for the open-relay guard.
+    /// </summary>
+    /// <param name="options">Server configuration. The role
+    /// (<see cref="SmtpServerOptions.Role"/>) determines whether this listener
+    /// is an MTA port or a submission port.</param>
+    /// <param name="sink">Sink for delivered messages.</param>
+    /// <param name="authenticator">Inbound SPF/DKIM/DMARC authenticator (optional).</param>
+    /// <param name="enforceReject">Refuse messages with SMTP 550 when DMARC says reject.</param>
+    /// <param name="smtpAuthenticator">For submission listeners, validates
+    /// AUTH PLAIN/LOGIN credentials. Null disables submission authentication.</param>
+    /// <param name="localDomains">For MTA listeners, decides whether a
+    /// destination domain is local. Null accepts any RCPT (legacy behavior,
+    /// safe only on closed networks).</param>
+    public SmtpServer(SmtpServerOptions options, IMessageSink sink,
+        IInboundAuthenticator? authenticator, bool enforceReject,
+        ISmtpAuthenticator? smtpAuthenticator, ILocalDomainResolver? localDomains)
     {
         System.ArgumentNullException.ThrowIfNull(options);
         System.ArgumentNullException.ThrowIfNull(sink);
@@ -41,6 +68,8 @@ public sealed class SmtpServer : System.IDisposable
         this.sink = sink;
         this.authenticator = authenticator;
         this.enforceReject = enforceReject;
+        this.smtpAuthenticator = smtpAuthenticator;
+        this.localDomains = localDomains;
         this.listener = new TcpListener(options.BindAddress, options.Port);
     }
 
@@ -92,7 +121,9 @@ public sealed class SmtpServer : System.IDisposable
                 // Fire and forget - exceptions inside the session are handled there.
                 _ = System.Threading.Tasks.Task.Run(async () =>
                 {
-                    var session = new SmtpSession(client, this.options, this.sink, this.authenticator, this.enforceReject);
+                    var session = new SmtpSession(client, this.options, this.sink,
+                        this.authenticator, this.enforceReject,
+                        this.smtpAuthenticator, this.localDomains);
                     await session.RunAsync(ct).ConfigureAwait(false);
                 }, ct);
             }

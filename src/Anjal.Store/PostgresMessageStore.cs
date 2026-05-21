@@ -588,4 +588,158 @@ LIMIT 1;";
         GiveUpAt = r.GetFieldValue<System.DateTimeOffset>(8),
         LastError = r.GetString(9),
     };
+
+    /// <inheritdoc/>
+    public async Task<SmtpUserRow> UpsertSmtpUserAsync(SmtpUserRow user, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(user);
+
+        const string sql = @"
+INSERT INTO smtp_users (username, password_pbkdf2, allowed_from_domains, enabled, updated_at)
+VALUES (lower(@username), @hash, @domains, @enabled, now())
+ON CONFLICT (username) DO UPDATE
+    SET password_pbkdf2 = EXCLUDED.password_pbkdf2,
+        allowed_from_domains = EXCLUDED.allowed_from_domains,
+        enabled = EXCLUDED.enabled,
+        updated_at = now()
+RETURNING id, username, password_pbkdf2, allowed_from_domains, enabled, updated_at;";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("username", user.Username ?? string.Empty);
+        cmd.Parameters.AddWithValue("hash", user.PasswordPbkdf2 ?? string.Empty);
+        string[] domainsArray = user.AllowedFromDomains is null
+            ? System.Array.Empty<string>()
+            : System.Linq.Enumerable.ToArray(user.AllowedFromDomains);
+        cmd.Parameters.AddWithValue("domains", domainsArray);
+        cmd.Parameters.AddWithValue("enabled", user.Enabled);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadSmtpUser(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SmtpUserRow>> ListSmtpUsersAsync(CancellationToken ct = default)
+    {
+        const string sql = @"
+SELECT id, username, password_pbkdf2, allowed_from_domains, enabled, updated_at
+FROM smtp_users ORDER BY username;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<SmtpUserRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadSmtpUser(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<SmtpUserRow?> GetSmtpUserAsync(string username, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(username);
+
+        const string sql = @"
+SELECT id, username, password_pbkdf2, allowed_from_domains, enabled, updated_at
+FROM smtp_users WHERE username = lower(@username) LIMIT 1;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("username", username);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+        return ReadSmtpUser(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteSmtpUserAsync(string username, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(username);
+
+        const string sql = "DELETE FROM smtp_users WHERE username = lower(@username);";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("username", username);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
+    /// <inheritdoc/>
+    public async Task<LocalDomainRow> UpsertLocalDomainAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+
+        const string sql = @"
+INSERT INTO local_domains (domain, created_at) VALUES (lower(@domain), now())
+ON CONFLICT (domain) DO UPDATE SET domain = EXCLUDED.domain
+RETURNING id, domain, created_at;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", domain);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadLocalDomain(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<LocalDomainRow>> ListLocalDomainsAsync(CancellationToken ct = default)
+    {
+        const string sql = "SELECT id, domain, created_at FROM local_domains ORDER BY domain;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<LocalDomainRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadLocalDomain(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> IsLocalDomainAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+
+        const string sql = "SELECT 1 FROM local_domains WHERE domain = lower(@domain) LIMIT 1;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", domain);
+        object? result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is not null;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteLocalDomainAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+
+        const string sql = "DELETE FROM local_domains WHERE domain = lower(@domain);";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("domain", domain);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
+    private static SmtpUserRow ReadSmtpUser(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        Username = r.GetString(1),
+        PasswordPbkdf2 = r.GetString(2),
+        AllowedFromDomains = r.GetFieldValue<string[]>(3),
+        Enabled = r.GetBoolean(4),
+        UpdatedAt = r.GetFieldValue<System.DateTimeOffset>(5),
+    };
+
+    private static LocalDomainRow ReadLocalDomain(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        Domain = r.GetString(1),
+        CreatedAt = r.GetFieldValue<System.DateTimeOffset>(2),
+    };
 }

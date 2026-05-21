@@ -65,6 +65,7 @@ public static class Program
             AdvertisedHostName = hostname,
             TlsCertificate = tlsCert,
             RequireTlsForMail = requireTls && tlsCert is not null,
+            Role = Anjal.Smtp.SmtpServerRole.Mta,
         };
 
         using var cts = new System.Threading.CancellationTokenSource();
@@ -80,8 +81,14 @@ public static class Program
         //   "none"         -> annotate only (always 250)
         (Anjal.Smtp.IInboundAuthenticator? inboundAuth, bool enforceReject) = BuildInboundAuth(hostname, Log);
 
-        using var server = new Anjal.Smtp.SmtpServer(smtpOptions, sink, inboundAuth, enforceReject);
-        Log($"Anjal SMTP listening on {bind}:{port} as {hostname}");
+        // Local-domain resolver: env-var ANJAL_LOCAL_DOMAINS plus store-backed table.
+        // When set, the MTA port refuses RCPT TO for non-local domains
+        // (open-relay guard). When empty, MTA accepts all RCPTs (legacy).
+        Anjal.Smtp.ILocalDomainResolver? localDomains = BuildLocalDomainResolver(store, Log);
+
+        using var server = new Anjal.Smtp.SmtpServer(smtpOptions, sink,
+            inboundAuth, enforceReject, smtpAuthenticator: null, localDomains: localDomains);
+        Log($"Anjal SMTP (MTA, port {port}) listening on {bind} as {hostname}");
         Log(pg is null ? "Using in-memory store." : "Using PostgreSQL store.");
         if (tlsCert is not null)
         {
@@ -91,6 +98,44 @@ public static class Program
         else
         {
             Log("STARTTLS disabled (set ANJAL_TLS_CERT_PATH to enable).");
+        }
+
+        // Optional submission listener (typically port 587). Requires
+        // SMTP authentication and the server-supplied SmtpAuthenticator.
+        // Disabled when ANJAL_SUBMISSION_PORT is unset or 0.
+        Anjal.Smtp.SmtpServer? submissionServer = null;
+        int submissionPort = ParsePortOrZero(System.Environment.GetEnvironmentVariable("ANJAL_SUBMISSION_PORT"));
+        if (submissionPort > 0)
+        {
+            Anjal.Smtp.ISmtpAuthenticator submissionAuth = BuildSmtpAuthenticator(store, Log);
+            bool allowPlaintextAuth = string.Equals(
+                System.Environment.GetEnvironmentVariable("ANJAL_AUTH_ALLOW_PLAINTEXT"),
+                "true", System.StringComparison.OrdinalIgnoreCase);
+
+            var submissionOptions = new Anjal.Smtp.SmtpServerOptions
+            {
+                BindAddress = System.Net.IPAddress.Parse(bind),
+                Port = submissionPort,
+                AdvertisedHostName = hostname,
+                TlsCertificate = tlsCert,
+                RequireTlsForMail = false, // submission has its own TLS-before-AUTH logic
+                Role = Anjal.Smtp.SmtpServerRole.Submission,
+                AllowPlaintextAuth = allowPlaintextAuth,
+            };
+
+            submissionServer = new Anjal.Smtp.SmtpServer(submissionOptions, sink,
+                inboundAuth: null, enforceReject: false,
+                smtpAuthenticator: submissionAuth, localDomains: null);
+
+            Log($"Anjal SMTP (Submission, port {submissionPort}) listening on {bind} as {hostname}");
+            if (allowPlaintextAuth)
+            {
+                Log("WARNING: ANJAL_AUTH_ALLOW_PLAINTEXT=true - AUTH accepted on plaintext channels.");
+            }
+            else if (tlsCert is null)
+            {
+                Log("WARNING: submission port has no TLS cert and plaintext AUTH is disabled - AUTH will fail.");
+            }
         }
 
         // Outbound side with TLS policy lookup against the store.
@@ -152,11 +197,24 @@ public static class Program
 
         try
         {
-            await server.StartAsync(cts.Token).ConfigureAwait(false);
+            System.Threading.Tasks.Task mtaTask = server.StartAsync(cts.Token);
+            System.Threading.Tasks.Task? submissionTask = submissionServer?.StartAsync(cts.Token);
+            if (submissionTask is not null)
+            {
+                await System.Threading.Tasks.Task.WhenAll(mtaTask, submissionTask).ConfigureAwait(false);
+            }
+            else
+            {
+                await mtaTask.ConfigureAwait(false);
+            }
         }
         catch (System.OperationCanceledException)
         {
             // Expected.
+        }
+        finally
+        {
+            submissionServer?.Dispose();
         }
 
         if (workerTask is not null)
@@ -289,6 +347,101 @@ public static class Program
             log($"Failed to load DKIM key from '{path}': {ex.GetType().Name}: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Parse an integer from an env-var. Returns 0 when null, empty, or
+    /// unparseable - the caller treats 0 as "feature disabled".
+    /// </summary>
+    private static int ParsePortOrZero(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return 0;
+        return int.TryParse(s, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out int n) && n > 0 ? n : 0;
+    }
+
+    /// <summary>
+    /// Build the SMTP submission authenticator. Combines an optional
+    /// env-var single-user (<c>ANJAL_SUBMISSION_USER</c> +
+    /// <c>ANJAL_SUBMISSION_PASSWORD</c> + <c>ANJAL_SUBMISSION_DOMAINS</c>)
+    /// with the store-backed user table. The env-var password is hashed
+    /// at startup via <see cref="Anjal.Smtp.Pbkdf2Hasher"/> so the plain
+    /// password is never compared directly at runtime.
+    /// </summary>
+    private static Anjal.Smtp.ISmtpAuthenticator BuildSmtpAuthenticator(
+        Anjal.Store.IMessageStore store,
+        System.Action<string> log)
+    {
+        string envUser = System.Environment.GetEnvironmentVariable("ANJAL_SUBMISSION_USER") ?? string.Empty;
+        string envPass = System.Environment.GetEnvironmentVariable("ANJAL_SUBMISSION_PASSWORD") ?? string.Empty;
+        string envDomainsRaw = System.Environment.GetEnvironmentVariable("ANJAL_SUBMISSION_DOMAINS") ?? string.Empty;
+
+        string envHash = string.Empty;
+        System.Collections.Generic.IReadOnlyList<string> envDomains = System.Array.Empty<string>();
+        if (envUser.Length > 0 && envPass.Length > 0)
+        {
+            envHash = Anjal.Smtp.Pbkdf2Hasher.Hash(envPass);
+            if (envDomainsRaw.Length > 0)
+            {
+                var domains = new System.Collections.Generic.List<string>();
+                foreach (string d in envDomainsRaw.Split(','))
+                {
+                    string trimmed = d.Trim().ToLowerInvariant();
+                    if (trimmed.Length > 0) domains.Add(trimmed);
+                }
+                envDomains = domains;
+            }
+            log($"Submission auth: env-var user '{envUser}' configured" +
+                (envDomains.Count > 0 ? $" with allowed domains [{string.Join(',', envDomains)}]" : " (admin authority)"));
+        }
+        else
+        {
+            log("Submission auth: env-var user not configured (store-backed only).");
+        }
+
+        return new ServerSmtpAuthenticator(envUser, envHash, envDomains, store);
+    }
+
+    /// <summary>
+    /// Build the local-domain resolver. Returns null when neither env-var
+    /// list nor store-backed table has any entries, signaling
+    /// "accept-all" legacy behavior. Returns a real resolver when at
+    /// least the env-var list is non-empty (we can't know if the store
+    /// has rows without querying it, so we always wire the store when
+    /// available - the resolver checks env first, store second).
+    /// </summary>
+    private static Anjal.Smtp.ILocalDomainResolver? BuildLocalDomainResolver(
+        Anjal.Store.IMessageStore store,
+        System.Action<string> log)
+    {
+        string raw = System.Environment.GetEnvironmentVariable("ANJAL_LOCAL_DOMAINS") ?? string.Empty;
+        var envDomains = new System.Collections.Generic.List<string>();
+        foreach (string d in raw.Split(','))
+        {
+            string trimmed = d.Trim().ToLowerInvariant();
+            if (trimmed.Length > 0) envDomains.Add(trimmed);
+        }
+
+        // Always wire the resolver when we have a store - the store-backed
+        // local_domains table may have rows the env-var list doesn't.
+        // When both env-var is empty and there's no store, we'd be a
+        // no-op resolver, so just return null and let the session take
+        // its accept-all branch.
+        if (envDomains.Count == 0 && store is null)
+        {
+            log("Local domains: not configured - MTA accepts all RCPT TO (open-relay risk).");
+            return null;
+        }
+
+        if (envDomains.Count > 0)
+        {
+            log($"Local domains (env): {string.Join(',', envDomains)}");
+        }
+        if (store is not null)
+        {
+            log("Local domains: store-backed table available.");
+        }
+        return new ServerLocalDomainResolver(envDomains, store);
     }
 
     /// <summary>

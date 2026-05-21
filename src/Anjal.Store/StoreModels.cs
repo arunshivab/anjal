@@ -1,6 +1,53 @@
 namespace Anjal.Store;
 
 /// <summary>
+/// An SMTP submission user, used to authenticate clients connecting to
+/// Anjal's submission port. Passwords are stored as PBKDF2-SHA256 hashes
+/// of the form <c>pbkdf2$&lt;iterations&gt;$&lt;salt-b64&gt;$&lt;hash-b64&gt;</c>.
+/// Never log or return the hash in API responses.
+/// </summary>
+public sealed class SmtpUserRow
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>The username (case-insensitive in lookup, stored as provided).</summary>
+    public string Username { get; set; } = string.Empty;
+
+    /// <summary>PBKDF2-SHA256 hash of the password in
+    /// <c>pbkdf2$iterations$salt-b64$hash-b64</c> form.</summary>
+    public string PasswordPbkdf2 { get; set; } = string.Empty;
+
+    /// <summary>Domains the user can send <c>MAIL FROM:</c> as. Empty list
+    /// means admin authority (any domain allowed).</summary>
+    public System.Collections.Generic.IReadOnlyList<string> AllowedFromDomains { get; set; }
+        = System.Array.Empty<string>();
+
+    /// <summary>When false, authentication attempts fail regardless of password.</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>When the row was created or last updated.</summary>
+    public System.DateTimeOffset UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// A domain considered local by Anjal's MTA listener. RCPT TO addresses
+/// whose domain is not in this list are refused with 550 5.7.1 Relaying
+/// denied (open-relay guard).
+/// </summary>
+public sealed class LocalDomainRow
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>The domain name (lowercase recommended).</summary>
+    public string Domain { get; set; } = string.Empty;
+
+    /// <summary>When the row was created.</summary>
+    public System.DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>
 /// A DKIM signing key persisted by Anjal.Store. The PEM is stored in
 /// plaintext; protect at the database access layer (encryption at rest,
 /// connection-level TLS, restricted role grants).

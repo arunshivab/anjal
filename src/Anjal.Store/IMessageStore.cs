@@ -189,4 +189,70 @@ public interface IMessageStore
     /// <param name="ct">Cancellation.</param>
     /// <returns><see langword="true"/> if a key was removed.</returns>
     System.Threading.Tasks.Task<bool> DeleteDkimKeyAsync(string domain, System.Threading.CancellationToken ct = default);
+
+    // -------- SMTP submission users --------
+
+    /// <summary>
+    /// Create or update an SMTP submission user. Username is unique
+    /// case-insensitively. The password should already be PBKDF2-hashed
+    /// before calling this method - the store does not hash for you.
+    /// </summary>
+    /// <param name="user">User to upsert.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The persisted row with Id populated.</returns>
+    System.Threading.Tasks.Task<SmtpUserRow> UpsertSmtpUserAsync(SmtpUserRow user, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// List all configured SMTP users. Hashes ARE populated; callers
+    /// handling API responses must redact the hash field.
+    /// </summary>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SmtpUserRow>> ListSmtpUsersAsync(System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Look up an SMTP user by username (case-insensitive).
+    /// </summary>
+    /// <param name="username">Username to look up.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The user row, or null if no such user.</returns>
+    System.Threading.Tasks.Task<SmtpUserRow?> GetSmtpUserAsync(string username, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove an SMTP user by username.
+    /// </summary>
+    /// <param name="username">Username to delete.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True if a user was removed.</returns>
+    System.Threading.Tasks.Task<bool> DeleteSmtpUserAsync(string username, System.Threading.CancellationToken ct = default);
+
+    // -------- Local domains --------
+
+    /// <summary>
+    /// Register a domain as local. Idempotent: adding the same domain
+    /// twice is not an error.
+    /// </summary>
+    /// <param name="domain">Domain to register.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<LocalDomainRow> UpsertLocalDomainAsync(string domain, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// List all local domains.
+    /// </summary>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<LocalDomainRow>> ListLocalDomainsAsync(System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Check whether a domain is local (case-insensitive).
+    /// </summary>
+    /// <param name="domain">Domain to check.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<bool> IsLocalDomainAsync(string domain, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove a local domain.
+    /// </summary>
+    /// <param name="domain">Domain to remove.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True if a row was removed.</returns>
+    System.Threading.Tasks.Task<bool> DeleteLocalDomainAsync(string domain, System.Threading.CancellationToken ct = default);
 }

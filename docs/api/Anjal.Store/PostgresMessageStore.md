@@ -9,8 +9,10 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **#ctor** *(method)* - Create the store with a PostgreSQL connection string.
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
+- **DeleteLocalDomainAsync** *(method)* - _(no description)_
 - **DeleteOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **DeleteRoutingRuleAsync** *(method)* - _(no description)_
+- **DeleteSmtpUserAsync** *(method)* - _(no description)_
 - **EnqueueOutboundAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
 - **GetDkimKeyAsync** *(method)* - _(no description)_
@@ -18,13 +20,19 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **GetOutboundByIdAsync** *(method)* - _(no description)_
 - **GetOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **GetRoutingRuleAsync** *(method)* - _(no description)_
+- **GetSmtpUserAsync** *(method)* - _(no description)_
+- **IsLocalDomainAsync** *(method)* - _(no description)_
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
 - **ListDkimKeysAsync** *(method)* - _(no description)_
+- **ListLocalDomainsAsync** *(method)* - _(no description)_
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
+- **ListSmtpUsersAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
 - **UpsertDkimKeyAsync** *(method)* - _(no description)_
+- **UpsertLocalDomainAsync** *(method)* - _(no description)_
 - **UpsertOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **UpsertRoutingRuleAsync** *(method)* - _(no description)_
+- **UpsertSmtpUserAsync** *(method)* - _(no description)_

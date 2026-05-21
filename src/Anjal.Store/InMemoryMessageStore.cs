@@ -16,6 +16,8 @@ public sealed class InMemoryMessageStore : IMessageStore
     private readonly List<OutboundMessage> outbound = new();
     private readonly List<OutboundTlsPolicy> tlsPolicies = new();
     private readonly List<DkimKeyRow> dkimKeys = new();
+    private readonly List<SmtpUserRow> smtpUsers = new();
+    private readonly List<LocalDomainRow> localDomains = new();
 
     /// <summary>The routing rules currently stored. Provided for inspection in tests.</summary>
     public IReadOnlyList<RoutingRule> Rules
@@ -397,6 +399,121 @@ public sealed class InMemoryMessageStore : IMessageStore
         {
             int removed = this.dkimKeys.RemoveAll(k =>
                 string.Equals(k.Domain, domain, System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(removed > 0);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<SmtpUserRow> UpsertSmtpUserAsync(SmtpUserRow user, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(user);
+        lock (this.gate)
+        {
+            SmtpUserRow? existing = this.smtpUsers.Find(u =>
+                string.Equals(u.Username, user.Username, System.StringComparison.OrdinalIgnoreCase));
+            if (existing is null)
+            {
+                user.Id = System.Guid.NewGuid();
+                user.UpdatedAt = System.DateTimeOffset.UtcNow;
+                this.smtpUsers.Add(user);
+                return Task.FromResult(user);
+            }
+            existing.PasswordPbkdf2 = user.PasswordPbkdf2;
+            existing.AllowedFromDomains = user.AllowedFromDomains;
+            existing.Enabled = user.Enabled;
+            existing.UpdatedAt = System.DateTimeOffset.UtcNow;
+            return Task.FromResult(existing);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SmtpUserRow>> ListSmtpUsersAsync(CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            IReadOnlyList<SmtpUserRow> snapshot = this.smtpUsers.ToArray();
+            return Task.FromResult(snapshot);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<SmtpUserRow?> GetSmtpUserAsync(string username, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(username);
+        lock (this.gate)
+        {
+            SmtpUserRow? found = this.smtpUsers.Find(u =>
+                string.Equals(u.Username, username, System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(found);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteSmtpUserAsync(string username, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(username);
+        lock (this.gate)
+        {
+            int removed = this.smtpUsers.RemoveAll(u =>
+                string.Equals(u.Username, username, System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(removed > 0);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<LocalDomainRow> UpsertLocalDomainAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+        lock (this.gate)
+        {
+            string normalized = domain.ToLowerInvariant();
+            LocalDomainRow? existing = this.localDomains.Find(d =>
+                string.Equals(d.Domain, normalized, System.StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                return Task.FromResult(existing);
+            }
+            var row = new LocalDomainRow
+            {
+                Id = System.Guid.NewGuid(),
+                Domain = normalized,
+                CreatedAt = System.DateTimeOffset.UtcNow,
+            };
+            this.localDomains.Add(row);
+            return Task.FromResult(row);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<LocalDomainRow>> ListLocalDomainsAsync(CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            IReadOnlyList<LocalDomainRow> snapshot = this.localDomains.ToArray();
+            return Task.FromResult(snapshot);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> IsLocalDomainAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+        lock (this.gate)
+        {
+            bool found = this.localDomains.Exists(d =>
+                string.Equals(d.Domain, domain, System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(found);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteLocalDomainAsync(string domain, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(domain);
+        lock (this.gate)
+        {
+            int removed = this.localDomains.RemoveAll(d =>
+                string.Equals(d.Domain, domain, System.StringComparison.OrdinalIgnoreCase));
             return Task.FromResult(removed > 0);
         }
     }

@@ -8,6 +8,7 @@
     <Project Path="examples/Anjal.Mime.Build/Anjal.Mime.Build.csproj" />
     <Project Path="examples/Anjal.Mime.Parse/Anjal.Mime.Parse.csproj" />
     <Project Path="examples/Anjal.OutboundEndToEnd/Anjal.OutboundEndToEnd.csproj" />
+    <Project Path="examples/Anjal.SubmissionAuth/Anjal.SubmissionAuth.csproj" />
     <Project Path="examples/Anjal.TlsEndToEnd/Anjal.TlsEndToEnd.csproj" />
   </Folder>
   <Folder Name="/src/">

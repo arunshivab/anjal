@@ -21,6 +21,8 @@ public sealed class ApiServer : System.IDisposable
     private readonly InboundHandler inbound;
     private readonly OutboundTlsPoliciesHandler tlsPolicies;
     private readonly DkimKeysHandler dkimKeys;
+    private readonly SmtpUsersHandler smtpUsers;
+    private readonly LocalDomainsHandler localDomains;
     private readonly System.Action<string>? log;
     private bool started;
     private bool disposed;
@@ -44,6 +46,8 @@ public sealed class ApiServer : System.IDisposable
         this.inbound = new InboundHandler(store);
         this.tlsPolicies = new OutboundTlsPoliciesHandler(store);
         this.dkimKeys = new DkimKeysHandler(store);
+        this.smtpUsers = new SmtpUsersHandler(store);
+        this.localDomains = new LocalDomainsHandler(store);
 
         this.listener = new HttpListener();
         // HttpListener takes a URI-style prefix like "http://127.0.0.1:8080/".
@@ -340,6 +344,58 @@ public sealed class ApiServer : System.IDisposable
             if (ctx.Method == "DELETE" && domain.Length > 0)
             {
                 await this.dkimKeys.DeleteAsync(ctx, domain).ConfigureAwait(false);
+                return;
+            }
+            await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+            return;
+        }
+
+        if (path.Equals("/api/smtp-users", System.StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/smtp-users/", System.StringComparison.OrdinalIgnoreCase))
+        {
+            switch (ctx.Method)
+            {
+                case "POST": await this.smtpUsers.PostAsync(ctx).ConfigureAwait(false); return;
+                case "GET": await this.smtpUsers.ListAsync(ctx).ConfigureAwait(false); return;
+                default:
+                    await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+                    return;
+            }
+        }
+
+        const string smtpUsersPrefix = "/api/smtp-users/";
+        if (path.StartsWith(smtpUsersPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string username = path.Substring(smtpUsersPrefix.Length);
+            if (ctx.Method == "DELETE" && username.Length > 0)
+            {
+                await this.smtpUsers.DeleteAsync(ctx, username).ConfigureAwait(false);
+                return;
+            }
+            await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+            return;
+        }
+
+        if (path.Equals("/api/local-domains", System.StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/local-domains/", System.StringComparison.OrdinalIgnoreCase))
+        {
+            switch (ctx.Method)
+            {
+                case "POST": await this.localDomains.PostAsync(ctx).ConfigureAwait(false); return;
+                case "GET": await this.localDomains.ListAsync(ctx).ConfigureAwait(false); return;
+                default:
+                    await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+                    return;
+            }
+        }
+
+        const string localDomainsPrefix = "/api/local-domains/";
+        if (path.StartsWith(localDomainsPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string domain = path.Substring(localDomainsPrefix.Length);
+            if (ctx.Method == "DELETE" && domain.Length > 0)
+            {
+                await this.localDomains.DeleteAsync(ctx, domain).ConfigureAwait(false);
                 return;
             }
             await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);

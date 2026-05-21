@@ -19,6 +19,8 @@ public sealed class SmtpSession
     private readonly IMessageSink sink;
     private readonly IInboundAuthenticator? authenticator;
     private readonly bool enforceReject;
+    private readonly ISmtpAuthenticator? smtpAuthenticator;
+    private readonly ILocalDomainResolver? localDomains;
     private readonly string remoteAddress;
     private bool isTls;
 
@@ -26,6 +28,7 @@ public sealed class SmtpSession
     private string clientHostName = string.Empty;
     private string envelopeFrom = string.Empty;
     private readonly List<string> envelopeTo = new();
+    private AuthenticatedUser? authenticatedUser;
 
     /// <summary>
     /// Construct a session for an accepted TCP client.
@@ -34,11 +37,14 @@ public sealed class SmtpSession
     /// <param name="options">Server configuration.</param>
     /// <param name="sink">Where delivered messages go.</param>
     public SmtpSession(TcpClient client, SmtpServerOptions options, IMessageSink sink)
-        : this(client, options, sink, authenticator: null, enforceReject: false) { }
+        : this(client, options, sink, authenticator: null, enforceReject: false,
+               smtpAuthenticator: null, localDomains: null)
+    { }
 
     /// <summary>
-    /// Construct a session for an accepted TCP client, with optional
-    /// inbound authentication.
+    /// Construct a session with inbound authentication (SPF/DKIM/DMARC) but
+    /// no submission-side AUTH. Retained for backward compatibility with
+    /// PR 8 callers.
     /// </summary>
     /// <param name="client">Accepted TCP client.</param>
     /// <param name="options">Server options.</param>
@@ -48,6 +54,29 @@ public sealed class SmtpSession
     /// refuse the message with SMTP 550 before invoking the sink.</param>
     public SmtpSession(TcpClient client, SmtpServerOptions options, IMessageSink sink,
         IInboundAuthenticator? authenticator, bool enforceReject)
+        : this(client, options, sink, authenticator, enforceReject,
+               smtpAuthenticator: null, localDomains: null)
+    { }
+
+    /// <summary>
+    /// Construct a session with full feature set: inbound auth, submission
+    /// auth, and local-domain resolution. This is the constructor used by
+    /// <see cref="SmtpServer"/> in PR 9 and later.
+    /// </summary>
+    /// <param name="client">Accepted TCP client.</param>
+    /// <param name="options">Server options. The <see cref="SmtpServerOptions.Role"/>
+    /// field determines whether this is an MTA listener or a Submission listener.</param>
+    /// <param name="sink">Message sink.</param>
+    /// <param name="authenticator">Optional inbound (SPF/DKIM/DMARC) authenticator.</param>
+    /// <param name="enforceReject">Whether to enforce DMARC p=reject at SMTP layer.</param>
+    /// <param name="smtpAuthenticator">For Submission role, validates AUTH PLAIN/LOGIN credentials.
+    /// Required when role is Submission.</param>
+    /// <param name="localDomains">For MTA role, decides whether a RCPT domain
+    /// is local (must be local or RCPT is refused as relay-denied). When null,
+    /// MTA role accepts any RCPT TO - useful for closed-network testing.</param>
+    public SmtpSession(TcpClient client, SmtpServerOptions options, IMessageSink sink,
+        IInboundAuthenticator? authenticator, bool enforceReject,
+        ISmtpAuthenticator? smtpAuthenticator, ILocalDomainResolver? localDomains)
     {
         System.ArgumentNullException.ThrowIfNull(client);
         System.ArgumentNullException.ThrowIfNull(options);
@@ -58,6 +87,8 @@ public sealed class SmtpSession
         this.sink = sink;
         this.authenticator = authenticator;
         this.enforceReject = enforceReject;
+        this.smtpAuthenticator = smtpAuthenticator;
+        this.localDomains = localDomains;
         this.stream = client.GetStream();
         this.remoteAddress = (client.Client.RemoteEndPoint as System.Net.IPEndPoint)?.Address.ToString() ?? string.Empty;
         this.state = State.AwaitingGreeting;
@@ -121,6 +152,7 @@ public sealed class SmtpSession
             case "EHLO": return await this.HandleEhloAsync(args, isExtended: true, ct).ConfigureAwait(false);
             case "HELO": return await this.HandleEhloAsync(args, isExtended: false, ct).ConfigureAwait(false);
             case "STARTTLS": return await this.HandleStarttlsAsync(ct).ConfigureAwait(false);
+            case "AUTH": return await this.HandleAuthAsync(args, ct).ConfigureAwait(false);
             case "MAIL": return await this.HandleMailAsync(args, ct).ConfigureAwait(false);
             case "RCPT": return await this.HandleRcptAsync(args, ct).ConfigureAwait(false);
             case "DATA": return await this.HandleDataAsync(ct).ConfigureAwait(false);
@@ -160,6 +192,17 @@ public sealed class SmtpSession
             if (this.options.TlsCertificate is not null && !this.isTls)
             {
                 await this.WriteLineAsync("250-STARTTLS", ct).ConfigureAwait(false);
+            }
+            // Advertise AUTH only on submission listeners, and only when
+            // either TLS is active or plaintext AUTH is explicitly allowed.
+            // Per RFC 4954 best practice, AUTH should not be offered on
+            // insecure channels because credentials would travel in
+            // clear/base64 on the wire.
+            if (this.options.Role == SmtpServerRole.Submission &&
+                this.smtpAuthenticator is not null &&
+                (this.isTls || this.options.AllowPlaintextAuth))
+            {
+                await this.WriteLineAsync("250-AUTH PLAIN LOGIN", ct).ConfigureAwait(false);
             }
             await this.WriteLineAsync("250 HELP", ct).ConfigureAwait(false);
         }
@@ -214,6 +257,210 @@ public sealed class SmtpSession
         return true;
     }
 
+    /// <summary>
+    /// Handle AUTH PLAIN and AUTH LOGIN per RFC 4954. AUTH is only valid
+    /// after EHLO on submission listeners with an authenticator configured.
+    /// Strict TLS-before-AUTH unless options.AllowPlaintextAuth.
+    /// </summary>
+    private async System.Threading.Tasks.Task<bool> HandleAuthAsync(string args, System.Threading.CancellationToken ct)
+    {
+        // Only submission listeners offer AUTH.
+        if (this.options.Role != SmtpServerRole.Submission || this.smtpAuthenticator is null)
+        {
+            await this.WriteLineAsync("502 AUTH not available on this listener", ct).ConfigureAwait(false);
+            return true;
+        }
+        // Need an established session (EHLO done).
+        if (this.state == State.AwaitingGreeting || this.state == State.AwaitingHelo)
+        {
+            await this.WriteLineAsync("503 Send EHLO first", ct).ConfigureAwait(false);
+            return true;
+        }
+        if (this.authenticatedUser is not null)
+        {
+            await this.WriteLineAsync("503 Already authenticated", ct).ConfigureAwait(false);
+            return true;
+        }
+        // Refuse AUTH on insecure channel unless explicit opt-in.
+        if (!this.isTls && !this.options.AllowPlaintextAuth)
+        {
+            await this.WriteLineAsync("538 5.7.11 Encryption required for requested authentication mechanism", ct).ConfigureAwait(false);
+            return true;
+        }
+        // In an in-progress transaction, refuse new AUTH.
+        if (!string.IsNullOrEmpty(this.envelopeFrom) || this.envelopeTo.Count > 0)
+        {
+            await this.WriteLineAsync("503 AUTH not permitted during mail transaction", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        string trimmed = args.Trim();
+        int sp = trimmed.IndexOf(' ', System.StringComparison.Ordinal);
+        string mech = sp < 0 ? trimmed : trimmed.Substring(0, sp);
+        string initial = sp < 0 ? string.Empty : trimmed.Substring(sp + 1).Trim();
+        mech = mech.ToUpperInvariant();
+
+        switch (mech)
+        {
+            case "PLAIN":
+                return await this.HandleAuthPlainAsync(initial, ct).ConfigureAwait(false);
+            case "LOGIN":
+                return await this.HandleAuthLoginAsync(initial, ct).ConfigureAwait(false);
+            default:
+                await this.WriteLineAsync("504 5.5.4 Unrecognized authentication mechanism", ct).ConfigureAwait(false);
+                return true;
+        }
+    }
+
+    /// <summary>
+    /// AUTH PLAIN flow per RFC 4616: the credentials are base64-encoded
+    /// "[authzid] NUL authcid NUL password". If no initial response is
+    /// provided, prompt with "334" and read on the next line.
+    /// </summary>
+    private async System.Threading.Tasks.Task<bool> HandleAuthPlainAsync(string initial, System.Threading.CancellationToken ct)
+    {
+        string b64 = initial;
+        if (b64.Length == 0)
+        {
+            await this.WriteLineAsync("334 ", ct).ConfigureAwait(false);
+            string? line = await this.ReadLineAsync(ct).ConfigureAwait(false);
+            if (line is null)
+            {
+                return false; // connection lost
+            }
+            if (line == "*")
+            {
+                await this.WriteLineAsync("501 5.7.0 Authentication cancelled", ct).ConfigureAwait(false);
+                return true;
+            }
+            b64 = line.Trim();
+        }
+
+        byte[] decoded;
+        try
+        {
+            decoded = System.Convert.FromBase64String(b64);
+        }
+        catch (System.FormatException)
+        {
+            await this.WriteLineAsync("501 5.5.2 Malformed AUTH PLAIN response", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        // Split on NUL: [authzid] NUL authcid NUL password
+        var parts = new System.Collections.Generic.List<string>();
+        int start = 0;
+        for (int i = 0; i < decoded.Length; i++)
+        {
+            if (decoded[i] == 0)
+            {
+                parts.Add(System.Text.Encoding.UTF8.GetString(decoded, start, i - start));
+                start = i + 1;
+            }
+        }
+        parts.Add(System.Text.Encoding.UTF8.GetString(decoded, start, decoded.Length - start));
+
+        if (parts.Count != 3)
+        {
+            await this.WriteLineAsync("501 5.5.2 AUTH PLAIN requires exactly 3 NUL-separated fields", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        string username = parts[1];
+        string password = parts[2];
+        return await this.CompleteAuthAsync(username, password, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// AUTH LOGIN: a Microsoft-originated mechanism widely deployed. The
+    /// server prompts "Username:" (base64), client sends base64(username),
+    /// server prompts "Password:" (base64), client sends base64(password).
+    /// The initial response (if any) is the base64-encoded username.
+    /// </summary>
+    private async System.Threading.Tasks.Task<bool> HandleAuthLoginAsync(string initial, System.Threading.CancellationToken ct)
+    {
+        // Prompt for username if not provided as initial response.
+        // "VXNlcm5hbWU6" is base64("Username:").
+        string b64Username = initial;
+        if (b64Username.Length == 0)
+        {
+            await this.WriteLineAsync("334 VXNlcm5hbWU6", ct).ConfigureAwait(false);
+            string? line = await this.ReadLineAsync(ct).ConfigureAwait(false);
+            if (line is null) return false;
+            if (line == "*")
+            {
+                await this.WriteLineAsync("501 5.7.0 Authentication cancelled", ct).ConfigureAwait(false);
+                return true;
+            }
+            b64Username = line.Trim();
+        }
+
+        string username;
+        try
+        {
+            username = System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(b64Username));
+        }
+        catch (System.FormatException)
+        {
+            await this.WriteLineAsync("501 5.5.2 Malformed AUTH LOGIN username", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        // Prompt for password. "UGFzc3dvcmQ6" is base64("Password:").
+        await this.WriteLineAsync("334 UGFzc3dvcmQ6", ct).ConfigureAwait(false);
+        string? passLine = await this.ReadLineAsync(ct).ConfigureAwait(false);
+        if (passLine is null) return false;
+        if (passLine == "*")
+        {
+            await this.WriteLineAsync("501 5.7.0 Authentication cancelled", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        string password;
+        try
+        {
+            password = System.Text.Encoding.UTF8.GetString(System.Convert.FromBase64String(passLine.Trim()));
+        }
+        catch (System.FormatException)
+        {
+            await this.WriteLineAsync("501 5.5.2 Malformed AUTH LOGIN password", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        return await this.CompleteAuthAsync(username, password, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Common path for both AUTH PLAIN and AUTH LOGIN: hand credentials to
+    /// the authenticator and reply 235 (success) or 535 (failure). On
+    /// success the user is bound to this session for subsequent MAIL FROM
+    /// authorization.
+    /// </summary>
+    private async System.Threading.Tasks.Task<bool> CompleteAuthAsync(string username, string password, System.Threading.CancellationToken ct)
+    {
+        AuthenticatedUser? user = null;
+        try
+        {
+            user = await this.smtpAuthenticator!.AuthenticateAsync(username, password, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Authenticator failure is "auth failed" - don't leak details.
+        catch (System.Exception)
+        {
+            user = null;
+        }
+#pragma warning restore CA1031
+
+        if (user is null)
+        {
+            await this.WriteLineAsync("535 5.7.8 Authentication credentials invalid", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        this.authenticatedUser = user;
+        await this.WriteLineAsync("235 2.7.0 Authentication successful", ct).ConfigureAwait(false);
+        return true;
+    }
+
     private async System.Threading.Tasks.Task<bool> HandleMailAsync(string args, System.Threading.CancellationToken ct)
     {
         if (this.state == State.AwaitingHelo)
@@ -226,12 +473,43 @@ public sealed class SmtpSession
             await this.WriteLineAsync("530 Must issue a STARTTLS command first", ct).ConfigureAwait(false);
             return true;
         }
+        // Submission listener requires the client to have authenticated.
+        if (this.options.Role == SmtpServerRole.Submission && this.authenticatedUser is null)
+        {
+            await this.WriteLineAsync("530 5.7.0 Authentication required", ct).ConfigureAwait(false);
+            return true;
+        }
 
         string? addr = ParseAddressArg(args, "FROM:");
         if (addr is null)
         {
             await this.WriteLineAsync("501 Syntax: MAIL FROM:<address>", ct).ConfigureAwait(false);
             return true;
+        }
+
+        // On submission, the authenticated user can only send "as" domains
+        // they're authorized for. Empty allow-list means admin authority
+        // (any domain). Bounce mail (empty MAIL FROM) is allowed.
+        if (this.options.Role == SmtpServerRole.Submission && this.authenticatedUser is not null && addr.Length > 0)
+        {
+            if (this.authenticatedUser.AllowedFromDomains.Count > 0)
+            {
+                string fromDomain = ExtractDomain(addr);
+                bool allowed = false;
+                foreach (string d in this.authenticatedUser.AllowedFromDomains)
+                {
+                    if (string.Equals(fromDomain, d, System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        allowed = true;
+                        break;
+                    }
+                }
+                if (!allowed)
+                {
+                    await this.WriteLineAsync($"550 5.7.1 Not authorized to send as {fromDomain}", ct).ConfigureAwait(false);
+                    return true;
+                }
+            }
         }
 
         this.envelopeFrom = addr;
@@ -262,10 +540,45 @@ public sealed class SmtpSession
             return true;
         }
 
+        // On MTA listener, refuse relay: the destination domain must be local.
+        // If no localDomains resolver is configured, accept all (legacy
+        // behavior, safe only on closed networks).
+        if (this.options.Role == SmtpServerRole.Mta && this.authenticatedUser is null && this.localDomains is not null)
+        {
+            string rcptDomain = ExtractDomain(addr);
+            bool isLocal = false;
+            try
+            {
+                isLocal = await this.localDomains.IsLocalAsync(rcptDomain, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031
+            catch (System.Exception)
+            {
+                isLocal = false;
+            }
+#pragma warning restore CA1031
+            if (!isLocal)
+            {
+                await this.WriteLineAsync("550 5.7.1 Relaying denied", ct).ConfigureAwait(false);
+                return true;
+            }
+        }
+
         this.envelopeTo.Add(addr);
         this.state = State.HasRcpt;
         await this.WriteLineAsync("250 OK", ct).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>
+    /// Extract the domain portion from a "user@domain" address. Returns
+    /// empty if not a valid local@domain form.
+    /// </summary>
+    private static string ExtractDomain(string addr)
+    {
+        if (string.IsNullOrEmpty(addr)) return string.Empty;
+        int at = addr.LastIndexOf('@');
+        return at < 0 ? string.Empty : addr.Substring(at + 1).Trim().ToLowerInvariant();
     }
 
     private async System.Threading.Tasks.Task<bool> HandleDataAsync(System.Threading.CancellationToken ct)
