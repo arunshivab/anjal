@@ -10,12 +10,19 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.8.0** - full SMTP server with bidirectional mail + DKIM signing +
-SPF/DKIM/DMARC inbound verification + **SMTP submission authentication
-on dual-port (25/587) with open-relay guard**. Anjal can now be safely
-exposed to the internet: port 25 accepts inbound from other servers only
-for local domains, port 587 requires authenticated submission from
-clients with per-user from-domain authorization.
+**v0.9.0** - full SMTP server with bidirectional mail + DKIM signing +
+SPF/DKIM/DMARC inbound verification + SMTP submission authentication on
+dual-port (25/587) with open-relay guard + **multi-tenant mailbox
+storage**. Mail addressed to a registered mailbox is written to a
+per-tenant Maildir on disk and indexed in the store; the same mailbox
+identity authenticates on the submission port and may send as its own
+domain. Webhook routing (the transactional path) continues to work
+alongside - an address can be a mailbox, a webhook target, or both.
+
+Mailbox storage is the first step of the webmail arc
+(storage -> webmail UI -> anti-spam -> deployment hardening). Not yet in
+this release: webmail, IMAP/POP, hard quota enforcement, deletion of mail
+data, full-text search, self-service domain verification.
 
 ## Modules
 
@@ -28,6 +35,7 @@ clients with per-user from-domain authorization.
 | `Anjal.Auth` | SPF (RFC 7208) + DKIM verifier (RFC 6376) + DMARC (RFC 7489) + Authentication-Results (RFC 8601) | none |
 | `Anjal.Routing` | Inbound routing + signed webhook dispatcher | none |
 | `Anjal.Store` | Persistence: in-memory and PostgreSQL | Npgsql |
+| `Anjal.Mailbox` | Multi-tenant Maildir storage (tmp/new/cur, Maildir++ folders) and the mailbox delivery sink | none |
 | `Anjal.Api` | HTTP/JSON API on `HttpListener` + `System.Text.Json` | none |
 | `Anjal.Server` | Composition root host process | none |
 
@@ -41,9 +49,10 @@ clients with per-user from-domain authorization.
 
 ## Run the demos
 
-Seven in-process demos prove each pipeline with no external setup:
+Eight in-process demos prove each pipeline with no external setup:
 
     dotnet run --project examples/Anjal.InboundEndToEnd
+    dotnet run --project examples/Anjal.MailboxEndToEnd
     dotnet run --project examples/Anjal.OutboundEndToEnd
     dotnet run --project examples/Anjal.ApiClient
     dotnet run --project examples/Anjal.TlsEndToEnd
@@ -130,6 +139,7 @@ the local Lipi instance). Add more users via the API as needed.
 | `ANJAL_SUBMISSION_PASSWORD` | - | Env-var bootstrap plaintext password (hashed on startup with PBKDF2) |
 | `ANJAL_SUBMISSION_DOMAINS` | - | Env-var user's allowed-from domains (comma-separated). Empty = admin authority. |
 | `ANJAL_AUTH_ALLOW_PLAINTEXT` | `false` | Allow AUTH on plaintext channels. ONLY for local dev. |
+| `ANJAL_MAILDIR_ROOT` | `/var/mail/anjal` (Unix) / `%LOCALAPPDATA%\Anjal\mail` (Windows) | Root directory for tenant Maildirs |
 
 ## SMTP submission authentication
 
@@ -314,6 +324,43 @@ the configured token is empty (test-only mode).
     POST   /api/local-domains                 { domain }
     GET    /api/local-domains
     DELETE /api/local-domains/{domain}
+
+### Tenants, domains and mailboxes (v0.9.0)
+
+Tenant creation is admin-API-only. A domain registered here is treated as
+verified and becomes RCPT-able on the MTA port immediately (it is
+consulted by the local-domain resolver alongside `local_domains` and
+`ANJAL_LOCAL_DOMAINS`).
+
+    POST   /api/tenants                       { slug, displayName, enabled }
+    GET    /api/tenants
+    GET    /api/tenants/{slug}
+    DELETE /api/tenants/{slug}                # cascades index rows; Maildir files stay on disk
+
+    POST   /api/tenant-domains                { tenantSlug, domain }
+    GET    /api/tenant-domains[?tenant=slug]
+    DELETE /api/tenant-domains/{domain}
+
+    POST   /api/mailboxes                     { tenantSlug, address, password, displayName, enabled, quotaBytes }
+    GET    /api/mailboxes[?tenant=slug]       # never returns password hashes
+    GET    /api/mailboxes/{address}
+    DELETE /api/mailboxes/{address}
+    GET    /api/mailboxes/{address}/folders
+    GET    /api/mailboxes/{address}/messages[?folder=INBOX&limit=50&offset=0]
+
+    GET    /api/messages/{id}                 # metadata
+    GET    /api/messages/{id}/raw             # { id, rawBytesBase64 }
+
+Creating a mailbox lays out `<root>/<tenant-slug>/<local@domain>/` with
+`tmp/`, `new/`, `cur/` and the Maildir++ folders `.Sent`, `.Drafts`,
+`.Trash`. An empty password makes the mailbox receive-only; on update, an
+omitted password keeps the existing one. The default quota is 2 GiB and
+is soft in this release (exceeding it is logged, not enforced).
+
+A mailbox authenticates on the submission port with its full address as
+the username and is allowed to send `MAIL FROM` its own domain only.
+`smtp_users` remain the way to create service accounts with broader
+from-domain authority.
 
 ## Regenerate API docs
 

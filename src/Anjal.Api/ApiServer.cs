@@ -23,6 +23,8 @@ public sealed class ApiServer : System.IDisposable
     private readonly DkimKeysHandler dkimKeys;
     private readonly SmtpUsersHandler smtpUsers;
     private readonly LocalDomainsHandler localDomains;
+    private readonly TenantsHandler? tenants;
+    private readonly MailboxesHandler? mailboxes;
     private readonly System.Action<string>? log;
     private bool started;
     private bool disposed;
@@ -34,11 +36,44 @@ public sealed class ApiServer : System.IDisposable
     /// <param name="store">Backing store, passed to all handlers.</param>
     /// <param name="log">Optional log callback. One line per served request.</param>
     public ApiServer(ApiOptions options, IMessageStore store, System.Action<string>? log = null)
+        : this(options, store, log, mailboxStore: null, maildir: null)
+    {
+    }
+
+    /// <summary>
+    /// Construct an API server with mailbox endpoints enabled.
+    /// </summary>
+    /// <param name="options">Configuration.</param>
+    /// <param name="store">Backing store, passed to all handlers.</param>
+    /// <param name="log">Optional log callback. One line per served request.</param>
+    /// <param name="mailboxStore">
+    /// Mailbox registry and message index. If null, <paramref name="store"/>
+    /// is used when it also implements <see cref="IMailboxStore"/> (both
+    /// built-in stores do).
+    /// </param>
+    /// <param name="maildir">
+    /// Filesystem store for message bodies. Required for the
+    /// <c>/api/tenants</c>, <c>/api/tenant-domains</c>, <c>/api/mailboxes</c>
+    /// and <c>/api/messages</c> routes; when null those routes return 404.
+    /// </param>
+    public ApiServer(
+        ApiOptions options,
+        IMessageStore store,
+        System.Action<string>? log,
+        IMailboxStore? mailboxStore,
+        Anjal.Mailbox.IMaildirStore? maildir)
     {
         System.ArgumentNullException.ThrowIfNull(options);
         System.ArgumentNullException.ThrowIfNull(store);
         this.options = options;
         this.log = log;
+
+        IMailboxStore? mbStore = mailboxStore ?? store as IMailboxStore;
+        if (mbStore is not null && maildir is not null)
+        {
+            this.tenants = new TenantsHandler(mbStore);
+            this.mailboxes = new MailboxesHandler(mbStore, maildir);
+        }
 
         this.routingRules = new RoutingRulesHandler(store);
         this.tagGrants = new TagGrantsHandler(store);
@@ -402,7 +437,159 @@ public sealed class ApiServer : System.IDisposable
             return;
         }
 
+        if (this.tenants is not null && this.mailboxes is not null &&
+            await this.TryDispatchMailboxAsync(ctx, path).ConfigureAwait(false))
+        {
+            return;
+        }
+
         await ctx.WriteErrorAsync(404, "not_found", $"No route matches {path}.").ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Mailbox routes (v0.9.0). Returns <see langword="false"/> if the path
+    /// is not a mailbox route so the caller can fall through to 404.
+    /// </summary>
+    private async System.Threading.Tasks.Task<bool> TryDispatchMailboxAsync(RequestContext ctx, string path)
+    {
+        // /api/tenants                          POST, GET
+        // /api/tenants/{slug}                   GET, DELETE
+        // /api/tenant-domains[?tenant=slug]     POST, GET
+        // /api/tenant-domains/{domain}          DELETE
+        // /api/mailboxes[?tenant=slug]          POST, GET
+        // /api/mailboxes/{address}              GET, DELETE
+        // /api/mailboxes/{address}/folders      GET
+        // /api/mailboxes/{address}/messages     GET  (?folder=&limit=&offset=)
+        // /api/messages/{id}                    GET
+        // /api/messages/{id}/raw                GET
+        TenantsHandler tenantsHandler = this.tenants!;
+        MailboxesHandler mailboxesHandler = this.mailboxes!;
+
+        if (path.Equals("/api/tenants", System.StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/tenants/", System.StringComparison.OrdinalIgnoreCase))
+        {
+            switch (ctx.Method)
+            {
+                case "POST": await tenantsHandler.PostAsync(ctx).ConfigureAwait(false); return true;
+                case "GET": await tenantsHandler.ListAsync(ctx).ConfigureAwait(false); return true;
+                default:
+                    await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+                    return true;
+            }
+        }
+
+        const string tenantsPrefix = "/api/tenants/";
+        if (path.StartsWith(tenantsPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string slug = path.Substring(tenantsPrefix.Length);
+            if (slug.Length > 0 && !slug.Contains('/', System.StringComparison.Ordinal))
+            {
+                switch (ctx.Method)
+                {
+                    case "GET": await tenantsHandler.GetAsync(ctx, slug).ConfigureAwait(false); return true;
+                    case "DELETE": await tenantsHandler.DeleteAsync(ctx, slug).ConfigureAwait(false); return true;
+                }
+            }
+            await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+            return true;
+        }
+
+        if (path.Equals("/api/tenant-domains", System.StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/tenant-domains/", System.StringComparison.OrdinalIgnoreCase))
+        {
+            switch (ctx.Method)
+            {
+                case "POST": await tenantsHandler.PostDomainAsync(ctx).ConfigureAwait(false); return true;
+                case "GET": await tenantsHandler.ListDomainsAsync(ctx).ConfigureAwait(false); return true;
+                default:
+                    await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+                    return true;
+            }
+        }
+
+        const string tenantDomainsPrefix = "/api/tenant-domains/";
+        if (path.StartsWith(tenantDomainsPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string domain = path.Substring(tenantDomainsPrefix.Length);
+            if (ctx.Method == "DELETE" && domain.Length > 0)
+            {
+                await tenantsHandler.DeleteDomainAsync(ctx, domain).ConfigureAwait(false);
+                return true;
+            }
+            await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+            return true;
+        }
+
+        if (path.Equals("/api/mailboxes", System.StringComparison.OrdinalIgnoreCase) ||
+            path.Equals("/api/mailboxes/", System.StringComparison.OrdinalIgnoreCase))
+        {
+            switch (ctx.Method)
+            {
+                case "POST": await mailboxesHandler.PostAsync(ctx).ConfigureAwait(false); return true;
+                case "GET": await mailboxesHandler.ListAsync(ctx).ConfigureAwait(false); return true;
+                default:
+                    await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+                    return true;
+            }
+        }
+
+        const string mailboxesPrefix = "/api/mailboxes/";
+        if (path.StartsWith(mailboxesPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string rest = path.Substring(mailboxesPrefix.Length);
+            int slash = rest.IndexOf('/', System.StringComparison.Ordinal);
+            string address = slash < 0 ? rest : rest.Substring(0, slash);
+            string sub = slash < 0 ? string.Empty : rest.Substring(slash + 1).TrimEnd('/');
+            if (address.Length > 0)
+            {
+                if (sub.Length == 0)
+                {
+                    switch (ctx.Method)
+                    {
+                        case "GET": await mailboxesHandler.GetAsync(ctx, address).ConfigureAwait(false); return true;
+                        case "DELETE": await mailboxesHandler.DeleteAsync(ctx, address).ConfigureAwait(false); return true;
+                    }
+                }
+                else if (ctx.Method == "GET" && sub.Equals("folders", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    await mailboxesHandler.ListFoldersAsync(ctx, address).ConfigureAwait(false);
+                    return true;
+                }
+                else if (ctx.Method == "GET" && sub.Equals("messages", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    await mailboxesHandler.ListMessagesAsync(ctx, address).ConfigureAwait(false);
+                    return true;
+                }
+            }
+            await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+            return true;
+        }
+
+        const string messagesPrefix = "/api/messages/";
+        if (path.StartsWith(messagesPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string rest = path.Substring(messagesPrefix.Length);
+            int slash = rest.IndexOf('/', System.StringComparison.Ordinal);
+            string id = slash < 0 ? rest : rest.Substring(0, slash);
+            string sub = slash < 0 ? string.Empty : rest.Substring(slash + 1).TrimEnd('/');
+            if (ctx.Method == "GET" && id.Length > 0)
+            {
+                if (sub.Length == 0)
+                {
+                    await mailboxesHandler.GetMessageAsync(ctx, id).ConfigureAwait(false);
+                    return true;
+                }
+                if (sub.Equals("raw", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    await mailboxesHandler.GetMessageRawAsync(ctx, id).ConfigureAwait(false);
+                    return true;
+                }
+            }
+            await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+            return true;
+        }
+
+        return false;
     }
 
     /// <inheritdoc/>

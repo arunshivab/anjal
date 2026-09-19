@@ -24,6 +24,8 @@ namespace Anjal.Server;
 ///   ANJAL_TLS_VALIDATE_PEER - if "false", outbound TLS skips cert validation (testing only). Default true.
 ///   ANJAL_TLS_DEFAULT_MODE  - default outbound TLS mode if no per-domain policy:
 ///                             "opportunistic" (default), "required", or "disabled".
+///   ANJAL_MAILDIR_ROOT      - root directory for tenant Maildirs. Default
+///                             /var/mail/anjal (Unix) or %LOCALAPPDATA%\Anjal\mail (Windows).
 /// </summary>
 public static class Program
 {
@@ -52,7 +54,17 @@ public static class Program
 
         void Log(string line) => System.Console.WriteLine($"[{System.DateTime.UtcNow:HH:mm:ss}] {line}");
 
-        var sink = new RoutingMessageSink(store, routing, dispatcher, Log);
+        // Mailbox storage (v0.9.0): Maildir on disk + index in the store.
+        // Both built-in stores implement IMailboxStore, so this is always on.
+        var mailboxStore = (Anjal.Store.IMailboxStore)store;
+        string maildirRoot = System.Environment.GetEnvironmentVariable("ANJAL_MAILDIR_ROOT") ?? Anjal.Mailbox.MaildirStore.DefaultRoot;
+        var maildir = new Anjal.Mailbox.MaildirStore(maildirRoot, hostname);
+        var mailboxSink = new Anjal.Mailbox.MailboxSink(mailboxStore, maildir, Log);
+
+        // Fan out: mailbox sink first, then webhook routing. An address may
+        // be a mailbox, a webhook target, or both.
+        var routingSink = new RoutingMessageSink(store, routing, dispatcher, Log);
+        var sink = new Anjal.Smtp.CompositeMessageSink(mailboxSink, routingSink);
 
         // TLS cert for SMTP receiver.
         System.Security.Cryptography.X509Certificates.X509Certificate2? tlsCert = LoadServerCert(Log);
@@ -90,6 +102,7 @@ public static class Program
             inboundAuth, enforceReject, smtpAuthenticator: null, localDomains: localDomains);
         Log($"Anjal SMTP (MTA, port {port}) listening on {bind} as {hostname}");
         Log(pg is null ? "Using in-memory store." : "Using PostgreSQL store.");
+        Log($"Maildir root: {maildir.Root}");
         if (tlsCert is not null)
         {
             Log($"STARTTLS enabled (cert subject: {tlsCert.Subject}, expires {tlsCert.NotAfter:yyyy-MM-dd}).");
@@ -183,7 +196,7 @@ public static class Program
                 BindAddress = System.Net.IPAddress.Parse(apiBind),
                 Port = apiPort,
                 BearerToken = token,
-            }, store, Log);
+            }, store, Log, mailboxStore, maildir);
             apiTask = apiServer.StartAsync(cts.Token);
             string authNote = string.IsNullOrEmpty(token) ? " (auth disabled - DO NOT use in production)" : string.Empty;
             Log($"API listening on http://{apiBind}:{apiPort}/api/...{authNote}");
@@ -399,7 +412,7 @@ public static class Program
             log("Submission auth: env-var user not configured (store-backed only).");
         }
 
-        return new ServerSmtpAuthenticator(envUser, envHash, envDomains, store);
+        return new ServerSmtpAuthenticator(envUser, envHash, envDomains, store, store as Anjal.Store.IMailboxStore);
     }
 
     /// <summary>
@@ -439,9 +452,9 @@ public static class Program
         }
         if (store is not null)
         {
-            log("Local domains: store-backed table available.");
+            log("Local domains: store-backed local_domains and tenant_domains tables available.");
         }
-        return new ServerLocalDomainResolver(envDomains, store);
+        return new ServerLocalDomainResolver(envDomains, store, store as Anjal.Store.IMailboxStore);
     }
 
     /// <summary>

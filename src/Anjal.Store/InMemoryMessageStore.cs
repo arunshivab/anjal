@@ -6,7 +6,7 @@ namespace Anjal.Store;
 /// and the inbound-end-to-end example. Thread-safe via a single lock; not
 /// optimised for high concurrency. No persistence across process restarts.
 /// </summary>
-public sealed class InMemoryMessageStore : IMessageStore
+public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore
 {
     private readonly object gate = new();
     private readonly List<RoutingRule> rules = new();

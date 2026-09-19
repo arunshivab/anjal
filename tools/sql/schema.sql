@@ -1,4 +1,4 @@
--- Anjal PostgreSQL schema (v0.2.0)
+-- Anjal PostgreSQL schema (v0.9.0)
 --
 -- The store layer keeps three concerns separated:
 --   routing_rules   - maps a local-part to a webhook URL + signing secret
@@ -121,5 +121,89 @@ CREATE TABLE IF NOT EXISTS local_domains (
     domain      CITEXT NOT NULL UNIQUE,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Multi-tenant mailbox storage (v0.9.0). Message bodies live in Maildir
+-- files under ANJAL_MAILDIR_ROOT/<tenant-slug>/<local_part>@<domain>/;
+-- these tables hold the tenant/domain/mailbox registry and the message
+-- index (metadata only, no raw bytes).
+--
+-- Deleting a tenant or mailbox cascades to its rows but never touches
+-- the Maildir files on disk (deletion of mail data is a later release).
+CREATE TABLE IF NOT EXISTS tenants (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug          CITEXT NOT NULL UNIQUE,
+    display_name  TEXT NOT NULL DEFAULT '',
+    enabled       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_domains (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    domain      CITEXT NOT NULL UNIQUE,
+    verified    BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS tenant_domains_tenant_idx
+    ON tenant_domains (tenant_id);
+
+-- Mailboxes carry their own submission credentials (virtual-user
+-- pattern): the same identity receives at local_part@domain and may
+-- AUTH on the submission port to send as that domain. An empty
+-- password_pbkdf2 means receive-only.
+CREATE TABLE IF NOT EXISTS mailboxes (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id        UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    local_part       CITEXT NOT NULL,
+    domain           CITEXT NOT NULL,
+    password_pbkdf2  TEXT NOT NULL DEFAULT '',
+    display_name     TEXT NOT NULL DEFAULT '',
+    enabled          BOOLEAN NOT NULL DEFAULT TRUE,
+    quota_bytes      BIGINT NOT NULL DEFAULT 2147483648,  -- 2 GiB soft quota
+    used_bytes       BIGINT NOT NULL DEFAULT 0,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT mailboxes_address_unique UNIQUE (local_part, domain)
+);
+
+CREATE INDEX IF NOT EXISTS mailboxes_tenant_idx
+    ON mailboxes (tenant_id);
+
+-- Folders: INBOX maps to the Maildir root; other names map to a
+-- Maildir++ ".Name" subdirectory. Names are case-sensitive.
+CREATE TABLE IF NOT EXISTS folders (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mailbox_id  UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT folders_mailbox_name_unique UNIQUE (mailbox_id, name)
+);
+
+-- Message index. maildir_file is relative to the folder's Maildir
+-- directory (e.g. "new/1726560000.M1P42Q7.host").
+CREATE TABLE IF NOT EXISTS messages (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mailbox_id     UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    folder_id      UUID NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+    maildir_file   TEXT NOT NULL,
+    envelope_from  TEXT NOT NULL DEFAULT '',
+    message_id     TEXT NOT NULL DEFAULT '',
+    from_header    TEXT NOT NULL DEFAULT '',
+    to_header      TEXT NOT NULL DEFAULT '',
+    subject        TEXT NOT NULL DEFAULT '',
+    date_header    TEXT NOT NULL DEFAULT '',
+    size_bytes     BIGINT NOT NULL DEFAULT 0,
+    seen           BOOLEAN NOT NULL DEFAULT FALSE,
+    flagged        BOOLEAN NOT NULL DEFAULT FALSE,
+    answered       BOOLEAN NOT NULL DEFAULT FALSE,
+    received_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS messages_folder_received_idx
+    ON messages (mailbox_id, folder_id, received_at DESC);
+
+CREATE INDEX IF NOT EXISTS messages_message_id_idx
+    ON messages (mailbox_id, message_id);
 
 COMMIT;

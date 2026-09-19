@@ -37,6 +37,17 @@ public sealed class RequestContext
     public string AuthorizationHeader => this.context.Request.Headers["Authorization"] ?? string.Empty;
 
     /// <summary>
+    /// Read a query-string parameter by name (case-insensitive). Returns
+    /// <see langword="null"/> if absent.
+    /// </summary>
+    /// <param name="name">Parameter name.</param>
+    public string? Query(string name)
+    {
+        System.ArgumentNullException.ThrowIfNull(name);
+        return this.context.Request.QueryString[name];
+    }
+
+    /// <summary>
     /// Read the request body as a string. Caches the result so repeated
     /// calls are free. Returns empty for GET / DELETE / requests with no body.
     /// </summary>
