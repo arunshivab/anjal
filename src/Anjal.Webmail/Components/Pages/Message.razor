@@ -1,0 +1,125 @@
+@page "/m/{Id:guid}"
+@attribute [Authorize]
+@inject MailboxService Mail
+
+<PageTitle>Anjal - @(view?.Subject ?? "message")</PageTitle>
+
+@if (view is null)
+{
+    <p class="muted">Message not found.</p>
+}
+else
+{
+    <div class="message">
+        <div class="toolbar">
+            <a class="btn subtle" href="/folder/@Uri.EscapeDataString(view.Folder.Name)">&laquo; @view.Folder.Name</a>
+            <a class="btn subtle" href="/compose?to=@Uri.EscapeDataString(ReplyTo)&subject=@Uri.EscapeDataString(ReplySubject)">Reply</a>
+            <form method="post" action="/message/@Id/flags" class="inline">
+                <AntiforgeryToken />
+                <input type="hidden" name="seen" value="1" />
+                <input type="hidden" name="flagged" value="@(view.Row.Flagged ? "0" : "1")" />
+                <input type="hidden" name="back" value="/m/@Id" />
+                <button type="submit" class="btn subtle">@(view.Row.Flagged ? "Unflag" : "Flag")</button>
+            </form>
+            <form method="post" action="/message/@Id/flags" class="inline">
+                <AntiforgeryToken />
+                <input type="hidden" name="seen" value="0" />
+                <input type="hidden" name="flagged" value="@(view.Row.Flagged ? "1" : "0")" />
+                <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                <button type="submit" class="btn subtle">Mark unread</button>
+            </form>
+            @if (view.Folder.Name == "Trash")
+            {
+                <form method="post" action="/message/@Id/move" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="folder" value="INBOX" />
+                    <input type="hidden" name="back" value="/folder/INBOX" />
+                    <button type="submit" class="btn subtle">Restore to Inbox</button>
+                </form>
+                <form method="post" action="/message/@Id/delete" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/folder/Trash" />
+                    <button type="submit" class="btn danger">Delete permanently</button>
+                </form>
+            }
+            else
+            {
+                <form method="post" action="/message/@Id/move" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="folder" value="Trash" />
+                    <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                    <button type="submit" class="btn subtle">Trash</button>
+                </form>
+            }
+            <a class="btn subtle" href="/raw/@Id">Download .eml</a>
+        </div>
+
+        <h1>@(string.IsNullOrWhiteSpace(view.Subject) ? "(no subject)" : view.Subject)</h1>
+        <dl class="headers">
+            <dt>From</dt><dd>@view.From</dd>
+            <dt>To</dt><dd>@view.To</dd>
+            @if (view.Cc.Length > 0)
+            {
+                <dt>Cc</dt><dd>@view.Cc</dd>
+            }
+            <dt>Date</dt><dd>@view.Date</dd>
+        </dl>
+
+        @if (view.HasBlockedImages)
+        {
+            <p class="notice">Remote images were blocked. <a href="/m/@Id?images=1">Load images</a></p>
+        }
+
+        <iframe class="body" sandbox="" referrerpolicy="no-referrer" srcdoc="@Srcdoc"></iframe>
+
+        @if (view.Attachments.Count > 0)
+        {
+            <h2>Attachments</h2>
+            <ul class="attachments">
+                @foreach (AttachmentView a in view.Attachments)
+                {
+                    <li><a href="/attachment/@Id/@a.Index">@a.FileName</a> <span class="muted">(@a.ContentType, @a.SizeBytes bytes)</span></li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+    [SupplyParameterFromQuery(Name = "images")] private string? Images { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private MessageView? view;
+
+    private string Srcdoc =>
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">" +
+        "<style>body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.45;margin:8px;color:#222;background:#fff;word-wrap:break-word}img{max-width:100%}</style>" +
+        "</head><body>" + (view?.BodyHtml ?? string.Empty) + "</body></html>";
+
+    private string ReplyTo => view is null ? string.Empty : view.From;
+
+    private string ReplySubject
+    {
+        get
+        {
+            string s = view?.Subject ?? string.Empty;
+            return s.StartsWith("Re:", StringComparison.OrdinalIgnoreCase) ? s : "Re: " + s;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        view = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        view = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
+    }
+}

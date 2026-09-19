@@ -1,0 +1,74 @@
+@inherits LayoutComponentBase
+@inject MailboxService Mail
+@inject NavigationManager Nav
+
+<AuthorizeView>
+    <Authorized>
+        <div class="shell">
+            <header class="topbar">
+                <a class="brand" href="/">Anjal</a>
+                <span class="who">@context.User.Identity?.Name</span>
+                <a class="btn" href="/compose">Compose</a>
+                <form method="post" action="/auth/logout" class="inline">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn subtle">Sign out</button>
+                </form>
+            </header>
+            <div class="main">
+                <nav class="sidebar">
+                    @if (folders is not null)
+                    {
+                        <ul>
+                            @foreach (FolderView f in folders)
+                            {
+                                <li class="@(IsCurrent(f.Name) ? "current" : "")">
+                                    <a href="/folder/@Uri.EscapeDataString(f.Name)">@f.Name <span class="count">@f.Count</span></a>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </nav>
+                <section class="content">
+                    @Body
+                </section>
+            </div>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <div class="shell">
+            <section class="content">
+                @Body
+            </section>
+        </div>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private IReadOnlyList<FolderView>? folders;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        AuthenticationState state = await AuthState;
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf(state.User);
+        if (mailboxId is not null)
+        {
+            folders = await Mail.ListFoldersAsync(mailboxId.Value);
+        }
+    }
+
+    private bool IsCurrent(string folderName)
+    {
+        string path = Nav.ToBaseRelativePath(Nav.Uri);
+        if (folderName == FolderRow.Inbox && (path.Length == 0 || path.StartsWith("?", StringComparison.Ordinal)))
+        {
+            return true;
+        }
+        return path.StartsWith("folder/" + Uri.EscapeDataString(folderName), StringComparison.Ordinal);
+    }
+}

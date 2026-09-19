@@ -11,6 +11,7 @@
     <Project Path="examples/Anjal.OutboundEndToEnd/Anjal.OutboundEndToEnd.csproj" />
     <Project Path="examples/Anjal.SubmissionAuth/Anjal.SubmissionAuth.csproj" />
     <Project Path="examples/Anjal.TlsEndToEnd/Anjal.TlsEndToEnd.csproj" />
+    <Project Path="examples/Anjal.WebmailDemo/Anjal.WebmailDemo.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Anjal.Api/Anjal.Api.csproj" />
@@ -23,6 +24,7 @@
     <Project Path="src/Anjal.Server/Anjal.Server.csproj" />
     <Project Path="src/Anjal.Smtp/Anjal.Smtp.csproj" />
     <Project Path="src/Anjal.Store/Anjal.Store.csproj" />
+    <Project Path="src/Anjal.Webmail/Anjal.Webmail.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Anjal.Api.Tests/Anjal.Api.Tests.csproj" />
@@ -34,5 +36,6 @@
     <Project Path="tests/Anjal.Server.Tests/Anjal.Server.Tests.csproj" />
     <Project Path="tests/Anjal.Smtp.Tests/Anjal.Smtp.Tests.csproj" />
     <Project Path="tests/Anjal.Store.Tests/Anjal.Store.Tests.csproj" />
+    <Project Path="tests/Anjal.Webmail.Tests/Anjal.Webmail.Tests.csproj" />
   </Folder>
 </Solution>

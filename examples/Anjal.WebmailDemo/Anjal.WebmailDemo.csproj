@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Anjal.Examples.WebmailDemo</RootNamespace>
+    <AssemblyName>Anjal.WebmailDemo</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CA1303;CA1812;CA1515;CA2007</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Anjal.Mailbox\Anjal.Mailbox.csproj" />
+    <ProjectReference Include="..\..\src\Anjal.Smtp\Anjal.Smtp.csproj" />
+    <ProjectReference Include="..\..\src\Anjal.Store\Anjal.Store.csproj" />
+    <ProjectReference Include="..\..\src\Anjal.Webmail\Anjal.Webmail.csproj" />
+  </ItemGroup>
+
+</Project>

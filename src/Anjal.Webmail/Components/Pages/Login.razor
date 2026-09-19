@@ -1,0 +1,24 @@
+@page "/login"
+@layout MainLayout
+@attribute [AllowAnonymous]
+
+<PageTitle>Anjal - sign in</PageTitle>
+
+<div class="login">
+    <h1>Anjal</h1>
+    <p class="muted">Sign in with your mailbox address.</p>
+    @if (Error is not null)
+    {
+        <p class="error">Address or password not accepted.</p>
+    }
+    <form method="post" action="/auth/login">
+        <AntiforgeryToken />
+        <label>Address <input type="email" name="address" autocomplete="username" required autofocus /></label>
+        <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
+        <button type="submit" class="btn primary">Sign in</button>
+    </form>
+</div>
+
+@code {
+    [SupplyParameterFromQuery] private string? Error { get; set; }
+}

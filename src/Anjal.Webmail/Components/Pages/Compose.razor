@@ -1,0 +1,31 @@
+@page "/compose"
+@attribute [Authorize]
+
+<PageTitle>Anjal - compose</PageTitle>
+
+<h1>New message</h1>
+
+@if (Error is not null)
+{
+    <p class="error">@Error</p>
+}
+
+<form method="post" action="/compose" enctype="multipart/form-data" class="compose">
+    <AntiforgeryToken />
+    <label>To <input type="text" name="to" value="@To" required autofocus placeholder="name@example.com, other@example.com" /></label>
+    <label>Cc <input type="text" name="cc" value="@Cc" /></label>
+    <label>Subject <input type="text" name="subject" value="@Subject" /></label>
+    <label>Attachments <input type="file" name="attachments" multiple /></label>
+    <textarea name="body" rows="18" placeholder="Write your message"></textarea>
+    <div class="actions">
+        <button type="submit" class="btn primary">Send</button>
+        <a class="btn subtle" href="/">Cancel</a>
+    </div>
+</form>
+
+@code {
+    [SupplyParameterFromQuery] private string? To { get; set; }
+    [SupplyParameterFromQuery] private string? Cc { get; set; }
+    [SupplyParameterFromQuery] private string? Subject { get; set; }
+    [SupplyParameterFromQuery] private string? Error { get; set; }
+}

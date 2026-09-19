@@ -92,6 +92,64 @@ public sealed class MaildirStoreTests : System.IDisposable
     }
 
     [Fact]
+    public void FlagSuffix_OrdersFlagsAndStripFlagsInverts()
+    {
+        Assert.Equal(":2,", MaildirStore.FlagSuffix(false, false, false));
+        Assert.Equal(":2,S", MaildirStore.FlagSuffix(true, false, false));
+        Assert.Equal(":2,FRS", MaildirStore.FlagSuffix(true, true, true));
+        Assert.Equal("abc.host", MaildirStore.StripFlags("abc.host:2,FS"));
+        Assert.Equal("abc.host", MaildirStore.StripFlags("abc.host;2,FS"));
+        Assert.Equal("abc.host", MaildirStore.StripFlags("abc.host"));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task SetFlags_MovesNewToCur_AndRewritesSuffix()
+    {
+        var store = new MaildirStore(this.root, "host");
+        MaildirWriteResult w = await store.WriteAsync("t", "a@b", Store.FolderRow.Inbox, Sample);
+
+        string? seen = store.SetFlags("t", "a@b", Store.FolderRow.Inbox, w.RelativePath, seen: true, flagged: false, answered: false);
+        Assert.NotNull(seen);
+        Assert.StartsWith("cur/", seen, System.StringComparison.Ordinal);
+        Assert.EndsWith("2,S", seen, System.StringComparison.Ordinal);
+        Assert.False(System.IO.File.Exists(w.FullPath));
+        Assert.Equal(Sample, await store.ReadAsync("t", "a@b", Store.FolderRow.Inbox, seen!));
+
+        string? flagged = store.SetFlags("t", "a@b", Store.FolderRow.Inbox, seen!, seen: true, flagged: true, answered: false);
+        Assert.EndsWith("2,FS", flagged, System.StringComparison.Ordinal);
+        Assert.Equal(Sample, await store.ReadAsync("t", "a@b", Store.FolderRow.Inbox, flagged!));
+        Assert.Null(await store.ReadAsync("t", "a@b", Store.FolderRow.Inbox, seen!));
+
+        // Same flags again is a no-op rename.
+        Assert.Equal(flagged, store.SetFlags("t", "a@b", Store.FolderRow.Inbox, flagged!, true, true, false));
+        Assert.Null(store.SetFlags("t", "a@b", Store.FolderRow.Inbox, "new/missing", true, false, false));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Move_CrossFolder_KeepsNameAndFlags()
+    {
+        var store = new MaildirStore(this.root, "host");
+        MaildirWriteResult w = await store.WriteAsync("t", "a@b", Store.FolderRow.Inbox, Sample);
+        string seen = store.SetFlags("t", "a@b", Store.FolderRow.Inbox, w.RelativePath, true, false, false)!;
+
+        string? moved = store.Move("t", "a@b", Store.FolderRow.Inbox, seen, "Trash");
+        Assert.Equal(seen, moved);
+        Assert.Null(await store.ReadAsync("t", "a@b", Store.FolderRow.Inbox, seen));
+        Assert.Equal(Sample, await store.ReadAsync("t", "a@b", "Trash", moved!));
+        Assert.Null(store.Move("t", "a@b", Store.FolderRow.Inbox, seen, "Trash"));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Delete_RemovesFile()
+    {
+        var store = new MaildirStore(this.root, "host");
+        MaildirWriteResult w = await store.WriteAsync("t", "a@b", Store.FolderRow.Inbox, Sample);
+        Assert.True(store.Delete("t", "a@b", Store.FolderRow.Inbox, w.RelativePath));
+        Assert.False(store.Delete("t", "a@b", Store.FolderRow.Inbox, w.RelativePath));
+        Assert.False(store.Delete("t", "a@b", Store.FolderRow.Inbox, "../x"));
+    }
+
+    [Fact]
     public void DefaultRoot_IsPlatformSpecific()
     {
         string root = MaildirStore.DefaultRoot;

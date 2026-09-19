@@ -1,0 +1,99 @@
+@page "/"
+@page "/folder/{FolderName}"
+@attribute [Authorize]
+@inject MailboxService Mail
+
+<PageTitle>Anjal - @Name</PageTitle>
+
+<h1>@Name <span class="muted small">@total message@(total == 1 ? "" : "s")</span></h1>
+
+@if (Sent is not null)
+{
+    <p class="notice">Message queued for delivery.</p>
+}
+
+@if (items is null)
+{
+    <p class="muted">Folder not found.</p>
+}
+else if (items.Count == 0)
+{
+    <p class="muted">Nothing here.</p>
+}
+else
+{
+    <table class="list">
+        <thead><tr><th></th><th>From</th><th>Subject</th><th>Received</th><th>Size</th></tr></thead>
+        <tbody>
+            @foreach (MessageRow m in items)
+            {
+                <tr class="@(m.Seen ? "" : "unseen")">
+                    <td>@(m.Flagged ? "★" : "")</td>
+                    <td>@Sender(m)</td>
+                    <td><a href="/m/@m.Id">@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a></td>
+                    <td class="nowrap">@m.ReceivedAt.ToLocalTime().ToString("dd MMM yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td class="nowrap">@Size(m.SizeBytes)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <div class="pager">
+        @if (page > 0)
+        {
+            <a href="@PageLink(page - 1)">&laquo; Newer</a>
+        }
+        <span class="muted">Page @(page + 1) of @Math.Max(1, (total + PageSize - 1) / PageSize)</span>
+        @if ((page + 1) * PageSize < total)
+        {
+            <a href="@PageLink(page + 1)">Older &raquo;</a>
+        }
+    </div>
+}
+
+@code {
+    private const int PageSize = 50;
+
+    [Parameter] public string? FolderName { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] private int? PageQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "sent")] private string? Sent { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private IReadOnlyList<MessageRow>? items;
+    private long total;
+    private int page;
+
+    private string Name => string.IsNullOrEmpty(FolderName) ? FolderRow.Inbox : FolderName;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        items = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        await Mail.ListFoldersAsync(mailboxId.Value); // ensures defaults exist
+        FolderRow? folder = await Mail.GetFolderAsync(mailboxId.Value, Name);
+        if (folder is null)
+        {
+            return;
+        }
+        page = Math.Max(0, PageQuery ?? 0);
+        (items, total) = await Mail.ListMessagesAsync(mailboxId.Value, folder.Id, page, PageSize);
+    }
+
+    private string PageLink(int p) => $"/folder/{Uri.EscapeDataString(Name)}?page={p}";
+
+    private static string Sender(MessageRow m)
+    {
+        string decoded = Anjal.Mime.EncodedWordDecoder.Decode(m.FromHeader);
+        return string.IsNullOrWhiteSpace(decoded) ? m.EnvelopeFrom : decoded;
+    }
+
+    private static string Size(long bytes) =>
+        bytes < 1024 ? $"{bytes} B" : bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB" : $"{bytes / (1024.0 * 1024.0):0.#} MB";
+}

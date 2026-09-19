@@ -58,6 +58,42 @@ public interface IMaildirStore
     /// <param name="relativePath">The <see cref="MaildirWriteResult.RelativePath"/> recorded at write time.</param>
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<byte[]?> ReadAsync(string tenantSlug, string address, string folderName, string relativePath, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Rename a message so its file name carries the given Maildir flags.
+    /// A message in <c>new/</c> moves to <c>cur/</c>; a message already in
+    /// <c>cur/</c> has its <c>:2,</c> suffix rewritten. Returns the new
+    /// relative path, or <see langword="null"/> if the file does not exist.
+    /// </summary>
+    /// <param name="tenantSlug">Tenant directory name.</param>
+    /// <param name="address">Mailbox address (<c>local@domain</c>).</param>
+    /// <param name="folderName">Folder name.</param>
+    /// <param name="relativePath">Current relative path.</param>
+    /// <param name="seen">Maildir "S" flag.</param>
+    /// <param name="flagged">Maildir "F" flag.</param>
+    /// <param name="answered">Maildir "R" flag.</param>
+    string? SetFlags(string tenantSlug, string address, string folderName, string relativePath, bool seen, bool flagged, bool answered);
+
+    /// <summary>
+    /// Move a message file to another folder of the same mailbox, keeping
+    /// its file name and flags. Returns the new relative path, or
+    /// <see langword="null"/> if the source file does not exist.
+    /// </summary>
+    /// <param name="tenantSlug">Tenant directory name.</param>
+    /// <param name="address">Mailbox address (<c>local@domain</c>).</param>
+    /// <param name="fromFolder">Source folder name.</param>
+    /// <param name="relativePath">Current relative path within the source folder.</param>
+    /// <param name="toFolder">Destination folder name (created if missing).</param>
+    string? Move(string tenantSlug, string address, string fromFolder, string relativePath, string toFolder);
+
+    /// <summary>
+    /// Delete a message file. Returns <see langword="true"/> if a file was removed.
+    /// </summary>
+    /// <param name="tenantSlug">Tenant directory name.</param>
+    /// <param name="address">Mailbox address (<c>local@domain</c>).</param>
+    /// <param name="folderName">Folder name.</param>
+    /// <param name="relativePath">Relative path within the folder.</param>
+    bool Delete(string tenantSlug, string address, string folderName, string relativePath);
 }
 
 /// <summary>
@@ -178,20 +214,148 @@ public sealed class MaildirStore : IMaildirStore
         System.ArgumentNullException.ThrowIfNull(relativePath);
         string dir = this.FolderPath(tenantSlug, address, folderName);
 
-        // The relative path is "new/<name>" or "cur/<name>[:2,flags]"; reject
-        // anything that tries to escape the folder directory.
-        string[] parts = relativePath.Split('/');
-        if (parts.Length != 2 || (parts[0] != "new" && parts[0] != "cur") || parts[1].Length == 0 ||
-            parts[1].Contains("..", System.StringComparison.Ordinal) || parts[1].Contains('\\', System.StringComparison.Ordinal))
+        if (!TrySplitRelative(relativePath, out string sub, out string name))
         {
             return null;
         }
-        string full = System.IO.Path.Combine(dir, parts[0], parts[1]);
+        string full = System.IO.Path.Combine(dir, sub, name);
         if (!System.IO.File.Exists(full))
         {
             return null;
         }
         return await System.IO.File.ReadAllBytesAsync(full, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Compose the Maildir flag suffix (<c>:2,</c> followed by flags in
+    /// ASCII order) for the given flags. Empty flags still yield <c>:2,</c>.
+    /// </summary>
+    /// <param name="seen">Maildir "S" flag.</param>
+    /// <param name="flagged">Maildir "F" flag.</param>
+    /// <param name="answered">Maildir "R" flag.</param>
+    public static string FlagSuffix(bool seen, bool flagged, bool answered)
+    {
+        var sb = new System.Text.StringBuilder(":2,");
+        if (flagged)
+        {
+            sb.Append('F');
+        }
+        if (answered)
+        {
+            sb.Append('R');
+        }
+        if (seen)
+        {
+            sb.Append('S');
+        }
+        return sb.ToString();
+    }
+
+    /// <inheritdoc/>
+    public string? SetFlags(string tenantSlug, string address, string folderName, string relativePath, bool seen, bool flagged, bool answered)
+    {
+        System.ArgumentNullException.ThrowIfNull(relativePath);
+        string dir = this.FolderPath(tenantSlug, address, folderName);
+        if (!TrySplitRelative(relativePath, out string sub, out string name))
+        {
+            return null;
+        }
+        string source = System.IO.Path.Combine(dir, sub, name);
+        if (!System.IO.File.Exists(source))
+        {
+            return null;
+        }
+
+        // Windows forbids ':' in file names; use ';' there (the Dovecot
+        // convention for Windows-hosted Maildirs) and ':' elsewhere.
+        string baseName = StripFlags(name);
+        string suffix = FlagSuffix(seen, flagged, answered);
+        if (System.OperatingSystem.IsWindows())
+        {
+            suffix = string.Concat(";", suffix.AsSpan(1));
+        }
+        string newName = baseName + suffix;
+        string target = System.IO.Path.Combine(dir, "cur", newName);
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, "cur"));
+        if (!string.Equals(source, target, System.StringComparison.Ordinal))
+        {
+            System.IO.File.Move(source, target, overwrite: true);
+        }
+        return "cur/" + newName;
+    }
+
+    /// <inheritdoc/>
+    public string? Move(string tenantSlug, string address, string fromFolder, string relativePath, string toFolder)
+    {
+        System.ArgumentNullException.ThrowIfNull(relativePath);
+        string fromDir = this.FolderPath(tenantSlug, address, fromFolder);
+        if (!TrySplitRelative(relativePath, out string sub, out string name))
+        {
+            return null;
+        }
+        string source = System.IO.Path.Combine(fromDir, sub, name);
+        if (!System.IO.File.Exists(source))
+        {
+            return null;
+        }
+        string toDir = this.EnsureFolder(tenantSlug, address, toFolder);
+        string target = System.IO.Path.Combine(toDir, sub, name);
+        System.IO.File.Move(source, target, overwrite: true);
+        return sub + "/" + name;
+    }
+
+    /// <inheritdoc/>
+    public bool Delete(string tenantSlug, string address, string folderName, string relativePath)
+    {
+        System.ArgumentNullException.ThrowIfNull(relativePath);
+        string dir = this.FolderPath(tenantSlug, address, folderName);
+        if (!TrySplitRelative(relativePath, out string sub, out string name))
+        {
+            return false;
+        }
+        string full = System.IO.Path.Combine(dir, sub, name);
+        if (!System.IO.File.Exists(full))
+        {
+            return false;
+        }
+        System.IO.File.Delete(full);
+        return true;
+    }
+
+    /// <summary>
+    /// Strip a <c>:2,flags</c> (or Windows <c>;2,flags</c>) suffix from a
+    /// Maildir file name, returning the unique base name.
+    /// </summary>
+    /// <param name="name">A Maildir file name (no directory).</param>
+    public static string StripFlags(string name)
+    {
+        System.ArgumentNullException.ThrowIfNull(name);
+        int colon = name.IndexOf(":2,", System.StringComparison.Ordinal);
+        if (colon < 0)
+        {
+            colon = name.IndexOf(";2,", System.StringComparison.Ordinal);
+        }
+        return colon < 0 ? name : name.Substring(0, colon);
+    }
+
+    /// <summary>
+    /// Validate and split a relative path of the form <c>new/&lt;name&gt;</c>
+    /// or <c>cur/&lt;name&gt;</c>, rejecting anything that could escape the
+    /// folder directory.
+    /// </summary>
+    private static bool TrySplitRelative(string relativePath, out string sub, out string name)
+    {
+        sub = string.Empty;
+        name = string.Empty;
+        string[] parts = relativePath.Split('/');
+        if (parts.Length != 2 || (parts[0] != "new" && parts[0] != "cur") || parts[1].Length == 0 ||
+            parts[1].Contains("..", System.StringComparison.Ordinal) || parts[1].Contains('\\', System.StringComparison.Ordinal))
+        {
+            return false;
+        }
+        sub = parts[0];
+        name = parts[1];
+        return true;
     }
 
     /// <summary>
