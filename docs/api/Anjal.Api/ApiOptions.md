@@ -6,6 +6,7 @@ Configuration for an .
 
 ## Members
 
+- **AcmeDirectory** *(property)* - ACME certificate directory (see Anjal.Acme.CertificateStore). When set, GET /api/acme reports certificate and renewal status and POST /api/acme/renew requests an immediate renewal from whichever process hosts the renewal service. Null disables both routes.
 - **BearerToken** *(property)* - Shared bearer token. Clients must send Authorization: Bearer <value>. Empty token disables auth - useful for local tests, never for production.
 - **BindAddress** *(property)* - The IP address to bind. Loopback by default for local dev.
 - **MaxBodyBytes** *(property)* - Maximum request body size in bytes. Requests larger than this receive 413. Default 25 MB - matches the SMTP server's MaxMessageBytes.

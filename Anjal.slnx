@@ -14,6 +14,7 @@
     <Project Path="examples/Anjal.WebmailDemo/Anjal.WebmailDemo.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/Anjal.Acme/Anjal.Acme.csproj" />
     <Project Path="src/Anjal.Api/Anjal.Api.csproj" />
     <Project Path="src/Anjal.Auth/Anjal.Auth.csproj" />
     <Project Path="src/Anjal.Dkim/Anjal.Dkim.csproj" />
@@ -28,6 +29,7 @@
     <Project Path="src/Anjal.Webmail/Anjal.Webmail.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Anjal.Acme.Tests/Anjal.Acme.Tests.csproj" />
     <Project Path="tests/Anjal.Api.Tests/Anjal.Api.Tests.csproj" />
     <Project Path="tests/Anjal.Auth.Tests/Anjal.Auth.Tests.csproj" />
     <Project Path="tests/Anjal.Dkim.Tests/Anjal.Dkim.Tests.csproj" />

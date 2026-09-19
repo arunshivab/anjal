@@ -35,12 +35,31 @@ namespace Anjal.Server;
 ///   ANJAL_RATE_USER_MSG_PER_HOUR - messages per authenticated user per hour, default 100.
 ///   ANJAL_GREYLIST          - "false" disables greylisting on the MTA port. Default true.
 ///   ANJAL_GREYLIST_DELAY_SECONDS - greylist delay, default 300.
+///   ANJAL_ACME_*            - see <see cref="Anjal.Acme.AcmeEnvironment"/>. When
+///                             ANJAL_ACME_DOMAINS is set and ANJAL_TLS_CERT_PATH is not,
+///                             STARTTLS uses the ACME certificate and picks up renewals
+///                             without a restart. ANJAL_ACME_HOST=true makes this process
+///                             run renewal itself (for deployments without the webmail),
+///                             serving HTTP-01 on ANJAL_ACME_HTTP_PORT (80).
+///
+/// Command line:
+///   --acme-renew-now        - ask the renewal service (in whichever process hosts it)
+///                             to renew at its next check, then exit.
 /// </summary>
 public static class Program
 {
     /// <summary>Entry point.</summary>
-    public static async System.Threading.Tasks.Task<int> Main()
+    /// <param name="args">Command-line arguments.</param>
+    public static async System.Threading.Tasks.Task<int> Main(string[] args)
     {
+        if (args is not null && System.Array.IndexOf(args, "--acme-renew-now") >= 0)
+        {
+            Anjal.Acme.AcmeEnvironment acmeEnv = Anjal.Acme.AcmeEnvironment.Read(hostByDefault: false);
+            new Anjal.Acme.CertificateStore(acmeEnv.Directory).RequestRenewal();
+            System.Console.WriteLine($"Renewal requested; marker written to {acmeEnv.Directory}. The hosting process will act on it within a minute.");
+            return 0;
+        }
+
         string bind = System.Environment.GetEnvironmentVariable("ANJAL_BIND") ?? "127.0.0.1";
         string portStr = System.Environment.GetEnvironmentVariable("ANJAL_PORT") ?? "2525";
         string hostname = System.Environment.GetEnvironmentVariable("ANJAL_HOSTNAME") ?? "anjal.localhost";
@@ -81,9 +100,22 @@ public static class Program
         Anjal.Spam.CompositeSmtpPolicy mtaPolicy = BuildMtaPolicy(Log);
         Anjal.Spam.RateLimiter submissionPolicy = BuildSubmissionPolicy();
 
-        // TLS cert for SMTP receiver.
+        // TLS cert for SMTP receiver: a static file (ANJAL_TLS_CERT_PATH) or,
+        // when ACME is configured, the live ACME certificate with hot reload.
         System.Security.Cryptography.X509Certificates.X509Certificate2? tlsCert = LoadServerCert(Log);
         bool requireTls = string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_TLS_REQUIRE"), "true", System.StringComparison.OrdinalIgnoreCase);
+        Anjal.Acme.AcmeEnvironment acme = Anjal.Acme.AcmeEnvironment.Read(hostByDefault: false);
+        Anjal.Acme.CertificateWatcher? certWatcher = null;
+        if (tlsCert is null && acme.Configured)
+        {
+            certWatcher = new Anjal.Acme.CertificateWatcher(new Anjal.Acme.CertificateStore(acme.Directory));
+            certWatcher.Reloaded += c => Log($"TLS: certificate reloaded (expires {c.NotAfter.ToUniversalTime():yyyy-MM-dd}).");
+            tlsCert = certWatcher.Current;
+            Log(tlsCert is null
+                ? $"TLS: ACME configured for {string.Join(", ", acme.Domains)} but no certificate in {acme.Directory} yet; STARTTLS off until one is issued."
+                : $"TLS: using ACME certificate from {acme.Directory}.");
+        }
+        System.Func<System.Security.Cryptography.X509Certificates.X509Certificate2?>? certSource = certWatcher is null ? null : () => certWatcher.Current;
 
         var smtpOptions = new Anjal.Smtp.SmtpServerOptions
         {
@@ -91,7 +123,8 @@ public static class Program
             Port = port,
             AdvertisedHostName = hostname,
             TlsCertificate = tlsCert,
-            RequireTlsForMail = requireTls && tlsCert is not null,
+            TlsCertificateSource = certSource,
+            RequireTlsForMail = requireTls && (tlsCert is not null || certWatcher is not null),
             Role = Anjal.Smtp.SmtpServerRole.Mta,
             Policy = mtaPolicy,
         };
@@ -147,6 +180,7 @@ public static class Program
                 Port = submissionPort,
                 AdvertisedHostName = hostname,
                 TlsCertificate = tlsCert,
+                TlsCertificateSource = certSource,
                 RequireTlsForMail = false, // submission has its own TLS-before-AUTH logic
                 Role = Anjal.Smtp.SmtpServerRole.Submission,
                 AllowPlaintextAuth = allowPlaintextAuth,
@@ -213,6 +247,7 @@ public static class Program
                 BindAddress = System.Net.IPAddress.Parse(apiBind),
                 Port = apiPort,
                 BearerToken = token,
+                AcmeDirectory = acme.Configured ? acme.Directory : null,
             }, store, Log, mailboxStore, maildir);
             apiTask = apiServer.StartAsync(cts.Token);
             string authNote = string.IsNullOrEmpty(token) ? " (auth disabled - DO NOT use in production)" : string.Empty;
@@ -221,6 +256,23 @@ public static class Program
         else
         {
             Log("API disabled (set ANJAL_API_PORT to enable).");
+        }
+
+        // ACME renewal hosted here (webmail-less deployments).
+        System.Threading.Tasks.Task? acmeTask = null;
+        Anjal.Acme.Http01Listener? http01 = null;
+        if (acme.Host)
+        {
+            var acmeStore = new Anjal.Acme.CertificateStore(acme.Directory);
+            var renewal = new Anjal.Acme.AcmeRenewalService(acme.Options, acmeStore, Log);
+            http01 = new Anjal.Acme.Http01Listener(acme.HttpBind, acme.HttpPort, Log);
+            System.Threading.Tasks.Task responderTask = http01.RunAsync(cts.Token);
+            acmeTask = System.Threading.Tasks.Task.WhenAll(responderTask, renewal.RunAsync(cts.Token));
+            Log($"ACME: this process hosts renewal; HTTP-01 responder on {acme.HttpBind}:{acme.HttpPort}.");
+        }
+        else if (acme.Configured)
+        {
+            Log("ACME: renewal is hosted by another process (set ANJAL_ACME_HOST=true to host it here).");
         }
 
         Log("Press Ctrl+C to stop.");
@@ -258,6 +310,13 @@ public static class Program
             catch (System.OperationCanceledException) { /* expected */ }
             apiServer?.Dispose();
         }
+        if (acmeTask is not null)
+        {
+            try { await acmeTask.ConfigureAwait(false); }
+            catch (System.OperationCanceledException) { /* expected */ }
+            http01?.Dispose();
+        }
+        certWatcher?.Dispose();
         return 0;
     }
 

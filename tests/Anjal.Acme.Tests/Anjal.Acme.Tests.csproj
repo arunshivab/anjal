@@ -19,12 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <InternalsVisibleTo Include="Anjal.Webmail.Tests" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Anjal.Webmail\Anjal.Webmail.csproj" />
-    <ProjectReference Include="..\Anjal.Acme.Tests\Anjal.Acme.Tests.csproj" />
+    <ProjectReference Include="..\..\src\Anjal.Acme\Anjal.Acme.csproj" />
   </ItemGroup>
 
 </Project>

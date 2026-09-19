@@ -10,10 +10,21 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.11.0** - full SMTP server with bidirectional mail + DKIM signing +
+**v0.12.0** - full SMTP server with bidirectional mail + DKIM signing +
 SPF/DKIM/DMARC inbound verification + SMTP submission authentication on
 dual-port (25/587) with open-relay guard + multi-tenant mailbox storage +
-webmail + **minimum-heuristics anti-spam**. `Anjal.Spam` scores every
+webmail + minimum-heuristics anti-spam + **built-in ACME (Let's Encrypt)
+certificates**. `Anjal.Acme` is an RFC 8555 client with no external
+dependencies: it creates the account, answers HTTP-01 challenges from
+the webmail's own HTTP listener (or a small responder in the server),
+obtains the certificate, renews it 30 days before expiry, and both the
+SMTP listeners and the webmail pick up a renewed certificate on the next
+connection without a restart. One certificate covers the SMTP host name
+and the webmail. `POST /api/acme/renew` (or `--acme-renew-now`) forces a
+renewal so the whole path can be exercised on day one rather than
+discovered at day 60.
+
+Previously: **v0.11.0** - `Anjal.Spam` scores every
 unauthenticated delivery (authentication results, sender/HELO/reverse-DNS
 sanity, header hygiene, a short phrase list, recipient count), writes
 the verdict into `X-Anjal-Spam-Score` / `X-Anjal-Spam-Reasons` headers,
@@ -44,6 +55,7 @@ quota enforcement, search, HTML compose, self-service domain verification.
 | `Anjal.Mailbox` | Multi-tenant Maildir storage (tmp/new/cur, Maildir++ folders, flag renames, moves) and the mailbox delivery sink | none |
 | `Anjal.Webmail` | Webmail host process (Blazor static SSR on Kestrel, cookie auth, HTML sanitiser) | none (ASP.NET Core shared framework) |
 | `Anjal.Spam` | Spam scoring, sender rules, rate limiting and greylisting | none |
+| `Anjal.Acme` | RFC 8555 client: account, orders, HTTP-01, CSR, PEM store, renewal scheduler, hot-reload watcher | none |
 | `Anjal.Api` | HTTP/JSON API on `HttpListener` + `System.Text.Json` | none |
 | `Anjal.Server` | Composition root host process | none |
 
@@ -158,13 +170,59 @@ the local Lipi instance). Add more users via the API as needed.
 | `ANJAL_GREYLIST` | `true` | `false` disables greylisting on the MTA port |
 | `ANJAL_GREYLIST_DELAY_SECONDS` | `300` | How long a first-seen (network, sender, recipient) triplet is deferred |
 
+### TLS and ACME
+
+Set these on **both** processes (they must agree on the store directory):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ANJAL_ACME_DOMAINS` | (off) | Comma-separated DNS names for the certificate, e.g. `mail.anjal.co.in`. Empty disables ACME |
+| `ANJAL_ACME_EMAIL` | (none) | Account contact for expiry notices |
+| `ANJAL_ACME_DIR` | `/var/lib/anjal/acme` (Unix) / `%LOCALAPPDATA%\Anjal\acme` (Windows) | Where `account.key.pem`, `cert.key.pem`, `fullchain.pem`, `meta.json`, `status.json` live |
+| `ANJAL_ACME_STAGING` | `false` | `true` uses Let's Encrypt staging (untrusted certs, generous rate limits) - rehearse with this first |
+| `ANJAL_ACME_DIRECTORY` | Let's Encrypt production | Any ACME v2 directory URL; overrides the staging flag |
+| `ANJAL_ACME_KEY` | `ecdsa-p256` | Certificate key: `ecdsa-p256` or `rsa-2048` |
+| `ANJAL_ACME_RENEW_DAYS` | `30` | Renew when fewer days remain |
+| `ANJAL_ACME_HOST` | webmail `true`, server `false` | Which process runs the renewal service. Exactly one per machine |
+| `ANJAL_ACME_HTTP_BIND` / `ANJAL_ACME_HTTP_PORT` | `+` / `80` | HTTP-01 responder when the **server** hosts renewal (no webmail deployed) |
+
+Behaviour:
+
+- `Anjal.Server` uses the ACME certificate for STARTTLS on 25/587 when
+  `ANJAL_TLS_CERT_PATH` is not set. Until the first certificate exists,
+  STARTTLS is simply not advertised.
+- `Anjal.Webmail` with `ANJAL_WEBMAIL_HTTPS_PORT=443` serves HTTPS with
+  the ACME certificate, answers `/.well-known/acme-challenge/*` on its
+  HTTP listener, redirects everything else on HTTP to HTTPS once a
+  certificate exists, and sends HSTS. Before the first certificate it
+  serves plain HTTP so a DNS mistake cannot lock you out.
+- Renewal runs in the webmail by default. A deployment without the
+  webmail (transactional only) sets `ANJAL_ACME_HOST=true` on the server,
+  which then runs a minimal HTTP-01 responder on port 80.
+- Both processes poll the store every 30 s and hot-swap the certificate
+  for new connections; nothing is restarted.
+
+    GET    /api/acme                          # certificate + renewal status (reads status.json)
+    POST   /api/acme/renew                    # request an immediate renewal (marker file)
+
+    dotnet Anjal.Webmail.dll --acme-renew-now # same, from the command line
+    dotnet Anjal.Server.dll  --acme-renew-now
+
+Rehearsal sequence for a new deployment: `ANJAL_ACME_STAGING=true` ->
+confirm `GET /api/acme` shows a certificate -> `POST /api/acme/renew` and
+confirm a second issuance -> unset staging, delete the store directory
+(the staging account and certificate are not usable in production),
+restart -> confirm the production certificate -> force one more renewal.
+Only then point real clients at it.
+
 ### Webmail environment variables (`Anjal.Webmail` process)
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANJAL_WEBMAIL_BIND` | `127.0.0.1` | HTTP bind address |
 | `ANJAL_WEBMAIL_PORT` | `8080` | HTTP port |
-| `ANJAL_WEBMAIL_SECURE` | `false` | `true` marks the session cookie Secure (set when served over HTTPS via a reverse proxy) |
+| `ANJAL_WEBMAIL_HTTPS_PORT` | `0` (off) | HTTPS port, `443` in production; needs ACME or `ANJAL_TLS_CERT_PATH` |
+| `ANJAL_WEBMAIL_SECURE` | `false` | `true` marks the session cookie Secure; implied when HTTPS is on |
 | `ANJAL_POSTGRES` | (in-memory) | Must point at the same database as `Anjal.Server` |
 | `ANJAL_MAILDIR_ROOT` | platform default | Must point at the same directory as `Anjal.Server`; both processes need read/write access |
 | `ANJAL_HOSTNAME` | `anjal.localhost` | Used in generated Message-IDs |

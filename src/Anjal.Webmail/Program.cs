@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Claims;
+using Anjal.Acme;
 using Anjal.Mailbox;
 using Anjal.Store;
 using Anjal.Webmail.Components;
@@ -24,7 +25,23 @@ namespace Anjal.Webmail;
 ///   ANJAL_POSTGRES          - PostgreSQL connection string. If unset, an in-memory store is
 ///                             used (demo only - it is NOT shared with Anjal.Server).
 ///   ANJAL_MAILDIR_ROOT      - Maildir root shared with Anjal.Server.
-///   ANJAL_WEBMAIL_SECURE    - "true" to mark the session cookie Secure (set when behind HTTPS).
+///   ANJAL_WEBMAIL_SECURE    - "true" to mark the session cookie Secure. Implied when HTTPS is on.
+///   ANJAL_WEBMAIL_HTTPS_PORT - HTTPS port (443 in production). 0 or unset disables HTTPS.
+///                              Requires ANJAL_ACME_DOMAINS (the certificate comes from the
+///                              ACME store) or ANJAL_TLS_CERT_PATH/ANJAL_TLS_KEY_PATH (a static PEM pair).
+///   ANJAL_ACME_*            - see <see cref="AcmeEnvironment"/>. The webmail hosts the
+///                              renewal service by default when domains are configured
+///                              (ANJAL_ACME_HOST=false hands that to another process) and
+///                              always answers HTTP-01 challenges on its HTTP listener.
+///
+/// With HTTPS on, the HTTP listener serves only ACME challenges and
+/// redirects everything else to HTTPS; HSTS is sent on HTTPS responses.
+/// Until the first certificate is issued the webmail serves plain HTTP
+/// so a DNS mistake cannot lock you out - watch the log and
+/// GET /api/acme on the server for the issuance result.
+///
+/// Command line:
+///   --acme-renew-now        - request an immediate renewal and exit.
 /// </summary>
 public static class Program
 {
@@ -34,6 +51,14 @@ public static class Program
     /// <param name="args">Command-line arguments (passed through to the host builder).</param>
     public static async Task<int> Main(string[] args)
     {
+        if (args is not null && Array.IndexOf(args, "--acme-renew-now") >= 0)
+        {
+            AcmeEnvironment env = AcmeEnvironment.Read(hostByDefault: true);
+            new CertificateStore(env.Directory).RequestRenewal();
+            Console.WriteLine($"Renewal requested; marker written to {env.Directory}. The hosting process will act on it within a minute.");
+            return 0;
+        }
+
         string bind = Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_BIND") ?? "127.0.0.1";
         string portStr = Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_PORT") ?? "8080";
         if (!int.TryParse(portStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int port))
@@ -46,12 +71,51 @@ public static class Program
         string maildirRoot = Environment.GetEnvironmentVariable("ANJAL_MAILDIR_ROOT") ?? MaildirStore.DefaultRoot;
         string hostname = Environment.GetEnvironmentVariable("ANJAL_HOSTNAME") ?? "anjal.localhost";
 
-        WebApplication app = CreateApp(args, store, new MaildirStore(maildirRoot, hostname), hostname, $"http://{bind}:{port}");
-        Console.WriteLine($"Anjal webmail listening on http://{bind}:{port}/");
+        string httpsPortStr = Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_HTTPS_PORT") ?? "0";
+        if (!int.TryParse(httpsPortStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int httpsPort) || httpsPort < 0)
+        {
+            Console.Error.WriteLine($"Invalid ANJAL_WEBMAIL_HTTPS_PORT: {httpsPortStr}");
+            return 1;
+        }
+
+        AcmeEnvironment acme = AcmeEnvironment.Read(hostByDefault: true);
+        var tls = new TlsSettings
+        {
+            HttpsPort = httpsPort,
+            Acme = acme,
+            StaticCertPath = Environment.GetEnvironmentVariable("ANJAL_TLS_CERT_PATH"),
+            StaticKeyPath = Environment.GetEnvironmentVariable("ANJAL_TLS_KEY_PATH"),
+        };
+
+        WebApplication app = CreateApp(args ?? Array.Empty<string>(), store, new MaildirStore(maildirRoot, hostname), hostname, $"http://{bind}:{port}", tls);
+        Console.WriteLine($"Anjal webmail listening on http://{bind}:{port}/" + (httpsPort > 0 ? $" and https://{bind}:{httpsPort}/" : string.Empty));
         Console.WriteLine(pg is null ? "Using in-memory store (demo only)." : "Using PostgreSQL store.");
         Console.WriteLine($"Maildir root: {maildirRoot}");
+        if (acme.Configured)
+        {
+            Console.WriteLine($"ACME: {string.Join(", ", acme.Domains)} via {acme.Options.DirectoryUrl}; store {acme.Directory}; " + (acme.Host ? "renewal hosted here." : "renewal hosted elsewhere."));
+        }
         await app.RunAsync().ConfigureAwait(false);
         return 0;
+    }
+
+    /// <summary>TLS-related settings for <see cref="CreateApp(string[], IMessageStore, IMaildirStore, string, string, TlsSettings?)"/>.</summary>
+    public sealed class TlsSettings
+    {
+        /// <summary>HTTPS port; 0 disables HTTPS.</summary>
+        public int HttpsPort { get; init; }
+
+        /// <summary>ACME environment; when configured, the certificate comes from its store.</summary>
+        public AcmeEnvironment? Acme { get; init; }
+
+        /// <summary>Static certificate PEM (with or without the key), used when ACME is not configured.</summary>
+        public string? StaticCertPath { get; init; }
+
+        /// <summary>Static key PEM if not embedded in the certificate file.</summary>
+        public string? StaticKeyPath { get; init; }
+
+        /// <summary>Whether HTTPS is requested.</summary>
+        public bool HttpsEnabled => this.HttpsPort > 0;
     }
 
     /// <summary>
@@ -64,6 +128,18 @@ public static class Program
     /// <param name="hostName">Host name for generated Message-IDs.</param>
     /// <param name="url">Listen URL, e.g. <c>http://127.0.0.1:0</c> for an ephemeral port.</param>
     public static WebApplication CreateApp(string[] args, IMessageStore store, IMaildirStore maildir, string hostName, string url)
+        => CreateApp(args, store, maildir, hostName, url, tls: null);
+
+    /// <summary>
+    /// Build the web application with optional HTTPS and ACME.
+    /// </summary>
+    /// <param name="args">Host builder arguments.</param>
+    /// <param name="store">Store implementing both <see cref="IMessageStore"/> and <see cref="IMailboxStore"/>.</param>
+    /// <param name="maildir">Filesystem store for message bodies.</param>
+    /// <param name="hostName">Host name for generated Message-IDs.</param>
+    /// <param name="url">HTTP listen URL, e.g. <c>http://127.0.0.1:0</c>.</param>
+    /// <param name="tls">HTTPS/ACME settings, or null for HTTP only.</param>
+    public static WebApplication CreateApp(string[] args, IMessageStore store, IMaildirStore maildir, string hostName, string url, TlsSettings? tls)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(store);
@@ -76,10 +152,40 @@ public static class Program
         }
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
-        builder.WebHost.UseUrls(url);
         builder.Logging.ClearProviders();
         builder.Logging.AddSimpleConsole();
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
+
+        // ---- TLS: certificate source (ACME store with hot reload, or a static PEM pair) ----
+        CertificateWatcher? watcher = null;
+        System.Security.Cryptography.X509Certificates.X509Certificate2? staticCert = null;
+        if (tls?.Acme is { Configured: true } acmeEnv)
+        {
+            watcher = new CertificateWatcher(new CertificateStore(acmeEnv.Directory));
+            builder.Services.AddSingleton(watcher);
+        }
+        else if (tls is not null && !string.IsNullOrEmpty(tls.StaticCertPath) && File.Exists(tls.StaticCertPath))
+        {
+            staticCert = !string.IsNullOrEmpty(tls.StaticKeyPath) && File.Exists(tls.StaticKeyPath)
+                ? System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(tls.StaticCertPath, tls.StaticKeyPath)
+                : System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(tls.StaticCertPath);
+        }
+        bool httpsOn = tls is { HttpsEnabled: true } && (watcher is not null || staticCert is not null);
+
+        var listenUri = new Uri(url);
+        builder.WebHost.ConfigureKestrel(kestrel =>
+        {
+            System.Net.IPAddress httpAddress = listenUri.Host == "localhost" ? System.Net.IPAddress.Loopback : System.Net.IPAddress.Parse(listenUri.Host);
+            kestrel.Listen(httpAddress, listenUri.Port);
+            if (httpsOn)
+            {
+                kestrel.Listen(httpAddress, tls!.HttpsPort, listen => listen.UseHttps(https =>
+                {
+                    // Consulted per connection: a renewed certificate is used by the next handshake.
+                    https.ServerCertificateSelector = (_, _) => watcher?.Current ?? staticCert;
+                }));
+            }
+        });
 
         builder.Services.AddSingleton(store);
         builder.Services.AddSingleton(mailboxStore);
@@ -93,7 +199,7 @@ public static class Program
             options.Cookie.Name = "anjal.session";
             options.Cookie.HttpOnly = true;
             options.Cookie.SameSite = SameSiteMode.Lax;
-            options.Cookie.SecurePolicy = secure ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
+            options.Cookie.SecurePolicy = secure || httpsOn ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
             options.LoginPath = "/login";
             options.LogoutPath = "/auth/logout";
             options.SlidingExpiration = true;
@@ -105,12 +211,55 @@ public static class Program
         builder.Services.AddAntiforgery();
 
         WebApplication app = builder.Build();
+
+        // ACME HTTP-01 challenges are answered before anything else, on any listener.
+        app.Use(async (http, next) =>
+        {
+            string? ka = Http01ChallengeStore.Lookup(http.Request.Path.Value ?? string.Empty);
+            if (ka is not null)
+            {
+                http.Response.StatusCode = 200;
+                http.Response.ContentType = "application/octet-stream";
+                await http.Response.WriteAsync(ka).ConfigureAwait(false);
+                return;
+            }
+            await next().ConfigureAwait(false);
+        });
+
+        if (httpsOn)
+        {
+            // Plain HTTP exists only for challenges: everything else goes to HTTPS,
+            // but only once a certificate actually exists so a fresh install stays reachable.
+            app.Use(async (http, next) =>
+            {
+                if (!http.Request.IsHttps && (watcher?.Current ?? staticCert) is not null)
+                {
+                    string host = http.Request.Host.Host;
+                    string portPart = tls!.HttpsPort == 443 ? string.Empty : ":" + tls.HttpsPort.ToString(CultureInfo.InvariantCulture);
+                    http.Response.Redirect("https://" + host + portPart + http.Request.PathBase + http.Request.Path + http.Request.QueryString, permanent: true);
+                    return;
+                }
+                if (http.Request.IsHttps)
+                {
+                    http.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+                }
+                await next().ConfigureAwait(false);
+            });
+        }
+
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseAntiforgery();
 
         MapEndpoints(app);
         app.MapRazorComponents<App>();
+
+        // Host the renewal service when configured to.
+        if (tls?.Acme is { Host: true } hostEnv)
+        {
+            var renewal = new AcmeRenewalService(hostEnv.Options, new CertificateStore(hostEnv.Directory), line => Console.WriteLine(line));
+            app.Lifetime.ApplicationStarted.Register(() => _ = renewal.RunAsync(app.Lifetime.ApplicationStopping));
+        }
         return app;
     }
 

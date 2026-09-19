@@ -6,6 +6,7 @@ Configuration for an instance.
 
 ## Members
 
+- **CurrentTlsCertificate** *(method)* - The certificate to use for a session starting now: the result if a source is set, otherwise .
 - **AdvertisedHostName** *(property)* - The hostname this server announces in 220 banners and EHLO responses.
 - **AllowPlaintextAuth** *(property)* - For , allow AUTH commands on plaintext connections (no STARTTLS). DEFAULT IS FALSE. Enable ONLY for local development or controlled networks - AUTH without TLS leaks credentials. The submission port refuses authentication unless this is true or TLS is active.
 - **BindAddress** *(property)* - IP address to bind. Defaults to loopback for local development.
@@ -17,3 +18,4 @@ Configuration for an instance.
 - **RequireTlsForMail** *(property)* - When true, the server refuses MAIL FROM, RCPT TO, and DATA on plaintext connections after EHLO - clients must STARTTLS first. Has no effect if is null. Defaults to false (TLS opportunistic on receiver side).
 - **Role** *(property)* - The role this listener plays. Determines which commands are accepted and which authorization checks apply. Defaults to which is correct for a public port 25 listener.
 - **TlsCertificate** *(property)* - X.509 certificate (with private key) used for STARTTLS. When set, the server advertises STARTTLS in EHLO and accepts upgrades. When null, STARTTLS is not advertised and the server runs plaintext only.
+- **TlsCertificateSource** *(property)* - Optional live certificate source, consulted at the start of every session. When set it takes precedence over , so a renewed certificate is used by new connections without restarting the server. Returning null means "no certificate yet" and disables STARTTLS for that session.

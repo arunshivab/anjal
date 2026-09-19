@@ -16,6 +16,7 @@ public sealed class SmtpSession
     private readonly TcpClient client;
     private Stream stream;
     private readonly SmtpServerOptions options;
+    private readonly System.Security.Cryptography.X509Certificates.X509Certificate2? tlsCertificate;
     private readonly IMessageSink sink;
     private readonly IInboundAuthenticator? authenticator;
     private readonly bool enforceReject;
@@ -84,6 +85,7 @@ public sealed class SmtpSession
 
         this.client = client;
         this.options = options;
+        this.tlsCertificate = options.CurrentTlsCertificate();
         this.sink = sink;
         this.authenticator = authenticator;
         this.enforceReject = enforceReject;
@@ -196,7 +198,7 @@ public sealed class SmtpSession
             await this.WriteLineAsync($"250-{this.options.AdvertisedHostName} Hello {this.clientHostName} [{this.remoteAddress}]", ct).ConfigureAwait(false);
             await this.WriteLineAsync($"250-SIZE {this.options.MaxMessageBytes}", ct).ConfigureAwait(false);
             await this.WriteLineAsync("250-8BITMIME", ct).ConfigureAwait(false);
-            if (this.options.TlsCertificate is not null && !this.isTls)
+            if (this.tlsCertificate is not null && !this.isTls)
             {
                 await this.WriteLineAsync("250-STARTTLS", ct).ConfigureAwait(false);
             }
@@ -222,7 +224,7 @@ public sealed class SmtpSession
 
     private async System.Threading.Tasks.Task<bool> HandleStarttlsAsync(System.Threading.CancellationToken ct)
     {
-        if (this.options.TlsCertificate is null)
+        if (this.tlsCertificate is null)
         {
             await this.WriteLineAsync("502 STARTTLS not supported", ct).ConfigureAwait(false);
             return true;
@@ -242,7 +244,7 @@ public sealed class SmtpSession
         try
         {
             await ssl.AuthenticateAsServerAsync(
-                this.options.TlsCertificate,
+                this.tlsCertificate,
                 clientCertificateRequired: false,
                 enabledSslProtocols: System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
                 checkCertificateRevocation: false).ConfigureAwait(false);
@@ -475,7 +477,7 @@ public sealed class SmtpSession
             await this.WriteLineAsync("503 Bad sequence of commands, send HELO/EHLO first", ct).ConfigureAwait(false);
             return true;
         }
-        if (this.options.RequireTlsForMail && this.options.TlsCertificate is not null && !this.isTls)
+        if (this.options.RequireTlsForMail && this.tlsCertificate is not null && !this.isTls)
         {
             await this.WriteLineAsync("530 Must issue a STARTTLS command first", ct).ConfigureAwait(false);
             return true;
