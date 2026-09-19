@@ -9,11 +9,18 @@
 - [Anjal.Api.DkimKeyResponse](Anjal.Api/DkimKeyResponse.md)
 - [Anjal.Api.DkimKeysHandler](Anjal.Api/DkimKeysHandler.md)
 - [Anjal.Api.ErrorResponse](Anjal.Api/ErrorResponse.md)
+- [Anjal.Api.FolderResponse](Anjal.Api/FolderResponse.md)
 - [Anjal.Api.InboundHandler](Anjal.Api/InboundHandler.md)
 - [Anjal.Api.InboundResponse](Anjal.Api/InboundResponse.md)
 - [Anjal.Api.LocalDomainRequest](Anjal.Api/LocalDomainRequest.md)
 - [Anjal.Api.LocalDomainResponse](Anjal.Api/LocalDomainResponse.md)
 - [Anjal.Api.LocalDomainsHandler](Anjal.Api/LocalDomainsHandler.md)
+- [Anjal.Api.MailboxRequest](Anjal.Api/MailboxRequest.md)
+- [Anjal.Api.MailboxResponse](Anjal.Api/MailboxResponse.md)
+- [Anjal.Api.MailboxesHandler](Anjal.Api/MailboxesHandler.md)
+- [Anjal.Api.MessagePageResponse](Anjal.Api/MessagePageResponse.md)
+- [Anjal.Api.MessageRawResponse](Anjal.Api/MessageRawResponse.md)
+- [Anjal.Api.MessageResponse](Anjal.Api/MessageResponse.md)
 - [Anjal.Api.ModuleInfo](Anjal.Api/ModuleInfo.md)
 - [Anjal.Api.OutboundHandler](Anjal.Api/OutboundHandler.md)
 - [Anjal.Api.OutboundRequest](Anjal.Api/OutboundRequest.md)
@@ -31,6 +38,11 @@
 - [Anjal.Api.TagGrantRequest](Anjal.Api/TagGrantRequest.md)
 - [Anjal.Api.TagGrantResponse](Anjal.Api/TagGrantResponse.md)
 - [Anjal.Api.TagGrantsHandler](Anjal.Api/TagGrantsHandler.md)
+- [Anjal.Api.TenantDomainRequest](Anjal.Api/TenantDomainRequest.md)
+- [Anjal.Api.TenantDomainResponse](Anjal.Api/TenantDomainResponse.md)
+- [Anjal.Api.TenantRequest](Anjal.Api/TenantRequest.md)
+- [Anjal.Api.TenantResponse](Anjal.Api/TenantResponse.md)
+- [Anjal.Api.TenantsHandler](Anjal.Api/TenantsHandler.md)
 
 ## Anjal.Auth
 
@@ -74,6 +86,14 @@
 - [Anjal.Dns.DnsResolver](Anjal.Dns/DnsResolver.md)
 - [Anjal.Dns.ModuleInfo](Anjal.Dns/ModuleInfo.md)
 - [Anjal.Dns.MxRecord](Anjal.Dns/MxRecord.md)
+
+## Anjal.Mailbox
+
+- [Anjal.Mailbox.IMaildirStore](Anjal.Mailbox/IMaildirStore.md)
+- [Anjal.Mailbox.MailboxSink](Anjal.Mailbox/MailboxSink.md)
+- [Anjal.Mailbox.MaildirStore](Anjal.Mailbox/MaildirStore.md)
+- [Anjal.Mailbox.MaildirWriteResult](Anjal.Mailbox/MaildirWriteResult.md)
+- [Anjal.Mailbox.ModuleInfo](Anjal.Mailbox/ModuleInfo.md)
 
 ## Anjal.Mime
 
@@ -123,6 +143,7 @@
 ## Anjal.Smtp
 
 - [Anjal.Smtp.AuthenticatedUser](Anjal.Smtp/AuthenticatedUser.md)
+- [Anjal.Smtp.CompositeMessageSink](Anjal.Smtp/CompositeMessageSink.md)
 - [Anjal.Smtp.DeliveryContext](Anjal.Smtp/DeliveryContext.md)
 - [Anjal.Smtp.DeliveryOutcome](Anjal.Smtp/DeliveryOutcome.md)
 - [Anjal.Smtp.DeliveryResult](Anjal.Smtp/DeliveryResult.md)
@@ -153,10 +174,14 @@
 ## Anjal.Store
 
 - [Anjal.Store.DkimKeyRow](Anjal.Store/DkimKeyRow.md)
+- [Anjal.Store.FolderRow](Anjal.Store/FolderRow.md)
+- [Anjal.Store.IMailboxStore](Anjal.Store/IMailboxStore.md)
 - [Anjal.Store.IMessageStore](Anjal.Store/IMessageStore.md)
 - [Anjal.Store.InMemoryMessageStore](Anjal.Store/InMemoryMessageStore.md)
 - [Anjal.Store.InboundMessage](Anjal.Store/InboundMessage.md)
 - [Anjal.Store.LocalDomainRow](Anjal.Store/LocalDomainRow.md)
+- [Anjal.Store.MailboxRow](Anjal.Store/MailboxRow.md)
+- [Anjal.Store.MessageRow](Anjal.Store/MessageRow.md)
 - [Anjal.Store.ModuleInfo](Anjal.Store/ModuleInfo.md)
 - [Anjal.Store.OutboundMessage](Anjal.Store/OutboundMessage.md)
 - [Anjal.Store.OutboundStatus](Anjal.Store/OutboundStatus.md)
@@ -165,5 +190,7 @@
 - [Anjal.Store.RoutingRule](Anjal.Store/RoutingRule.md)
 - [Anjal.Store.SmtpUserRow](Anjal.Store/SmtpUserRow.md)
 - [Anjal.Store.TagGrant](Anjal.Store/TagGrant.md)
+- [Anjal.Store.TenantDomainRow](Anjal.Store/TenantDomainRow.md)
+- [Anjal.Store.TenantRow](Anjal.Store/TenantRow.md)
 - [Anjal.Store.TlsMode](Anjal.Store/TlsMode.md)
 - [Anjal.Store.WebhookDelivery](Anjal.Store/WebhookDelivery.md)

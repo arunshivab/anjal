@@ -8,7 +8,7 @@ namespace Anjal.Store;
 /// connection through the driver's connection pool. Connection-string is
 /// supplied at construction time.
 /// </summary>
-public sealed class PostgresMessageStore : IMessageStore
+public sealed partial class PostgresMessageStore : IMessageStore, IMailboxStore
 {
     private readonly string connectionString;
 
