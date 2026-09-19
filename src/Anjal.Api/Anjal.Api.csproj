@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\Anjal.Acme\Anjal.Acme.csproj" />
     <ProjectReference Include="..\Anjal.Mailbox\Anjal.Mailbox.csproj" />
     <ProjectReference Include="..\Anjal.Routing\Anjal.Routing.csproj" />
     <ProjectReference Include="..\Anjal.Store\Anjal.Store.csproj" />

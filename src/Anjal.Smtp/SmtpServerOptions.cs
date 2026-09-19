@@ -63,4 +63,20 @@ public sealed class SmtpServerOptions
     /// Null means every connection and command is allowed.
     /// </summary>
     public ISmtpPolicy? Policy { get; init; }
+
+    /// <summary>
+    /// Optional live certificate source, consulted at the start of every
+    /// session. When set it takes precedence over
+    /// <see cref="TlsCertificate"/>, so a renewed certificate is used by
+    /// new connections without restarting the server. Returning null
+    /// means "no certificate yet" and disables STARTTLS for that session.
+    /// </summary>
+    public System.Func<X509Certificate2?>? TlsCertificateSource { get; init; }
+
+    /// <summary>
+    /// The certificate to use for a session starting now: the
+    /// <see cref="TlsCertificateSource"/> result if a source is set,
+    /// otherwise <see cref="TlsCertificate"/>.
+    /// </summary>
+    public X509Certificate2? CurrentTlsCertificate() => this.TlsCertificateSource is null ? this.TlsCertificate : this.TlsCertificateSource();
 }

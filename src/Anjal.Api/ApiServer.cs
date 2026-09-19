@@ -25,6 +25,7 @@ public sealed class ApiServer : System.IDisposable
     private readonly LocalDomainsHandler localDomains;
     private readonly TenantsHandler? tenants;
     private readonly MailboxesHandler? mailboxes;
+    private readonly AcmeHandler? acme;
     private readonly System.Action<string>? log;
     private bool started;
     private bool disposed;
@@ -73,6 +74,10 @@ public sealed class ApiServer : System.IDisposable
         {
             this.tenants = new TenantsHandler(mbStore);
             this.mailboxes = new MailboxesHandler(mbStore, maildir);
+        }
+        if (!string.IsNullOrWhiteSpace(options.AcmeDirectory))
+        {
+            this.acme = new AcmeHandler(new Anjal.Acme.CertificateStore(options.AcmeDirectory));
         }
 
         this.routingRules = new RoutingRulesHandler(store);
@@ -441,6 +446,20 @@ public sealed class ApiServer : System.IDisposable
             await this.TryDispatchMailboxAsync(ctx, path).ConfigureAwait(false))
         {
             return;
+        }
+
+        if (this.acme is not null)
+        {
+            if (path.Equals("/api/acme", System.StringComparison.OrdinalIgnoreCase) && ctx.Method == "GET")
+            {
+                await this.acme.GetStatusAsync(ctx).ConfigureAwait(false);
+                return;
+            }
+            if (path.Equals("/api/acme/renew", System.StringComparison.OrdinalIgnoreCase) && ctx.Method == "POST")
+            {
+                await this.acme.RenewAsync(ctx).ConfigureAwait(false);
+                return;
+            }
         }
 
         await ctx.WriteErrorAsync(404, "not_found", $"No route matches {path}.").ConfigureAwait(false);

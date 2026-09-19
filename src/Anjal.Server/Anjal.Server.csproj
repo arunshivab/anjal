@@ -7,6 +7,7 @@
     <ProjectReference Include="..\Anjal.Routing\Anjal.Routing.csproj" />
     <ProjectReference Include="..\Anjal.Mailbox\Anjal.Mailbox.csproj" />
     <ProjectReference Include="..\Anjal.Spam\Anjal.Spam.csproj" />
+    <ProjectReference Include="..\Anjal.Acme\Anjal.Acme.csproj" />
     <ProjectReference Include="..\Anjal.Mime\Anjal.Mime.csproj" />
     <ProjectReference Include="..\Anjal.Dns\Anjal.Dns.csproj" />
     <ProjectReference Include="..\Anjal.Dkim\Anjal.Dkim.csproj" />
