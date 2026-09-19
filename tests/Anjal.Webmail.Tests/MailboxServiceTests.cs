@@ -95,7 +95,8 @@ public sealed class MailboxServiceTests : System.IDisposable
         await this.DeliverAsync("Subject: a\r\n\r\nb\r\n");
         var folders = await this.svc.ListFoldersAsync(this.mailbox.Id);
 
-        Assert.Equal(4, folders.Count);
+        Assert.Equal(5, folders.Count);
+        Assert.Contains(folders, f => f.Name == "Junk");
         Assert.Equal("INBOX", folders[0].Name);
         Assert.Equal(1, folders[0].Count);
         Assert.Contains(folders, f => f.Name == "Sent" && f.Count == 0);
@@ -178,6 +179,36 @@ public sealed class MailboxServiceTests : System.IDisposable
         Assert.Null(await this.maildir.ReadAsync(this.tenant.Slug, this.mailbox.Address, "Trash", moved.MaildirFile));
         Assert.Equal(usedBefore - row.SizeBytes, (await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.UsedBytes);
         Assert.Null(await this.store.GetMessageByIdAsync(row.Id));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task ReportSpam_MovesToJunkAndBlocksSender_NotSpam_RestoresAndAllows()
+    {
+        await this.SeedAsync();
+        MessageRow row = await this.DeliverAsync("From: Spam Co <news@spammer.test>\r\nSubject: buy\r\n\r\nbody\r\n");
+
+        MessageRow? junked = await this.svc.ReportSpamAsync(this.mailbox.Id, row.Id);
+        FolderRow? junk = await this.svc.GetFolderAsync(this.mailbox.Id, MailboxSink.JunkFolder);
+        Assert.Equal(junk!.Id, junked!.FolderId);
+        var rules = await this.store.ListSenderRulesAsync(this.tenant.Id);
+        SenderRuleRow block = Assert.Single(rules);
+        Assert.Equal("news@spammer.test", block.Pattern);
+        Assert.Equal(SenderRuleAction.Block, block.Action);
+
+        MessageRow? restored = await this.svc.MarkNotSpamAsync(this.mailbox.Id, row.Id);
+        FolderRow? inbox = await this.svc.GetFolderAsync(this.mailbox.Id, FolderRow.Inbox);
+        Assert.Equal(inbox!.Id, restored!.FolderId);
+        SenderRuleRow allow = Assert.Single(await this.store.ListSenderRulesAsync(this.tenant.Id));
+        Assert.Equal(SenderRuleAction.Allow, allow.Action);
+
+        Assert.Null(await this.svc.ReportSpamAsync(System.Guid.NewGuid(), row.Id));
+    }
+
+    [Fact]
+    public void SenderOf_PrefersFromHeader()
+    {
+        Assert.Equal("a@b.test", MailboxService.SenderOf(new MessageRow { FromHeader = "A <A@B.test>", EnvelopeFrom = "bounce@x.test" }));
+        Assert.Equal("bounce@x.test", MailboxService.SenderOf(new MessageRow { FromHeader = string.Empty, EnvelopeFrom = "Bounce@x.test" }));
     }
 
     [Fact]

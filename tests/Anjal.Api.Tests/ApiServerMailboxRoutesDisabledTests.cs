@@ -8,7 +8,7 @@ public class ApiServerMailboxRoutesDisabledTests
     [Fact]
     public async System.Threading.Tasks.Task WithoutMaildir_MailboxRoutesAre404()
     {
-        const int port = 39899;
+        int port = FreePort.Next();
         var store = new InMemoryMessageStore();
         using var cts = new System.Threading.CancellationTokenSource();
         using var server = new ApiServer(new ApiOptions

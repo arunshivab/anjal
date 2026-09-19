@@ -57,4 +57,10 @@ public sealed class SmtpServerOptions
     /// authentication unless this is true or TLS is active.
     /// </summary>
     public bool AllowPlaintextAuth { get; init; }
+
+    /// <summary>
+    /// Optional connection/transaction policy (rate limiting, greylisting).
+    /// Null means every connection and command is allowed.
+    /// </summary>
+    public ISmtpPolicy? Policy { get; init; }
 }

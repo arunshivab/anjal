@@ -23,6 +23,13 @@ public sealed class DeliveryContext
     public string ClientHostName { get; init; } = string.Empty;
 
     /// <summary>
+    /// Username that authenticated on the submission port, or null for
+    /// unauthenticated (MTA) deliveries. Authenticated mail is never
+    /// scored for spam.
+    /// </summary>
+    public string? AuthenticatedUser { get; init; }
+
+    /// <summary>
     /// Authentication detail (SPF/DKIM/DMARC verdicts) if an authenticator
     /// was configured. Null if inbound auth is disabled. The concrete type
     /// is <c>Anjal.Auth.AuthenticationResults</c> when populated.

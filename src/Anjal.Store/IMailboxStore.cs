@@ -147,4 +147,18 @@ public interface IMailboxStore
     /// was removed. The caller is responsible for the Maildir file.
     /// </summary>
     System.Threading.Tasks.Task<bool> DeleteMessageAsync(System.Guid id, System.Threading.CancellationToken ct = default);
+
+    // -------- Sender rules --------
+
+    /// <summary>
+    /// Create or replace a sender rule keyed by (tenant, pattern). Returns
+    /// the saved row.
+    /// </summary>
+    System.Threading.Tasks.Task<SenderRuleRow> UpsertSenderRuleAsync(SenderRuleRow rule, System.Threading.CancellationToken ct = default);
+
+    /// <summary>List a tenant's sender rules ordered by pattern.</summary>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SenderRuleRow>> ListSenderRulesAsync(System.Guid tenantId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Remove a sender rule. Returns <see langword="true"/> if a row was removed.</summary>
+    System.Threading.Tasks.Task<bool> DeleteSenderRuleAsync(System.Guid tenantId, string pattern, System.Threading.CancellationToken ct = default);
 }

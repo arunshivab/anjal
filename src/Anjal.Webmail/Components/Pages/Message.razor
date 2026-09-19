@@ -28,6 +28,24 @@ else
                 <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
                 <button type="submit" class="btn subtle">Mark unread</button>
             </form>
+            @if (view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+            {
+                <form method="post" action="/message/@Id/spam" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="verdict" value="ham" />
+                    <input type="hidden" name="back" value="/folder/INBOX" />
+                    <button type="submit" class="btn subtle">Not spam</button>
+                </form>
+            }
+            else if (view.Folder.Name != "Trash" && view.Folder.Name != "Sent")
+            {
+                <form method="post" action="/message/@Id/spam" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="verdict" value="spam" />
+                    <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                    <button type="submit" class="btn subtle">Report spam</button>
+                </form>
+            }
             @if (view.Folder.Name == "Trash")
             {
                 <form method="post" action="/message/@Id/move" class="inline">
@@ -63,6 +81,10 @@ else
                 <dt>Cc</dt><dd>@view.Cc</dd>
             }
             <dt>Date</dt><dd>@view.Date</dd>
+            @if (view.Row.SpamScore > 0)
+            {
+                <dt>Spam</dt><dd>score @view.Row.SpamScore@(view.SpamReasons.Length > 0 ? " - " + view.SpamReasons : "")</dd>
+            }
         </dl>
 
         @if (view.HasBlockedImages)

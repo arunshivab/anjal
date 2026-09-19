@@ -174,6 +174,19 @@ public static class Program
             return moved is null ? Results.NotFound() : Results.Redirect(SafeBack(back, "/"));
         }).RequireAuthorization();
 
+        app.MapPost("/message/{id:guid}/spam", async (HttpContext http, Guid id, [FromForm] string verdict, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/login");
+            }
+            MessageRow? moved = verdict == "ham"
+                ? await svc.MarkNotSpamAsync(mailboxId.Value, id, ct).ConfigureAwait(false)
+                : await svc.ReportSpamAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return moved is null ? Results.NotFound() : Results.Redirect(SafeBack(back, "/"));
+        }).RequireAuthorization();
+
         app.MapPost("/message/{id:guid}/delete", async (HttpContext http, Guid id, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);

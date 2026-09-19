@@ -1,4 +1,4 @@
--- Anjal PostgreSQL schema (v0.9.0)
+-- Anjal PostgreSQL schema (v0.11.0)
 --
 -- The store layer keeps three concerns separated:
 --   routing_rules   - maps a local-part to a webhook URL + signing secret
@@ -205,5 +205,21 @@ CREATE INDEX IF NOT EXISTS messages_folder_received_idx
 
 CREATE INDEX IF NOT EXISTS messages_message_id_idx
     ON messages (mailbox_id, message_id);
+
+-- Anti-spam (v0.11.0). Scores are computed at delivery by Anjal.Spam;
+-- messages at or above the tenant's threshold are filed in Junk instead
+-- of INBOX. Sender rules force INBOX (allow) or Junk (block) regardless
+-- of score. Nothing here rejects mail at SMTP time.
+ALTER TABLE tenants  ADD COLUMN IF NOT EXISTS spam_threshold INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS spam_score     INTEGER NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS sender_rules (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    pattern     CITEXT NOT NULL,                     -- "alice@example.com" or "@example.com"
+    action      TEXT NOT NULL CHECK (action IN ('allow', 'block')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT sender_rules_tenant_pattern_unique UNIQUE (tenant_id, pattern)
+);
 
 COMMIT;

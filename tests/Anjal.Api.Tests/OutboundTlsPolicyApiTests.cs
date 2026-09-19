@@ -7,7 +7,6 @@ namespace Anjal.Api.Tests;
 
 public class OutboundTlsPolicyApiTests : System.IDisposable
 {
-    private static int nextPort = 39200;
 
     private readonly InMemoryMessageStore store;
     private readonly ApiServer server;
@@ -19,7 +18,7 @@ public class OutboundTlsPolicyApiTests : System.IDisposable
 
     public OutboundTlsPolicyApiTests()
     {
-        int port = System.Threading.Interlocked.Increment(ref nextPort);
+        int port = FreePort.Next();
         this.token = "test-token-" + System.Guid.NewGuid().ToString("N");
         this.store = new InMemoryMessageStore();
         this.cts = new System.Threading.CancellationTokenSource();

@@ -5,7 +5,6 @@ namespace Anjal.Api.Tests;
 
 public class AuthTests
 {
-    private static int nextPort = 38800;
 
     private static async System.Threading.Tasks.Task StopAsync(System.Threading.CancellationTokenSource cts, System.Threading.Tasks.Task serverTask)
     {
@@ -29,7 +28,7 @@ public class AuthTests
     [Fact]
     public async System.Threading.Tasks.Task MissingAuthHeader_Returns401()
     {
-        int p = System.Threading.Interlocked.Increment(ref nextPort);
+        int p = FreePort.Next();
         var store = new InMemoryMessageStore();
         using var cts = new System.Threading.CancellationTokenSource();
         using var server = new ApiServer(new ApiOptions
@@ -56,7 +55,7 @@ public class AuthTests
     [Fact]
     public async System.Threading.Tasks.Task WrongToken_Returns401()
     {
-        int p = System.Threading.Interlocked.Increment(ref nextPort);
+        int p = FreePort.Next();
         var store = new InMemoryMessageStore();
         using var cts = new System.Threading.CancellationTokenSource();
         using var server = new ApiServer(new ApiOptions
@@ -85,7 +84,7 @@ public class AuthTests
     [Fact]
     public async System.Threading.Tasks.Task CorrectToken_Returns200()
     {
-        int p = System.Threading.Interlocked.Increment(ref nextPort);
+        int p = FreePort.Next();
         var store = new InMemoryMessageStore();
         using var cts = new System.Threading.CancellationTokenSource();
         using var server = new ApiServer(new ApiOptions
@@ -115,7 +114,7 @@ public class AuthTests
     public async System.Threading.Tasks.Task EmptyConfiguredToken_DisablesAuth()
     {
         // Empty token means "no auth required" - a deliberate test-only mode.
-        int p = System.Threading.Interlocked.Increment(ref nextPort);
+        int p = FreePort.Next();
         var store = new InMemoryMessageStore();
         using var cts = new System.Threading.CancellationTokenSource();
         using var server = new ApiServer(new ApiOptions

@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Anjal.Mime\Anjal.Mime.csproj" />
     <ProjectReference Include="..\Anjal.Smtp\Anjal.Smtp.csproj" />
+    <ProjectReference Include="..\Anjal.Spam\Anjal.Spam.csproj" />
     <ProjectReference Include="..\Anjal.Store\Anjal.Store.csproj" />
   </ItemGroup>
 

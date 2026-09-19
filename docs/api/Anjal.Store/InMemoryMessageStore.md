@@ -15,6 +15,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **DeleteMessageAsync** *(method)* - _(no description)_
 - **DeleteOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **DeleteRoutingRuleAsync** *(method)* - _(no description)_
+- **DeleteSenderRuleAsync** *(method)* - _(no description)_
 - **DeleteSmtpUserAsync** *(method)* - _(no description)_
 - **DeleteTenantAsync** *(method)* - _(no description)_
 - **DeleteTenantDomainAsync** *(method)* - _(no description)_
@@ -42,6 +43,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **ListMessagesAsync** *(method)* - _(no description)_
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
+- **ListSenderRulesAsync** *(method)* - _(no description)_
 - **ListSmtpUsersAsync** *(method)* - _(no description)_
 - **ListTenantDomainsAsync** *(method)* - _(no description)_
 - **ListTenantsAsync** *(method)* - _(no description)_
@@ -56,6 +58,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **UpsertMailboxAsync** *(method)* - _(no description)_
 - **UpsertOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **UpsertRoutingRuleAsync** *(method)* - _(no description)_
+- **UpsertSenderRuleAsync** *(method)* - _(no description)_
 - **UpsertSmtpUserAsync** *(method)* - _(no description)_
 - **UpsertTenantAsync** *(method)* - _(no description)_
 - **UpsertTenantDomainAsync** *(method)* - _(no description)_

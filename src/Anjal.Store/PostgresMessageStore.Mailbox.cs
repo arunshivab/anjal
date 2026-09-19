@@ -9,11 +9,12 @@ namespace Anjal.Store;
 /// </summary>
 public sealed partial class PostgresMessageStore
 {
-    private const string TenantColumns = "id, slug, display_name, enabled, created_at";
+    private const string TenantColumns = "id, slug, display_name, enabled, spam_threshold, created_at";
+    private const string SenderRuleColumns = "id, tenant_id, pattern, action, created_at";
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
     private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
-    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, received_at";
+    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at";
 
     /// <inheritdoc/>
     public async Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
@@ -21,11 +22,12 @@ public sealed partial class PostgresMessageStore
         System.ArgumentNullException.ThrowIfNull(tenant);
 
         const string sql = @"
-INSERT INTO tenants (slug, display_name, enabled)
-VALUES (lower(@slug), @display_name, @enabled)
+INSERT INTO tenants (slug, display_name, enabled, spam_threshold)
+VALUES (lower(@slug), @display_name, @enabled, @spam_threshold)
 ON CONFLICT (slug) DO UPDATE
-    SET display_name = EXCLUDED.display_name,
-        enabled      = EXCLUDED.enabled
+    SET display_name   = EXCLUDED.display_name,
+        enabled        = EXCLUDED.enabled,
+        spam_threshold = EXCLUDED.spam_threshold
 RETURNING " + TenantColumns + ";";
 
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
@@ -33,6 +35,7 @@ RETURNING " + TenantColumns + ";";
         cmd.Parameters.AddWithValue("slug", tenant.Slug.Trim());
         cmd.Parameters.AddWithValue("display_name", tenant.DisplayName);
         cmd.Parameters.AddWithValue("enabled", tenant.Enabled);
+        cmd.Parameters.AddWithValue("spam_threshold", tenant.SpamThreshold);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -328,8 +331,8 @@ RETURNING " + FolderColumns + ";";
         System.ArgumentNullException.ThrowIfNull(message);
 
         const string sql = @"
-INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered)
-VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered)
+INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score)
+VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score)
 RETURNING " + MessageColumns + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -346,6 +349,7 @@ RETURNING " + MessageColumns + ";";
         cmd.Parameters.AddWithValue("seen", message.Seen);
         cmd.Parameters.AddWithValue("flagged", message.Flagged);
         cmd.Parameters.AddWithValue("answered", message.Answered);
+        cmd.Parameters.AddWithValue("spam_score", message.SpamScore);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -462,12 +466,72 @@ RETURNING " + MessageColumns + ";";
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
     }
 
+    /// <inheritdoc/>
+    public async Task<SenderRuleRow> UpsertSenderRuleAsync(SenderRuleRow rule, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(rule);
+
+        const string sql = @"
+INSERT INTO sender_rules (tenant_id, pattern, action)
+VALUES (@tenant_id, lower(@pattern), @action)
+ON CONFLICT (tenant_id, pattern) DO UPDATE SET action = EXCLUDED.action
+RETURNING " + SenderRuleColumns + ";";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("tenant_id", rule.TenantId);
+        cmd.Parameters.AddWithValue("pattern", rule.Pattern.Trim());
+        cmd.Parameters.AddWithValue("action", rule.Action == SenderRuleAction.Block ? "block" : "allow");
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadSenderRule(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SenderRuleRow>> ListSenderRulesAsync(System.Guid tenantId, CancellationToken ct = default)
+    {
+        const string sql = "SELECT " + SenderRuleColumns + " FROM sender_rules WHERE tenant_id = @tenant_id ORDER BY pattern;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("tenant_id", tenantId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<SenderRuleRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadSenderRule(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteSenderRuleAsync(System.Guid tenantId, string pattern, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(pattern);
+
+        const string sql = "DELETE FROM sender_rules WHERE tenant_id = @tenant_id AND pattern = lower(@pattern);";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("tenant_id", tenantId);
+        cmd.Parameters.AddWithValue("pattern", pattern.Trim());
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
     private static TenantRow ReadTenant(NpgsqlDataReader r) => new()
     {
         Id = r.GetGuid(0),
         Slug = r.GetString(1),
         DisplayName = r.GetString(2),
         Enabled = r.GetBoolean(3),
+        SpamThreshold = r.GetInt32(4),
+        CreatedAt = r.GetFieldValue<System.DateTimeOffset>(5),
+    };
+
+    private static SenderRuleRow ReadSenderRule(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        TenantId = r.GetGuid(1),
+        Pattern = r.GetString(2),
+        Action = string.Equals(r.GetString(3), "block", System.StringComparison.OrdinalIgnoreCase) ? SenderRuleAction.Block : SenderRuleAction.Allow,
         CreatedAt = r.GetFieldValue<System.DateTimeOffset>(4),
     };
 
@@ -519,6 +583,7 @@ RETURNING " + MessageColumns + ";";
         Seen = r.GetBoolean(11),
         Flagged = r.GetBoolean(12),
         Answered = r.GetBoolean(13),
-        ReceivedAt = r.GetFieldValue<System.DateTimeOffset>(14),
+        SpamScore = r.GetInt32(14),
+        ReceivedAt = r.GetFieldValue<System.DateTimeOffset>(15),
     };
 }

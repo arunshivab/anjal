@@ -26,6 +26,15 @@ namespace Anjal.Server;
 ///                             "opportunistic" (default), "required", or "disabled".
 ///   ANJAL_MAILDIR_ROOT      - root directory for tenant Maildirs. Default
 ///                             /var/mail/anjal (Unix) or %LOCALAPPDATA%\Anjal\mail (Windows).
+///   ANJAL_SPAM_ACTION       - "junk" (default: score, mark, file in Junk) or "reject"
+///                             (refuse with 550 at or above ANJAL_SPAM_REJECT_THRESHOLD).
+///   ANJAL_SPAM_REJECT_THRESHOLD - score for reject mode, default 5.
+///   ANJAL_SPAM_DNS          - "false" disables the DNS-based scoring rules. Default true.
+///   ANJAL_RATE_CONN_PER_MIN - connections per IP per minute, default 60 (0 disables).
+///   ANJAL_RATE_MSG_PER_HOUR - unauthenticated messages per IP per hour, default 200.
+///   ANJAL_RATE_USER_MSG_PER_HOUR - messages per authenticated user per hour, default 100.
+///   ANJAL_GREYLIST          - "false" disables greylisting on the MTA port. Default true.
+///   ANJAL_GREYLIST_DELAY_SECONDS - greylist delay, default 300.
 /// </summary>
 public static class Program
 {
@@ -64,7 +73,13 @@ public static class Program
         // Fan out: mailbox sink first, then webhook routing. An address may
         // be a mailbox, a webhook target, or both.
         var routingSink = new RoutingMessageSink(store, routing, dispatcher, Log);
-        var sink = new Anjal.Smtp.CompositeMessageSink(mailboxSink, routingSink);
+        var fanOut = new Anjal.Smtp.CompositeMessageSink(mailboxSink, routingSink);
+
+        // Anti-spam (v0.11.0): score unauthenticated mail before fan-out.
+        // Verdict headers ride along; the mailbox sink files Junk.
+        Anjal.Spam.SpamFilterSink sink = BuildSpamFilter(fanOut, Log);
+        Anjal.Spam.CompositeSmtpPolicy mtaPolicy = BuildMtaPolicy(Log);
+        Anjal.Spam.RateLimiter submissionPolicy = BuildSubmissionPolicy();
 
         // TLS cert for SMTP receiver.
         System.Security.Cryptography.X509Certificates.X509Certificate2? tlsCert = LoadServerCert(Log);
@@ -78,6 +93,7 @@ public static class Program
             TlsCertificate = tlsCert,
             RequireTlsForMail = requireTls && tlsCert is not null,
             Role = Anjal.Smtp.SmtpServerRole.Mta,
+            Policy = mtaPolicy,
         };
 
         using var cts = new System.Threading.CancellationTokenSource();
@@ -134,6 +150,7 @@ public static class Program
                 RequireTlsForMail = false, // submission has its own TLS-before-AUTH logic
                 Role = Anjal.Smtp.SmtpServerRole.Submission,
                 AllowPlaintextAuth = allowPlaintextAuth,
+                Policy = submissionPolicy,
             };
 
             submissionServer = new Anjal.Smtp.SmtpServer(submissionOptions, sink,
@@ -423,6 +440,87 @@ public static class Program
     /// has rows without querying it, so we always wire the store when
     /// available - the resolver checks env first, store second).
     /// </summary>
+    /// <summary>
+    /// Wrap the delivery sink in the spam scorer. Reads ANJAL_SPAM_ACTION,
+    /// ANJAL_SPAM_REJECT_THRESHOLD and ANJAL_SPAM_DNS.
+    /// </summary>
+    private static Anjal.Spam.SpamFilterSink BuildSpamFilter(Anjal.Smtp.IMessageSink inner, System.Action<string> log)
+    {
+        string action = (System.Environment.GetEnvironmentVariable("ANJAL_SPAM_ACTION") ?? "junk").Trim().ToLowerInvariant();
+        bool useDns = !string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_SPAM_DNS"), "false", System.StringComparison.OrdinalIgnoreCase);
+        int rejectThreshold = ParseIntEnv("ANJAL_SPAM_REJECT_THRESHOLD", Anjal.Store.TenantRow.DefaultSpamThreshold);
+
+        Anjal.Spam.ISpamDnsLookup? dns = null;
+        if (useDns)
+        {
+            Anjal.Dns.DnsResolver? mx = null;
+            try
+            {
+                mx = Anjal.Dns.DnsResolver.CreateFromSystem();
+            }
+#pragma warning disable CA1031 // No system resolver: fall back to A/AAAA-only checks.
+            catch (System.Exception ex)
+            {
+                log($"Spam: no system DNS resolver for MX checks ({ex.GetType().Name}); using A/AAAA only.");
+            }
+#pragma warning restore CA1031
+            dns = new Anjal.Spam.SystemSpamDnsLookup(mx);
+        }
+
+        var scorer = new Anjal.Spam.SpamScorer(null, dns);
+        var filter = new Anjal.Spam.SpamFilterSink(scorer, inner, log)
+        {
+            Action = action == "reject" ? Anjal.Spam.SpamAction.Reject : Anjal.Spam.SpamAction.Junk,
+            RejectThreshold = rejectThreshold,
+        };
+        log($"Spam filter: action={filter.Action.ToString().ToLowerInvariant()}, dns={(useDns ? "on" : "off")}" +
+            (filter.Action == Anjal.Spam.SpamAction.Reject ? $", reject threshold={rejectThreshold}" : string.Empty));
+        return filter;
+    }
+
+    /// <summary>MTA-port policy: rate limits plus greylisting.</summary>
+    private static Anjal.Spam.CompositeSmtpPolicy BuildMtaPolicy(System.Action<string> log)
+    {
+        var limits = new Anjal.Spam.RateLimitOptions
+        {
+            ConnectionsPerMinute = ParseIntEnv("ANJAL_RATE_CONN_PER_MIN", 60),
+            MessagesPerHourPerIp = ParseIntEnv("ANJAL_RATE_MSG_PER_HOUR", 200),
+            MessagesPerHourPerUser = ParseIntEnv("ANJAL_RATE_USER_MSG_PER_HOUR", 100),
+        };
+        var policies = new System.Collections.Generic.List<Anjal.Smtp.ISmtpPolicy> { new Anjal.Spam.RateLimiter(limits) };
+
+        bool greylist = !string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_GREYLIST"), "false", System.StringComparison.OrdinalIgnoreCase);
+        if (greylist)
+        {
+            int delay = ParseIntEnv("ANJAL_GREYLIST_DELAY_SECONDS", 300);
+            policies.Add(new Anjal.Spam.Greylist(new Anjal.Spam.GreylistOptions { Delay = System.TimeSpan.FromSeconds(delay) }));
+            log($"Greylisting: on (delay {delay}s).");
+        }
+        else
+        {
+            log("Greylisting: off.");
+        }
+        log($"Rate limits: {limits.ConnectionsPerMinute} conn/min, {limits.MessagesPerHourPerIp} msg/hr per IP.");
+        return new Anjal.Spam.CompositeSmtpPolicy(policies.ToArray());
+    }
+
+    /// <summary>Submission-port policy: connection and per-user limits only, no greylisting.</summary>
+    private static Anjal.Spam.RateLimiter BuildSubmissionPolicy()
+    {
+        return new Anjal.Spam.RateLimiter(new Anjal.Spam.RateLimitOptions
+        {
+            ConnectionsPerMinute = ParseIntEnv("ANJAL_RATE_CONN_PER_MIN", 60),
+            MessagesPerHourPerIp = 0,
+            MessagesPerHourPerUser = ParseIntEnv("ANJAL_RATE_USER_MSG_PER_HOUR", 100),
+        });
+    }
+
+    private static int ParseIntEnv(string name, int fallback)
+    {
+        string? raw = System.Environment.GetEnvironmentVariable(name);
+        return raw is not null && int.TryParse(raw, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int n) ? n : fallback;
+    }
+
     private static ServerLocalDomainResolver? BuildLocalDomainResolver(
         Anjal.Store.IMessageStore store,
         System.Action<string> log)

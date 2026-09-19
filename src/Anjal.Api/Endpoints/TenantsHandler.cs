@@ -72,13 +72,143 @@ public sealed class TenantsHandler
             return;
         }
 
+        if (req.SpamThreshold is int st && st < 0)
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", "spamThreshold must be 0 or more.").ConfigureAwait(false);
+            return;
+        }
+
+        TenantRow? current = await this.store.GetTenantAsync(slug).ConfigureAwait(false);
         TenantRow saved = await this.store.UpsertTenantAsync(new TenantRow
         {
             Slug = slug,
             DisplayName = req.DisplayName.Trim(),
             Enabled = req.Enabled,
+            SpamThreshold = req.SpamThreshold ?? current?.SpamThreshold ?? TenantRow.DefaultSpamThreshold,
         }).ConfigureAwait(false);
         await ctx.WriteJsonAsync(200, ToResponse(saved)).ConfigureAwait(false);
+    }
+
+    /// <summary><c>GET /api/tenants/{slug}/sender-rules</c> - list allow/block rules.</summary>
+    /// <param name="ctx">Request context.</param>
+    /// <param name="slug">Slug from URL.</param>
+    public async System.Threading.Tasks.Task ListSenderRulesAsync(RequestContext ctx, string slug)
+    {
+        System.ArgumentNullException.ThrowIfNull(ctx);
+        System.ArgumentNullException.ThrowIfNull(slug);
+        TenantRow? tenant = await this.store.GetTenantAsync(slug).ConfigureAwait(false);
+        if (tenant is null)
+        {
+            await ctx.WriteErrorAsync(404, "not_found", $"No tenant '{slug}'.").ConfigureAwait(false);
+            return;
+        }
+        System.Collections.Generic.IReadOnlyList<SenderRuleRow> rules = await this.store.ListSenderRulesAsync(tenant.Id).ConfigureAwait(false);
+        var responses = new System.Collections.Generic.List<SenderRuleResponse>(rules.Count);
+        foreach (SenderRuleRow r in rules)
+        {
+            responses.Add(ToResponse(r));
+        }
+        await ctx.WriteJsonAsync(200, responses).ConfigureAwait(false);
+    }
+
+    /// <summary><c>POST /api/tenants/{slug}/sender-rules</c> - create or replace a rule.</summary>
+    /// <param name="ctx">Request context.</param>
+    /// <param name="slug">Slug from URL.</param>
+    public async System.Threading.Tasks.Task PostSenderRuleAsync(RequestContext ctx, string slug)
+    {
+        System.ArgumentNullException.ThrowIfNull(ctx);
+        System.ArgumentNullException.ThrowIfNull(slug);
+        TenantRow? tenant = await this.store.GetTenantAsync(slug).ConfigureAwait(false);
+        if (tenant is null)
+        {
+            await ctx.WriteErrorAsync(404, "not_found", $"No tenant '{slug}'.").ConfigureAwait(false);
+            return;
+        }
+        string body = await ctx.ReadBodyAsync().ConfigureAwait(false);
+        SenderRuleRequest? req;
+        try
+        {
+            req = ApiJson.Deserialize<SenderRuleRequest>(body);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            await ctx.WriteErrorAsync(400, "invalid_json", ex.Message).ConfigureAwait(false);
+            return;
+        }
+        if (req is null)
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", "Body is empty.").ConfigureAwait(false);
+            return;
+        }
+        string pattern = req.Pattern.Trim().ToLowerInvariant();
+        if (!IsValidSenderPattern(pattern))
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", "pattern must be local@domain or @domain.").ConfigureAwait(false);
+            return;
+        }
+        SenderRuleAction action;
+        if (string.Equals(req.Action, "allow", System.StringComparison.OrdinalIgnoreCase))
+        {
+            action = SenderRuleAction.Allow;
+        }
+        else if (string.Equals(req.Action, "block", System.StringComparison.OrdinalIgnoreCase))
+        {
+            action = SenderRuleAction.Block;
+        }
+        else
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", "action must be allow or block.").ConfigureAwait(false);
+            return;
+        }
+
+        SenderRuleRow saved = await this.store.UpsertSenderRuleAsync(new SenderRuleRow
+        {
+            TenantId = tenant.Id,
+            Pattern = pattern,
+            Action = action,
+        }).ConfigureAwait(false);
+        await ctx.WriteJsonAsync(200, ToResponse(saved)).ConfigureAwait(false);
+    }
+
+    /// <summary><c>DELETE /api/tenants/{slug}/sender-rules/{pattern}</c> - remove a rule.</summary>
+    /// <param name="ctx">Request context.</param>
+    /// <param name="slug">Slug from URL.</param>
+    /// <param name="pattern">Pattern from URL (URL-decoded).</param>
+    public async System.Threading.Tasks.Task DeleteSenderRuleAsync(RequestContext ctx, string slug, string pattern)
+    {
+        System.ArgumentNullException.ThrowIfNull(ctx);
+        System.ArgumentNullException.ThrowIfNull(slug);
+        System.ArgumentNullException.ThrowIfNull(pattern);
+        TenantRow? tenant = await this.store.GetTenantAsync(slug).ConfigureAwait(false);
+        if (tenant is null)
+        {
+            await ctx.WriteErrorAsync(404, "not_found", $"No tenant '{slug}'.").ConfigureAwait(false);
+            return;
+        }
+        bool removed = await this.store.DeleteSenderRuleAsync(tenant.Id, pattern).ConfigureAwait(false);
+        if (!removed)
+        {
+            await ctx.WriteErrorAsync(404, "not_found", $"No sender rule '{pattern}'.").ConfigureAwait(false);
+            return;
+        }
+        await ctx.WriteEmptyAsync(204).ConfigureAwait(false);
+    }
+
+    /// <summary>A pattern is <c>local@domain</c> or <c>@domain</c>, with no whitespace.</summary>
+    /// <param name="pattern">Lowercased pattern.</param>
+    public static bool IsValidSenderPattern(string pattern)
+    {
+        System.ArgumentNullException.ThrowIfNull(pattern);
+        if (pattern.Length < 2 || pattern.Contains(' ', System.StringComparison.Ordinal) || pattern.Contains('/', System.StringComparison.Ordinal))
+        {
+            return false;
+        }
+        int at = pattern.IndexOf('@', System.StringComparison.Ordinal);
+        if (at < 0 || at != pattern.LastIndexOf('@') || at == pattern.Length - 1)
+        {
+            return false;
+        }
+        return pattern.Substring(at + 1).Contains('.', System.StringComparison.Ordinal);
     }
 
     /// <summary><c>GET /api/tenants</c> - list.</summary>
@@ -230,7 +360,16 @@ public sealed class TenantsHandler
         Slug = t.Slug,
         DisplayName = t.DisplayName,
         Enabled = t.Enabled,
+        SpamThreshold = t.SpamThreshold,
         CreatedAt = t.CreatedAt,
+    };
+
+    private static SenderRuleResponse ToResponse(SenderRuleRow r) => new()
+    {
+        Id = r.Id,
+        Pattern = r.Pattern,
+        Action = r.Action == SenderRuleAction.Block ? "block" : "allow",
+        CreatedAt = r.CreatedAt,
     };
 
     private static TenantDomainResponse ToResponse(TenantDomainRow d, string tenantSlug) => new()
