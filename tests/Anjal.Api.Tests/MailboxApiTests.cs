@@ -8,7 +8,6 @@ namespace Anjal.Api.Tests;
 
 public class MailboxApiTests : System.IDisposable
 {
-    private static int nextPort = 39900;
     private static readonly string[] ArunRecipient = new[] { "arun@anjal.co.in" };
 
     private readonly InMemoryMessageStore store;
@@ -23,7 +22,7 @@ public class MailboxApiTests : System.IDisposable
 
     public MailboxApiTests()
     {
-        int port = System.Threading.Interlocked.Increment(ref nextPort);
+        int port = FreePort.Next();
         this.token = "test-token-" + System.Guid.NewGuid().ToString("N");
         this.store = new InMemoryMessageStore();
         this.root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "anjal-api-" + System.Guid.NewGuid().ToString("N"));

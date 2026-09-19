@@ -8,7 +8,6 @@ namespace Anjal.Api.Tests;
 
 public class DkimKeyApiTests : System.IDisposable
 {
-    private static int nextPort = 39400;
 
     private readonly InMemoryMessageStore store;
     private readonly ApiServer server;
@@ -21,7 +20,7 @@ public class DkimKeyApiTests : System.IDisposable
 
     public DkimKeyApiTests()
     {
-        int port = System.Threading.Interlocked.Increment(ref nextPort);
+        int port = FreePort.Next();
         this.token = "test-token-" + System.Guid.NewGuid().ToString("N");
         this.store = new InMemoryMessageStore();
         this.cts = new System.Threading.CancellationTokenSource();

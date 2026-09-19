@@ -7,7 +7,6 @@ namespace Anjal.Api.Tests;
 
 public class LocalDomainApiTests : System.IDisposable
 {
-    private static int nextPort = 39700;
 
     private readonly InMemoryMessageStore store;
     private readonly ApiServer server;
@@ -19,7 +18,7 @@ public class LocalDomainApiTests : System.IDisposable
 
     public LocalDomainApiTests()
     {
-        int port = System.Threading.Interlocked.Increment(ref nextPort);
+        int port = FreePort.Next();
         this.token = "test-token-" + System.Guid.NewGuid().ToString("N");
         this.store = new InMemoryMessageStore();
         this.cts = new System.Threading.CancellationTokenSource();
