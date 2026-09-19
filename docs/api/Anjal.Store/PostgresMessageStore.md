@@ -13,6 +13,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
 - **DeleteLocalDomainAsync** *(method)* - _(no description)_
 - **DeleteMailboxAsync** *(method)* - _(no description)_
+- **DeleteMessageAsync** *(method)* - _(no description)_
 - **DeleteOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **DeleteRoutingRuleAsync** *(method)* - _(no description)_
 - **DeleteSmtpUserAsync** *(method)* - _(no description)_
@@ -46,9 +47,11 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **ListTenantDomainsAsync** *(method)* - _(no description)_
 - **ListTenantsAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
+- **MoveMessageAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveMessageAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
+- **SetMessageFlagsAsync** *(method)* - _(no description)_
 - **UpsertDkimKeyAsync** *(method)* - _(no description)_
 - **UpsertLocalDomainAsync** *(method)* - _(no description)_
 - **UpsertMailboxAsync** *(method)* - _(no description)_

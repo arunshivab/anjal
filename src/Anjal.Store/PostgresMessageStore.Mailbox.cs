@@ -404,6 +404,64 @@ LIMIT @limit OFFSET @offset;";
         return result is long n ? n : 0;
     }
 
+    /// <inheritdoc/>
+    public async Task<MessageRow?> SetMessageFlagsAsync(System.Guid id, bool seen, bool flagged, bool answered, string? maildirFile, CancellationToken ct = default)
+    {
+        const string sql = @"
+UPDATE messages
+SET seen = @seen, flagged = @flagged, answered = @answered,
+    maildir_file = COALESCE(@maildir_file, maildir_file)
+WHERE id = @id
+RETURNING " + MessageColumns + ";";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("seen", seen);
+        cmd.Parameters.AddWithValue("flagged", flagged);
+        cmd.Parameters.AddWithValue("answered", answered);
+        cmd.Parameters.Add(new NpgsqlParameter<string?>("maildir_file", NpgsqlTypes.NpgsqlDbType.Text) { TypedValue = maildirFile });
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+        return ReadMailboxMessage(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<MessageRow?> MoveMessageAsync(System.Guid id, System.Guid folderId, string maildirFile, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(maildirFile);
+
+        const string sql = @"
+UPDATE messages SET folder_id = @folder_id, maildir_file = @maildir_file
+WHERE id = @id
+RETURNING " + MessageColumns + ";";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("folder_id", folderId);
+        cmd.Parameters.AddWithValue("maildir_file", maildirFile);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            return null;
+        }
+        return ReadMailboxMessage(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteMessageAsync(System.Guid id, CancellationToken ct = default)
+    {
+        const string sql = "DELETE FROM messages WHERE id = @id;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
     private static TenantRow ReadTenant(NpgsqlDataReader r) => new()
     {
         Id = r.GetGuid(0),

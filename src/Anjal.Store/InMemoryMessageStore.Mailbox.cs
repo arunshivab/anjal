@@ -422,6 +422,53 @@ public sealed partial class InMemoryMessageStore
         }
     }
 
+    /// <inheritdoc/>
+    public Task<MessageRow?> SetMessageFlagsAsync(System.Guid id, bool seen, bool flagged, bool answered, string? maildirFile, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            MessageRow? found = this.mailboxMessages.Find(m => m.Id == id);
+            if (found is null)
+            {
+                return Task.FromResult<MessageRow?>(null);
+            }
+            found.Seen = seen;
+            found.Flagged = flagged;
+            found.Answered = answered;
+            if (maildirFile is not null)
+            {
+                found.MaildirFile = maildirFile;
+            }
+            return Task.FromResult<MessageRow?>(Clone(found));
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<MessageRow?> MoveMessageAsync(System.Guid id, System.Guid folderId, string maildirFile, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(maildirFile);
+        lock (this.gate)
+        {
+            MessageRow? found = this.mailboxMessages.Find(m => m.Id == id);
+            if (found is null)
+            {
+                return Task.FromResult<MessageRow?>(null);
+            }
+            found.FolderId = folderId;
+            found.MaildirFile = maildirFile;
+            return Task.FromResult<MessageRow?>(Clone(found));
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteMessageAsync(System.Guid id, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            return Task.FromResult(this.mailboxMessages.RemoveAll(m => m.Id == id) > 0);
+        }
+    }
+
     private void RemoveMailboxCascade(System.Guid mailboxId)
     {
         this.mailboxMessages.RemoveAll(m => m.MailboxId == mailboxId);

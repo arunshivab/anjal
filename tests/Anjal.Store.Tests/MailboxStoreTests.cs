@@ -239,4 +239,53 @@ public class MailboxStoreTests
         Assert.NotNull(await store.GetMessageByIdAsync(m3.Id));
         Assert.Null(await store.GetMessageByIdAsync(System.Guid.NewGuid()));
     }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Message_SetFlags_UpdatesFlagsAndOptionallyFile()
+    {
+        (InMemoryMessageStore store, _, MailboxRow mailbox) = await SeedAsync();
+        FolderRow inbox = await store.EnsureFolderAsync(mailbox.Id, FolderRow.Inbox);
+        var m = await store.SaveMessageAsync(new MessageRow { MailboxId = mailbox.Id, FolderId = inbox.Id, MaildirFile = "new/1" });
+
+        MessageRow? flagged = await store.SetMessageFlagsAsync(m.Id, seen: true, flagged: true, answered: false, maildirFile: null);
+        Assert.NotNull(flagged);
+        Assert.True(flagged!.Seen);
+        Assert.True(flagged.Flagged);
+        Assert.False(flagged.Answered);
+        Assert.Equal("new/1", flagged.MaildirFile);
+
+        MessageRow? renamed = await store.SetMessageFlagsAsync(m.Id, seen: true, flagged: false, answered: true, maildirFile: "cur/1:2,RS");
+        Assert.Equal("cur/1:2,RS", renamed!.MaildirFile);
+        Assert.False(renamed.Flagged);
+        Assert.True(renamed.Answered);
+
+        Assert.Null(await store.SetMessageFlagsAsync(System.Guid.NewGuid(), true, true, true, null));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Message_Move_ChangesFolderAndFile()
+    {
+        (InMemoryMessageStore store, _, MailboxRow mailbox) = await SeedAsync();
+        FolderRow inbox = await store.EnsureFolderAsync(mailbox.Id, FolderRow.Inbox);
+        FolderRow trash = await store.EnsureFolderAsync(mailbox.Id, "Trash");
+        var m = await store.SaveMessageAsync(new MessageRow { MailboxId = mailbox.Id, FolderId = inbox.Id, MaildirFile = "cur/1:2,S" });
+
+        MessageRow? moved = await store.MoveMessageAsync(m.Id, trash.Id, "cur/1:2,S");
+        Assert.Equal(trash.Id, moved!.FolderId);
+        Assert.Equal(0, await store.CountMessagesAsync(mailbox.Id, inbox.Id));
+        Assert.Equal(1, await store.CountMessagesAsync(mailbox.Id, trash.Id));
+        Assert.Null(await store.MoveMessageAsync(System.Guid.NewGuid(), trash.Id, "x"));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Message_Delete_RemovesRow()
+    {
+        (InMemoryMessageStore store, _, MailboxRow mailbox) = await SeedAsync();
+        FolderRow inbox = await store.EnsureFolderAsync(mailbox.Id, FolderRow.Inbox);
+        var m = await store.SaveMessageAsync(new MessageRow { MailboxId = mailbox.Id, FolderId = inbox.Id, MaildirFile = "new/1" });
+
+        Assert.True(await store.DeleteMessageAsync(m.Id));
+        Assert.False(await store.DeleteMessageAsync(m.Id));
+        Assert.Null(await store.GetMessageByIdAsync(m.Id));
+    }
 }

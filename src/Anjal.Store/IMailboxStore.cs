@@ -116,4 +116,35 @@ public interface IMailboxStore
 
     /// <summary>Count messages in a folder (or the whole mailbox when <paramref name="folderId"/> is null).</summary>
     System.Threading.Tasks.Task<long> CountMessagesAsync(System.Guid mailboxId, System.Guid? folderId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Update a message's flags and, optionally, the Maildir file name that
+    /// now carries them (Maildir encodes flags in the file name, so a flag
+    /// change on disk is a rename). Returns the updated row, or
+    /// <see langword="null"/> if no such message.
+    /// </summary>
+    /// <param name="id">The message.</param>
+    /// <param name="seen">New seen flag.</param>
+    /// <param name="flagged">New flagged flag.</param>
+    /// <param name="answered">New answered flag.</param>
+    /// <param name="maildirFile">New relative file path, or null to leave unchanged.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<MessageRow?> SetMessageFlagsAsync(System.Guid id, bool seen, bool flagged, bool answered, string? maildirFile, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Move a message to another folder of the same mailbox, recording the
+    /// new Maildir file path. Returns the updated row, or
+    /// <see langword="null"/> if no such message.
+    /// </summary>
+    /// <param name="id">The message.</param>
+    /// <param name="folderId">Destination folder.</param>
+    /// <param name="maildirFile">New relative file path within the destination folder.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<MessageRow?> MoveMessageAsync(System.Guid id, System.Guid folderId, string maildirFile, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove a message's index row. Returns <see langword="true"/> if a row
+    /// was removed. The caller is responsible for the Maildir file.
+    /// </summary>
+    System.Threading.Tasks.Task<bool> DeleteMessageAsync(System.Guid id, System.Threading.CancellationToken ct = default);
 }

@@ -10,19 +10,21 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.9.0** - full SMTP server with bidirectional mail + DKIM signing +
+**v0.10.0** - full SMTP server with bidirectional mail + DKIM signing +
 SPF/DKIM/DMARC inbound verification + SMTP submission authentication on
-dual-port (25/587) with open-relay guard + **multi-tenant mailbox
-storage**. Mail addressed to a registered mailbox is written to a
-per-tenant Maildir on disk and indexed in the store; the same mailbox
-identity authenticates on the submission port and may send as its own
-domain. Webhook routing (the transactional path) continues to work
-alongside - an address can be a mailbox, a webhook target, or both.
+dual-port (25/587) with open-relay guard + multi-tenant mailbox storage +
+**webmail**. `Anjal.Webmail` is a separate host process (Blazor, static
+server rendering, no JavaScript framework) that shares the database and
+Maildir root with `Anjal.Server`: sign in with a mailbox address, read
+mail (HTML bodies sanitised and rendered in a sandboxed iframe with
+remote images blocked by default), download attachments, flag, trash,
+restore, delete, and compose plain-text mail with attachments that goes
+out through the existing outbound queue with a copy filed in Sent.
 
-Mailbox storage is the first step of the webmail arc
-(storage -> webmail UI -> anti-spam -> deployment hardening). Not yet in
-this release: webmail, IMAP/POP, hard quota enforcement, deletion of mail
-data, full-text search, self-service domain verification.
+Webmail is the second step of the arc
+(storage -> webmail -> anti-spam -> deployment hardening). Not yet in
+this release: IMAP/POP, hard quota enforcement, search, drafts, custom
+folders, HTML compose, self-service domain verification.
 
 ## Modules
 
@@ -35,7 +37,8 @@ data, full-text search, self-service domain verification.
 | `Anjal.Auth` | SPF (RFC 7208) + DKIM verifier (RFC 6376) + DMARC (RFC 7489) + Authentication-Results (RFC 8601) | none |
 | `Anjal.Routing` | Inbound routing + signed webhook dispatcher | none |
 | `Anjal.Store` | Persistence: in-memory and PostgreSQL | Npgsql |
-| `Anjal.Mailbox` | Multi-tenant Maildir storage (tmp/new/cur, Maildir++ folders) and the mailbox delivery sink | none |
+| `Anjal.Mailbox` | Multi-tenant Maildir storage (tmp/new/cur, Maildir++ folders, flag renames, moves) and the mailbox delivery sink | none |
+| `Anjal.Webmail` | Webmail host process (Blazor static SSR on Kestrel, cookie auth, HTML sanitiser) | none (ASP.NET Core shared framework) |
 | `Anjal.Api` | HTTP/JSON API on `HttpListener` + `System.Text.Json` | none |
 | `Anjal.Server` | Composition root host process | none |
 
@@ -49,10 +52,11 @@ data, full-text search, self-service domain verification.
 
 ## Run the demos
 
-Eight in-process demos prove each pipeline with no external setup:
+Nine in-process demos prove each pipeline with no external setup:
 
     dotnet run --project examples/Anjal.InboundEndToEnd
     dotnet run --project examples/Anjal.MailboxEndToEnd
+    dotnet run --project examples/Anjal.WebmailDemo       # then open http://127.0.0.1:8080/
     dotnet run --project examples/Anjal.OutboundEndToEnd
     dotnet run --project examples/Anjal.ApiClient
     dotnet run --project examples/Anjal.TlsEndToEnd
@@ -139,7 +143,28 @@ the local Lipi instance). Add more users via the API as needed.
 | `ANJAL_SUBMISSION_PASSWORD` | - | Env-var bootstrap plaintext password (hashed on startup with PBKDF2) |
 | `ANJAL_SUBMISSION_DOMAINS` | - | Env-var user's allowed-from domains (comma-separated). Empty = admin authority. |
 | `ANJAL_AUTH_ALLOW_PLAINTEXT` | `false` | Allow AUTH on plaintext channels. ONLY for local dev. |
-| `ANJAL_MAILDIR_ROOT` | `/var/mail/anjal` (Unix) / `%LOCALAPPDATA%\Anjal\mail` (Windows) | Root directory for tenant Maildirs |
+| `ANJAL_MAILDIR_ROOT` | `/var/mail/anjal` (Unix) / `%LOCALAPPDATA%\Anjal\mail` (Windows) | Root directory for tenant Maildirs (shared by `Anjal.Server` and `Anjal.Webmail`) |
+
+### Webmail environment variables (`Anjal.Webmail` process)
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ANJAL_WEBMAIL_BIND` | `127.0.0.1` | HTTP bind address |
+| `ANJAL_WEBMAIL_PORT` | `8080` | HTTP port |
+| `ANJAL_WEBMAIL_SECURE` | `false` | `true` marks the session cookie Secure (set when served over HTTPS via a reverse proxy) |
+| `ANJAL_POSTGRES` | (in-memory) | Must point at the same database as `Anjal.Server` |
+| `ANJAL_MAILDIR_ROOT` | platform default | Must point at the same directory as `Anjal.Server`; both processes need read/write access |
+| `ANJAL_HOSTNAME` | `anjal.localhost` | Used in generated Message-IDs |
+
+Run it alongside the mail server:
+
+    $env:ANJAL_POSTGRES     = "Host=localhost;Database=anjal;Username=postgres;Password=..."
+    $env:ANJAL_MAILDIR_ROOT = "C:\anjal\mail"
+    dotnet run --project src/Anjal.Webmail
+
+Sign in with a mailbox address and its password (created via
+`POST /api/mailboxes`). The webmail talks to the store and Maildir
+directly - it does not go through the HTTP API and needs no API token.
 
 ## SMTP submission authentication
 
