@@ -24,7 +24,52 @@ public sealed class TenantRow
     /// <summary>When false, no mail is delivered to any mailbox of this tenant.</summary>
     public bool Enabled { get; set; } = true;
 
+    /// <summary>Default spam threshold for a new tenant.</summary>
+    public const int DefaultSpamThreshold = 5;
+
+    /// <summary>
+    /// Messages scoring at or above this land in Junk instead of INBOX.
+    /// Scores are integers; see <c>Anjal.Spam.SpamScorer</c> for the rules.
+    /// </summary>
+    public int SpamThreshold { get; set; } = DefaultSpamThreshold;
+
     /// <summary>When the tenant was created.</summary>
+    public System.DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>What a <see cref="SenderRuleRow"/> does to matching mail.</summary>
+public enum SenderRuleAction
+{
+    /// <summary>Always deliver to INBOX regardless of score.</summary>
+    Allow = 0,
+
+    /// <summary>Always deliver to Junk regardless of score.</summary>
+    Block = 1,
+}
+
+/// <summary>
+/// A per-tenant sender allow/block rule. The pattern is either a full
+/// address (<c>alice@example.com</c>) or a domain with a leading "@"
+/// (<c>@example.com</c>, which also matches subdomains). Patterns are
+/// matched case-insensitively against the envelope MAIL FROM and the
+/// From header address. A block rule wins over an allow rule when both
+/// match; an exact-address rule wins over a domain rule.
+/// </summary>
+public sealed class SenderRuleRow
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>The owning tenant.</summary>
+    public System.Guid TenantId { get; set; }
+
+    /// <summary>Address or "@domain" pattern, lowercase.</summary>
+    public string Pattern { get; set; } = string.Empty;
+
+    /// <summary>Allow or block.</summary>
+    public SenderRuleAction Action { get; set; }
+
+    /// <summary>When the rule was created.</summary>
     public System.DateTimeOffset CreatedAt { get; set; }
 }
 
@@ -192,6 +237,9 @@ public sealed class MessageRow
 
     /// <summary>Maildir "R" flag - the message has been replied to.</summary>
     public bool Answered { get; set; }
+
+    /// <summary>Spam score assigned at delivery (0 when scoring was not run).</summary>
+    public int SpamScore { get; set; }
 
     /// <summary>Time the message was delivered to the folder.</summary>
     public System.DateTimeOffset ReceivedAt { get; set; }

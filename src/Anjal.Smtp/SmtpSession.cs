@@ -103,6 +103,13 @@ public sealed class SmtpSession
     {
         try
         {
+            PolicyDecision connect = this.Consult(p => p.OnConnect(this.remoteAddress));
+            if (!connect.Allowed)
+            {
+                await this.WriteLineAsync($"{connect.ReplyCode} {connect.ReplyText}", ct).ConfigureAwait(false);
+                return;
+            }
+
             await this.WriteLineAsync($"220 {this.options.AdvertisedHostName} Anjal SMTP service ready", ct).ConfigureAwait(false);
             this.state = State.AwaitingHelo;
 
@@ -512,11 +519,41 @@ public sealed class SmtpSession
             }
         }
 
+        PolicyDecision mailPolicy = this.Consult(p => p.OnMailFrom(this.remoteAddress, this.authenticatedUser?.Username, addr));
+        if (!mailPolicy.Allowed)
+        {
+            await this.WriteLineAsync($"{mailPolicy.ReplyCode} {mailPolicy.ReplyText}", ct).ConfigureAwait(false);
+            return true;
+        }
+
         this.envelopeFrom = addr;
         this.envelopeTo.Clear();
         this.state = State.HasMail;
         await this.WriteLineAsync("250 OK", ct).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>
+    /// Ask the configured policy. A missing policy, or one that throws,
+    /// allows the command - a policy bug must never take the server down.
+    /// </summary>
+    private PolicyDecision Consult(System.Func<ISmtpPolicy, PolicyDecision> check)
+    {
+        ISmtpPolicy? policy = this.options.Policy;
+        if (policy is null)
+        {
+            return PolicyDecision.Allow;
+        }
+        try
+        {
+            return check(policy) ?? PolicyDecision.Allow;
+        }
+#pragma warning disable CA1031 // Policy failures are fail-open by design.
+        catch (System.Exception)
+        {
+            return PolicyDecision.Allow;
+        }
+#pragma warning restore CA1031
     }
 
     private async System.Threading.Tasks.Task<bool> HandleRcptAsync(string args, System.Threading.CancellationToken ct)
@@ -562,6 +599,13 @@ public sealed class SmtpSession
                 await this.WriteLineAsync("550 5.7.1 Relaying denied", ct).ConfigureAwait(false);
                 return true;
             }
+        }
+
+        PolicyDecision rcptPolicy = this.Consult(p => p.OnRcptTo(this.remoteAddress, this.authenticatedUser?.Username, this.envelopeFrom, addr));
+        if (!rcptPolicy.Allowed)
+        {
+            await this.WriteLineAsync($"{rcptPolicy.ReplyCode} {rcptPolicy.ReplyText}", ct).ConfigureAwait(false);
+            return true;
         }
 
         this.envelopeTo.Add(addr);
@@ -650,6 +694,7 @@ public sealed class SmtpSession
             RawBytes = bodyToDeliver,
             RemoteAddress = this.remoteAddress,
             ClientHostName = this.clientHostName,
+            AuthenticatedUser = this.authenticatedUser?.Username,
             AuthResults = authResult?.Detail,
         };
 

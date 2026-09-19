@@ -68,6 +68,9 @@ public sealed class MessageView
     /// <summary>Whether remote images were blocked during sanitising.</summary>
     public bool HasBlockedImages { get; init; }
 
+    /// <summary>The <c>X-Anjal-Spam-Reasons</c> header, or empty.</summary>
+    public string SpamReasons { get; init; } = string.Empty;
+
     /// <summary>Attachments in order.</summary>
     public IReadOnlyList<AttachmentView> Attachments { get; init; } = Array.Empty<AttachmentView>();
 }
@@ -99,7 +102,7 @@ public sealed class ComposeRequest
 public sealed class MailboxService
 {
     /// <summary>Folders every mailbox shows even before any mail arrives.</summary>
-    public static readonly IReadOnlyList<string> DefaultFolders = new[] { FolderRow.Inbox, "Sent", "Drafts", "Trash" };
+    public static readonly IReadOnlyList<string> DefaultFolders = new[] { FolderRow.Inbox, "Sent", "Drafts", MailboxSink.JunkFolder, "Trash" };
 
     private readonly IMailboxStore store;
     private readonly IMessageStore messageStore;
@@ -295,6 +298,7 @@ public sealed class MailboxService
             BodyHtml = bodyHtml,
             IsHtml = isHtml,
             HasBlockedImages = blocked,
+            SpamReasons = parsed?.Headers.Get(Anjal.Spam.SpamHeaders.Reasons) ?? string.Empty,
             Attachments = views,
         };
     }
@@ -377,6 +381,69 @@ public sealed class MailboxService
         }
         string? moved = this.maildir.Move(context.Value.tenant.Slug, context.Value.mailbox.Address, from.Name, row.MaildirFile, to.Name);
         return await this.store.MoveMessageAsync(messageId, to.Id, moved ?? row.MaildirFile, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// "Not spam": move the message to INBOX and add an allow rule for its
+    /// sender so future mail from that address goes straight to INBOX.
+    /// Returns the moved row, or null if the message is unknown.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The message.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<MessageRow?> MarkNotSpamAsync(Guid mailboxId, Guid messageId, CancellationToken ct = default)
+    {
+        MessageRow? moved = await this.MoveAsync(mailboxId, messageId, FolderRow.Inbox, ct).ConfigureAwait(false);
+        if (moved is not null)
+        {
+            await this.AddSenderRuleAsync(mailboxId, moved, SenderRuleAction.Allow, ct).ConfigureAwait(false);
+        }
+        return moved;
+    }
+
+    /// <summary>
+    /// "Report spam": move the message to Junk and add a block rule for
+    /// its sender. Returns the moved row, or null if the message is unknown.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The message.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<MessageRow?> ReportSpamAsync(Guid mailboxId, Guid messageId, CancellationToken ct = default)
+    {
+        MessageRow? moved = await this.MoveAsync(mailboxId, messageId, MailboxSink.JunkFolder, ct).ConfigureAwait(false);
+        if (moved is not null)
+        {
+            await this.AddSenderRuleAsync(mailboxId, moved, SenderRuleAction.Block, ct).ConfigureAwait(false);
+        }
+        return moved;
+    }
+
+    /// <summary>
+    /// The sender address a rule should target: the From header address if
+    /// present, else the envelope sender. Empty if neither is usable.
+    /// </summary>
+    /// <param name="row">The message row.</param>
+    public static string SenderOf(MessageRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        string from = Anjal.Spam.SpamScorer.FirstAddress(Anjal.Mime.EncodedWordDecoder.Decode(row.FromHeader));
+        return from.Length > 0 ? from : row.EnvelopeFrom.Trim().ToLowerInvariant();
+    }
+
+    private async Task AddSenderRuleAsync(Guid mailboxId, MessageRow row, SenderRuleAction action, CancellationToken ct)
+    {
+        (TenantRow tenant, MailboxRow mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
+        string sender = SenderOf(row);
+        if (context is null || sender.Length == 0 || !sender.Contains('@', StringComparison.Ordinal))
+        {
+            return;
+        }
+        await this.store.UpsertSenderRuleAsync(new SenderRuleRow
+        {
+            TenantId = context.Value.tenant.Id,
+            Pattern = sender,
+            Action = action,
+        }, ct).ConfigureAwait(false);
     }
 
     /// <summary>

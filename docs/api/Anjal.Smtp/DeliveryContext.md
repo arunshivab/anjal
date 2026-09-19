@@ -7,6 +7,7 @@ Context for a delivery attempt. Captures the SMTP envelope and the fully-receive
 ## Members
 
 - **AuthResults** *(property)* - Authentication detail (SPF/DKIM/DMARC verdicts) if an authenticator was configured. Null if inbound auth is disabled. The concrete type is Anjal.Auth.AuthenticationResults when populated.
+- **AuthenticatedUser** *(property)* - Username that authenticated on the submission port, or null for unauthenticated (MTA) deliveries. Authenticated mail is never scored for spam.
 - **ClientHostName** *(property)* - The EHLO/HELO hostname the client claimed.
 - **EnvelopeFrom** *(property)* - The MAIL FROM address from the SMTP envelope (without angle brackets).
 - **EnvelopeTo** *(property)* - The RCPT TO addresses from the SMTP envelope (without angle brackets).

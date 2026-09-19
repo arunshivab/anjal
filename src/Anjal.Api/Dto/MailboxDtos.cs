@@ -11,6 +11,35 @@ public sealed class TenantRequest
 
     /// <summary>When false, no mail is delivered to the tenant's mailboxes.</summary>
     public bool Enabled { get; set; } = true;
+
+    /// <summary>Spam score at or above which mail is filed in Junk. Null keeps the default (5); 0 disables Junk filing.</summary>
+    public int? SpamThreshold { get; set; }
+}
+
+/// <summary>Request body for a sender allow/block rule.</summary>
+public sealed class SenderRuleRequest
+{
+    /// <summary>Address (<c>alice@example.com</c>) or domain (<c>@example.com</c>) pattern.</summary>
+    public string Pattern { get; set; } = string.Empty;
+
+    /// <summary><c>allow</c> or <c>block</c>.</summary>
+    public string Action { get; set; } = "block";
+}
+
+/// <summary>Response body for a sender rule.</summary>
+public sealed class SenderRuleResponse
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>The pattern, lowercase.</summary>
+    public string Pattern { get; set; } = string.Empty;
+
+    /// <summary><c>allow</c> or <c>block</c>.</summary>
+    public string Action { get; set; } = string.Empty;
+
+    /// <summary>When the rule was created.</summary>
+    public System.DateTimeOffset CreatedAt { get; set; }
 }
 
 /// <summary>Response body for a tenant.</summary>
@@ -27,6 +56,9 @@ public sealed class TenantResponse
 
     /// <summary>Whether the tenant is enabled.</summary>
     public bool Enabled { get; set; }
+
+    /// <summary>Spam threshold in effect.</summary>
+    public int SpamThreshold { get; set; }
 
     /// <summary>When the tenant was created.</summary>
     public System.DateTimeOffset CreatedAt { get; set; }
@@ -188,6 +220,9 @@ public sealed class MessageResponse
 
     /// <summary>Replied to.</summary>
     public bool Answered { get; set; }
+
+    /// <summary>Spam score assigned at delivery.</summary>
+    public int SpamScore { get; set; }
 
     /// <summary>When the message was delivered.</summary>
     public System.DateTimeOffset ReceivedAt { get; set; }

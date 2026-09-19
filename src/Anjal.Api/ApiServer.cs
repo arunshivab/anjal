@@ -454,6 +454,8 @@ public sealed class ApiServer : System.IDisposable
     {
         // /api/tenants                          POST, GET
         // /api/tenants/{slug}                   GET, DELETE
+        // /api/tenants/{slug}/sender-rules      GET, POST
+        // /api/tenants/{slug}/sender-rules/{p}  DELETE
         // /api/tenant-domains[?tenant=slug]     POST, GET
         // /api/tenant-domains/{domain}          DELETE
         // /api/mailboxes[?tenant=slug]          POST, GET
@@ -481,13 +483,33 @@ public sealed class ApiServer : System.IDisposable
         const string tenantsPrefix = "/api/tenants/";
         if (path.StartsWith(tenantsPrefix, System.StringComparison.OrdinalIgnoreCase))
         {
-            string slug = path.Substring(tenantsPrefix.Length);
-            if (slug.Length > 0 && !slug.Contains('/', System.StringComparison.Ordinal))
+            string rest = path.Substring(tenantsPrefix.Length);
+            int slash = rest.IndexOf('/', System.StringComparison.Ordinal);
+            string slug = slash < 0 ? rest : rest.Substring(0, slash);
+            string sub = slash < 0 ? string.Empty : rest.Substring(slash + 1).TrimEnd('/');
+            if (slug.Length > 0)
             {
-                switch (ctx.Method)
+                if (sub.Length == 0)
                 {
-                    case "GET": await tenantsHandler.GetAsync(ctx, slug).ConfigureAwait(false); return true;
-                    case "DELETE": await tenantsHandler.DeleteAsync(ctx, slug).ConfigureAwait(false); return true;
+                    switch (ctx.Method)
+                    {
+                        case "GET": await tenantsHandler.GetAsync(ctx, slug).ConfigureAwait(false); return true;
+                        case "DELETE": await tenantsHandler.DeleteAsync(ctx, slug).ConfigureAwait(false); return true;
+                    }
+                }
+                else if (sub.Equals("sender-rules", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    switch (ctx.Method)
+                    {
+                        case "GET": await tenantsHandler.ListSenderRulesAsync(ctx, slug).ConfigureAwait(false); return true;
+                        case "POST": await tenantsHandler.PostSenderRuleAsync(ctx, slug).ConfigureAwait(false); return true;
+                    }
+                }
+                else if (sub.StartsWith("sender-rules/", System.StringComparison.OrdinalIgnoreCase) && ctx.Method == "DELETE")
+                {
+                    string pattern = System.Uri.UnescapeDataString(sub["sender-rules/".Length..]);
+                    await tenantsHandler.DeleteSenderRuleAsync(ctx, slug, pattern).ConfigureAwait(false);
+                    return true;
                 }
             }
             await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);

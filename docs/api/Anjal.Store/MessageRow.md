@@ -19,5 +19,6 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 - **ReceivedAt** *(property)* - Time the message was delivered to the folder.
 - **Seen** *(property)* - Maildir "S" flag - the message has been read.
 - **SizeBytes** *(property)* - Size of the Maildir file in bytes.
+- **SpamScore** *(property)* - Spam score assigned at delivery (0 when scoring was not run).
 - **Subject** *(property)* - The Subject header, decoded if RFC 2047 encoded.
 - **ToHeader** *(property)* - The raw To header value.

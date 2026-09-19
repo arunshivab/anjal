@@ -18,5 +18,6 @@ Response body for one message's metadata (no body).
 - **ReceivedAt** *(property)* - When the message was delivered.
 - **Seen** *(property)* - Read flag.
 - **SizeBytes** *(property)* - Size in bytes.
+- **SpamScore** *(property)* - Spam score assigned at delivery.
 - **Subject** *(property)* - Decoded Subject header.
 - **To** *(property)* - Raw To header.

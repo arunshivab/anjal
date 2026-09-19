@@ -187,6 +187,60 @@ public sealed class MailboxSinkTests : System.IDisposable
         Assert.Contains(this.log, l => l.Contains("over quota", System.StringComparison.Ordinal));
     }
 
+    private static readonly byte[] Scored7 = System.Text.Encoding.ASCII.GetBytes(
+        "X-Anjal-Spam-Score: 7\r\nX-Anjal-Spam-Reasons: SPF_FAIL(3), DKIM_FAIL(3), NO_DATE(1)\r\n" +
+        "From: Spammer <spam@spammer.test>\r\nSubject: buy\r\n\r\nbody\r\n");
+
+    [Fact]
+    public async System.Threading.Tasks.Task Deliver_ScoreAtThreshold_FilesInJunk_AndRecordsScore()
+    {
+        await this.SeedAsync();
+        DeliveryResult r = await this.Sink().DeliverAsync(Ctx(Scored7, "arun@anjal.co.in"));
+        Assert.Equal(DeliveryOutcome.Accepted, r.Outcome);
+
+        MessageRow row = Assert.Single(this.store.MailboxMessages);
+        Assert.Equal(7, row.SpamScore);
+        var folders = await this.store.ListFoldersAsync(row.MailboxId);
+        Assert.Equal(MailboxSink.JunkFolder, Assert.Single(folders).Name);
+        Assert.Contains(this.log, l => l.Contains("/.Junk/", System.StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Deliver_ScoreBelowTenantThreshold_StaysInInbox()
+    {
+        (TenantRow tenant, _) = await this.SeedAsync();
+        await this.store.UpsertTenantAsync(new TenantRow { Slug = tenant.Slug, SpamThreshold = 8 });
+        await this.Sink().DeliverAsync(Ctx(Scored7, "arun@anjal.co.in"));
+        var folders = await this.store.ListFoldersAsync(this.store.MailboxMessages[0].MailboxId);
+        Assert.Equal(FolderRow.Inbox, Assert.Single(folders).Name);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Deliver_SenderRules_OverrideScore()
+    {
+        (TenantRow tenant, _) = await this.SeedAsync();
+        await this.store.UpsertSenderRuleAsync(new SenderRuleRow { TenantId = tenant.Id, Pattern = "@spammer.test", Action = SenderRuleAction.Allow });
+        await this.Sink().DeliverAsync(Ctx(Scored7, "arun@anjal.co.in"));
+        Assert.Equal(FolderRow.Inbox, Assert.Single(await this.store.ListFoldersAsync(this.store.MailboxMessages[0].MailboxId)).Name);
+
+        await this.store.UpsertSenderRuleAsync(new SenderRuleRow { TenantId = tenant.Id, Pattern = "sender@example.com", Action = SenderRuleAction.Block });
+        await this.Sink().DeliverAsync(Ctx(Sample, "arun@anjal.co.in"));
+        Assert.Equal(2, this.store.MailboxMessages.Count);
+        var folders = await this.store.ListFoldersAsync(this.store.MailboxMessages[1].MailboxId);
+        Assert.Contains(folders, f => f.Name == MailboxSink.JunkFolder);
+        Assert.Equal(1, await this.store.CountMessagesAsync(this.store.MailboxMessages[1].MailboxId, folders.First(f => f.Name == MailboxSink.JunkFolder).Id));
+    }
+
+    [Fact]
+    public void ChooseFolder_Rules()
+    {
+        Assert.Equal(FolderRow.Inbox, MailboxSink.ChooseFolder(0, 5, null));
+        Assert.Equal(MailboxSink.JunkFolder, MailboxSink.ChooseFolder(5, 5, null));
+        Assert.Equal(FolderRow.Inbox, MailboxSink.ChooseFolder(50, 0, null));
+        Assert.Equal(FolderRow.Inbox, MailboxSink.ChooseFolder(50, 5, SenderRuleAction.Allow));
+        Assert.Equal(MailboxSink.JunkFolder, MailboxSink.ChooseFolder(0, 5, SenderRuleAction.Block));
+    }
+
     [Fact]
     public async System.Threading.Tasks.Task Deliver_ThroughSmtpServer_EndToEnd()
     {

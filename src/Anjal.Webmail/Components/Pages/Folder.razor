@@ -23,7 +23,7 @@ else if (items.Count == 0)
 else
 {
     <table class="list">
-        <thead><tr><th></th><th>From</th><th>Subject</th><th>Received</th><th>Size</th></tr></thead>
+        <thead><tr><th></th><th>From</th><th>Subject</th><th>Received</th><th>Size</th><th title="Spam score">Score</th></tr></thead>
         <tbody>
             @foreach (MessageRow m in items)
             {
@@ -33,6 +33,7 @@ else
                     <td><a href="/m/@m.Id">@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a></td>
                     <td class="nowrap">@m.ReceivedAt.ToLocalTime().ToString("dd MMM yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture)</td>
                     <td class="nowrap">@Size(m.SizeBytes)</td>
+                    <td class="nowrap muted">@(m.SpamScore > 0 ? m.SpamScore.ToString(System.Globalization.CultureInfo.InvariantCulture) : "")</td>
                 </tr>
             }
         </tbody>

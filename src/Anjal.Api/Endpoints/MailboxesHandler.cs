@@ -15,7 +15,7 @@ public sealed class MailboxesHandler
 {
     /// <summary>Folders created for every new mailbox.</summary>
     public static readonly System.Collections.Generic.IReadOnlyList<string> DefaultFolders =
-        new[] { FolderRow.Inbox, "Sent", "Drafts", "Trash" };
+        new[] { FolderRow.Inbox, "Sent", "Drafts", MailboxSink.JunkFolder, "Trash" };
 
     private const int DefaultPageSize = 50;
     private const int MaxPageSize = 500;
@@ -392,6 +392,7 @@ public sealed class MailboxesHandler
         Seen = r.Seen,
         Flagged = r.Flagged,
         Answered = r.Answered,
+        SpamScore = r.SpamScore,
         ReceivedAt = r.ReceivedAt,
     };
 }

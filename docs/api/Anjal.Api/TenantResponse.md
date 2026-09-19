@@ -11,3 +11,4 @@ Response body for a tenant.
 - **Enabled** *(property)* - Whether the tenant is enabled.
 - **Id** *(property)* - Identifier assigned by the store.
 - **Slug** *(property)* - The slug.
+- **SpamThreshold** *(property)* - Spam threshold in effect.

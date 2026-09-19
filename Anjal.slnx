@@ -23,6 +23,7 @@
     <Project Path="src/Anjal.Routing/Anjal.Routing.csproj" />
     <Project Path="src/Anjal.Server/Anjal.Server.csproj" />
     <Project Path="src/Anjal.Smtp/Anjal.Smtp.csproj" />
+    <Project Path="src/Anjal.Spam/Anjal.Spam.csproj" />
     <Project Path="src/Anjal.Store/Anjal.Store.csproj" />
     <Project Path="src/Anjal.Webmail/Anjal.Webmail.csproj" />
   </Folder>
@@ -35,6 +36,7 @@
     <Project Path="tests/Anjal.Routing.Tests/Anjal.Routing.Tests.csproj" />
     <Project Path="tests/Anjal.Server.Tests/Anjal.Server.Tests.csproj" />
     <Project Path="tests/Anjal.Smtp.Tests/Anjal.Smtp.Tests.csproj" />
+    <Project Path="tests/Anjal.Spam.Tests/Anjal.Spam.Tests.csproj" />
     <Project Path="tests/Anjal.Store.Tests/Anjal.Store.Tests.csproj" />
     <Project Path="tests/Anjal.Webmail.Tests/Anjal.Webmail.Tests.csproj" />
   </Folder>

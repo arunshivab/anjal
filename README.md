@@ -10,21 +10,25 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.10.0** - full SMTP server with bidirectional mail + DKIM signing +
+**v0.11.0** - full SMTP server with bidirectional mail + DKIM signing +
 SPF/DKIM/DMARC inbound verification + SMTP submission authentication on
 dual-port (25/587) with open-relay guard + multi-tenant mailbox storage +
-**webmail**. `Anjal.Webmail` is a separate host process (Blazor, static
-server rendering, no JavaScript framework) that shares the database and
-Maildir root with `Anjal.Server`: sign in with a mailbox address, read
-mail (HTML bodies sanitised and rendered in a sandboxed iframe with
-remote images blocked by default), download attachments, flag, trash,
-restore, delete, and compose plain-text mail with attachments that goes
-out through the existing outbound queue with a copy filed in Sent.
+webmail + **minimum-heuristics anti-spam**. `Anjal.Spam` scores every
+unauthenticated delivery (authentication results, sender/HELO/reverse-DNS
+sanity, header hygiene, a short phrase list, recipient count), writes
+the verdict into `X-Anjal-Spam-Score` / `X-Anjal-Spam-Reasons` headers,
+and the mailbox sink files mail at or above the tenant's threshold in
+**Junk** instead of INBOX. Per-tenant sender allow/block rules override
+the score; the webmail's *Not spam* / *Report spam* buttons create them.
+The MTA port also gets connection and message rate limits and classic
+greylisting. Nothing is rejected on the strength of a score unless
+`ANJAL_SPAM_ACTION=reject` is set deliberately - v1 is designed to be
+observed before it is trusted.
 
-Webmail is the second step of the arc
+Anti-spam is the third step of the arc
 (storage -> webmail -> anti-spam -> deployment hardening). Not yet in
-this release: IMAP/POP, hard quota enforcement, search, drafts, custom
-folders, HTML compose, self-service domain verification.
+this release: Bayesian/corpus filtering, DNSBL lookups, IMAP/POP, hard
+quota enforcement, search, HTML compose, self-service domain verification.
 
 ## Modules
 
@@ -39,6 +43,7 @@ folders, HTML compose, self-service domain verification.
 | `Anjal.Store` | Persistence: in-memory and PostgreSQL | Npgsql |
 | `Anjal.Mailbox` | Multi-tenant Maildir storage (tmp/new/cur, Maildir++ folders, flag renames, moves) and the mailbox delivery sink | none |
 | `Anjal.Webmail` | Webmail host process (Blazor static SSR on Kestrel, cookie auth, HTML sanitiser) | none (ASP.NET Core shared framework) |
+| `Anjal.Spam` | Spam scoring, sender rules, rate limiting and greylisting | none |
 | `Anjal.Api` | HTTP/JSON API on `HttpListener` + `System.Text.Json` | none |
 | `Anjal.Server` | Composition root host process | none |
 
@@ -144,6 +149,14 @@ the local Lipi instance). Add more users via the API as needed.
 | `ANJAL_SUBMISSION_DOMAINS` | - | Env-var user's allowed-from domains (comma-separated). Empty = admin authority. |
 | `ANJAL_AUTH_ALLOW_PLAINTEXT` | `false` | Allow AUTH on plaintext channels. ONLY for local dev. |
 | `ANJAL_MAILDIR_ROOT` | `/var/mail/anjal` (Unix) / `%LOCALAPPDATA%\Anjal\mail` (Windows) | Root directory for tenant Maildirs (shared by `Anjal.Server` and `Anjal.Webmail`) |
+| `ANJAL_SPAM_ACTION` | `junk` | `junk` files scored mail in Junk; `reject` refuses with 550 at or above `ANJAL_SPAM_REJECT_THRESHOLD` |
+| `ANJAL_SPAM_REJECT_THRESHOLD` | `5` | Score used by reject mode (Junk filing uses the per-tenant threshold) |
+| `ANJAL_SPAM_DNS` | `true` | `false` disables the DNS-based rules (sender MX, HELO resolution, reverse DNS) |
+| `ANJAL_RATE_CONN_PER_MIN` | `60` | Connections per client IP per minute, both ports (`0` disables) |
+| `ANJAL_RATE_MSG_PER_HOUR` | `200` | Unauthenticated messages per client IP per hour on the MTA port |
+| `ANJAL_RATE_USER_MSG_PER_HOUR` | `100` | Messages per authenticated user per hour on the submission port |
+| `ANJAL_GREYLIST` | `true` | `false` disables greylisting on the MTA port |
+| `ANJAL_GREYLIST_DELAY_SECONDS` | `300` | How long a first-seen (network, sender, recipient) triplet is deferred |
 
 ### Webmail environment variables (`Anjal.Webmail` process)
 
@@ -350,6 +363,36 @@ the configured token is empty (test-only mode).
     GET    /api/local-domains
     DELETE /api/local-domains/{domain}
 
+### Anti-spam (v0.11.0)
+
+Scoring runs only on unauthenticated (MTA-port) deliveries. Each rule
+that fires adds points; the sum is written to the message and compared
+with the tenant's `spamThreshold` (default 5, `0` disables Junk filing).
+
+| Rule | Points | Rule | Points |
+|---|---|---|---|
+| SPF fail / softfail / none | 3 / 2 / 1 | HELO malformed / unresolvable | 2 / 1 |
+| DKIM fail / none | 3 / 1 | No reverse DNS for client IP | 1 |
+| DMARC fail | 3 | From header domain != envelope domain | 1 |
+| Sender domain has no MX or A | 3 | Missing From / Message-ID / Date | 2 / 1 / 1 |
+| Subject all upper-case | 1 | Phrase list hits (capped) | 1 each, max 3 |
+| More than 20 recipients | 1 | | |
+
+Sender rules (`alice@example.com` or `@example.com`, matched against the
+envelope sender and the From header) override the score: *allow* forces
+INBOX, *block* forces Junk. Exact-address rules beat domain rules; block
+beats allow. The webmail's *Report spam* adds a block rule and *Not spam*
+adds an allow rule for the sender.
+
+Rate limits and greylisting are temporary refusals (4xx), not spam
+verdicts: legitimate mail servers retry. Loopback and private-network
+clients and authenticated sessions are never greylisted.
+
+    POST   /api/tenants                       { ..., spamThreshold }
+    GET    /api/tenants/{slug}/sender-rules
+    POST   /api/tenants/{slug}/sender-rules   { pattern, action: "allow" | "block" }
+    DELETE /api/tenants/{slug}/sender-rules/{pattern}
+
 ### Tenants, domains and mailboxes (v0.9.0)
 
 Tenant creation is admin-API-only. A domain registered here is treated as
@@ -378,7 +421,7 @@ consulted by the local-domain resolver alongside `local_domains` and
 
 Creating a mailbox lays out `<root>/<tenant-slug>/<local@domain>/` with
 `tmp/`, `new/`, `cur/` and the Maildir++ folders `.Sent`, `.Drafts`,
-`.Trash`. An empty password makes the mailbox receive-only; on update, an
+`.Junk`, `.Trash`. An empty password makes the mailbox receive-only; on update, an
 omitted password keeps the existing one. The default quota is 2 GiB and
 is soft in this release (exceeding it is logged, not enforced).
 

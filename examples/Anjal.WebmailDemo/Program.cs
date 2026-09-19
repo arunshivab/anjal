@@ -36,7 +36,8 @@ internal static class Program
 
         string root = Path.Combine(Path.GetTempPath(), "anjal-webmail-demo-" + Guid.NewGuid().ToString("N"));
         var maildir = new MaildirStore(root, "demo");
-        var sink = new MailboxSink(store, maildir);
+        // Score through the real filter (no DNS) so the Junk folder shows a real verdict.
+        var sink = new Anjal.Spam.SpamFilterSink(new Anjal.Spam.SpamScorer(), new MailboxSink(store, maildir));
 
         await DeliverAsync(sink,
             "From: Colleague <colleague@example.com>\r\nTo: arun@anjal.localhost\r\nSubject: Welcome to Anjal webmail\r\n" +
@@ -59,6 +60,11 @@ internal static class Program
             "--X\r\nContent-Type: text/csv; name=\"report.csv\"\r\nContent-Disposition: attachment; filename=\"report.csv\"\r\n\r\n" +
             "case,result\r\n18472,normal\r\n--X--\r\n");
 
+        await DeliverAsync(sink,
+            "Subject: YOU HAVE WON THE LOTTERY\r\nContent-Type: text/plain\r\n\r\n" +
+            "Dear friend, act now! Click here for a guaranteed risk-free wire transfer of one million dollars.\r\n",
+            envelopeFrom: "prize@lottery-winner.test");
+
         string port = Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_PORT") ?? "8080";
         WebApplication app = Anjal.Webmail.Program.CreateApp(args, store, maildir, "anjal.localhost", $"http://127.0.0.1:{port}");
 
@@ -72,11 +78,11 @@ internal static class Program
         return 0;
     }
 
-    private static async Task DeliverAsync(MailboxSink sink, string raw)
+    private static async Task DeliverAsync(Anjal.Spam.SpamFilterSink sink, string raw, string envelopeFrom = "demo@example.com")
     {
         DeliveryResult r = await sink.DeliverAsync(new DeliveryContext
         {
-            EnvelopeFrom = "demo@example.com",
+            EnvelopeFrom = envelopeFrom,
             EnvelopeTo = Recipient,
             RawBytes = System.Text.Encoding.UTF8.GetBytes(raw),
         });

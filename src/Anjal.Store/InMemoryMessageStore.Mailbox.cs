@@ -11,6 +11,7 @@ public sealed partial class InMemoryMessageStore
     private readonly List<MailboxRow> mailboxes = new();
     private readonly List<FolderRow> folders = new();
     private readonly List<MessageRow> mailboxMessages = new();
+    private readonly List<SenderRuleRow> senderRules = new();
 
     /// <summary>The mailbox message rows currently stored. Provided for inspection in tests.</summary>
     public IReadOnlyList<MessageRow> MailboxMessages
@@ -37,6 +38,7 @@ public sealed partial class InMemoryMessageStore
             {
                 existing.DisplayName = tenant.DisplayName;
                 existing.Enabled = tenant.Enabled;
+                existing.SpamThreshold = tenant.SpamThreshold;
                 return Task.FromResult(Clone(existing));
             }
             var row = new TenantRow
@@ -45,6 +47,7 @@ public sealed partial class InMemoryMessageStore
                 Slug = slug,
                 DisplayName = tenant.DisplayName,
                 Enabled = tenant.Enabled,
+                SpamThreshold = tenant.SpamThreshold,
                 CreatedAt = System.DateTimeOffset.UtcNow,
             };
             this.tenants.Add(row);
@@ -107,6 +110,7 @@ public sealed partial class InMemoryMessageStore
             }
             this.mailboxes.RemoveAll(m => m.TenantId == found.Id);
             this.tenantDomains.RemoveAll(d => d.TenantId == found.Id);
+            this.senderRules.RemoveAll(r => r.TenantId == found.Id);
             this.tenants.Remove(found);
             return Task.FromResult(true);
         }
@@ -469,6 +473,72 @@ public sealed partial class InMemoryMessageStore
         }
     }
 
+    /// <inheritdoc/>
+    public Task<SenderRuleRow> UpsertSenderRuleAsync(SenderRuleRow rule, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(rule);
+        lock (this.gate)
+        {
+            string pattern = rule.Pattern.Trim().ToLowerInvariant();
+            SenderRuleRow? existing = this.senderRules.Find(r =>
+                r.TenantId == rule.TenantId && string.Equals(r.Pattern, pattern, System.StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                existing.Action = rule.Action;
+                return Task.FromResult(Clone(existing));
+            }
+            var row = new SenderRuleRow
+            {
+                Id = System.Guid.NewGuid(),
+                TenantId = rule.TenantId,
+                Pattern = pattern,
+                Action = rule.Action,
+                CreatedAt = System.DateTimeOffset.UtcNow,
+            };
+            this.senderRules.Add(row);
+            return Task.FromResult(Clone(row));
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SenderRuleRow>> ListSenderRulesAsync(System.Guid tenantId, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            var snapshot = new List<SenderRuleRow>();
+            foreach (SenderRuleRow r in this.senderRules)
+            {
+                if (r.TenantId == tenantId)
+                {
+                    snapshot.Add(Clone(r));
+                }
+            }
+            snapshot.Sort((a, b) => string.CompareOrdinal(a.Pattern, b.Pattern));
+            return Task.FromResult<IReadOnlyList<SenderRuleRow>>(snapshot);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteSenderRuleAsync(System.Guid tenantId, string pattern, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(pattern);
+        lock (this.gate)
+        {
+            int removed = this.senderRules.RemoveAll(r =>
+                r.TenantId == tenantId && string.Equals(r.Pattern, pattern.Trim(), System.StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(removed > 0);
+        }
+    }
+
+    private static SenderRuleRow Clone(SenderRuleRow r) => new()
+    {
+        Id = r.Id,
+        TenantId = r.TenantId,
+        Pattern = r.Pattern,
+        Action = r.Action,
+        CreatedAt = r.CreatedAt,
+    };
+
     private void RemoveMailboxCascade(System.Guid mailboxId)
     {
         this.mailboxMessages.RemoveAll(m => m.MailboxId == mailboxId);
@@ -492,6 +562,7 @@ public sealed partial class InMemoryMessageStore
         Slug = t.Slug,
         DisplayName = t.DisplayName,
         Enabled = t.Enabled,
+        SpamThreshold = t.SpamThreshold,
         CreatedAt = t.CreatedAt,
     };
 
@@ -543,6 +614,7 @@ public sealed partial class InMemoryMessageStore
         Seen = m.Seen,
         Flagged = m.Flagged,
         Answered = m.Answered,
+        SpamScore = m.SpamScore,
         ReceivedAt = m.ReceivedAt,
     };
 }

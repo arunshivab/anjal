@@ -8,9 +8,19 @@ namespace Anjal.Mailbox;
 /// the mailbox's INBOX Maildir, and a metadata row is indexed in the
 /// store. Recipients with no matching mailbox are skipped so that another
 /// sink (e.g. the webhook router) can claim them.
+/// <para>
+/// Folder choice: a message whose <c>X-Anjal-Spam-Score</c> header (written
+/// upstream by <c>Anjal.Spam.SpamFilterSink</c>) is at or above the
+/// tenant's <see cref="Anjal.Store.TenantRow.SpamThreshold"/> is filed in
+/// <see cref="JunkFolder"/> instead of INBOX. A tenant sender rule
+/// overrides the score: allow forces INBOX, block forces Junk.
+/// </para>
 /// </summary>
 public sealed class MailboxSink : Anjal.Smtp.IMessageSink
 {
+    /// <summary>Name of the folder spam is filed in.</summary>
+    public const string JunkFolder = "Junk";
+
     private readonly Anjal.Store.IMailboxStore store;
     private readonly IMaildirStore maildir;
     private readonly System.Action<string>? log;
@@ -97,6 +107,27 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         return (tenant, mailbox);
     }
 
+    /// <summary>
+    /// Decide the destination folder: a sender rule wins outright; otherwise
+    /// the score is compared with the tenant threshold (a threshold of 0 or
+    /// less disables junk filing for the tenant).
+    /// </summary>
+    /// <param name="spamScore">Score from the <c>X-Anjal-Spam-Score</c> header, 0 if none.</param>
+    /// <param name="threshold">Tenant threshold.</param>
+    /// <param name="rule">Matching sender rule, if any.</param>
+    public static string ChooseFolder(int spamScore, int threshold, Anjal.Store.SenderRuleAction? rule)
+    {
+        if (rule == Anjal.Store.SenderRuleAction.Allow)
+        {
+            return Anjal.Store.FolderRow.Inbox;
+        }
+        if (rule == Anjal.Store.SenderRuleAction.Block)
+        {
+            return JunkFolder;
+        }
+        return threshold > 0 && spamScore >= threshold ? JunkFolder : Anjal.Store.FolderRow.Inbox;
+    }
+
     /// <inheritdoc/>
     public async System.Threading.Tasks.Task<Anjal.Smtp.DeliveryResult> DeliverAsync(
         Anjal.Smtp.DeliveryContext ctx,
@@ -126,6 +157,10 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         }
 #pragma warning restore CA1031
 
+        int spamScore = Anjal.Spam.SpamHeaders.ScoreOf(parsed);
+        string fromHeaderAddress = parsed is null ? string.Empty : Anjal.Spam.SpamScorer.FirstAddress(parsed.Headers.Get("From") ?? string.Empty);
+        var rulesByTenant = new System.Collections.Generic.Dictionary<System.Guid, System.Collections.Generic.IReadOnlyList<Anjal.Store.SenderRuleRow>>();
+
         int delivered = 0;
         bool transient = false;
         var seenMailboxes = new System.Collections.Generic.HashSet<System.Guid>();
@@ -150,15 +185,22 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
 
             try
             {
-                Anjal.Store.FolderRow inbox = await this.store.EnsureFolderAsync(mailbox.Id, Anjal.Store.FolderRow.Inbox, ct).ConfigureAwait(false);
+                if (!rulesByTenant.TryGetValue(tenant.Id, out System.Collections.Generic.IReadOnlyList<Anjal.Store.SenderRuleRow>? rules))
+                {
+                    rules = await this.store.ListSenderRulesAsync(tenant.Id, ct).ConfigureAwait(false);
+                    rulesByTenant[tenant.Id] = rules;
+                }
+                string folderName = ChooseFolder(spamScore, tenant.SpamThreshold, Anjal.Spam.SenderRules.Evaluate(rules, ctx.EnvelopeFrom, fromHeaderAddress));
+
+                Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
                 MaildirWriteResult written = await this.maildir
-                    .WriteAsync(tenant.Slug, mailbox.Address, inbox.Name, ctx.RawBytes, ct)
+                    .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, ctx.RawBytes, ct)
                     .ConfigureAwait(false);
 
                 await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
                 {
                     MailboxId = mailbox.Id,
-                    FolderId = inbox.Id,
+                    FolderId = folder.Id,
                     MaildirFile = written.RelativePath,
                     EnvelopeFrom = ctx.EnvelopeFrom,
                     MessageId = parsed?.MessageId ?? string.Empty,
@@ -167,6 +209,7 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     Subject = parsed?.Subject ?? string.Empty,
                     DateHeader = parsed?.Date ?? string.Empty,
                     SizeBytes = written.SizeBytes,
+                    SpamScore = spamScore,
                 }, ct).ConfigureAwait(false);
 
                 long? used = await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
@@ -176,7 +219,7 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     this.log?.Invoke($"Mailbox: {mailbox.Address} over quota ({u} of {mailbox.QuotaBytes} bytes)");
                 }
 
-                this.log?.Invoke($"Delivered {rcpt} -> {tenant.Slug}/{mailbox.Address}/{written.RelativePath} ({written.SizeBytes} bytes)");
+                this.log?.Invoke($"Delivered {rcpt} -> {tenant.Slug}/{mailbox.Address}/{Anjal.Store.FolderRow.MaildirNameFor(folder.Name)}/{written.RelativePath} ({written.SizeBytes} bytes, spam score {spamScore})");
                 delivered++;
             }
             catch (System.IO.IOException ex)

@@ -146,6 +146,62 @@ public class MailboxApiTests : System.IDisposable
         Assert.False(Endpoints.TenantsHandler.IsValidSlug(new string('a', 64)));
     }
 
+    [Fact]
+    public async System.Threading.Tasks.Task Tenants_SpamThreshold_DefaultKeptOnUpdate_AndSettable()
+    {
+        TenantResponse created = await this.CreateTenantAsync();
+        Assert.Equal(TenantRow.DefaultSpamThreshold, created.SpamThreshold);
+
+        HttpResponseMessage set = await this.client.PostAsJsonAsync("api/tenants", new TenantRequest { Slug = "imagiqa", DisplayName = "x", SpamThreshold = 8 }, ApiJson.Options);
+        Assert.Equal(8, (await set.Content.ReadFromJsonAsync<TenantResponse>(ApiJson.Options))!.SpamThreshold);
+
+        HttpResponseMessage keep = await this.client.PostAsJsonAsync("api/tenants", new TenantRequest { Slug = "imagiqa", DisplayName = "y" }, ApiJson.Options);
+        Assert.Equal(8, (await keep.Content.ReadFromJsonAsync<TenantResponse>(ApiJson.Options))!.SpamThreshold);
+
+        HttpResponseMessage bad = await this.client.PostAsJsonAsync("api/tenants", new TenantRequest { Slug = "imagiqa", SpamThreshold = -1 }, ApiJson.Options);
+        Assert.Equal(HttpStatusCode.BadRequest, bad.StatusCode);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task SenderRules_Post_List_Delete_Validation()
+    {
+        await this.CreateTenantAsync();
+
+        HttpResponseMessage post = await this.client.PostAsJsonAsync("api/tenants/imagiqa/sender-rules", new SenderRuleRequest { Pattern = "@Spammer.Test", Action = "block" }, ApiJson.Options);
+        Assert.Equal(HttpStatusCode.OK, post.StatusCode);
+        SenderRuleResponse rule = (await post.Content.ReadFromJsonAsync<SenderRuleResponse>(ApiJson.Options))!;
+        Assert.Equal("@spammer.test", rule.Pattern);
+        Assert.Equal("block", rule.Action);
+
+        await this.client.PostAsJsonAsync("api/tenants/imagiqa/sender-rules", new SenderRuleRequest { Pattern = "alice@example.com", Action = "allow" }, ApiJson.Options);
+        var list = await this.client.GetFromJsonAsync<System.Collections.Generic.List<SenderRuleResponse>>("api/tenants/imagiqa/sender-rules", ApiJson.Options);
+        Assert.Equal(2, list!.Count);
+
+        HttpResponseMessage badPattern = await this.client.PostAsJsonAsync("api/tenants/imagiqa/sender-rules", new SenderRuleRequest { Pattern = "no-at", Action = "block" }, ApiJson.Options);
+        Assert.Equal(HttpStatusCode.BadRequest, badPattern.StatusCode);
+        HttpResponseMessage badAction = await this.client.PostAsJsonAsync("api/tenants/imagiqa/sender-rules", new SenderRuleRequest { Pattern = "@x.test", Action = "maybe" }, ApiJson.Options);
+        Assert.Equal(HttpStatusCode.BadRequest, badAction.StatusCode);
+        HttpResponseMessage noTenant = await this.client.GetAsync("api/tenants/ghost/sender-rules");
+        Assert.Equal(HttpStatusCode.NotFound, noTenant.StatusCode);
+
+        HttpResponseMessage del = await this.client.DeleteAsync("api/tenants/imagiqa/sender-rules/" + System.Uri.EscapeDataString("@spammer.test"));
+        Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+        HttpResponseMessage del2 = await this.client.DeleteAsync("api/tenants/imagiqa/sender-rules/" + System.Uri.EscapeDataString("@spammer.test"));
+        Assert.Equal(HttpStatusCode.NotFound, del2.StatusCode);
+    }
+
+    [Fact]
+    public void IsValidSenderPattern_Rules()
+    {
+        Assert.True(Endpoints.TenantsHandler.IsValidSenderPattern("@example.com"));
+        Assert.True(Endpoints.TenantsHandler.IsValidSenderPattern("alice@example.com"));
+        Assert.False(Endpoints.TenantsHandler.IsValidSenderPattern("@"));
+        Assert.False(Endpoints.TenantsHandler.IsValidSenderPattern("example.com"));
+        Assert.False(Endpoints.TenantsHandler.IsValidSenderPattern("a@b@c.d"));
+        Assert.False(Endpoints.TenantsHandler.IsValidSenderPattern("a@nodot"));
+        Assert.False(Endpoints.TenantsHandler.IsValidSenderPattern("a b@c.d"));
+    }
+
     // -------- Tenant domains --------
 
     [Fact]
@@ -203,7 +259,7 @@ public class MailboxApiTests : System.IDisposable
         Assert.DoesNotContain("password", raw, System.StringComparison.OrdinalIgnoreCase);
 
         var folders = await this.client.GetFromJsonAsync<System.Collections.Generic.List<FolderResponse>>("api/mailboxes/arun@anjal.co.in/folders", ApiJson.Options);
-        Assert.Equal(4, folders!.Count);
+        Assert.Equal(5, folders!.Count);
         Assert.Equal("INBOX", folders[0].Name);
         Assert.True(System.IO.Directory.Exists(System.IO.Path.Combine(this.maildir.FolderPath("imagiqa", "arun@anjal.co.in", "Sent"), "cur")));
     }

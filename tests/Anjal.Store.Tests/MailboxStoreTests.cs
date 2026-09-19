@@ -278,6 +278,48 @@ public class MailboxStoreTests
     }
 
     [Fact]
+    public async System.Threading.Tasks.Task Tenant_SpamThreshold_DefaultsAndUpdates()
+    {
+        var store = new InMemoryMessageStore();
+        var t = await store.UpsertTenantAsync(new TenantRow { Slug = "t" });
+        Assert.Equal(TenantRow.DefaultSpamThreshold, t.SpamThreshold);
+        var t2 = await store.UpsertTenantAsync(new TenantRow { Slug = "t", SpamThreshold = 9 });
+        Assert.Equal(9, t2.SpamThreshold);
+        Assert.Equal(9, (await store.GetTenantAsync("t"))!.SpamThreshold);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task SenderRules_Upsert_List_Delete_CascadeWithTenant()
+    {
+        (InMemoryMessageStore store, TenantRow tenant, _) = await SeedAsync();
+        var a = await store.UpsertSenderRuleAsync(new SenderRuleRow { TenantId = tenant.Id, Pattern = "@Spammer.TEST", Action = SenderRuleAction.Block });
+        Assert.Equal("@spammer.test", a.Pattern);
+        var b = await store.UpsertSenderRuleAsync(new SenderRuleRow { TenantId = tenant.Id, Pattern = "@spammer.test", Action = SenderRuleAction.Allow });
+        Assert.Equal(a.Id, b.Id);
+        Assert.Equal(SenderRuleAction.Allow, b.Action);
+        await store.UpsertSenderRuleAsync(new SenderRuleRow { TenantId = tenant.Id, Pattern = "alice@example.com", Action = SenderRuleAction.Block });
+
+        var list = await store.ListSenderRulesAsync(tenant.Id);
+        Assert.Equal(2, list.Count);
+        Assert.Equal("@spammer.test", list[0].Pattern);
+        Assert.Empty(await store.ListSenderRulesAsync(System.Guid.NewGuid()));
+
+        Assert.True(await store.DeleteSenderRuleAsync(tenant.Id, "ALICE@example.com"));
+        Assert.False(await store.DeleteSenderRuleAsync(tenant.Id, "alice@example.com"));
+        Assert.True(await store.DeleteTenantAsync(tenant.Slug));
+        Assert.Empty(await store.ListSenderRulesAsync(tenant.Id));
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Message_SpamScore_RoundTrips()
+    {
+        (InMemoryMessageStore store, _, MailboxRow mailbox) = await SeedAsync();
+        FolderRow inbox = await store.EnsureFolderAsync(mailbox.Id, FolderRow.Inbox);
+        var m = await store.SaveMessageAsync(new MessageRow { MailboxId = mailbox.Id, FolderId = inbox.Id, MaildirFile = "new/1", SpamScore = 6 });
+        Assert.Equal(6, (await store.GetMessageByIdAsync(m.Id))!.SpamScore);
+    }
+
+    [Fact]
     public async System.Threading.Tasks.Task Message_Delete_RemovesRow()
     {
         (InMemoryMessageStore store, _, MailboxRow mailbox) = await SeedAsync();

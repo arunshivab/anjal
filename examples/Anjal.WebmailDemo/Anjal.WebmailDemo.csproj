@@ -16,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Anjal.Mailbox\Anjal.Mailbox.csproj" />
     <ProjectReference Include="..\..\src\Anjal.Smtp\Anjal.Smtp.csproj" />
+    <ProjectReference Include="..\..\src\Anjal.Spam\Anjal.Spam.csproj" />
     <ProjectReference Include="..\..\src\Anjal.Store\Anjal.Store.csproj" />
     <ProjectReference Include="..\..\src\Anjal.Webmail\Anjal.Webmail.csproj" />
   </ItemGroup>
