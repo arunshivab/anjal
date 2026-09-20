@@ -10,7 +10,31 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.13.0** - everything below plus **deployment hardening**: hard
+**v0.15.0** - everything below plus **categories and the dashboard**.
+Categories exist at two levels: a tenant's defaults, shared by every
+mailbox and the only ones an institution can report across, and a
+mailbox's own additions, private to it. Eight colour slots are a
+per-mailbox budget - the tenant's take theirs first, a mailbox's own take
+what remains, and any beyond eight work by name alone. Assigning a
+category can remember the sender, so later mail from them is filed at
+delivery. The dashboard reports one mailbox over a period: delivered with
+the Junk count beside it, sent and received per day, received by folder
+*and* by category, top senders, attachments - every figure repeated as a
+table so nothing is locked behind a colour. `deploy/DEPLOY.md` now covers
+E2E's two firewalls (Security Group and firewalld) instead of ufw.
+
+Previously: **v0.14.0** - the **designed webmail**: the
+Anjal design system (four first-class themes, LiPi Sans covering Latin
+and nine Indic scripts, LiPicons, the seal), and the features a mailbox
+is actually lived in through — drafts with autosave, reply / reply all /
+forward with plain-text quoting, Bcc, server-side search across one
+folder or all, per-mailbox settings (display name, theme, password),
+bulk actions and mark-all-read, unread counts, and address suggestions
+learned from Sent. Six small JavaScript enhancements sit on top of pages
+that work fully without them. A disabled tenant now defers inbound mail
+with `450` instead of rejecting it, so a suspension bounces nothing.
+
+Previously: **v0.13.0** - everything below plus **deployment hardening**: hard
 mailbox quota (`452 4.2.2 Mailbox full` at RCPT, compose disabled in
 the webmail when full), an unauthenticated `/healthz` (store, Maildir,
 certificate) and an authenticated Prometheus `/metrics`, and a
@@ -66,6 +90,13 @@ quota enforcement, search, HTML compose, self-service domain verification.
 | `Anjal.Webmail` | Webmail host process (Blazor static SSR on Kestrel, cookie auth, HTML sanitiser) | none (ASP.NET Core shared framework) |
 | `Anjal.Spam` | Spam scoring, sender rules, rate limiting and greylisting | none |
 | `Anjal.Acme` | RFC 8555 client: account, orders, HTTP-01, CSR, PEM store, renewal scheduler, hot-reload watcher | none |
+
+The webmail carries the design system as embedded assets - `tokens.css`,
+`app.css`, `app.js`, the LiPi Sans woff2 files and the logos are compiled
+into the assembly and served from the process, so there is no `wwwroot`
+to deploy and no third-party request from any page. Icons come from
+`LiPicons.Blazor` (imagiQa's own package, restored from `localpackages/`);
+it is the only package reference outside the ASP.NET shared framework.
 | `Anjal.Api` | HTTP/JSON API on `HttpListener` + `System.Text.Json` | none |
 | `Anjal.Server` | Composition root host process | none |
 
@@ -203,6 +234,33 @@ Counters: `anjal_smtp_{mta,submission}_connections_total`,
 `anjal_spam_{scored,rejected}_total`. Gauges: `anjal_outbound_pending`,
 `anjal_outbound_sending`, `anjal_greylist_entries`, `anjal_uptime_seconds`.
 
+### Categories
+
+A category is a name and a colour slot, always shown together. Tenant
+defaults are seeded once per tenant (Clinical, Referrals, Diagnostics,
+Billing, Vendors, Circulars - six, so every mailbox keeps two coloured
+slots for its own). A mailbox adds its own in Settings; slots are stored,
+never derived from the name and never recomputed when a category is
+deleted, because a category that changes colour repaints every chart it
+has appeared in. Past the eighth slot a category still works and is told
+apart by name.
+
+Assign one from the message page or the list's bulk bar. Ticking "also
+file future mail from this sender here" writes a rule that applies at
+delivery; an exact address beats a domain rule. Deleting a category
+leaves its messages in place, simply uncategorised.
+
+### Dashboard
+
+`/dashboard` reports one mailbox over 7, 30, 90 or 365 days: messages
+delivered as the single hero figure with the Junk count directly beneath
+it (a dashboard that reports only what reached the inbox hides the number
+you want when mail seems to have gone missing), sent and received per day
+on one shared scale, received by folder and by category, the five people
+who wrote most, and attachment counts. Days with no mail are drawn as
+zero rather than closed up. No percentage deltas, no gauges, no second
+axis. Every number is repeated in a plain table.
+
 ### Quota
 
 Each mailbox has `quotaBytes` (default 2 GiB, `0` = unlimited). At or
@@ -256,6 +314,21 @@ confirm a second issuance -> unset staging, delete the store directory
 (the staging account and certificate are not usable in production),
 restart -> confirm the production certificate -> force one more renewal.
 Only then point real clients at it.
+
+### Webmail
+
+Routes: `/sign-in`, `/folder/{name}`, `/message/{id}`, `/compose`,
+`/draft/{id}`, `/search`, `/settings`. Every action is a link or a form
+POST that redirects, so a refresh never repeats it and every page is
+linkable. Six enhancements attach on top when JavaScript is present -
+draft autosave, address suggestions, connectivity light, mark-all-read
+without a reload, keyboard shortcuts (`j` `k` `Enter` `r` `#`), and a
+client-side address check - and each has a working fallback; the
+connectivity light and the shortcut hint are simply not rendered
+without the script rather than claiming something untrue.
+
+Themes (`paper`, `ink`, `postcard`, `midnight`) are stored per mailbox,
+not per browser, so a user's choice follows them to any machine.
 
 ### Webmail environment variables (`Anjal.Webmail` process)
 

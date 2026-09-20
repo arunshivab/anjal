@@ -1,0 +1,115 @@
+@page "/search"
+@attribute [Authorize]
+@inject MailboxService Mail
+
+<PageTitle>Search — Anjal</PageTitle>
+
+<div class="qbar">
+    <span class="q">@(string.IsNullOrWhiteSpace(Q) ? "All messages" : "\u201c" + Q + "\u201d")</span>
+    <span class="cnt">@total result@(total == 1 ? "" : "s") in @(Scope == "all" ? "all folders" : SearchFolder)</span>
+    <span class="sp">
+        <a class="btn btn-q btn-sm" href="/folder/@Uri.EscapeDataString(SearchFolder)">Clear</a>
+    </span>
+</div>
+
+@if (items is null || items.Count == 0)
+{
+    <p class="empty">Nothing matched.</p>
+}
+else
+{
+    <table class="ml">
+        <thead>
+            <tr>
+                <th class="c-fld">Folder</th>
+                <th class="c-from">From</th>
+                <th>Subject</th>
+                <th class="c-time">Received</th>
+                <th class="c-size">Size</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (MessageRow m in items)
+            {
+                <tr class="@(m.Seen ? "" : "unread")">
+                    <td class="c-fld"><span class="mono">@FolderName(m)</span></td>
+                    <td class="c-from"><span class="from">@Sender(m)</span></td>
+                    <td class="c-subject">
+                        <span class="subj"><a href="/message/@m.Id">@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a></span>
+                    </td>
+                    <td class="c-time num">@m.ReceivedAt.ToLocalTime().ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td class="c-size num">@MainLayout.Size(m.SizeBytes)</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <div class="pg">
+        @if (pageIndex > 0)
+        {
+            <a href="@PageLink(pageIndex - 1)">&laquo; Newer</a>
+        }
+        @if ((pageIndex + 1) * MailboxService.PageSize < total)
+        {
+            <a href="@PageLink(pageIndex + 1)">Older &raquo;</a>
+        }
+        <span class="of">Page @(pageIndex + 1) of @Math.Max(1, (total + MailboxService.PageSize - 1) / MailboxService.PageSize)</span>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "scope")] private string? Scope { get; set; }
+    [SupplyParameterFromQuery(Name = "from")] private string? From { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] private int? PageQuery { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private IReadOnlyList<MessageRow>? items;
+    private IReadOnlyDictionary<Guid, string> folderNames = new Dictionary<Guid, string>();
+    private long total;
+    private int pageIndex;
+
+    /// <summary>The folder searched: the chosen scope, else where the search started.</summary>
+    private string SearchFolder =>
+        !string.IsNullOrWhiteSpace(Scope) && Scope != "all" ? Scope
+        : string.IsNullOrWhiteSpace(From) ? FolderRow.Inbox : From;
+
+    private string PageLink(int p) =>
+        $"/search?q={Uri.EscapeDataString(Q ?? string.Empty)}&scope={Uri.EscapeDataString(Scope ?? "folder")}&from={Uri.EscapeDataString(SearchFolder)}&page={p}";
+
+    private string FolderName(MessageRow m) => folderNames.TryGetValue(m.FolderId, out string? n) ? n : "—";
+
+    private static string Sender(MessageRow m)
+    {
+        string decoded = Anjal.Mime.EncodedWordDecoder.Decode(m.FromHeader);
+        var parsed = Anjal.Mime.AddressParser.Parse(decoded);
+        if (parsed.Count > 0 && parsed[0].DisplayName.Length > 0)
+        {
+            return parsed[0].DisplayName;
+        }
+        return string.IsNullOrWhiteSpace(decoded) ? m.EnvelopeFrom : decoded;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        items = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        await Mail.ListFoldersAsync(mailboxId.Value);
+        folderNames = await Mail.FolderNamesAsync(mailboxId.Value);
+        Guid? folderId = null;
+        if (Scope != "all")
+        {
+            FolderRow? folder = await Mail.GetFolderAsync(mailboxId.Value, SearchFolder);
+            folderId = folder?.Id;
+        }
+        pageIndex = Math.Max(0, PageQuery ?? 0);
+        (items, total) = await Mail.SearchAsync(mailboxId.Value, folderId, Q ?? string.Empty, pageIndex);
+    }
+}

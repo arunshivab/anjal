@@ -148,6 +148,60 @@ public interface IMailboxStore
     /// </summary>
     System.Threading.Tasks.Task<bool> DeleteMessageAsync(System.Guid id, System.Threading.CancellationToken ct = default);
 
+    /// <summary>Count unread (not seen) messages in a folder, or the whole mailbox when <paramref name="folderId"/> is null.</summary>
+    System.Threading.Tasks.Task<long> CountUnreadAsync(System.Guid mailboxId, System.Guid? folderId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Case-insensitive substring search over subject, From, To and envelope
+    /// sender, newest first. <paramref name="folderId"/> null searches every folder.
+    /// </summary>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MessageRow>> SearchMessagesAsync(System.Guid mailboxId, System.Guid? folderId, string query, int limit, int offset, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Count of <see cref="SearchMessagesAsync"/> matches.</summary>
+    System.Threading.Tasks.Task<long> CountSearchAsync(System.Guid mailboxId, System.Guid? folderId, string query, System.Threading.CancellationToken ct = default);
+
+    // -------- Categories --------
+
+    /// <summary>
+    /// Create or rename a category. A row with <see cref="CategoryRow.MailboxId"/>
+    /// null is a tenant default; otherwise it belongs to that mailbox.
+    /// The slot is assigned by the caller and never recomputed.
+    /// </summary>
+    System.Threading.Tasks.Task<CategoryRow> UpsertCategoryAsync(CategoryRow category, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Tenant defaults plus one mailbox's own, shared first then by slot.</summary>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<CategoryRow>> ListCategoriesAsync(System.Guid tenantId, System.Guid? mailboxId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>One category by id, or null.</summary>
+    System.Threading.Tasks.Task<CategoryRow?> GetCategoryAsync(System.Guid id, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Delete a category and clear it from any message carrying it.</summary>
+    System.Threading.Tasks.Task<bool> DeleteCategoryAsync(System.Guid id, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Put a category on a message, or clear it with null.</summary>
+    System.Threading.Tasks.Task<MessageRow?> SetMessageCategoryAsync(System.Guid mailboxId, System.Guid messageId, System.Guid? categoryId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Create or replace a sender-to-category rule for a mailbox.</summary>
+    System.Threading.Tasks.Task<CategoryRuleRow> UpsertCategoryRuleAsync(CategoryRuleRow rule, System.Threading.CancellationToken ct = default);
+
+    /// <summary>A mailbox's sender-to-category rules.</summary>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<CategoryRuleRow>> ListCategoryRulesAsync(System.Guid mailboxId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Remove a sender-to-category rule.</summary>
+    System.Threading.Tasks.Task<bool> DeleteCategoryRuleAsync(System.Guid id, System.Threading.CancellationToken ct = default);
+
+    // -------- Dashboard aggregates --------
+
+    /// <summary>
+    /// Everything the dashboard shows for one mailbox over a period,
+    /// computed in the store rather than by reading every message.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="periodStart">Start, inclusive.</param>
+    /// <param name="periodEnd">End, exclusive.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, System.Threading.CancellationToken ct = default);
+
     // -------- Sender rules --------
 
     /// <summary>

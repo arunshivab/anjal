@@ -128,6 +128,7 @@
 - [Anjal.Mailbox.MaildirWriteResult](Anjal.Mailbox/MaildirWriteResult.md)
 - [Anjal.Mailbox.ModuleInfo](Anjal.Mailbox/ModuleInfo.md)
 - [Anjal.Mailbox.QuotaPolicy](Anjal.Mailbox/QuotaPolicy.md)
+- [Anjal.Mailbox.TenantStatePolicy](Anjal.Mailbox/TenantStatePolicy.md)
 
 ## Anjal.Mime
 
@@ -229,6 +230,9 @@
 
 ## Anjal.Store
 
+- [Anjal.Store.CategoryRow](Anjal.Store/CategoryRow.md)
+- [Anjal.Store.CategoryRuleRow](Anjal.Store/CategoryRuleRow.md)
+- [Anjal.Store.DailyCount](Anjal.Store/DailyCount.md)
 - [Anjal.Store.DkimKeyRow](Anjal.Store/DkimKeyRow.md)
 - [Anjal.Store.FolderRow](Anjal.Store/FolderRow.md)
 - [Anjal.Store.IMailboxStore](Anjal.Store/IMailboxStore.md)
@@ -236,9 +240,11 @@
 - [Anjal.Store.InMemoryMessageStore](Anjal.Store/InMemoryMessageStore.md)
 - [Anjal.Store.InboundMessage](Anjal.Store/InboundMessage.md)
 - [Anjal.Store.LocalDomainRow](Anjal.Store/LocalDomainRow.md)
+- [Anjal.Store.MailboxActivity](Anjal.Store/MailboxActivity.md)
 - [Anjal.Store.MailboxRow](Anjal.Store/MailboxRow.md)
 - [Anjal.Store.MessageRow](Anjal.Store/MessageRow.md)
 - [Anjal.Store.ModuleInfo](Anjal.Store/ModuleInfo.md)
+- [Anjal.Store.NamedCount](Anjal.Store/NamedCount.md)
 - [Anjal.Store.OutboundMessage](Anjal.Store/OutboundMessage.md)
 - [Anjal.Store.OutboundStatus](Anjal.Store/OutboundStatus.md)
 - [Anjal.Store.OutboundTlsPolicy](Anjal.Store/OutboundTlsPolicy.md)

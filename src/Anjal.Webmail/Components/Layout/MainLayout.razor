@@ -5,37 +5,71 @@
 <AuthorizeView>
     <Authorized>
         <div class="shell">
-            <header class="topbar">
-                <a class="brand" href="/">Anjal</a>
-                <span class="who">@context.User.Identity?.Name</span>
-                <a class="btn" href="/compose">Compose</a>
-                <form method="post" action="/auth/logout" class="inline">
-                    <AntiforgeryToken />
-                    <button type="submit" class="btn subtle">Sign out</button>
-                </form>
-            </header>
-            <div class="main">
-                <nav class="sidebar">
-                    @if (mailbox is not null)
-                    {
-                        <div class="usage">
-                            <div class="bar"><span style="width:@UsagePercent%"></span></div>
-                            <div class="muted small">@Size(mailbox.UsedBytes) of @(mailbox.QuotaBytes > 0 ? Size(mailbox.QuotaBytes) : "unlimited")@(Anjal.Mailbox.QuotaPolicy.IsFull(mailbox) ? " - full" : "")</div>
-                        </div>
-                    }
-                    @if (folders is not null)
-                    {
-                        <ul>
+            <a class="skip" href="#main">Skip to content</a>
+            <header class="top">
+                <a class="wm" href="/folder/INBOX" aria-label="Anjal, go to inbox">
+                    <img src="/logos/anjal-mark.svg" alt="" aria-hidden="true" />
+                    <span>anjal</span>
+                </a>
+                <form class="search" method="get" action="/search" role="search">
+                    <span class="sfield">
+                        <LipiIcon Name="search" Size="15" Class="si" />
+                        <input class="sbox" type="search" name="q" value="@SearchQuery" placeholder="Search mail" aria-label="Search mail" />
+                    </span>
+                    <select class="scope" name="scope" aria-label="Where to search">
+                        @if (folders is not null)
+                        {
                             @foreach (FolderView f in folders)
                             {
-                                <li class="@(IsCurrent(f.Name) ? "current" : "")">
-                                    <a href="/folder/@Uri.EscapeDataString(f.Name)">@f.Name <span class="count">@f.Count</span></a>
-                                </li>
+                                <option value="@f.Name" selected="@(SearchScopeValue == f.Name)">@f.Name</option>
                             }
-                        </ul>
+                        }
+                        <option value="all" selected="@(SearchScopeValue == "all")">All folders</option>
+                    </select>
+                    <input type="hidden" name="from" value="@CurrentFolder" />
+                </form>
+                <span class="sp">
+                    <span class="lite" data-connectivity></span>
+                    <span class="who" title="Signed in as @context.User.Identity?.Name">@context.User.Identity?.Name</span>
+                    <a href="/dashboard" class="iconbtn" title="Dashboard" aria-label="Dashboard"><LipiIcon Name="chart-bar" Size="17" /></a>
+                    <a href="/settings" class="iconbtn" title="Settings" aria-label="Settings"><LipiIcon Name="sliders" Size="17" /></a>
+                    <form method="post" action="/sign-out" class="inline signout">
+                        <AntiforgeryToken />
+                        <button type="submit" class="iconbtn" title="Sign out" aria-label="Sign out"><LipiIcon Name="log-out" Size="17" /></button>
+                    </form>
+                </span>
+            </header>
+            <div class="app">
+                <nav class="side" aria-label="Folders">
+                    <a class="btn btn-p compose" href="/compose">Compose</a>
+                    @if (folders is not null)
+                    {
+                        @foreach (FolderView f in folders)
+                        {
+                            <a class="fd @(IsCurrent(f.Name) ? "on" : "")" href="/folder/@Uri.EscapeDataString(f.Name)">
+                                <LipiIcon Name="@IconFor(f.Name)" Size="17" />
+                                <span>@f.Name</span>
+                                @if (Badge(f) is string badge)
+                                {
+                                    <span class="n @(f.Name == FolderRow.Inbox && f.Unread > 0 ? "unreadn" : "")"
+                                          data-unread-badge="@(f.Name == FolderRow.Inbox ? "1" : null)">@badge</span>
+                                }
+                            </a>
+                        }
+                    }
+                    @if (mailbox is not null)
+                    {
+                        <div class="quota">
+                            <div class="meter @(Full ? "hot" : "")"><i style="width:@UsagePercent%"></i></div>
+                            <div class="qr"><span>Mailbox</span><span>@Size(mailbox.UsedBytes) of @QuotaText</span></div>
+                            @if (Full)
+                            {
+                                <div class="qr"><span class="sub">Full — delete something to receive more</span></div>
+                            }
+                        </div>
                     }
                 </nav>
-                <section class="content">
+                <section class="pane" id="main">
                     @Body
                 </section>
             </div>
@@ -43,9 +77,7 @@
     </Authorized>
     <NotAuthorized>
         <div class="shell">
-            <section class="content">
-                @Body
-            </section>
+            <section class="pane" id="main">@Body</section>
         </div>
     </NotAuthorized>
 </AuthorizeView>
@@ -56,10 +88,85 @@
     private IReadOnlyList<FolderView>? folders;
     private MailboxRow? mailbox;
 
-    private int UsagePercent => mailbox is null || mailbox.QuotaBytes <= 0 ? 0 : (int)Math.Min(100, mailbox.UsedBytes * 100 / mailbox.QuotaBytes);
+    private string CurrentFolder
+    {
+        get
+        {
+            string path = Nav.ToBaseRelativePath(Nav.Uri);
+            if (!path.StartsWith("folder/", StringComparison.Ordinal))
+            {
+                return FolderRow.Inbox;
+            }
+            string rest = path.Substring("folder/".Length);
+            int q = rest.IndexOf('?', StringComparison.Ordinal);
+            return Uri.UnescapeDataString(q < 0 ? rest : rest.Substring(0, q));
+        }
+    }
 
-    private static string Size(long bytes) =>
-        bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB" : bytes < 1024L * 1024 * 1024 ? $"{bytes / (1024.0 * 1024.0):0.#} MB" : $"{bytes / (1024.0 * 1024.0 * 1024.0):0.##} GB";
+    private string SearchQuery => QueryValue("q");
+
+    private string SearchScope => QueryValue("scope");
+
+    /// <summary>
+    /// What the scope selector should show: the scope of the search being
+    /// viewed, otherwise the folder the reader is in, so searching defaults
+    /// to where they already are.
+    /// </summary>
+    private string SearchScopeValue
+    {
+        get
+        {
+            string scope = SearchScope;
+            return scope.Length > 0 ? scope : CurrentFolder;
+        }
+    }
+
+    private string QueryValue(string name)
+    {
+        var uri = new Uri(Nav.Uri);
+        foreach (string pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = pair.IndexOf('=', StringComparison.Ordinal);
+            if (eq > 0 && Uri.UnescapeDataString(pair.Substring(0, eq)) == name)
+            {
+                return Uri.UnescapeDataString(pair.Substring(eq + 1).Replace('+', ' '));
+            }
+        }
+        return string.Empty;
+    }
+
+    private bool Full => mailbox is not null && Anjal.Mailbox.QuotaPolicy.IsFull(mailbox);
+
+    private int UsagePercent => mailbox is null || mailbox.QuotaBytes <= 0
+        ? 0
+        : (int)Math.Min(100, mailbox.UsedBytes * 100 / mailbox.QuotaBytes);
+
+    private string QuotaText => mailbox is null || mailbox.QuotaBytes <= 0 ? "unlimited" : Size(mailbox.QuotaBytes);
+
+    /// <summary>INBOX shows unread (what needs attention); every other folder shows its total.</summary>
+    private static string? Badge(FolderView f)
+    {
+        if (f.Name == FolderRow.Inbox)
+        {
+            return f.Unread > 0 ? f.Unread.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+        }
+        return f.Count > 0 ? f.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+    }
+
+    private static string IconFor(string folder) => folder switch
+    {
+        "Sent" => "referral-out",
+        "Drafts" => "draft",
+        "Junk" => "compliance-shield",
+        "Trash" => "trash",
+        _ => "email",
+    };
+
+    internal static string Size(long bytes) =>
+        bytes < 1024 ? $"{bytes} B"
+        : bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB"
+        : bytes < 1024L * 1024 * 1024 ? $"{bytes / (1024.0 * 1024.0):0.#} MB"
+        : $"{bytes / (1024.0 * 1024.0 * 1024.0):0.##} GB";
 
     protected override async Task OnInitializedAsync()
     {
@@ -69,11 +176,12 @@
         }
         AuthenticationState state = await AuthState;
         Guid? mailboxId = WebmailAuthService.MailboxIdOf(state.User);
-        if (mailboxId is not null)
+        if (mailboxId is null)
         {
-            folders = await Mail.ListFoldersAsync(mailboxId.Value);
-            mailbox = (await Mail.GetContextAsync(mailboxId.Value))?.Mailbox;
+            return;
         }
+        folders = await Mail.ListFoldersAsync(mailboxId.Value);
+        mailbox = (await Mail.GetContextAsync(mailboxId.Value))?.Mailbox;
     }
 
     private bool IsCurrent(string folderName)

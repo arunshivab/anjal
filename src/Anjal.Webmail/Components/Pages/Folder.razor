@@ -3,71 +3,248 @@
 @attribute [Authorize]
 @inject MailboxService Mail
 
-<PageTitle>Anjal - @Name</PageTitle>
+<PageTitle>@Name — Anjal</PageTitle>
 
-<h1>@Name <span class="muted small">@total message@(total == 1 ? "" : "s")</span></h1>
+<div class="pagehead">
+    <h1>@Name</h1>
+    <span class="cnt">@total message@(total == 1 ? "" : "s")@(unread > 0 ? $" · {unread} unread" : "")</span>
+</div>
 
 @if (Sent is not null)
 {
-    <p class="notice">Message queued for delivery.</p>
+    <div style="padding:12px 12px 0">
+        <div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>Message queued for delivery. A copy is in Sent.</span></div>
+    </div>
 }
-
-@if (items is null)
+@if (Saved is not null)
 {
-    <p class="muted">Folder not found.</p>
-}
-else if (items.Count == 0)
-{
-    <p class="muted">Nothing here.</p>
-}
-else
-{
-    <table class="list">
-        <thead><tr><th></th><th>From</th><th>Subject</th><th>Received</th><th>Size</th><th title="Spam score">Score</th></tr></thead>
-        <tbody>
-            @foreach (MessageRow m in items)
-            {
-                <tr class="@(m.Seen ? "" : "unseen")">
-                    <td>@(m.Flagged ? "★" : "")</td>
-                    <td>@Sender(m)</td>
-                    <td><a href="/m/@m.Id">@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a></td>
-                    <td class="nowrap">@m.ReceivedAt.ToLocalTime().ToString("dd MMM yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture)</td>
-                    <td class="nowrap">@Size(m.SizeBytes)</td>
-                    <td class="nowrap muted">@(m.SpamScore > 0 ? m.SpamScore.ToString(System.Globalization.CultureInfo.InvariantCulture) : "")</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-    <div class="pager">
-        @if (page > 0)
-        {
-            <a href="@PageLink(page - 1)">&laquo; Newer</a>
-        }
-        <span class="muted">Page @(page + 1) of @Math.Max(1, (total + PageSize - 1) / PageSize)</span>
-        @if ((page + 1) * PageSize < total)
-        {
-            <a href="@PageLink(page + 1)">Older &raquo;</a>
-        }
+    <div style="padding:12px 12px 0">
+        <div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>Draft saved.</span></div>
     </div>
 }
 
-@code {
-    private const int PageSize = 50;
+@if (folder is null)
+{
+    <p class="empty">No folder called @Name.</p>
+}
+else
+{
+    @if (Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+    {
+        <div style="padding:12px 12px 0">
+            <div class="notice n-info">
+                <LipiIcon Name="info" Size="16" />
+                <span>Messages here scored at or above @threshold. Anjal accepted them and filed them in Junk; none was rejected.
+                      Open one and choose <b>Not spam</b> to move it to INBOX and allow the sender.</span>
+            </div>
+        </div>
+    }
 
+    <form method="post" action="/folder/@Uri.EscapeDataString(Name)/bulk" data-bulkform>
+        <AntiforgeryToken />
+        <input type="hidden" name="page" value="@pageIndex" />
+        <div class="bulk">
+            <span class="lbl" data-bulklabel>With selected:</span>
+            <button class="btn btn-s btn-sm" name="action" value="trash" type="submit" data-bulkaction>Trash</button>
+            <button class="btn btn-s btn-sm" name="action" value="read" type="submit" data-bulkaction>Mark read</button>
+            <button class="btn btn-s btn-sm" name="action" value="unread" type="submit" data-bulkaction>Mark unread</button>
+            @if (Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+            {
+                <button class="btn btn-s btn-sm" name="action" value="notspam" type="submit" data-bulkaction>Not spam</button>
+            }
+            @if (categories.Count > 0 && Name != "Drafts")
+            {
+                <span class="bulkcat">
+                    <select name="categoryId" class="scope" aria-label="Category to apply" data-bulkaction>
+                        <option value="">Category…</option>
+                        @foreach (CategoryView c in categories)
+                        {
+                            <option value="@c.Row.Id">@c.Row.Name</option>
+                        }
+                        <option value="clear">Remove category</option>
+                    </select>
+                    <button class="btn btn-s btn-sm" name="action" value="categorise" type="submit" data-bulkaction>Apply</button>
+                </span>
+            }
+            else if (Name != "Sent" && Name != "Drafts")
+            {
+                <button class="btn btn-s btn-sm" name="action" value="spam" type="submit" data-bulkaction>Report spam</button>
+            }
+            <span style="margin-left:auto">
+                <button type="submit" class="btn btn-q btn-sm" formaction="/folder/@Uri.EscapeDataString(Name)/readall"
+                        formnovalidate data-markallread-btn>Mark all read</button>
+            </span>
+        </div>
+
+    @if (items is null || items.Count == 0)
+    {
+        <p class="empty">No messages in @Name.</p>
+    }
+    else
+    {
+        <table class="ml @(ShowFlag ? "" : "noflag")">
+            <thead>
+                <tr>
+                    <th class="c-cb">
+                        <input type="checkbox" data-selectall aria-label="Select all on this page" />
+                    </th>
+                    @if (ShowFlag)
+                    {
+                        <th class="c-fl"><span class="sr">Flag</span></th>
+                    }
+                    <th class="c-from">From</th>
+                    <th>Subject</th>
+                    <th class="c-cat">Category</th>
+                    <th class="c-time">Received</th>
+                    <th class="c-size">Size</th>
+                    <th class="c-score" title="Spam score">Score</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (MessageRow m in items)
+                {
+                    <tr class="@(m.Seen ? "" : "unread")" data-message="@m.Id" data-reply="/compose?reply=@m.Id">
+                        <td class="c-cb">
+                            <input type="checkbox" name="id" value="@m.Id" data-rowcheck aria-label="Select message from @Sender(m)" />
+                        </td>
+                        @if (ShowFlag)
+                        {
+                            <td class="c-fl">
+                                <button type="submit" class="fav @(m.Flagged ? "on" : "")"
+                                        formaction="/message/@m.Id/flag" formnovalidate
+                                        name="back" value="@BackLink"
+                                        title="@(m.Flagged ? "Remove flag" : "Flag")"
+                                        aria-label="@(m.Flagged ? "Remove flag" : "Flag")">அ</button>
+                            </td>
+                        }
+                        <td class="c-from">
+                            <span class="from">
+                                @if (m.Seen)
+                                {
+                                    <span class="udot off" aria-hidden="true"></span>
+                                }
+                                else
+                                {
+                                    <span class="udot" aria-label="Unread"></span>
+                                }
+                                <span class="sname">@Sender(m)</span>
+                            </span>
+                        </td>
+                        <td class="c-subject">
+                            <span class="subj">
+                                <a href="@OpenLink(m)" data-open>@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a>
+                            </span>
+                        </td>
+                        <td class="c-cat">
+                            @if (m.CategoryId is Guid cid && Lookup(cid) is CategoryView cat)
+                            {
+                                <span class="chip slot-@cat.Row.Slot"><i></i>@cat.Row.Name</span>
+                            }
+                        </td>
+                        <td class="c-time num">@When(m.ReceivedAt)</td>
+                        <td class="c-size num">@MainLayout.Size(m.SizeBytes)</td>
+                        <td class="c-score">
+                            @if (m.SpamScore > 0)
+                            {
+                                <span class="score @(m.SpamScore >= threshold ? "s-hi" : "s-mid")">@m.SpamScore</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <div class="pg">
+            @if (pageIndex > 0)
+            {
+                <a href="@PageLink(pageIndex - 1)">&laquo; Newer</a>
+            }
+            @if ((pageIndex + 1) * MailboxService.PageSize < total)
+            {
+                <a href="@PageLink(pageIndex + 1)">Older &raquo;</a>
+            }
+            <span class="of">Page @(pageIndex + 1) of @Math.Max(1, (total + MailboxService.PageSize - 1) / MailboxService.PageSize)</span>
+        </div>
+        <div class="kb" data-kbhint hidden>
+            <b>j</b><b>k</b> move <b>Enter</b> open <b>r</b> reply <b>#</b> trash
+        </div>
+    }
+    </form>
+}
+
+@code {
     [Parameter] public string? FolderName { get; set; }
     [SupplyParameterFromQuery(Name = "page")] private int? PageQuery { get; set; }
     [SupplyParameterFromQuery(Name = "sent")] private string? Sent { get; set; }
+    [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private IReadOnlyList<MessageRow>? items;
+    private FolderRow? folder;
     private long total;
-    private int page;
+    private long unread;
+    private int pageIndex;
+    private int threshold = TenantRow.DefaultSpamThreshold;
+    private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
+
+    private CategoryView? Lookup(Guid id)
+    {
+        foreach (CategoryView c in categories)
+        {
+            if (c.Row.Id == id)
+            {
+                return c;
+            }
+        }
+        return null;
+    }
 
     private string Name => string.IsNullOrEmpty(FolderName) ? FolderRow.Inbox : FolderName;
+
+    /// <summary>
+    /// Flagging means "come back to this", which only has meaning where a
+    /// message is being kept. In Junk the action you want is Not spam, a
+    /// draft is already a to-do, and flagging something already deleted
+    /// says nothing — so the column is absent in those three folders and
+    /// the width goes to the columns that matter there.
+    /// </summary>
+    private bool ShowFlag => Name == FolderRow.Inbox || Name == "Sent";
+
+    private string BackLink => PageLink(pageIndex);
+
+    private string PageLink(int p) => $"/folder/{Uri.EscapeDataString(Name)}?page={p}";
+
+    private string OpenLink(MessageRow m) =>
+        Name == "Drafts" ? $"/draft/{m.Id}" : $"/message/{m.Id}";
+
+    private static string Sender(MessageRow m)
+    {
+        string decoded = Anjal.Mime.EncodedWordDecoder.Decode(m.FromHeader);
+        var parsed = Anjal.Mime.AddressParser.Parse(decoded);
+        if (parsed.Count > 0 && parsed[0].DisplayName.Length > 0)
+        {
+            return parsed[0].DisplayName;
+        }
+        return string.IsNullOrWhiteSpace(decoded) ? m.EnvelopeFrom : decoded;
+    }
+
+    /// <summary>Today shows the clock; this week the weekday; older the date.</summary>
+    private static string When(DateTimeOffset at)
+    {
+        DateTime local = at.ToLocalTime().DateTime;
+        DateTime today = DateTime.Now.Date;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        if (local.Date == today) { return local.ToString("HH:mm", inv); }
+        if (local.Date == today.AddDays(-1)) { return "Yesterday"; }
+        if (local.Date > today.AddDays(-7)) { return local.ToString("ddd", inv); }
+        if (local.Year == today.Year) { return local.ToString("d MMM", inv); }
+        return local.ToString("d MMM yyyy", inv);
+    }
 
     protected override async Task OnParametersSetAsync()
     {
         items = null;
+        folder = null;
         if (AuthState is null)
         {
             return;
@@ -77,24 +254,17 @@ else
         {
             return;
         }
-        await Mail.ListFoldersAsync(mailboxId.Value); // ensures defaults exist
-        FolderRow? folder = await Mail.GetFolderAsync(mailboxId.Value, Name);
+        await Mail.ListFoldersAsync(mailboxId.Value);
+        folder = await Mail.GetFolderAsync(mailboxId.Value, Name);
         if (folder is null)
         {
             return;
         }
-        page = Math.Max(0, PageQuery ?? 0);
-        (items, total) = await Mail.ListMessagesAsync(mailboxId.Value, folder.Id, page, PageSize);
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);
+        threshold = context?.Tenant.SpamThreshold is int t && t > 0 ? t : TenantRow.DefaultSpamThreshold;
+        pageIndex = Math.Max(0, PageQuery ?? 0);
+        (items, total) = await Mail.ListMessagesAsync(mailboxId.Value, folder.Id, pageIndex, MailboxService.PageSize);
+        unread = await Mail.UnreadInFolderAsync(mailboxId.Value, folder.Id);
+        categories = await Mail.ListCategoriesAsync(mailboxId.Value);
     }
-
-    private string PageLink(int p) => $"/folder/{Uri.EscapeDataString(Name)}?page={p}";
-
-    private static string Sender(MessageRow m)
-    {
-        string decoded = Anjal.Mime.EncodedWordDecoder.Decode(m.FromHeader);
-        return string.IsNullOrWhiteSpace(decoded) ? m.EnvelopeFrom : decoded;
-    }
-
-    private static string Size(long bytes) =>
-        bytes < 1024 ? $"{bytes} B" : bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB" : $"{bytes / (1024.0 * 1024.0):0.#} MB";
 }

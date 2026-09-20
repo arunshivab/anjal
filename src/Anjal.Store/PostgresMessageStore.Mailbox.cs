@@ -12,9 +12,9 @@ public sealed partial class PostgresMessageStore
     private const string TenantColumns = "id, slug, display_name, enabled, spam_threshold, created_at";
     private const string SenderRuleColumns = "id, tenant_id, pattern, action, created_at";
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
-    private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at";
+    private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
-    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at";
+    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments";
 
     /// <inheritdoc/>
     public async Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
@@ -181,14 +181,15 @@ RETURNING " + TenantDomainColumns + ";";
         // Password: only replaced when a non-empty hash is supplied.
         // used_bytes: never overwritten by an upsert.
         const string sql = @"
-INSERT INTO mailboxes (tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes)
-VALUES (@tenant_id, lower(@local_part), lower(@domain), @password, @display_name, @enabled, @quota)
+INSERT INTO mailboxes (tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, theme)
+VALUES (@tenant_id, lower(@local_part), lower(@domain), @password, @display_name, @enabled, @quota, CASE WHEN @theme = '' THEN 'paper' ELSE @theme END)
 ON CONFLICT (local_part, domain) DO UPDATE
     SET tenant_id       = EXCLUDED.tenant_id,
         password_pbkdf2 = CASE WHEN EXCLUDED.password_pbkdf2 = '' THEN mailboxes.password_pbkdf2 ELSE EXCLUDED.password_pbkdf2 END,
         display_name    = EXCLUDED.display_name,
         enabled         = EXCLUDED.enabled,
         quota_bytes     = EXCLUDED.quota_bytes,
+        theme           = CASE WHEN @theme = '' THEN mailboxes.theme ELSE @theme END,
         updated_at      = now()
 RETURNING " + MailboxColumns + ";";
 
@@ -201,6 +202,9 @@ RETURNING " + MailboxColumns + ";";
         cmd.Parameters.AddWithValue("display_name", mailbox.DisplayName);
         cmd.Parameters.AddWithValue("enabled", mailbox.Enabled);
         cmd.Parameters.AddWithValue("quota", mailbox.QuotaBytes);
+        // Empty means "keep the stored theme" on update; the SQL CASE decides.
+        // On insert the column default supplies "paper".
+        cmd.Parameters.AddWithValue("theme", mailbox.Theme ?? string.Empty);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -331,8 +335,8 @@ RETURNING " + FolderColumns + ";";
         System.ArgumentNullException.ThrowIfNull(message);
 
         const string sql = @"
-INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score)
-VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score)
+INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments)
+VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments)
 RETURNING " + MessageColumns + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -346,6 +350,8 @@ RETURNING " + MessageColumns + ";";
         cmd.Parameters.AddWithValue("subject", message.Subject);
         cmd.Parameters.AddWithValue("date_header", message.DateHeader);
         cmd.Parameters.AddWithValue("size_bytes", message.SizeBytes);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("category_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = message.CategoryId });
+        cmd.Parameters.AddWithValue("has_attachments", message.HasAttachments);
         cmd.Parameters.AddWithValue("seen", message.Seen);
         cmd.Parameters.AddWithValue("flagged", message.Flagged);
         cmd.Parameters.AddWithValue("answered", message.Answered);
@@ -404,6 +410,65 @@ LIMIT @limit OFFSET @offset;";
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
         cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("folder_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = folderId });
+        object? result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is long n ? n : 0;
+    }
+
+    /// <inheritdoc/>
+    public async Task<long> CountUnreadAsync(System.Guid mailboxId, System.Guid? folderId, CancellationToken ct = default)
+    {
+        const string sql = "SELECT count(*) FROM messages WHERE mailbox_id = @mailbox_id AND NOT seen AND (@folder_id IS NULL OR folder_id = @folder_id);";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("folder_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = folderId });
+        object? result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is long n ? n : 0;
+    }
+
+    private const string SearchWhere = @"
+WHERE mailbox_id = @mailbox_id AND (@folder_id IS NULL OR folder_id = @folder_id)
+  AND (@q = '' OR subject ILIKE @pattern OR from_header ILIKE @pattern OR to_header ILIKE @pattern OR envelope_from ILIKE @pattern)";
+
+    private static string LikePattern(string query)
+    {
+        string q = query.Trim().Replace("\\", "\\\\", System.StringComparison.Ordinal).Replace("%", "\\%", System.StringComparison.Ordinal).Replace("_", "\\_", System.StringComparison.Ordinal);
+        return "%" + q + "%";
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<MessageRow>> SearchMessagesAsync(System.Guid mailboxId, System.Guid? folderId, string query, int limit, int offset, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(query);
+        const string sql = "SELECT " + MessageColumns + " FROM messages" + SearchWhere + " ORDER BY received_at DESC, id DESC LIMIT @limit OFFSET @offset;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("folder_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = folderId });
+        cmd.Parameters.AddWithValue("q", query.Trim());
+        cmd.Parameters.AddWithValue("pattern", LikePattern(query));
+        cmd.Parameters.AddWithValue("limit", System.Math.Max(0, limit));
+        cmd.Parameters.AddWithValue("offset", System.Math.Max(0, offset));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<MessageRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadMailboxMessage(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<long> CountSearchAsync(System.Guid mailboxId, System.Guid? folderId, string query, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(query);
+        const string sql = "SELECT count(*) FROM messages" + SearchWhere + ";";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("folder_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = folderId });
+        cmd.Parameters.AddWithValue("q", query.Trim());
+        cmd.Parameters.AddWithValue("pattern", LikePattern(query));
         object? result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return result is long n ? n : 0;
     }
@@ -557,6 +622,7 @@ RETURNING " + SenderRuleColumns + ";";
         UsedBytes = r.GetInt64(8),
         CreatedAt = r.GetFieldValue<System.DateTimeOffset>(9),
         UpdatedAt = r.GetFieldValue<System.DateTimeOffset>(10),
+        Theme = r.GetString(11),
     };
 
     private static FolderRow ReadFolder(NpgsqlDataReader r) => new()
@@ -585,5 +651,293 @@ RETURNING " + SenderRuleColumns + ";";
         Answered = r.GetBoolean(13),
         SpamScore = r.GetInt32(14),
         ReceivedAt = r.GetFieldValue<System.DateTimeOffset>(15),
+        CategoryId = r.IsDBNull(16) ? null : r.GetGuid(16),
+        HasAttachments = r.GetBoolean(17),
     };
+
+    // ================= Categories (v0.15.0) =================
+
+    private const string CategoryColumns = "id, tenant_id, mailbox_id, name, slot, created_at";
+
+    /// <inheritdoc/>
+    public async Task<CategoryRow> UpsertCategoryAsync(CategoryRow category, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(category);
+        const string byId = @"
+UPDATE categories SET name = @name, slot = @slot WHERE id = @id
+RETURNING " + CategoryColumns + ";";
+        const string insert = @"
+INSERT INTO categories (tenant_id, mailbox_id, name, slot)
+VALUES (@tenant_id, @mailbox_id, @name, @slot)
+ON CONFLICT (tenant_id, coalesce(mailbox_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(name)) DO UPDATE
+    SET slot = EXCLUDED.slot
+RETURNING " + CategoryColumns + ";";
+
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        if (category.Id != System.Guid.Empty)
+        {
+            await using var update = new NpgsqlCommand(byId, conn);
+            update.Parameters.AddWithValue("id", category.Id);
+            update.Parameters.AddWithValue("name", category.Name);
+            update.Parameters.AddWithValue("slot", category.Slot);
+            await using var ur = await update.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (await ur.ReadAsync(ct).ConfigureAwait(false))
+            {
+                return ReadCategory(ur);
+            }
+        }
+
+        await using var cmd = new NpgsqlCommand(insert, conn);
+        cmd.Parameters.AddWithValue("tenant_id", category.TenantId);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("mailbox_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = category.MailboxId });
+        cmd.Parameters.AddWithValue("name", category.Name);
+        cmd.Parameters.AddWithValue("slot", category.Slot);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadCategory(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<CategoryRow>> ListCategoriesAsync(System.Guid tenantId, System.Guid? mailboxId, CancellationToken ct = default)
+    {
+        const string sql = "SELECT " + CategoryColumns + @" FROM categories
+WHERE tenant_id = @tenant_id AND (mailbox_id IS NULL OR (@mailbox_id IS NOT NULL AND mailbox_id = @mailbox_id))
+ORDER BY (mailbox_id IS NOT NULL), slot, name;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("tenant_id", tenantId);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("mailbox_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = mailboxId });
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<CategoryRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadCategory(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<CategoryRow?> GetCategoryAsync(System.Guid id, CancellationToken ct = default)
+    {
+        const string sql = "SELECT " + CategoryColumns + " FROM categories WHERE id = @id LIMIT 1;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadCategory(reader) : null;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteCategoryAsync(System.Guid id, CancellationToken ct = default)
+    {
+        // messages.category_id and category_rules both ON DELETE cascade/set null.
+        const string sql = "DELETE FROM categories WHERE id = @id;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
+    /// <inheritdoc/>
+    public async Task<MessageRow?> SetMessageCategoryAsync(System.Guid mailboxId, System.Guid messageId, System.Guid? categoryId, CancellationToken ct = default)
+    {
+        const string sql = @"
+UPDATE messages SET category_id = @category_id
+WHERE id = @id AND mailbox_id = @mailbox_id
+RETURNING " + MessageColumns + ";";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", messageId);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("category_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = categoryId });
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadMailboxMessage(reader) : null;
+    }
+
+    /// <inheritdoc/>
+    public async Task<CategoryRuleRow> UpsertCategoryRuleAsync(CategoryRuleRow rule, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(rule);
+        const string sql = @"
+INSERT INTO category_rules (mailbox_id, pattern, category_id)
+VALUES (@mailbox_id, lower(@pattern), @category_id)
+ON CONFLICT (mailbox_id, pattern) DO UPDATE SET category_id = EXCLUDED.category_id
+RETURNING id, mailbox_id, pattern, category_id, created_at;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", rule.MailboxId);
+        cmd.Parameters.AddWithValue("pattern", rule.Pattern);
+        cmd.Parameters.AddWithValue("category_id", rule.CategoryId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadCategoryRule(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<CategoryRuleRow>> ListCategoryRulesAsync(System.Guid mailboxId, CancellationToken ct = default)
+    {
+        const string sql = "SELECT id, mailbox_id, pattern, category_id, created_at FROM category_rules WHERE mailbox_id = @mailbox_id ORDER BY pattern;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<CategoryRuleRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadCategoryRule(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteCategoryRuleAsync(System.Guid id, CancellationToken ct = default)
+    {
+        const string sql = "DELETE FROM category_rules WHERE id = @id;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
+    /// <inheritdoc/>
+    public async Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, CancellationToken ct = default)
+    {
+        // One round trip: the period's messages joined to their folder and
+        // category, aggregated five ways by the database rather than in
+        // memory, because a busy mailbox is tens of thousands of rows.
+        const string sql = @"
+WITH period AS (
+    SELECT m.id, m.folder_id, m.category_id, m.has_attachments, m.received_at,
+           m.from_header, m.envelope_from, f.name AS folder
+    FROM messages m
+    JOIN folders f ON f.id = m.folder_id
+    WHERE m.mailbox_id = @mailbox_id AND m.received_at >= @from AND m.received_at < @to
+),
+inbound AS (SELECT * FROM period WHERE folder <> 'Sent' AND folder <> 'Drafts')
+SELECT
+    (SELECT count(*) FROM inbound WHERE folder <> 'Junk')                        AS delivered,
+    (SELECT count(*) FROM inbound WHERE folder = 'Junk')                         AS junked,
+    (SELECT count(*) FROM period WHERE folder = 'Sent')                          AS sent,
+    (SELECT count(*) FROM inbound WHERE has_attachments)                         AS received_attach,
+    (SELECT count(*) FROM period WHERE folder = 'Sent' AND has_attachments)      AS sent_attach;";
+
+        const string folderSql = @"
+SELECT f.name, count(*)
+FROM messages m JOIN folders f ON f.id = m.folder_id
+WHERE m.mailbox_id = @mailbox_id AND m.received_at >= @from AND m.received_at < @to
+  AND f.name <> 'Sent' AND f.name <> 'Drafts'
+GROUP BY f.name ORDER BY count(*) DESC;";
+
+        const string categorySql = @"
+SELECT coalesce(c.name, 'Uncategorised'), coalesce(c.slot, 0), count(*)
+FROM messages m
+JOIN folders f ON f.id = m.folder_id
+LEFT JOIN categories c ON c.id = m.category_id
+WHERE m.mailbox_id = @mailbox_id AND m.received_at >= @from AND m.received_at < @to
+  AND f.name <> 'Sent' AND f.name <> 'Drafts'
+GROUP BY c.name, c.slot ORDER BY count(*) DESC;";
+
+        const string senderSql = @"
+SELECT CASE
+         WHEN position('<' in m.from_header) > 0
+           THEN trim(both from split_part(split_part(m.from_header, '<', 2), '>', 1))
+         WHEN m.from_header <> '' THEN trim(m.from_header)
+         ELSE m.envelope_from
+       END AS sender,
+       count(*)
+FROM messages m JOIN folders f ON f.id = m.folder_id
+WHERE m.mailbox_id = @mailbox_id AND m.received_at >= @from AND m.received_at < @to
+  AND f.name <> 'Sent' AND f.name <> 'Drafts'
+GROUP BY sender ORDER BY count(*) DESC, sender LIMIT 5;";
+
+        const string daySql = @"
+SELECT date_trunc('day', m.received_at AT TIME ZONE 'UTC') AS day,
+       count(*) FILTER (WHERE f.name <> 'Sent' AND f.name <> 'Drafts') AS received,
+       count(*) FILTER (WHERE f.name = 'Sent') AS sent
+FROM messages m JOIN folders f ON f.id = m.folder_id
+WHERE m.mailbox_id = @mailbox_id AND m.received_at >= @from AND m.received_at < @to
+GROUP BY day ORDER BY day;";
+
+        var activity = new MailboxActivity { From = periodStart, To = periodEnd };
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+
+        await using (var cmd = new NpgsqlCommand(sql, conn))
+        {
+            Bind(cmd, mailboxId, periodStart, periodEnd);
+            await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            if (await r.ReadAsync(ct).ConfigureAwait(false))
+            {
+                activity.Delivered = r.GetInt64(0);
+                activity.Junked = r.GetInt64(1);
+                activity.Sent = r.GetInt64(2);
+                activity.ReceivedWithAttachments = r.GetInt64(3);
+                activity.SentWithAttachments = r.GetInt64(4);
+            }
+        }
+
+        activity.ByFolder = await NamedCountsAsync(conn, folderSql, mailboxId, periodStart, periodEnd, slotColumn: false, ct).ConfigureAwait(false);
+        activity.ByCategory = await NamedCountsAsync(conn, categorySql, mailboxId, periodStart, periodEnd, slotColumn: true, ct).ConfigureAwait(false);
+        activity.TopSenders = await NamedCountsAsync(conn, senderSql, mailboxId, periodStart, periodEnd, slotColumn: false, ct).ConfigureAwait(false);
+
+        await using (var cmd = new NpgsqlCommand(daySql, conn))
+        {
+            Bind(cmd, mailboxId, periodStart, periodEnd);
+            await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            var days = new List<DailyCount>();
+            while (await r.ReadAsync(ct).ConfigureAwait(false))
+            {
+                days.Add(new DailyCount
+                {
+                    Day = new System.DateTimeOffset(r.GetFieldValue<System.DateTime>(0), System.TimeSpan.Zero),
+                    Received = r.GetInt64(1),
+                    Sent = r.GetInt64(2),
+                });
+            }
+            activity.ByDay = days;
+        }
+
+        return activity;
+    }
+
+    private static async Task<IReadOnlyList<NamedCount>> NamedCountsAsync(NpgsqlConnection conn, string sql, System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, bool slotColumn, CancellationToken ct)
+    {
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        Bind(cmd, mailboxId, periodStart, periodEnd);
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var list = new List<NamedCount>();
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
+        {
+            list.Add(slotColumn
+                ? new NamedCount { Name = r.GetString(0), Slot = r.GetInt32(1), Count = r.GetInt64(2) }
+                : new NamedCount { Name = r.GetString(0), Count = r.GetInt64(1) });
+        }
+        return list;
+    }
+
+    private static void Bind(NpgsqlCommand cmd, System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd)
+    {
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        cmd.Parameters.AddWithValue("from", periodStart);
+        cmd.Parameters.AddWithValue("to", periodEnd);
+    }
+
+    private static CategoryRow ReadCategory(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        TenantId = r.GetGuid(1),
+        MailboxId = r.IsDBNull(2) ? null : r.GetGuid(2),
+        Name = r.GetString(3),
+        Slot = r.GetInt32(4),
+        CreatedAt = r.GetFieldValue<System.DateTimeOffset>(5),
+    };
+
+    private static CategoryRuleRow ReadCategoryRule(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        MailboxId = r.GetGuid(1),
+        Pattern = r.GetString(2),
+        CategoryId = r.GetGuid(3),
+        CreatedAt = r.GetFieldValue<System.DateTimeOffset>(4),
+    };
+
 }

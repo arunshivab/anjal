@@ -7,6 +7,7 @@ A mailbox: a receiving identity local_part@domain belonging to a tenant. The mai
 ## Members
 
 - **DefaultQuotaBytes** *(field)* - Two gibibytes - the default per-mailbox quota.
+- **DefaultTheme** *(field)* - Default webmail theme.
 - **Address** *(property)* - The full address local_part@domain.
 - **CreatedAt** *(property)* - When the mailbox was created.
 - **DisplayName** *(property)* - Display name for the From header (e.g. "Arun Shiva B").
@@ -17,5 +18,6 @@ A mailbox: a receiving identity local_part@domain belonging to a tenant. The mai
 - **PasswordPbkdf2** *(property)* - PBKDF2 password hash in Anjal.Smtp.Pbkdf2Hasher format, used for submission authentication. Empty means the mailbox is receive-only and cannot authenticate.
 - **QuotaBytes** *(property)* - Soft quota in bytes. Exceeding it is logged; hard enforcement is a later release.
 - **TenantId** *(property)* - The owning tenant.
+- **Theme** *(property)* - Webmail theme for this mailbox: paper, ink, postcard or midnight. Stored per mailbox, not per browser.
 - **UpdatedAt** *(property)* - When the mailbox was created or last updated.
 - **UsedBytes** *(property)* - Bytes currently stored in this mailbox, maintained by the store on each delivery.

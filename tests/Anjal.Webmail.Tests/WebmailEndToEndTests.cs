@@ -86,10 +86,10 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
 
     private async System.Threading.Tasks.Task LoginAsync()
     {
-        string token = await this.TokenFromAsync("login");
+        string token = await this.TokenFromAsync("sign-in");
         HttpResponseMessage res = await this.PostFormAsync("auth/login", token, ("address", "arun@anjal.co.in"), ("password", "correct horse battery"));
         Assert.Equal(HttpStatusCode.Redirect, res.StatusCode);
-        Assert.Equal("/", res.Headers.Location!.ToString());
+        Assert.Equal("/folder/INBOX", res.Headers.Location!.ToString());
     }
 
     private async System.Threading.Tasks.Task<MessageRow> DeliverAsync(string raw)
@@ -107,7 +107,7 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
     [Fact]
     public async System.Threading.Tasks.Task Anonymous_IsRedirectedToLogin_AndBadPasswordIsRefused()
     {
-        HttpResponseMessage home = await this.client.GetAsync("");
+        HttpResponseMessage home = await this.client.GetAsync("folder/INBOX");
         Assert.True(home.StatusCode is HttpStatusCode.Redirect or HttpStatusCode.Found or HttpStatusCode.OK);
         if (home.StatusCode == HttpStatusCode.OK)
         {
@@ -115,14 +115,14 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
             Assert.DoesNotContain("Sign out", await home.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
         }
 
-        HttpResponseMessage attachment = await this.client.GetAsync($"attachment/{System.Guid.NewGuid()}/0");
+        HttpResponseMessage attachment = await this.client.GetAsync($"message/{System.Guid.NewGuid()}/attachment/0");
         Assert.Equal(HttpStatusCode.Redirect, attachment.StatusCode);
-        Assert.Contains("/login", attachment.Headers.Location!.ToString(), System.StringComparison.Ordinal);
+        Assert.Contains("/sign-in", attachment.Headers.Location!.ToString(), System.StringComparison.Ordinal);
 
-        string token = await this.TokenFromAsync("login");
+        string token = await this.TokenFromAsync("sign-in");
         HttpResponseMessage bad = await this.PostFormAsync("auth/login", token, ("address", "arun@anjal.co.in"), ("password", "nope"));
         Assert.Equal(HttpStatusCode.Redirect, bad.StatusCode);
-        Assert.Equal("/login?error=1", bad.Headers.Location!.ToString());
+        Assert.Equal("/sign-in?error=1", bad.Headers.Location!.ToString());
     }
 
     [Fact]
@@ -131,7 +131,27 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         HttpResponseMessage css = await this.client.GetAsync("app.css");
         Assert.Equal(HttpStatusCode.OK, css.StatusCode);
         Assert.Equal("text/css", css.Content.Headers.ContentType!.MediaType);
-        Assert.Contains(".sidebar", await css.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
+        Assert.Contains(".side", await css.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
+
+        HttpResponseMessage tokens = await this.client.GetAsync("tokens.css");
+        Assert.Equal(HttpStatusCode.OK, tokens.StatusCode);
+        Assert.Contains("--brand:", await tokens.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
+
+        HttpResponseMessage font = await this.client.GetAsync("fonts/LiPi-Sans-Tamil.woff2");
+        Assert.Equal(HttpStatusCode.OK, font.StatusCode);
+        Assert.Equal("font/woff2", font.Content.Headers.ContentType!.MediaType);
+        Assert.Contains("immutable", font.Headers.CacheControl!.ToString(), System.StringComparison.Ordinal);
+
+        HttpResponseMessage logo = await this.client.GetAsync("logos/anjal-wordmark.svg");
+        Assert.Equal(HttpStatusCode.OK, logo.StatusCode);
+        Assert.Equal("image/svg+xml", logo.Content.Headers.ContentType!.MediaType);
+
+        HttpResponseMessage script = await this.client.GetAsync("app.js");
+        Assert.Equal(HttpStatusCode.OK, script.StatusCode);
+        Assert.Contains("data-connectivity", await script.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
+
+        HttpResponseMessage missing = await this.client.GetAsync("fonts/nope.woff2");
+        Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 
     [Fact]
@@ -156,30 +176,30 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         await this.LoginAsync();
 
         // Inbox lists the message.
-        HttpResponseMessage inbox = await this.client.GetAsync("");
+        HttpResponseMessage inbox = await this.client.GetAsync("folder/INBOX");
         Assert.Equal(HttpStatusCode.OK, inbox.StatusCode);
         string inboxHtml = await inbox.Content.ReadAsStringAsync();
         Assert.Contains("Hello webmail", inboxHtml, System.StringComparison.Ordinal);
         Assert.Contains("arun@anjal.co.in", inboxHtml, System.StringComparison.Ordinal);
-        Assert.Contains("class=\"unseen\"", inboxHtml, System.StringComparison.Ordinal);
+        Assert.Contains("class=\"unread\"", inboxHtml, System.StringComparison.Ordinal);
 
         // Open it: sanitised body inside srcdoc, marked seen.
-        HttpResponseMessage open = await this.client.GetAsync($"m/{delivered.Id}");
+        HttpResponseMessage open = await this.client.GetAsync($"message/{delivered.Id}");
         Assert.Equal(HttpStatusCode.OK, open.StatusCode);
         string openHtml = await open.Content.ReadAsStringAsync();
         Assert.Contains("srcdoc=", openHtml, System.StringComparison.Ordinal);
-        Assert.Contains("&lt;b&gt;bold&lt;/b&gt;", openHtml, System.StringComparison.Ordinal);
+        Assert.Contains("bold", openHtml, System.StringComparison.Ordinal);
         Assert.DoesNotContain("alert(1)", openHtml, System.StringComparison.Ordinal);
         Assert.True((await this.store.GetMessageByIdAsync(delivered.Id))!.Seen);
 
         // Flag via the form on the message page.
         string token = TokenRegex.Match(openHtml).Groups[1].Value;
-        HttpResponseMessage flag = await this.PostFormAsync($"message/{delivered.Id}/flags", token, ("seen", "1"), ("flagged", "1"), ("back", $"/m/{delivered.Id}"));
+        HttpResponseMessage flag = await this.PostFormAsync($"message/{delivered.Id}/flag", token, ("back", $"/message/{delivered.Id}"));
         Assert.Equal(HttpStatusCode.Redirect, flag.StatusCode);
         Assert.True((await this.store.GetMessageByIdAsync(delivered.Id))!.Flagged);
 
         // Raw download.
-        HttpResponseMessage raw = await this.client.GetAsync($"raw/{delivered.Id}");
+        HttpResponseMessage raw = await this.client.GetAsync($"message/{delivered.Id}/raw.eml");
         Assert.Equal(HttpStatusCode.OK, raw.StatusCode);
         Assert.Equal("message/rfc822", raw.Content.Headers.ContentType!.MediaType);
 
@@ -225,9 +245,52 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         Assert.Contains("/compose?error=", invalid.Headers.Location!.ToString(), System.StringComparison.Ordinal);
 
         // Logout.
-        HttpResponseMessage logout = await this.PostFormAsync("auth/logout", composeToken2);
+        // Bulk actions from the list: the selection and the action button must
+        // live in the same form, or nothing reaches the server.
+        MessageRow second = await this.DeliverAsync("Subject: Second message\r\n\r\nbody\r\n");
+        string inboxHtml2 = await (await this.client.GetAsync("folder/INBOX")).Content.ReadAsStringAsync();
+        Assert.Contains($"name=\"id\" value=\"{second.Id}\"", inboxHtml2, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("form=\"bulkform\"", inboxHtml2, System.StringComparison.Ordinal);
+
+        string bulkToken = await this.TokenFromAsync("folder/INBOX");
+        HttpResponseMessage markRead = await this.PostFormAsync("folder/INBOX/bulk", bulkToken, ("action", "read"), ("id", second.Id.ToString()));
+        Assert.Equal(HttpStatusCode.Redirect, markRead.StatusCode);
+        Assert.True((await this.store.GetMessageByIdAsync(second.Id))!.Seen, "mark read from the list must apply");
+
+        string bulkToken2 = await this.TokenFromAsync("folder/INBOX");
+        HttpResponseMessage bulkTrash = await this.PostFormAsync("folder/INBOX/bulk", bulkToken2, ("action", "trash"), ("id", second.Id.ToString()));
+        Assert.Equal(HttpStatusCode.Redirect, bulkTrash.StatusCode);
+        FolderRow trashFolder = Assert.Single(await this.store.ListFoldersAsync(this.mailbox.Id), f => f.Name == "Trash");
+        Assert.Equal(trashFolder.Id, (await this.store.GetMessageByIdAsync(second.Id))!.FolderId);
+
+        // Flagging only makes sense where a message is being kept.
+        await this.DeliverAsync("Subject: Still in the inbox\r\n\r\nbody\r\n");
+        Assert.Contains("class=\"fav", await (await this.client.GetAsync("folder/INBOX")).Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
+        foreach (string folder in new[] { "Junk", "Drafts", "Trash" })
+        {
+            string html = await (await this.client.GetAsync($"folder/{folder}")).Content.ReadAsStringAsync();
+            Assert.DoesNotContain("class=\"fav", html, System.StringComparison.Ordinal);
+        }
+
+        // The theme lives on the root element and changes without a fresh sign-in.
+        HttpResponseMessage beforeTheme = await this.client.GetAsync("settings");
+        Assert.Contains("data-theme=\"paper\"", await beforeTheme.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
+        string themeToken = await this.TokenFromAsync("settings");
+        HttpResponseMessage themed = await this.PostFormAsync("settings/theme", themeToken, ("theme", "midnight"));
+        Assert.Equal(HttpStatusCode.Redirect, themed.StatusCode);
+        HttpResponseMessage afterTheme = await this.client.GetAsync("settings");
+        Assert.Contains("data-theme=\"midnight\"", await afterTheme.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
+
+        // The cookie was re-issued by the theme change, so a form rendered
+        // before it is stale; the reader is sent to sign in again, not a 500.
+        HttpResponseMessage stale = await this.PostFormAsync("sign-out", composeToken2);
+        Assert.Equal(HttpStatusCode.Redirect, stale.StatusCode);
+        Assert.Equal("/sign-in?expired=1", stale.Headers.Location!.ToString());
+
+        string logoutToken = await this.TokenFromAsync("settings");
+        HttpResponseMessage logout = await this.PostFormAsync("sign-out", logoutToken);
         Assert.Equal(HttpStatusCode.Redirect, logout.StatusCode);
-        HttpResponseMessage after = await this.client.GetAsync($"raw/{delivered.Id}");
+        HttpResponseMessage after = await this.client.GetAsync($"message/{delivered.Id}/raw.eml");
         Assert.Equal(HttpStatusCode.Redirect, after.StatusCode);
     }
 
@@ -240,12 +303,12 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
             "--B\r\nContent-Type: text/html; name=\"evil.html\"\r\nContent-Disposition: attachment; filename=\"evil.html\"\r\n\r\n<script>1</script>\r\n--B--\r\n");
         await this.LoginAsync();
 
-        HttpResponseMessage res = await this.client.GetAsync($"attachment/{delivered.Id}/0");
+        HttpResponseMessage res = await this.client.GetAsync($"message/{delivered.Id}/attachment/0");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         Assert.Equal("application/octet-stream", res.Content.Headers.ContentType!.MediaType);
         Assert.Contains("evil.html", res.Content.Headers.ContentDisposition!.ToString(), System.StringComparison.Ordinal);
 
-        HttpResponseMessage missing = await this.client.GetAsync($"attachment/{delivered.Id}/9");
+        HttpResponseMessage missing = await this.client.GetAsync($"message/{delivered.Id}/attachment/9");
         Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
     }
 }

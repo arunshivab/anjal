@@ -1,53 +1,159 @@
 @page "/compose"
+@page "/draft/{DraftId:guid}"
 @attribute [Authorize]
 @inject MailboxService Mail
 
-<PageTitle>Anjal - compose</PageTitle>
+<PageTitle>@(DraftId is null ? "New message" : "Draft") — Anjal</PageTitle>
 
-<h1>New message</h1>
-
-@if (Error is not null)
-{
-    <p class="error">@Error</p>
-}
-@if (full)
-{
-    <p class="error">Your mailbox is full - free some space before sending.</p>
-}
-
-<form method="post" action="/compose" enctype="multipart/form-data" class="compose">
+<form method="post" action="/compose" enctype="multipart/form-data" data-compose class="composer">
     <AntiforgeryToken />
-    <label>To <input type="text" name="to" value="@To" required autofocus placeholder="name@example.com, other@example.com" /></label>
-    <label>Cc <input type="text" name="cc" value="@Cc" /></label>
-    <label>Subject <input type="text" name="subject" value="@Subject" /></label>
-    <label>Attachments <input type="file" name="attachments" multiple /></label>
-    <textarea name="body" rows="18" placeholder="Write your message"></textarea>
-    <div class="actions">
-        <button type="submit" class="btn primary" disabled="@full">Send</button>
-        <a class="btn subtle" href="/">Cancel</a>
-    </div>
+    <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? draftIdFromPrefill)" />
+    <input type="hidden" name="inReplyTo" value="@inReplyTo" />
+
+    <main class="write">
+        <a class="back" href="/folder/INBOX"><LipiIcon Name="chevron-left" Size="15" /> INBOX</a>
+
+        @if (Error is not null)
+        {
+            <div class="notice n-err readnotice">
+                <LipiIcon Name="warning" Size="16" /><span><b>Not sent.</b> @Error</span>
+            </div>
+        }
+        <div class="notice n-err readnotice" data-client-error hidden></div>
+        @if (full)
+        {
+            <div class="notice n-err readnotice">
+                <LipiIcon Name="warning" Size="16" />
+                <span><b>Mailbox full — @MainLayout.Size(used) of @MainLayout.Size(quota).</b>
+                      Sending is paused because a copy of every sent message is stored in Sent.
+                      Delete something, or ask your administrator to raise the quota, then come back to this draft.</span>
+            </div>
+        }
+
+        <div class="sheet">
+            <input class="subjectline" name="subject" type="text" value="@subject"
+                   placeholder="Subject" aria-label="Subject" />
+            <textarea class="canvas" name="body" aria-label="Message"
+                      placeholder="Write your message.">@body</textarea>
+        </div>
+    </main>
+
+    <aside class="rail" aria-label="Message details">
+        <section class="railcard">
+            <h2 class="railhead">Recipients</h2>
+            <label class="raillabel" for="to">To</label>
+            <input class="railinp" id="to" name="to" type="text" value="@to" required autofocus
+                   data-suggest placeholder="name@example.com" />
+            <label class="raillabel" for="cc">Cc</label>
+            <input class="railinp" id="cc" name="cc" type="text" value="@cc" data-suggest />
+            <label class="raillabel" for="bcc">Bcc</label>
+            <input class="railinp" id="bcc" name="bcc" type="text" value="@bcc" data-suggest />
+            <p class="railnote">Suggested from people you have written to. Separate several with commas.</p>
+        </section>
+
+        <section class="railcard">
+            <h2 class="railhead">Attachments</h2>
+            <input class="railfile" id="attachments" name="attachments" type="file" multiple aria-label="Attach files" />
+        </section>
+
+        <section class="railcard">
+            <h2 class="railhead">Send</h2>
+            <button type="submit" class="btn btn-p railbtn" disabled="@full">
+                <LipiIcon Name="referral-out" Size="15" /> Send
+            </button>
+            <button type="submit" class="btn btn-s railbtn" formaction="/draft">Save draft</button>
+            <a class="btn btn-q railbtn" href="/folder/INBOX">Cancel</a>
+            <p class="draftstate" data-draft-state>Drafts are saved when you press Save draft</p>
+            <p class="railnote">Plain text. Anjal signs and sends from @address.</p>
+        </section>
+    </aside>
 </form>
 
 @code {
-    [SupplyParameterFromQuery] private string? To { get; set; }
-    [SupplyParameterFromQuery] private string? Cc { get; set; }
-    [SupplyParameterFromQuery] private string? Subject { get; set; }
-    [SupplyParameterFromQuery] private string? Error { get; set; }
+    [Parameter] public Guid? DraftId { get; set; }
+    [SupplyParameterFromQuery(Name = "reply")] private Guid? Reply { get; set; }
+    [SupplyParameterFromQuery(Name = "replyall")] private Guid? ReplyAll { get; set; }
+    [SupplyParameterFromQuery(Name = "forward")] private Guid? Forward { get; set; }
+    [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "to")] private string? ToQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "cc")] private string? CcQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "subject")] private string? SubjectQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "body")] private string? BodyQuery { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
+    private string to = string.Empty;
+    private string cc = string.Empty;
+    private string bcc = string.Empty;
+    private string subject = string.Empty;
+    private string body = string.Empty;
+    private string inReplyTo = string.Empty;
+    private string draftIdFromPrefill = string.Empty;
     private bool full;
+    private string address = string.Empty;
+    private long used;
+    private long quota;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
+        to = ToQuery ?? string.Empty;
+        cc = CcQuery ?? string.Empty;
+        bcc = string.Empty;
+        subject = SubjectQuery ?? string.Empty;
+        body = BodyQuery ?? string.Empty;
+        inReplyTo = string.Empty;
+        draftIdFromPrefill = string.Empty;
+
         if (AuthState is null)
         {
             return;
         }
         Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
-        if (mailboxId is not null)
+        if (mailboxId is null)
         {
-            MailboxRow? mb = (await Mail.GetContextAsync(mailboxId.Value))?.Mailbox;
-            full = mb is not null && Anjal.Mailbox.QuotaPolicy.IsFull(mb);
+            return;
+        }
+
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);
+        if (context is not null)
+        {
+            MailboxRow mb = context.Value.Mailbox;
+            full = Anjal.Mailbox.QuotaPolicy.IsFull(mb);
+            used = mb.UsedBytes;
+            quota = mb.QuotaBytes;
+            address = mb.Address;
+        }
+
+        if (DraftId is Guid draft)
+        {
+            ComposeRequest? loaded = await Mail.LoadDraftAsync(mailboxId.Value, draft);
+            if (loaded is not null)
+            {
+                to = loaded.To;
+                cc = loaded.Cc;
+                bcc = loaded.Bcc;
+                subject = loaded.Subject;
+                body = loaded.Body;
+                inReplyTo = loaded.InReplyTo;
+            }
+            return;
+        }
+
+        Guid? source = Reply ?? ReplyAll ?? Forward;
+        if (source is null)
+        {
+            return;
+        }
+        MailboxService.PrefillKind kind = Reply is not null ? MailboxService.PrefillKind.Reply
+            : ReplyAll is not null ? MailboxService.PrefillKind.ReplyAll
+            : MailboxService.PrefillKind.Forward;
+        ComposePrefill? prefill = await Mail.PrefillAsync(mailboxId.Value, source.Value, kind);
+        if (prefill is not null)
+        {
+            to = prefill.To;
+            cc = prefill.Cc;
+            subject = prefill.Subject;
+            body = prefill.Body;
+            inReplyTo = prefill.InReplyTo;
         }
     }
 }

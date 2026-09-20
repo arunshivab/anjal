@@ -30,6 +30,9 @@ coverage.cobertura.xml
 
 # NuGet
 *.nupkg
+# ...except imagiQa's own packages, which are restored from the repo's
+# local feed so a clone builds with no external package source.
+!localpackages/*.nupkg
 *.snupkg
 .nuget/
 packages/

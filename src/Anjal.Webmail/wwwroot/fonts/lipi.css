@@ -1,0 +1,146 @@
+/* =========================================================================
+ * LiPi Sans v1.0 — Self-hosted, fully offline
+ * A unified type system for the Indian web.
+ *
+ * LiPi Sans is a derivative work, distributed under the SIL Open Font
+ * License 1.1. It is built on:
+ *   • Inter — © The Inter Project Authors (rsms.me/inter)
+ *   • Noto Sans (Devanagari, Bengali, Tamil, Telugu, Malayalam,
+ *     Kannada, Gujarati, Gurmukhi, Oriya) — © Google LLC
+ *
+ * Per OFL clause 3, "Inter" and "Noto" are Reserved Font Names; LiPi
+ * does NOT use them in its public family name. The internal font
+ * binaries retain their upstream name tables — see CUSTOMIZATIONS.md
+ * for the planned full rename to LiPi Sans Latin / LiPi Sans Devanagari
+ * etc. when binaries are rebuilt with fonttools.
+ *
+ * Files in ./fonts/:
+ *   LiPi-Sans-Latin.woff2          (was InterVariable.woff2)
+ *   LiPi-Sans-Latin-Italic.woff2
+ *   LiPi-Sans-Devanagari.ttf       (was NotoSansDevanagari)
+ *   LiPi-Sans-Bengali.ttf
+ *   LiPi-Sans-Tamil.ttf
+ *   LiPi-Sans-Telugu.ttf
+ *   LiPi-Sans-Malayalam.ttf
+ *   LiPi-Sans-Kannada.ttf
+ *   LiPi-Sans-Gujarati.ttf
+ *   LiPi-Sans-Gurmukhi.ttf
+ *   LiPi-Sans-Odia.ttf
+ * ========================================================================= */
+
+/* ---- Latin --------------------------------------------------------- */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Latin.woff2") format("woff2-variations");
+  unicode-range: U+0000-024F, U+0259, U+1E00-1EFF, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "LiPi Sans"; font-style: italic; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Latin-Italic.woff2") format("woff2-variations");
+  unicode-range: U+0000-024F, U+0259, U+1E00-1EFF, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ---- Devanagari ---------------------------------------------------- */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Devanagari.woff2") format("woff2-variations");
+  unicode-range: U+0900-097F, U+1CD0-1CF9, U+200C-200D, U+20A8, U+20B9, U+25CC, U+A830-A839, U+A8E0-A8FF;
+}
+
+/* ---- Bengali ------------------------------------------------------- */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Bengali.woff2") format("woff2-variations");
+  unicode-range: U+0980-09FE, U+200C-200D, U+20B9, U+25CC;
+}
+
+/* ---- Tamil --------------------------------------------------------- */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Tamil.woff2") format("woff2-variations");
+  unicode-range: U+0964-0965, U+0B82-0BFA, U+200C-200D, U+20B9, U+25CC;
+}
+
+/* ---- Telugu -------------------------------------------------------- */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Telugu.woff2") format("woff2-variations");
+  unicode-range: U+0951-0952, U+0964-0965, U+0C00-0C7F, U+1CDA, U+200C-200D, U+25CC;
+}
+
+/* ---- Malayalam ----------------------------------------------------- */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Malayalam.woff2") format("woff2-variations");
+  unicode-range: U+0D00-0D7F, U+200C-200D, U+20B9, U+25CC;
+}
+
+/* ---- Kannada ------------------------------------------------------- */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Kannada.woff2") format("woff2-variations");
+  unicode-range: U+0951-0952, U+0964-0965, U+0C82-0CF2, U+200C-200D, U+20B9, U+25CC;
+}
+
+/* ---- Gujarati ------------------------------------------------------ */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Gujarati.woff2") format("woff2-variations");
+  unicode-range: U+0964-0965, U+0A80-0AFF, U+200C-200D, U+20B9, U+25CC, U+A830-A839;
+}
+
+/* ---- Gurmukhi ------------------------------------------------------ */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Gurmukhi.woff2") format("woff2-variations");
+  unicode-range: U+0964-0965, U+0A01-0A75, U+200C-200D, U+20B9, U+25CC, U+A830-A839;
+}
+
+/* ---- Odia ---------------------------------------------------------- */
+@font-face {
+  font-family: "LiPi Sans"; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url("/fonts/LiPi-Sans-Odia.woff2") format("woff2-variations");
+  unicode-range: U+0964-0965, U+0B01-0B77, U+200C-200D, U+20B9, U+25CC;
+}
+
+/* =========================================================================
+ * LiPi opinionated defaults — the customizations that make this LiPi
+ * rather than just "Inter + Noto bundled".
+ * ========================================================================= */
+:root {
+  --lipi-sans: "LiPi Sans", system-ui, -apple-system, sans-serif;
+
+  /* LiPi tightens line-height vs Inter's default (1.5 → 1.4) and sets
+     a slight negative tracking on display sizes — chosen to match the
+     visual rhythm of the Devanagari and Bengali baseline. */
+  --lipi-leading-body: 1.45;
+  --lipi-leading-tight: 1.1;
+  --lipi-tracking-display: -0.022em;
+  --lipi-tracking-body: -0.005em;
+}
+
+html, body {
+  font-family: var(--lipi-sans);
+  /* LiPi feature stack: open digits (ss01), straight-leg L (cv11),
+     contextual alternates, kerning, common ligatures. */
+  font-feature-settings: "ss01", "cv11", "calt", "kern", "liga";
+  font-optical-sizing: auto;
+  line-height: var(--lipi-leading-body);
+  letter-spacing: var(--lipi-tracking-body);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* LiPi headline preset — display tracking + tight leading */
+.lipi-display {
+  letter-spacing: var(--lipi-tracking-display);
+  line-height: var(--lipi-leading-tight);
+  font-weight: 500;
+}
+
+/* LiPi numeric preset — tabular figures + slashed zero */
+.lipi-num {
+  font-feature-settings: "tnum", "zero", "ss01", "cv11";
+  font-variant-numeric: tabular-nums slashed-zero;
+}

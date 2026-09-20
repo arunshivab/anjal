@@ -10,7 +10,11 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
 - **CountOutboundAsync** *(method)* - _(no description)_
+- **CountSearchAsync** *(method)* - _(no description)_
+- **CountUnreadAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
+- **DeleteCategoryAsync** *(method)* - _(no description)_
+- **DeleteCategoryRuleAsync** *(method)* - _(no description)_
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
 - **DeleteLocalDomainAsync** *(method)* - _(no description)_
 - **DeleteMailboxAsync** *(method)* - _(no description)_
@@ -24,6 +28,8 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **EnqueueOutboundAsync** *(method)* - _(no description)_
 - **EnsureFolderAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
+- **GetActivityAsync** *(method)* - _(no description)_
+- **GetCategoryAsync** *(method)* - _(no description)_
 - **GetDkimKeyAsync** *(method)* - _(no description)_
 - **GetInboundByIdAsync** *(method)* - _(no description)_
 - **GetMailboxAsync** *(method)* - _(no description)_
@@ -38,6 +44,8 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **GetTenantDomainAsync** *(method)* - _(no description)_
 - **IsLocalDomainAsync** *(method)* - _(no description)_
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
+- **ListCategoriesAsync** *(method)* - _(no description)_
+- **ListCategoryRulesAsync** *(method)* - _(no description)_
 - **ListDkimKeysAsync** *(method)* - _(no description)_
 - **ListFoldersAsync** *(method)* - _(no description)_
 - **ListLocalDomainsAsync** *(method)* - _(no description)_
@@ -54,7 +62,11 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveMessageAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
+- **SearchMessagesAsync** *(method)* - _(no description)_
+- **SetMessageCategoryAsync** *(method)* - _(no description)_
 - **SetMessageFlagsAsync** *(method)* - _(no description)_
+- **UpsertCategoryAsync** *(method)* - _(no description)_
+- **UpsertCategoryRuleAsync** *(method)* - _(no description)_
 - **UpsertDkimKeyAsync** *(method)* - _(no description)_
 - **UpsertLocalDomainAsync** *(method)* - _(no description)_
 - **UpsertMailboxAsync** *(method)* - _(no description)_

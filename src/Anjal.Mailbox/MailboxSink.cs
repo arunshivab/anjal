@@ -210,6 +210,8 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     DateHeader = parsed?.Date ?? string.Empty,
                     SizeBytes = written.SizeBytes,
                     SpamScore = spamScore,
+                    HasAttachments = HasAttachment(parsed?.Body),
+                    CategoryId = await this.CategoryForAsync(mailbox.Id, ctx.EnvelopeFrom, parsed?.Headers.Get("From") ?? string.Empty, ct).ConfigureAwait(false),
                 }, ct).ConfigureAwait(false);
 
                 long? used = await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
@@ -259,5 +261,86 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             Outcome = Anjal.Smtp.DeliveryOutcome.PermanentFailure,
             ReplyText = "No such mailbox",
         };
+    }
+
+    /// <summary>
+    /// Whether a parsed message carries an attachment: any part with a
+    /// filename, or any non-text part inside a multipart body. A plain
+    /// text or HTML message on its own does not count.
+    /// </summary>
+    /// <param name="entity">Root entity, or null when parsing failed.</param>
+    public static bool HasAttachment(Anjal.Mime.MimeEntity? entity)
+    {
+        if (entity is Anjal.Mime.MimePart part)
+        {
+            // The same test the message view uses when it lists attachments,
+            // so the flag and the list can never disagree.
+            string disposition = part.Headers.Get("Content-Disposition") ?? string.Empty;
+            if (disposition.StartsWith("attachment", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            string type = part.ContentType.MimeType;
+            return !type.StartsWith("text/", System.StringComparison.OrdinalIgnoreCase);
+        }
+        if (entity is Anjal.Mime.MimeMultipart multi)
+        {
+            foreach (Anjal.Mime.MimeEntity child in multi.Parts)
+            {
+                if (HasAttachment(child))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// The category a mailbox's rules put this sender in, or null. An exact
+    /// address beats a domain rule, the same precedence sender rules use.
+    /// </summary>
+    private async System.Threading.Tasks.Task<System.Guid?> CategoryForAsync(System.Guid mailboxId, string envelopeFrom, string fromHeader, System.Threading.CancellationToken ct)
+    {
+        System.Collections.Generic.IReadOnlyList<Anjal.Store.CategoryRuleRow> rules =
+            await this.store.ListCategoryRulesAsync(mailboxId, ct).ConfigureAwait(false);
+        if (rules.Count == 0)
+        {
+            return null;
+        }
+
+        var addresses = new System.Collections.Generic.List<string>();
+        if (envelopeFrom.Length > 0)
+        {
+            addresses.Add(envelopeFrom);
+        }
+        foreach (Anjal.Mime.MailAddress a in Anjal.Mime.AddressParser.Parse(Anjal.Mime.EncodedWordDecoder.Decode(fromHeader)))
+        {
+            addresses.Add(a.Address);
+        }
+
+        System.Guid? domainMatch = null;
+        foreach (Anjal.Store.CategoryRuleRow rule in rules)
+        {
+            foreach (string address in addresses)
+            {
+                if (!TrySplitAddress(address, out string local, out string domain))
+                {
+                    continue;
+                }
+                string full = local + "@" + domain;
+                if (string.Equals(rule.Pattern, full, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return rule.CategoryId;
+                }
+                if (rule.Pattern.StartsWith('@') &&
+                    (string.Equals(rule.Pattern.AsSpan(1).ToString(), domain, System.StringComparison.OrdinalIgnoreCase) ||
+                     domain.EndsWith("." + rule.Pattern.AsSpan(1).ToString(), System.StringComparison.OrdinalIgnoreCase)))
+                {
+                    domainMatch ??= rule.CategoryId;
+                }
+            }
+        }
+        return domainMatch;
     }
 }

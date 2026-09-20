@@ -1,24 +1,54 @@
+@page "/sign-in"
 @page "/login"
 @layout MainLayout
 @attribute [AllowAnonymous]
 
-<PageTitle>Anjal - sign in</PageTitle>
+<PageTitle>Sign in — Anjal</PageTitle>
 
-<div class="login">
-    <h1>Anjal</h1>
-    <p class="muted">Sign in with your mailbox address.</p>
-    @if (Error is not null)
-    {
-        <p class="error">Address or password not accepted.</p>
-    }
-    <form method="post" action="/auth/login">
-        <AntiforgeryToken />
-        <label>Address <input type="email" name="address" autocomplete="username" required autofocus /></label>
-        <label>Password <input type="password" name="password" autocomplete="current-password" required /></label>
-        <button type="submit" class="btn primary">Sign in</button>
-    </form>
+<div class="centre">
+    <div class="panel signin">
+        <img src="/logos/anjal-lockup.svg" alt="Anjal" style="display:block;margin:0 auto 10px;height:52px" />
+        <p class="hostline">@HostName</p>
+
+        @if (Error is not null)
+        {
+            <div class="err">
+                <LipiIcon Name="warning" Size="16" />
+                <span>Address or password not accepted.</span>
+            </div>
+        }
+        @if (Expired is not null)
+        {
+            <div class="note">
+                <LipiIcon Name="info" Size="16" />
+                <span>Your session expired. Sign in again to carry on; nothing you were reading was lost.</span>
+            </div>
+        }
+
+        <form method="post" action="/auth/login">
+            <AntiforgeryToken />
+            <div class="row">
+                <label class="lbl" for="address">Address</label>
+                <input class="inp @(Error is not null ? "bad" : "")" id="address" name="address" type="email"
+                       inputmode="email" autocomplete="username" required autofocus />
+            </div>
+            <div class="row">
+                <label class="lbl" for="password">Password</label>
+                <input class="inp @(Error is not null ? "bad" : "")" id="password" name="password" type="password"
+                       autocomplete="current-password" required />
+            </div>
+            <button type="submit" class="full">Sign in</button>
+        </form>
+        <p class="hint" style="color:var(--ink-subtle);font-size:12px;margin:14px 0 0;text-align:center">
+            No password reset here. Ask your administrator; Anjal will not email a new password.
+        </p>
+    </div>
 </div>
 
 @code {
     [SupplyParameterFromQuery] private string? Error { get; set; }
+    [SupplyParameterFromQuery] private string? Expired { get; set; }
+    [Inject] private Anjal.Webmail.Services.HostInfo Host { get; set; } = default!;
+
+    private string HostName => Host.Name;
 }

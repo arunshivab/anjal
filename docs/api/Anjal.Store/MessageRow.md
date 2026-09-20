@@ -7,11 +7,13 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 ## Members
 
 - **Answered** *(property)* - Maildir "R" flag - the message has been replied to.
+- **CategoryId** *(property)* - The category this message carries, or null.
 - **DateHeader** *(property)* - The raw Date header value, or empty.
 - **EnvelopeFrom** *(property)* - SMTP envelope MAIL FROM.
 - **Flagged** *(property)* - Maildir "F" flag - the message is flagged/starred.
 - **FolderId** *(property)* - The folder the message is in.
 - **FromHeader** *(property)* - The raw From header value.
+- **HasAttachments** *(property)* - True when the message has at least one attachment part.
 - **Id** *(property)* - Identifier assigned by the store.
 - **MailboxId** *(property)* - The owning mailbox.
 - **MaildirFile** *(property)* - Path of the Maildir file relative to the folder's Maildir directory, e.g. new/1726560000.M123456P4242Q7.host.

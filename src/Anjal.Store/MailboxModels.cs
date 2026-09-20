@@ -137,6 +137,12 @@ public sealed class MailboxRow
     /// <summary>Display name for the From header (e.g. "Arun Shiva B").</summary>
     public string DisplayName { get; set; } = string.Empty;
 
+    /// <summary>Default webmail theme.</summary>
+    public const string DefaultTheme = "paper";
+
+    /// <summary>Webmail theme for this mailbox: paper, ink, postcard or midnight. Stored per mailbox, not per browser.</summary>
+    public string Theme { get; set; } = DefaultTheme;
+
     /// <summary>When false, delivery and authentication both fail.</summary>
     public bool Enabled { get; set; } = true;
 
@@ -238,9 +244,155 @@ public sealed class MessageRow
     /// <summary>Maildir "R" flag - the message has been replied to.</summary>
     public bool Answered { get; set; }
 
+    /// <summary>The category this message carries, or null.</summary>
+    public System.Guid? CategoryId { get; set; }
+
+    /// <summary>True when the message has at least one attachment part.</summary>
+    public bool HasAttachments { get; set; }
+
     /// <summary>Spam score assigned at delivery (0 when scoring was not run).</summary>
     public int SpamScore { get; set; }
 
     /// <summary>Time the message was delivered to the folder.</summary>
     public System.DateTimeOffset ReceivedAt { get; set; }
+}
+
+/// <summary>
+/// A named label a mailbox can put on a message. Categories exist at two
+/// levels: a tenant's defaults, shared by every mailbox in it and the only
+/// ones an institution can report across, and a mailbox's own additions,
+/// private to that mailbox.
+/// <para>
+/// Colour comes from <see cref="Slot"/>, one of eight validated slots.
+/// The eight are a per-mailbox budget: the tenant's defaults take slots in
+/// order, a mailbox's own take what remains, and anything past the eighth
+/// keeps <see cref="NoSlot"/> and is told apart by name alone. Slots are
+/// stored, never derived from the name and never recomputed when a
+/// category is deleted, because recomputing repaints every chart.
+/// </para>
+/// </summary>
+public sealed class CategoryRow
+{
+    /// <summary>Slot value meaning "no colour left"; rendered in ink-subtle.</summary>
+    public const int NoSlot = 0;
+
+    /// <summary>The highest colour slot the design system defines.</summary>
+    public const int MaxSlot = 8;
+
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>The tenant this category belongs to.</summary>
+    public System.Guid TenantId { get; set; }
+
+    /// <summary>
+    /// The mailbox that owns it, or null for a tenant default shared by
+    /// every mailbox in the tenant.
+    /// </summary>
+    public System.Guid? MailboxId { get; set; }
+
+    /// <summary>Display name, unique within its scope.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Colour slot 1-8, or <see cref="NoSlot"/>.</summary>
+    public int Slot { get; set; }
+
+    /// <summary>When it was created.</summary>
+    public System.DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>True when this is a tenant default rather than a mailbox's own.</summary>
+    public bool IsShared => this.MailboxId is null;
+}
+
+/// <summary>
+/// "File mail from this sender under this category." Written when the
+/// reader assigns a category and asks for future mail to follow, and
+/// applied at delivery. Owned by one mailbox: categorising is a personal
+/// act even when the category is shared.
+/// </summary>
+public sealed class CategoryRuleRow
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>The mailbox whose mail this rule files.</summary>
+    public System.Guid MailboxId { get; set; }
+
+    /// <summary>
+    /// Sender pattern: a full address (<c>lab@example.com</c>) or a domain
+    /// (<c>@example.com</c>), matched the same way sender rules are.
+    /// </summary>
+    public string Pattern { get; set; } = string.Empty;
+
+    /// <summary>The category to apply.</summary>
+    public System.Guid CategoryId { get; set; }
+
+    /// <summary>When it was created.</summary>
+    public System.DateTimeOffset CreatedAt { get; set; }
+}
+
+/// <summary>One day's message counts, for the dashboard's line chart.</summary>
+public sealed class DailyCount
+{
+    /// <summary>The day (UTC date at midnight).</summary>
+    public System.DateTimeOffset Day { get; set; }
+
+    /// <summary>Messages received that day.</summary>
+    public long Received { get; set; }
+
+    /// <summary>Messages sent that day.</summary>
+    public long Sent { get; set; }
+}
+
+/// <summary>A label and a count, for the dashboard's bar charts.</summary>
+public sealed class NamedCount
+{
+    /// <summary>What is being counted: a folder, a category, a sender.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>How many.</summary>
+    public long Count { get; set; }
+
+    /// <summary>Colour slot when the name is a category; otherwise <see cref="CategoryRow.NoSlot"/>.</summary>
+    public int Slot { get; set; }
+}
+
+/// <summary>What a mailbox did over a period. Everything the dashboard shows.</summary>
+public sealed class MailboxActivity
+{
+    /// <summary>Start of the period (inclusive, UTC).</summary>
+    public System.DateTimeOffset From { get; set; }
+
+    /// <summary>End of the period (exclusive, UTC).</summary>
+    public System.DateTimeOffset To { get; set; }
+
+    /// <summary>Messages delivered to a folder other than Junk.</summary>
+    public long Delivered { get; set; }
+
+    /// <summary>Messages filed in Junk.</summary>
+    public long Junked { get; set; }
+
+    /// <summary>Junk messages the reader moved back to INBOX.</summary>
+    public long RecoveredFromJunk { get; set; }
+
+    /// <summary>Messages sent.</summary>
+    public long Sent { get; set; }
+
+    /// <summary>Messages received carrying at least one attachment.</summary>
+    public long ReceivedWithAttachments { get; set; }
+
+    /// <summary>Messages sent carrying at least one attachment.</summary>
+    public long SentWithAttachments { get; set; }
+
+    /// <summary>Received messages per folder.</summary>
+    public System.Collections.Generic.IReadOnlyList<NamedCount> ByFolder { get; set; } = System.Array.Empty<NamedCount>();
+
+    /// <summary>Received messages per category, including "Uncategorised".</summary>
+    public System.Collections.Generic.IReadOnlyList<NamedCount> ByCategory { get; set; } = System.Array.Empty<NamedCount>();
+
+    /// <summary>The five people who wrote most.</summary>
+    public System.Collections.Generic.IReadOnlyList<NamedCount> TopSenders { get; set; } = System.Array.Empty<NamedCount>();
+
+    /// <summary>Sent and received per day, oldest first.</summary>
+    public System.Collections.Generic.IReadOnlyList<DailyCount> ByDay { get; set; } = System.Array.Empty<DailyCount>();
 }
