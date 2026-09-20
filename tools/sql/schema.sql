@@ -1,4 +1,4 @@
--- Anjal PostgreSQL schema (v0.11.0)
+-- Anjal PostgreSQL schema (v0.15.0)
 --
 -- The store layer keeps three concerns separated:
 --   routing_rules   - maps a local-part to a webhook URL + signing secret
@@ -221,5 +221,48 @@ CREATE TABLE IF NOT EXISTS sender_rules (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT sender_rules_tenant_pattern_unique UNIQUE (tenant_id, pattern)
 );
+
+-- Webmail (v0.14.0): per-mailbox theme, and an index for unread counts.
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'paper';
+
+CREATE INDEX IF NOT EXISTS messages_unread_idx
+    ON messages (mailbox_id, folder_id)
+    WHERE NOT seen;
+
+-- Categories (v0.15.0). Two levels in one table: a row with mailbox_id NULL
+-- is a tenant default shared by every mailbox; otherwise it belongs to that
+-- mailbox alone. The slot carries the colour and is stored, never derived
+-- from the name and never recomputed when a category is deleted.
+CREATE TABLE IF NOT EXISTS categories (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    mailbox_id  UUID REFERENCES mailboxes(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL CHECK (length(trim(name)) BETWEEN 1 AND 40),
+    slot        INT  NOT NULL DEFAULT 0 CHECK (slot BETWEEN 0 AND 8),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One name per scope, case-insensitively. The coalesce gives tenant defaults
+-- (mailbox_id NULL) a stable key, since NULL never equals NULL in an index.
+CREATE UNIQUE INDEX IF NOT EXISTS categories_scope_name_idx
+    ON categories (tenant_id, coalesce(mailbox_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(name));
+
+-- "File mail from this sender here." Owned by one mailbox: categorising is a
+-- personal act even when the category is shared by the tenant.
+CREATE TABLE IF NOT EXISTS category_rules (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mailbox_id  UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    pattern     TEXT NOT NULL CHECK (pattern ~ '^(@[^@[:space:]]+|[^@[:space:]]+@[^@[:space:]]+)$'),
+    category_id UUID NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (mailbox_id, pattern)
+);
+
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS category_id UUID REFERENCES categories(id) ON DELETE SET NULL;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS has_attachments BOOLEAN NOT NULL DEFAULT false;
+
+-- The dashboard reads a period of one mailbox, grouped several ways.
+CREATE INDEX IF NOT EXISTS messages_activity_idx ON messages (mailbox_id, received_at);
+CREATE INDEX IF NOT EXISTS messages_category_idx ON messages (category_id) WHERE category_id IS NOT NULL;
 
 COMMIT;

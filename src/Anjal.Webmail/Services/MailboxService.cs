@@ -17,6 +17,9 @@ public sealed class FolderView
 
     /// <summary>Messages in the folder.</summary>
     public long Count { get; init; }
+
+    /// <summary>Unread messages in the folder.</summary>
+    public long Unread { get; init; }
 }
 
 /// <summary>One attachment of an opened message.</summary>
@@ -84,6 +87,18 @@ public sealed class ComposeRequest
     /// <summary>Cc header value.</summary>
     public string Cc { get; set; } = string.Empty;
 
+    /// <summary>Bcc header value. Recipients receive the message but the header is not sent.</summary>
+    public string Bcc { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The draft this compose is editing, if any. On send or save the old
+    /// draft is replaced, so a draft never duplicates itself.
+    /// </summary>
+    public Guid? DraftId { get; set; }
+
+    /// <summary>Message-ID of the message being replied to, for In-Reply-To and References.</summary>
+    public string InReplyTo { get; set; } = string.Empty;
+
     /// <summary>Subject.</summary>
     public string Subject { get; set; } = string.Empty;
 
@@ -99,7 +114,7 @@ public sealed class ComposeRequest
 /// signed-in mailbox id and refuses to touch messages that belong to a
 /// different mailbox, so the pages never need to check ownership.
 /// </summary>
-public sealed class MailboxService
+public sealed partial class MailboxService
 {
     /// <summary>Folders every mailbox shows even before any mail arrives.</summary>
     public static readonly IReadOnlyList<string> DefaultFolders = new[] { FolderRow.Inbox, "Sent", "Drafts", MailboxSink.JunkFolder, "Trash" };
@@ -157,7 +172,8 @@ public sealed class MailboxService
         foreach (FolderRow f in await this.store.ListFoldersAsync(mailboxId, ct).ConfigureAwait(false))
         {
             long count = await this.store.CountMessagesAsync(mailboxId, f.Id, ct).ConfigureAwait(false);
-            result.Add(new FolderView { Id = f.Id, Name = f.Name, Count = count });
+            long unread = await this.store.CountUnreadAsync(mailboxId, f.Id, ct).ConfigureAwait(false);
+            result.Add(new FolderView { Id = f.Id, Name = f.Name, Count = count, Unread = unread });
         }
         return result;
     }
@@ -498,6 +514,7 @@ public sealed class MailboxService
 
         IReadOnlyList<MailAddress> to = AddressParser.Parse(request.To);
         IReadOnlyList<MailAddress> cc = AddressParser.Parse(request.Cc);
+        IReadOnlyList<MailAddress> bcc = AddressParser.Parse(request.Bcc);
         if (to.Count == 0)
         {
             return "At least one valid To address is required.";
@@ -505,6 +522,10 @@ public sealed class MailboxService
         if (!string.IsNullOrWhiteSpace(request.Cc) && cc.Count == 0)
         {
             return "The Cc field contains no valid address.";
+        }
+        if (!string.IsNullOrWhiteSpace(request.Bcc) && bcc.Count == 0)
+        {
+            return "The Bcc field contains no valid address.";
         }
         if (string.IsNullOrWhiteSpace(request.Subject) && string.IsNullOrWhiteSpace(request.Body) && request.Attachments.Count == 0)
         {
@@ -516,6 +537,7 @@ public sealed class MailboxService
 
         var recipients = new List<MailAddress>(to);
         recipients.AddRange(cc);
+        recipients.AddRange(bcc);
         foreach (MailAddress rcpt in recipients)
         {
             await this.messageStore.EnqueueOutboundAsync(new OutboundMessage
@@ -548,6 +570,12 @@ public sealed class MailboxService
             Seen = true,
         }, ct).ConfigureAwait(false);
         await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
+
+        // The draft this was composed from is now redundant.
+        if (request.DraftId is Guid draftId)
+        {
+            await this.DeleteAsync(mailbox.Id, draftId, ct).ConfigureAwait(false);
+        }
         return null;
     }
 
@@ -560,6 +588,20 @@ public sealed class MailboxService
     /// <param name="to">Parsed To addresses.</param>
     /// <param name="cc">Parsed Cc addresses.</param>
     public static byte[] BuildMessage(MailboxRow mailbox, ComposeRequest request, IReadOnlyList<MailAddress> to, IReadOnlyList<MailAddress> cc)
+        => BuildMessage(mailbox, request, to, cc, draftHeaders: null);
+
+    /// <summary>
+    /// Build the wire bytes, optionally as a draft. A draft keeps the
+    /// half-typed To/Cc/Bcc text verbatim so reopening it shows exactly
+    /// what was typed; a sent message uses the parsed addresses and never
+    /// carries a Bcc header.
+    /// </summary>
+    /// <param name="mailbox">The sending mailbox.</param>
+    /// <param name="request">The compose form.</param>
+    /// <param name="to">Parsed To addresses.</param>
+    /// <param name="cc">Parsed Cc addresses.</param>
+    /// <param name="draftHeaders">Non-null when saving a draft; the raw field text to preserve.</param>
+    public static byte[] BuildMessage(MailboxRow mailbox, ComposeRequest request, IReadOnlyList<MailAddress> to, IReadOnlyList<MailAddress> cc, ComposeRequest? draftHeaders)
     {
         ArgumentNullException.ThrowIfNull(mailbox);
         ArgumentNullException.ThrowIfNull(request);
@@ -601,10 +643,30 @@ public sealed class MailboxService
 
         var msg = new MimeMessage(root);
         msg.Headers.Add("From", FormatFrom(mailbox));
-        msg.Headers.Add("To", FormatAddresses(to));
-        if (cc.Count > 0)
+        if (draftHeaders is not null)
         {
-            msg.Headers.Add("Cc", FormatAddresses(cc));
+            msg.Headers.Add("To", draftHeaders.To.Trim());
+            if (draftHeaders.Cc.Trim().Length > 0)
+            {
+                msg.Headers.Add("Cc", draftHeaders.Cc.Trim());
+            }
+            if (draftHeaders.Bcc.Trim().Length > 0)
+            {
+                msg.Headers.Add("Bcc", draftHeaders.Bcc.Trim());
+            }
+        }
+        else
+        {
+            msg.Headers.Add("To", FormatAddresses(to));
+            if (cc.Count > 0)
+            {
+                msg.Headers.Add("Cc", FormatAddresses(cc));
+            }
+        }
+        if (request.InReplyTo.Length > 0)
+        {
+            msg.Headers.Add("In-Reply-To", "<" + request.InReplyTo.Trim('<', '>') + ">");
+            msg.Headers.Add("References", "<" + request.InReplyTo.Trim('<', '>') + ">");
         }
         msg.Subject = EncodeHeaderText(request.Subject.Trim());
         msg.Date = FormatDate(DateTimeOffset.UtcNow);

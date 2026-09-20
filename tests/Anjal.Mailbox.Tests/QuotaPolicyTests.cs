@@ -98,3 +98,42 @@ public class QuotaPolicyTests
         }
     }
 }
+
+public class TenantStatePolicyTests
+{
+    private static async System.Threading.Tasks.Task<(InMemoryMessageStore Store, TenantRow Tenant)> SeedAsync(bool enabled)
+    {
+        var store = new InMemoryMessageStore();
+        TenantRow tenant = await store.UpsertTenantAsync(new TenantRow { Slug = "t", Enabled = enabled }).ConfigureAwait(false);
+        await store.UpsertTenantDomainAsync(new TenantDomainRow { TenantId = tenant.Id, Domain = "d.test" }).ConfigureAwait(false);
+        await store.UpsertMailboxAsync(new MailboxRow { TenantId = tenant.Id, LocalPart = "u", Domain = "d.test" }).ConfigureAwait(false);
+        return (store, tenant);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task DisabledTenant_DefersWith450_RatherThanRejecting()
+    {
+        (InMemoryMessageStore store, _) = await SeedAsync(enabled: false);
+        PolicyDecision d = await new TenantStatePolicy(store).OnRcptToAsync("203.0.113.1", null, "a@b", "u@d.test");
+
+        Assert.False(d.Allowed);
+        Assert.Equal(450, d.ReplyCode);
+        Assert.Contains("temporarily", d.ReplyText, System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task EnabledTenant_UnknownAddress_AndOtherDomains_AreAllowed()
+    {
+        (InMemoryMessageStore store, _) = await SeedAsync(enabled: true);
+        var policy = new TenantStatePolicy(store);
+        Assert.True((await policy.OnRcptToAsync("203.0.113.1", null, "a@b", "u@d.test")).Allowed);
+        Assert.True((await policy.OnConnectAsync("203.0.113.1")).Allowed);
+        Assert.True((await policy.OnMailFromAsync("203.0.113.1", null, "a@b")).Allowed);
+
+        (InMemoryMessageStore off, _) = await SeedAsync(enabled: false);
+        var offPolicy = new TenantStatePolicy(off);
+        Assert.True((await offPolicy.OnRcptToAsync("203.0.113.1", null, "a@b", "nobody@d.test")).Allowed);
+        Assert.True((await offPolicy.OnRcptToAsync("203.0.113.1", null, "a@b", "u@other.test")).Allowed);
+        Assert.True((await offPolicy.OnRcptToAsync("203.0.113.1", null, "a@b", "not-an-address")).Allowed);
+    }
+}

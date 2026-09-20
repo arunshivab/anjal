@@ -124,23 +124,23 @@ public sealed class WebmailTlsTests : IAsyncLifetime, System.IDisposable
     public async System.Threading.Tasks.Task ObtainsCertificate_ServesHttps_RedirectsHttp_Hsts_AndHotReloads()
     {
         // Before any certificate exists, HTTP serves the login page directly (no redirect).
-        HttpResponseMessage early = await this.http.GetAsync("login");
+        HttpResponseMessage early = await this.http.GetAsync("sign-in");
         Assert.True(early.StatusCode is HttpStatusCode.OK or HttpStatusCode.MovedPermanently);
 
         await this.WaitForCertificateAsync();
         Assert.Equal(1, this.ca.Issued);
 
         // HTTPS works with the issued certificate.
-        HttpResponseMessage secure = await this.https.GetAsync("login");
+        HttpResponseMessage secure = await this.https.GetAsync("sign-in");
         Assert.Equal(HttpStatusCode.OK, secure.StatusCode);
-        Assert.Contains("<h1>Anjal</h1>", await secure.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
+        Assert.Contains("Sign in", await secure.Content.ReadAsStringAsync(), System.StringComparison.Ordinal);
         Assert.True(secure.Headers.TryGetValues("Strict-Transport-Security", out System.Collections.Generic.IEnumerable<string>? hsts));
         Assert.Contains("max-age=31536000", hsts!.First(), System.StringComparison.Ordinal);
 
         // HTTP now redirects to HTTPS - except challenge paths, which are still answered.
-        HttpResponseMessage redirect = await this.http.GetAsync("login?x=1");
+        HttpResponseMessage redirect = await this.http.GetAsync("sign-in?x=1");
         Assert.Equal(HttpStatusCode.MovedPermanently, redirect.StatusCode);
-        Assert.Equal($"https://127.0.0.1:{this.httpsPort}/login?x=1", redirect.Headers.Location!.ToString());
+        Assert.Equal($"https://127.0.0.1:{this.httpsPort}/sign-in?x=1", redirect.Headers.Location!.ToString());
         Http01ChallengeStore.Add("t-live", "t-live.ka");
         try
         {
@@ -176,7 +176,7 @@ public sealed class WebmailTlsTests : IAsyncLifetime, System.IDisposable
             },
         }))
         {
-            HttpResponseMessage again = await probe.GetAsync($"https://localhost:{this.httpsPort}/login");
+            HttpResponseMessage again = await probe.GetAsync($"https://localhost:{this.httpsPort}/sign-in");
             Assert.Equal(HttpStatusCode.OK, again.StatusCode);
         }
         Assert.NotNull(servedThumb);

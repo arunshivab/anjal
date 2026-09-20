@@ -18,6 +18,14 @@ public sealed class WebmailAuthService
     /// <summary>Claim type carrying the tenant slug.</summary>
     public const string TenantSlugClaim = "anjal:tenant_slug";
 
+    /// <summary>
+    /// Claim type carrying the mailbox's webmail theme. It rides in the
+    /// cookie because the root element's <c>data-theme</c> is written
+    /// before any page component runs, and a database read at that point
+    /// would cost a query on every request.
+    /// </summary>
+    public const string ThemeClaim = "anjal:theme";
+
     private readonly IMailboxStore store;
 
     /// <summary>Construct.</summary>
@@ -65,6 +73,7 @@ public sealed class WebmailAuthService
         identity.AddClaim(new Claim(ClaimTypes.Name, mailbox.Address));
         identity.AddClaim(new Claim(MailboxIdClaim, mailbox.Id.ToString()));
         identity.AddClaim(new Claim(TenantSlugClaim, tenant.Slug));
+        identity.AddClaim(new Claim(ThemeClaim, string.IsNullOrWhiteSpace(mailbox.Theme) ? MailboxRow.DefaultTheme : mailbox.Theme));
         return new ClaimsPrincipal(identity);
     }
 
@@ -77,5 +86,38 @@ public sealed class WebmailAuthService
     {
         string? raw = user?.FindFirst(MailboxIdClaim)?.Value;
         return raw is not null && Guid.TryParse(raw, out Guid id) ? id : null;
+    }
+
+    /// <summary>
+    /// The signed-in mailbox's theme, or the default for an anonymous
+    /// request.
+    /// </summary>
+    /// <param name="user">The current principal.</param>
+    public static string ThemeOf(ClaimsPrincipal? user)
+    {
+        string? theme = user?.FindFirst(ThemeClaim)?.Value;
+        return string.IsNullOrWhiteSpace(theme) ? MailboxRow.DefaultTheme : theme;
+    }
+
+    /// <summary>
+    /// Rebuild a principal with a different theme claim, so the change
+    /// takes effect on the very next render without another sign-in.
+    /// </summary>
+    /// <param name="user">The current principal.</param>
+    /// <param name="theme">The new theme.</param>
+    public static ClaimsPrincipal WithTheme(ClaimsPrincipal user, string theme)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(theme);
+        var identity = new ClaimsIdentity("AnjalWebmail");
+        foreach (Claim c in user.Claims)
+        {
+            if (!string.Equals(c.Type, ThemeClaim, StringComparison.Ordinal))
+            {
+                identity.AddClaim(new Claim(c.Type, c.Value));
+            }
+        }
+        identity.AddClaim(new Claim(ThemeClaim, theme));
+        return new ClaimsPrincipal(identity);
     }
 }

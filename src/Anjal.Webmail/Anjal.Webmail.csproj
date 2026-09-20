@@ -10,10 +10,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The stylesheet is embedded and served from an endpoint so the UI
-         is self-contained wherever the host is launched from. -->
-    <Content Remove="wwwroot\app.css" />
-    <EmbeddedResource Include="wwwroot\app.css" LogicalName="Anjal.Webmail.app.css" />
+    <PackageReference Include="LiPicons.Blazor" Version="1.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Static assets are embedded and served from endpoints so the UI is
+         self-contained wherever the host is launched from: no wwwroot on disk,
+         no third-party request, and nothing to copy at deploy time. -->
+    <Content Remove="wwwroot\**" />
+    <EmbeddedResource Include="wwwroot\**" />
   </ItemGroup>
 
   <PropertyGroup>

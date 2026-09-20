@@ -1,0 +1,262 @@
+@page "/dashboard"
+@attribute [Authorize]
+@inject MailboxService Mail
+
+<PageTitle>Dashboard — Anjal</PageTitle>
+
+<div class="stack dash">
+    <div class="dashhead">
+        <div>
+            <h1>Your mail</h1>
+            <p class="lead">@PeriodLabel · @activity.From.ToLocalTime().ToString("d MMM yyyy", Inv) to @activity.To.AddDays(-1).ToLocalTime().ToString("d MMM yyyy", Inv)</p>
+        </div>
+        <form method="get" action="/dashboard" class="periodpick">
+            <select name="period" class="scope" aria-label="Period" onchange="this.form.submit()">
+                @foreach ((string Key, string Label, int Days) p in MailboxService.Periods)
+                {
+                    <option value="@p.Key" selected="@(PeriodKey == p.Key)">@p.Label</option>
+                }
+            </select>
+            <noscript><button type="submit" class="btn btn-s btn-sm">Show</button></noscript>
+        </form>
+    </div>
+
+    <section class="heroband">
+        <div class="hero">
+            <span class="figure">@activity.Delivered</span>
+            <span class="figlabel">message@(activity.Delivered == 1 ? "" : "s") delivered</span>
+            <p class="figsub">
+                @if (activity.Junked > 0)
+                {
+                    <text>@activity.Junked more @(activity.Junked == 1 ? "was" : "were") filed in Junk.</text>
+                }
+                else
+                {
+                    <text>Nothing was filed in Junk.</text>
+                }
+            </p>
+        </div>
+        <div class="tile">
+            <span class="tilefig">@activity.Sent</span>
+            <span class="figlabel">sent</span>
+        </div>
+        <div class="tile">
+            <span class="tilefig">@(activity.ReceivedWithAttachments + activity.SentWithAttachments)</span>
+            <span class="figlabel">with attachments</span>
+            <p class="figsub">@activity.ReceivedWithAttachments received · @activity.SentWithAttachments sent</p>
+        </div>
+    </section>
+
+    <div class="dashgrid">
+        <section class="railcard chart">
+            <h2 class="railhead">Sent and received, by day</h2>
+            @if (TotalByDay == 0)
+            {
+                <p class="railnote">No messages in this period.</p>
+            }
+            else
+            {
+                <div class="legend">
+                    <span><i class="sw sw-received"></i> Received</span>
+                    <span><i class="sw sw-sent"></i> Sent</span>
+                </div>
+                <svg class="linechart" viewBox="0 0 640 200" preserveAspectRatio="none" role="img"
+                     aria-label="Sent and received per day">
+                    <line x1="0" y1="199" x2="640" y2="199" class="axis" />
+                    <polyline class="ln received" points="@Points(d => d.Received)" />
+                    <polyline class="ln sent" points="@Points(d => d.Sent)" />
+                </svg>
+                <div class="axislabels">
+                    <span>@activity.ByDay[0].Day.ToString("d MMM", Inv)</span>
+                    <span class="peak">peak @Peak</span>
+                    <span>@activity.ByDay[activity.ByDay.Count - 1].Day.ToString("d MMM", Inv)</span>
+                </div>
+            }
+        </section>
+
+        <section class="railcard chart">
+            <h2 class="railhead">Received by folder</h2>
+            @if (activity.ByFolder.Count == 0)
+            {
+                <p class="railnote">Nothing received in this period.</p>
+            }
+            else
+            {
+                @foreach (NamedCount f in activity.ByFolder)
+                {
+                    <div class="barrow">
+                        <span class="barlabel">@f.Name</span>
+                        <span class="bartrack"><i class="bar neutral" style="width:@Width(f.Count, MaxFolder)%"></i></span>
+                        <span class="barvalue">@f.Count</span>
+                    </div>
+                }
+            }
+        </section>
+
+        <section class="railcard chart">
+            <h2 class="railhead">Received by category</h2>
+            @if (activity.ByCategory.Count == 0)
+            {
+                <p class="railnote">Nothing received in this period.</p>
+            }
+            else
+            {
+                @foreach (NamedCount c in activity.ByCategory)
+                {
+                    <div class="barrow">
+                        <span class="barlabel">
+                            <i class="dot slot-@c.Slot"></i>@c.Name
+                        </span>
+                        <span class="bartrack"><i class="bar slot-@c.Slot" style="width:@Width(c.Count, MaxCategory)%"></i></span>
+                        <span class="barvalue">@c.Count</span>
+                    </div>
+                }
+                <p class="railnote">A category is a colour and a name together; the colour alone never carries meaning.</p>
+            }
+        </section>
+
+        <section class="railcard chart">
+            <h2 class="railhead">Who wrote to you most</h2>
+            @if (activity.TopSenders.Count == 0)
+            {
+                <p class="railnote">Nothing received in this period.</p>
+            }
+            else
+            {
+                @foreach (NamedCount s in activity.TopSenders)
+                {
+                    <div class="barrow">
+                        <span class="barlabel" title="@s.Name">@s.Name</span>
+                        <span class="bartrack"><i class="bar neutral" style="width:@Width(s.Count, MaxSender)%"></i></span>
+                        <span class="barvalue">@s.Count</span>
+                    </div>
+                }
+            }
+        </section>
+    </div>
+
+    <section class="railcard">
+        <h2 class="railhead">The same numbers, as a table</h2>
+        <table class="plain">
+            <thead><tr><th>Measure</th><th class="num">Count</th></tr></thead>
+            <tbody>
+                <tr><td>Delivered</td><td class="num">@activity.Delivered</td></tr>
+                <tr><td>Filed in Junk</td><td class="num">@activity.Junked</td></tr>
+                <tr><td>Sent</td><td class="num">@activity.Sent</td></tr>
+                <tr><td>Received with attachments</td><td class="num">@activity.ReceivedWithAttachments</td></tr>
+                <tr><td>Sent with attachments</td><td class="num">@activity.SentWithAttachments</td></tr>
+                @foreach (NamedCount c in activity.ByCategory)
+                {
+                    <tr><td>Category: @c.Name</td><td class="num">@c.Count</td></tr>
+                }
+            </tbody>
+        </table>
+        <p class="railnote">Nothing here is locked behind a colour or a pointer.</p>
+    </section>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "period")] private string? Period { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private MailboxActivity activity = new();
+
+    private static System.Globalization.CultureInfo Inv => System.Globalization.CultureInfo.InvariantCulture;
+
+    private string PeriodKey => string.IsNullOrWhiteSpace(Period) ? "30d" : Period;
+
+    private string PeriodLabel
+    {
+        get
+        {
+            foreach ((string Key, string Label, int Days) p in MailboxService.Periods)
+            {
+                if (p.Key == PeriodKey)
+                {
+                    return p.Label;
+                }
+            }
+            return "Last 30 days";
+        }
+    }
+
+    private long MaxFolder => Max(activity.ByFolder);
+
+    private long MaxCategory => Max(activity.ByCategory);
+
+    private long MaxSender => Max(activity.TopSenders);
+
+    private long TotalByDay
+    {
+        get
+        {
+            long total = 0;
+            foreach (DailyCount d in activity.ByDay)
+            {
+                total += d.Received + d.Sent;
+            }
+            return total;
+        }
+    }
+
+    private long Peak
+    {
+        get
+        {
+            long peak = 0;
+            foreach (DailyCount d in activity.ByDay)
+            {
+                peak = Math.Max(peak, Math.Max(d.Received, d.Sent));
+            }
+            return peak;
+        }
+    }
+
+    private static long Max(IReadOnlyList<NamedCount> counts)
+    {
+        long max = 1;
+        foreach (NamedCount c in counts)
+        {
+            max = Math.Max(max, c.Count);
+        }
+        return max;
+    }
+
+    private static int Width(long value, long max) => max <= 0 ? 0 : (int)Math.Max(2, value * 100 / max);
+
+    /// <summary>
+    /// The polyline for one series, drawn into a 640x200 box. Both series
+    /// share one scale because they share a unit; the axis is the peak of
+    /// whichever is higher, so the two lines stay comparable.
+    /// </summary>
+    private string Points(Func<DailyCount, long> pick)
+    {
+        if (activity.ByDay.Count == 0)
+        {
+            return string.Empty;
+        }
+        long peak = Math.Max(1, Peak);
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < activity.ByDay.Count; i++)
+        {
+            double x = activity.ByDay.Count == 1 ? 320 : 640.0 * i / (activity.ByDay.Count - 1);
+            double y = 196 - (190.0 * pick(activity.ByDay[i]) / peak);
+            sb.Append(x.ToString("0.#", Inv)).Append(',').Append(y.ToString("0.#", Inv)).Append(' ');
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        activity = await Mail.GetActivityAsync(mailboxId.Value, PeriodKey);
+    }
+}

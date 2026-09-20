@@ -1,0 +1,186 @@
+@page "/settings"
+@attribute [Authorize]
+@inject MailboxService Mail
+
+<PageTitle>Settings — Anjal</PageTitle>
+
+<div class="stack">
+    <h1>Settings</h1>
+    <p class="lead">Your display name, the look of the webmail, and your password. Each section saves on its own, so one cannot fail because of another.</p>
+
+    @if (Saved is not null)
+    {
+        <div class="notice n-ok" style="margin-bottom:16px"><LipiIcon Name="check" Size="16" /><span>@SavedMessage</span></div>
+    }
+    @if (Error is not null)
+    {
+        <div class="notice n-err" style="margin-bottom:16px"><LipiIcon Name="warning" Size="16" /><span>@Error</span></div>
+    }
+
+    <div class="formcard">
+        <h2>Display name</h2>
+        <p class="hint">The name recipients see beside your address.</p>
+        <form method="post" action="/settings/name">
+            <AntiforgeryToken />
+            <div class="row">
+                <label class="lbl" for="displayName">Display name</label>
+                <input class="inp" id="displayName" name="displayName" type="text" value="@displayName" maxlength="100" />
+            </div>
+            <p class="sentas">Sent as: @FromLine</p>
+            <button type="submit" class="btn btn-p" style="margin-top:12px">Save</button>
+        </form>
+    </div>
+
+    <div class="formcard">
+        <h2>Theme</h2>
+        <p class="hint">Stored with your mailbox, so it follows you to any browser you sign in from.</p>
+        <form method="post" action="/settings/theme">
+            <AntiforgeryToken />
+            <div class="themepick">
+                @foreach (string t in MailboxService.Themes)
+                {
+                    <label>
+                        <input type="radio" name="theme" value="@t" checked="@(theme == t)" />
+                        <span>@Title(t)</span>
+                    </label>
+                }
+            </div>
+            <button type="submit" class="btn btn-p">Save</button>
+        </form>
+    </div>
+
+    <div class="formcard">
+        <h2>Categories</h2>
+        <p class="hint">
+            Your organisation sets the shared ones; you can add your own on top.
+            Eight carry a colour — the shared ones take theirs first, yours take what is left,
+            and any beyond eight still work, told apart by name.
+        </p>
+        @foreach (CategoryView c in categories)
+        {
+            <div class="catrow">
+                <span class="chip slot-@c.Row.Slot"><i></i>@c.Row.Name</span>
+                <span class="catmeta">@c.Count message@(c.Count == 1 ? "" : "s")</span>
+                @if (c.Shared)
+                {
+                    <span class="catmeta shared">Shared by @tenantName</span>
+                }
+                else
+                {
+                    <form method="post" action="/settings/categories/delete" class="inline catdel">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="categoryId" value="@c.Row.Id" />
+                        <button type="submit" class="btn btn-q btn-sm">Remove</button>
+                    </form>
+                }
+            </div>
+        }
+        <form method="post" action="/settings/categories" class="catadd">
+            <AntiforgeryToken />
+            <input class="inp" name="name" type="text" maxlength="40" placeholder="Add a category of your own" aria-label="New category" />
+            <button type="submit" class="btn btn-p">Add</button>
+        </form>
+        @if (rules.Count > 0)
+        {
+            <h3 class="subhead">Senders filed automatically</h3>
+            @foreach (CategoryRuleRow r in rules)
+            {
+                <div class="catrow">
+                    <span class="mono">@r.Pattern</span>
+                    <span class="catmeta">@(NameOf(r.CategoryId))</span>
+                    <form method="post" action="/settings/categories/rules/delete" class="inline catdel">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="ruleId" value="@r.Id" />
+                        <button type="submit" class="btn btn-q btn-sm">Forget</button>
+                    </form>
+                </div>
+            }
+        }
+    </div>
+
+    <div class="formcard">
+        <h2>Password</h2>
+        <p class="hint">At least @MailboxService.MinimumPasswordLength characters. Anjal does not expire passwords. Changing it keeps this session signed in.</p>
+        <form method="post" action="/settings/password">
+            <AntiforgeryToken />
+            <div class="row">
+                <label class="lbl" for="current">Current password</label>
+                <input class="inp" id="current" name="current" type="password" autocomplete="current-password" required />
+            </div>
+            <div class="row">
+                <label class="lbl" for="next">New password</label>
+                <input class="inp" id="next" name="next" type="password" autocomplete="new-password" required minlength="@MailboxService.MinimumPasswordLength" />
+            </div>
+            <div class="row">
+                <label class="lbl" for="confirm">Confirm new password</label>
+                <input class="inp" id="confirm" name="confirm" type="password" autocomplete="new-password" required />
+            </div>
+            <button type="submit" class="btn btn-p">Change password</button>
+        </form>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
+    [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private string displayName = string.Empty;
+    private string theme = MailboxRow.DefaultTheme;
+    private string address = string.Empty;
+    private string tenantName = string.Empty;
+    private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
+    private IReadOnlyList<CategoryRuleRow> rules = System.Array.Empty<CategoryRuleRow>();
+
+    private string NameOf(Guid categoryId)
+    {
+        foreach (CategoryView c in categories)
+        {
+            if (c.Row.Id == categoryId)
+            {
+                return c.Row.Name;
+            }
+        }
+        return MailboxService.Uncategorised;
+    }
+
+    private string FromLine => displayName.Length > 0 ? $"\"{displayName}\" <{address}>" : address;
+
+    private string SavedMessage => Saved switch
+    {
+        "name" => "Display name saved.",
+        "theme" => "Theme saved.",
+        "password" => "Password changed. You are still signed in here; other sessions will need the new password.",
+        "category" => "Category added.",
+        "categoryremoved" => "Category removed. Messages that carried it are now uncategorised.",
+        "ruleremoved" => "That sender will no longer be filed automatically.",
+        _ => "Saved.",
+    };
+
+    private static string Title(string t) => t.Length == 0 ? t : char.ToUpperInvariant(t[0]) + t.Substring(1);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);
+        if (context is not null)
+        {
+            displayName = context.Value.Mailbox.DisplayName;
+            theme = context.Value.Mailbox.Theme;
+            address = context.Value.Mailbox.Address;
+            tenantName = string.IsNullOrWhiteSpace(context.Value.Tenant.DisplayName)
+                ? context.Value.Tenant.Slug
+                : context.Value.Tenant.DisplayName;
+        }
+        categories = await Mail.ListCategoriesAsync(mailboxId.Value);
+        rules = await Mail.ListCategoryRulesAsync(mailboxId.Value);
+    }
+}

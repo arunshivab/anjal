@@ -1,14 +1,19 @@
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="@Anjal.Webmail.Services.WebmailAuthService.ThemeOf(Http.HttpContext?.User)">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="no-referrer" />
+    <meta name="color-scheme" content="light dark" />
     <base href="/" />
-    <link rel="stylesheet" href="app.css" />
+    <link rel="icon" href="/logos/anjal-favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/tokens.css" />
+    <link rel="stylesheet" href="/app.css" />
     <HeadOutlet />
 </head>
 <body>
     <Routes />
+    <script src="/app.js" defer></script>
 </body>
 </html>

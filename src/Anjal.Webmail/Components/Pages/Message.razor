@@ -1,109 +1,207 @@
-@page "/m/{Id:guid}"
+@page "/message/{Id:guid}"
 @attribute [Authorize]
 @inject MailboxService Mail
 
-<PageTitle>Anjal - @(view?.Subject ?? "message")</PageTitle>
+<PageTitle>@(view?.Subject ?? "Message") — Anjal</PageTitle>
 
 @if (view is null)
 {
-    <p class="muted">Message not found.</p>
+    <div class="stack">
+        <h1>That message is no longer here.</h1>
+        <p class="lead">It may have been deleted, or moved to another folder. The folder it was in is still there.</p>
+        <a class="btn btn-s" href="/folder/INBOX">Back to INBOX</a>
+    </div>
 }
 else
 {
-    <div class="message">
-        <div class="toolbar">
-            <a class="btn subtle" href="/folder/@Uri.EscapeDataString(view.Folder.Name)">&laquo; @view.Folder.Name</a>
-            <a class="btn subtle" href="/compose?to=@Uri.EscapeDataString(ReplyTo)&subject=@Uri.EscapeDataString(ReplySubject)">Reply</a>
-            <form method="post" action="/message/@Id/flags" class="inline">
-                <AntiforgeryToken />
-                <input type="hidden" name="seen" value="1" />
-                <input type="hidden" name="flagged" value="@(view.Row.Flagged ? "0" : "1")" />
-                <input type="hidden" name="back" value="/m/@Id" />
-                <button type="submit" class="btn subtle">@(view.Row.Flagged ? "Unflag" : "Flag")</button>
-            </form>
-            <form method="post" action="/message/@Id/flags" class="inline">
-                <AntiforgeryToken />
-                <input type="hidden" name="seen" value="0" />
-                <input type="hidden" name="flagged" value="@(view.Row.Flagged ? "1" : "0")" />
-                <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
-                <button type="submit" class="btn subtle">Mark unread</button>
-            </form>
+    <div class="reading">
+        <main class="read">
+            <div class="tb">
+                <a class="back inrow" href="/folder/@Uri.EscapeDataString(view.Folder.Name)"
+                   title="Back to @view.Folder.Name">
+                    <LipiIcon Name="chevron-left" Size="16" />
+                </a>
+                <a class="btn btn-p" href="/compose?reply=@Id"><LipiIcon Name="undo" Size="15" /> Reply</a>
+                <a class="btn btn-s" href="/compose?replyall=@Id">Reply all</a>
+                <a class="btn btn-s" href="/compose?forward=@Id"><LipiIcon Name="redo" Size="15" /> Forward</a>
+                <span class="gap"></span>
+
+                <form method="post" action="/message/@Id/flag" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/message/@Id" />
+                    <button type="submit" class="btn btn-q">@(view.Row.Flagged ? "Unflag" : "Flag")</button>
+                </form>
+                <form method="post" action="/message/@Id/read" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="seen" value="0" />
+                    <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                    <button type="submit" class="btn btn-q">Mark unread</button>
+                </form>
+
+                @if (view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+                {
+                    <form method="post" action="/message/@Id/move" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="folder" value="INBOX" />
+                        <input type="hidden" name="allow" value="1" />
+                        <input type="hidden" name="back" value="/folder/INBOX" />
+                        <button type="submit" class="btn btn-s">Not spam</button>
+                    </form>
+                }
+                else if (view.Folder.Name != "Trash" && view.Folder.Name != "Sent")
+                {
+                    <form method="post" action="/message/@Id/move" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="folder" value="Junk" />
+                        <input type="hidden" name="block" value="1" />
+                        <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                        <button type="submit" class="btn btn-q">Report spam</button>
+                    </form>
+                }
+
+                @if (view.Folder.Name == "Trash")
+                {
+                    <form method="post" action="/message/@Id/move" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="folder" value="INBOX" />
+                        <input type="hidden" name="back" value="/folder/INBOX" />
+                        <button type="submit" class="btn btn-q">Restore</button>
+                    </form>
+                }
+                else
+                {
+                    <form method="post" action="/message/@Id/move" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="folder" value="Trash" />
+                        <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                        <button type="submit" class="btn btn-q"><LipiIcon Name="trash" Size="15" /> Trash</button>
+                    </form>
+                }
+            </div>
+
+            <h1 class="readsubj">@(string.IsNullOrWhiteSpace(view.Subject) ? "(no subject)" : view.Subject)</h1>
+            <p class="byline">
+                <span class="seal" aria-hidden="true">@Initial</span>
+                <span><b>@SenderName</b><span class="sep">·</span>@view.Date</span>
+            </p>
+
+            @if (view.HasBlockedImages)
+            {
+                <div class="notice n-info readnotice">
+                    <LipiIcon Name="info" Size="16" />
+                    <span>Remote images were blocked. They can tell the sender that you opened this message.</span>
+                    <form method="post" action="/message/@Id/images" class="inline act">
+                        <AntiforgeryToken />
+                        <button type="submit" class="btn btn-s btn-sm">Load images</button>
+                    </form>
+                </div>
+            }
             @if (view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
             {
-                <form method="post" action="/message/@Id/spam" class="inline">
-                    <AntiforgeryToken />
-                    <input type="hidden" name="verdict" value="ham" />
-                    <input type="hidden" name="back" value="/folder/INBOX" />
-                    <button type="submit" class="btn subtle">Not spam</button>
-                </form>
+                <div class="notice n-info readnotice">
+                    <LipiIcon Name="info" Size="16" />
+                    <span>Anjal accepted this message and filed it in Junk. It was never rejected.
+                          Choosing <b>Not spam</b> moves it to INBOX and allows the sender.</span>
+                </div>
             }
-            else if (view.Folder.Name != "Trash" && view.Folder.Name != "Sent")
-            {
-                <form method="post" action="/message/@Id/spam" class="inline">
-                    <AntiforgeryToken />
-                    <input type="hidden" name="verdict" value="spam" />
-                    <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
-                    <button type="submit" class="btn subtle">Report spam</button>
-                </form>
-            }
-            @if (view.Folder.Name == "Trash")
-            {
-                <form method="post" action="/message/@Id/move" class="inline">
-                    <AntiforgeryToken />
-                    <input type="hidden" name="folder" value="INBOX" />
-                    <input type="hidden" name="back" value="/folder/INBOX" />
-                    <button type="submit" class="btn subtle">Restore to Inbox</button>
-                </form>
-                <form method="post" action="/message/@Id/delete" class="inline">
-                    <AntiforgeryToken />
-                    <input type="hidden" name="back" value="/folder/Trash" />
-                    <button type="submit" class="btn danger">Delete permanently</button>
-                </form>
-            }
-            else
-            {
-                <form method="post" action="/message/@Id/move" class="inline">
-                    <AntiforgeryToken />
-                    <input type="hidden" name="folder" value="Trash" />
-                    <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
-                    <button type="submit" class="btn subtle">Trash</button>
-                </form>
-            }
-            <a class="btn subtle" href="/raw/@Id">Download .eml</a>
-        </div>
 
-        <h1>@(string.IsNullOrWhiteSpace(view.Subject) ? "(no subject)" : view.Subject)</h1>
-        <dl class="headers">
-            <dt>From</dt><dd>@view.From</dd>
-            <dt>To</dt><dd>@view.To</dd>
-            @if (view.Cc.Length > 0)
-            {
-                <dt>Cc</dt><dd>@view.Cc</dd>
-            }
-            <dt>Date</dt><dd>@view.Date</dd>
-            @if (view.Row.SpamScore > 0)
-            {
-                <dt>Spam</dt><dd>score @view.Row.SpamScore@(view.SpamReasons.Length > 0 ? " - " + view.SpamReasons : "")</dd>
-            }
-        </dl>
+            <div class="bodypanel">
+                <iframe class="bodyframe" sandbox="" referrerpolicy="no-referrer" title="Message body" srcdoc="@Srcdoc"></iframe>
+            </div>
+        </main>
 
-        @if (view.HasBlockedImages)
-        {
-            <p class="notice">Remote images were blocked. <a href="/m/@Id?images=1">Load images</a></p>
-        }
+        <aside class="rail" aria-label="Message details">
+            <section class="railcard">
+                <h2 class="railhead">Details</h2>
+                <dl class="raildl">
+                    <dt>From</dt><dd>@view.From</dd>
+                    <dt>To</dt><dd>@view.To</dd>
+                    @if (view.Cc.Length > 0)
+                    {
+                        <dt>Cc</dt><dd>@view.Cc</dd>
+                    }
+                    <dt>Date</dt><dd>@view.Date</dd>
+                    <dt>Folder</dt><dd>@view.Folder.Name</dd>
+                    <dt>Size</dt><dd>@MainLayout.Size(view.Row.SizeBytes)</dd>
+                </dl>
+            </section>
 
-        <iframe class="body" sandbox="" referrerpolicy="no-referrer" srcdoc="@Srcdoc"></iframe>
+            <section class="railcard">
+                <h2 class="railhead">Category</h2>
+                <form method="post" action="/message/@Id/category">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/message/@Id" />
+                    <select class="railinp" name="categoryId" aria-label="Category">
+                        <option value="">@MailboxService.Uncategorised</option>
+                        @foreach (CategoryView c in categories)
+                        {
+                            <option value="@c.Row.Id" selected="@(view.Row.CategoryId == c.Row.Id)">
+                                @c.Row.Name@(c.Shared ? "" : " (yours)")
+                            </option>
+                        }
+                    </select>
+                    <label class="checkline">
+                        <input type="checkbox" name="future" value="1" />
+                        <span>Also file future mail from @SenderName here</span>
+                    </label>
+                    <button type="submit" class="btn btn-s railbtn">Save category</button>
+                </form>
+            </section>
 
-        @if (view.Attachments.Count > 0)
-        {
-            <h2>Attachments</h2>
-            <ul class="attachments">
-                @foreach (AttachmentView a in view.Attachments)
+            <section class="railcard">
+                <h2 class="railhead">Checks</h2>
+                @if (view.Row.SpamScore > 0)
                 {
-                    <li><a href="/attachment/@Id/@a.Index">@a.FileName</a> <span class="muted">(@a.ContentType, @a.SizeBytes bytes)</span></li>
+                    <p class="scoreline @(view.Row.SpamScore >= 5 ? "hi" : "")">score @view.Row.SpamScore</p>
+                    @if (view.SpamReasons.Length > 0)
+                    {
+                        <p class="railnote">@view.SpamReasons</p>
+                    }
                 }
-            </ul>
-        }
+                else
+                {
+                    <p class="railnote"><LipiIcon Name="check" Size="14" /> Nothing suspicious. Spam score 0.</p>
+                }
+                <p class="railnote"><LipiIcon Name="security" Size="14" /> Shown in a sandbox; scripts cannot run.</p>
+            </section>
+
+            @if (view.Attachments.Count > 0)
+            {
+                <section class="railcard">
+                    <h2 class="railhead">@view.Attachments.Count attachment@(view.Attachments.Count == 1 ? "" : "s")</h2>
+                    @foreach (AttachmentView a in view.Attachments)
+                    {
+                        <a class="attrow" href="/message/@Id/attachment/@a.Index">
+                            <LipiIcon Name="attachment" Size="16" />
+                            <span>
+                                <span class="fn">@a.FileName</span>
+                                <span class="mt">@MainLayout.Size(a.SizeBytes)</span>
+                            </span>
+                            <LipiIcon Name="download" Size="15" Class="dlic" />
+                        </a>
+                    }
+                </section>
+            }
+
+            <section class="railcard">
+                <h2 class="railhead">This message</h2>
+                <a class="raillink" href="/message/@Id/raw.eml"><LipiIcon Name="download" Size="15" /> Download .eml</a>
+                @if (view.Folder.Name == "Trash" || view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+                {
+                    <details class="confirm">
+                        <summary class="raillink danger"><LipiIcon Name="trash" Size="15" /> Delete permanently</summary>
+                        <span class="inner">
+                            This cannot be undone.
+                            <form method="post" action="/message/@Id/delete" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                                <button type="submit" class="btn btn-d btn-sm">Delete</button>
+                            </form>
+                        </span>
+                    </details>
+                }
+            </section>
+        </aside>
     </div>
 }
 
@@ -113,22 +211,37 @@ else
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private MessageView? view;
+    private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
 
-    private string Srcdoc =>
-        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">" +
-        "<style>body{font-family:system-ui,sans-serif;font-size:14px;line-height:1.45;margin:8px;color:#222;background:#fff;word-wrap:break-word}img{max-width:100%}</style>" +
-        "</head><body>" + (view?.BodyHtml ?? string.Empty) + "</body></html>";
-
-    private string ReplyTo => view is null ? string.Empty : view.From;
-
-    private string ReplySubject
+    private string SenderName
     {
         get
         {
-            string s = view?.Subject ?? string.Empty;
-            return s.StartsWith("Re:", StringComparison.OrdinalIgnoreCase) ? s : "Re: " + s;
+            var parsed = Anjal.Mime.AddressParser.Parse(view?.From ?? string.Empty);
+            if (parsed.Count > 0 && parsed[0].DisplayName.Length > 0)
+            {
+                return parsed[0].DisplayName;
+            }
+            return parsed.Count > 0 ? parsed[0].Address : (view?.From ?? string.Empty);
         }
     }
+
+    /// <summary>First letter of the sender, for the seal beside the byline.</summary>
+    private string Initial
+    {
+        get
+        {
+            string name = SenderName.TrimStart();
+            return name.Length > 0 ? name.Substring(0, 1).ToUpperInvariant() : "?";
+        }
+    }
+
+    private string Srcdoc =>
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">" +
+        "<style>body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;" +
+        "margin:18px;color:#1a1a1a;background:#fff;word-wrap:break-word}img{max-width:100%}" +
+        "pre{white-space:pre-wrap;font-family:inherit;margin:0}a{color:#0b5d8f}</style></head><body>" +
+        (view?.BodyHtml ?? string.Empty) + "</body></html>";
 
     protected override async Task OnParametersSetAsync()
     {
@@ -143,5 +256,6 @@ else
             return;
         }
         view = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
+        categories = await Mail.ListCategoriesAsync(mailboxId.Value);
     }
 }

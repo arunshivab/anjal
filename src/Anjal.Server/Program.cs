@@ -258,6 +258,7 @@ public static class Program
             Anjal.Smtp.Counters.Describe("anjal_mailbox_delivered_total", "Messages filed in a mailbox INBOX.");
             Anjal.Smtp.Counters.Describe("anjal_mailbox_junked_total", "Messages filed in a mailbox Junk folder.");
             Anjal.Smtp.Counters.Describe("anjal_quota_refusals_total", "RCPT commands refused with 452 because the mailbox is full.");
+            Anjal.Smtp.Counters.Describe("anjal_tenant_disabled_deferrals_total", "RCPT commands deferred with 450 because the tenant is disabled.");
             Anjal.Smtp.Counters.Describe("anjal_greylist_deferred_total", "RCPT commands deferred by greylisting.");
             Anjal.Smtp.Counters.Describe("anjal_spam_scored_total", "Unauthenticated deliveries scored by the spam filter.");
             Log($"Health at http://{apiBind}:{apiPort}/healthz (no auth), metrics at /metrics (bearer token).");
@@ -575,6 +576,11 @@ public static class Program
 
         // Hard quota: RCPT to a full mailbox is deferred with 452 (v0.13.0).
         policies.Add(new Anjal.Mailbox.QuotaPolicy(mailboxStore, log));
+
+        // A disabled tenant defers with 450 rather than rejecting, so mail is
+        // held by the sending servers and nothing bounces while the account
+        // is suspended (v0.14.0).
+        policies.Add(new Anjal.Mailbox.TenantStatePolicy(mailboxStore, log));
         foreach (Anjal.Smtp.ISmtpPolicy p in policies)
         {
             if (p is Anjal.Spam.Greylist g)

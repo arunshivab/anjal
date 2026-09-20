@@ -54,29 +54,85 @@ Placeholders used throughout - substitute your real values everywhere:
 vm$ sudo apt update && sudo apt full-upgrade -y
 vm$ sudo hostnamectl set-hostname mail.anjal.co.in
 vm$ sudo timedatectl set-timezone UTC          # logs and Maildir names in UTC; the webmail shows local time
-vm$ sudo apt install -y unattended-upgrades fail2ban ufw postgresql postgresql-client rclone curl jq
+vm$ sudo apt install -y unattended-upgrades fail2ban postgresql postgresql-client rclone curl jq netcat-openbsd
 vm$ sudo dpkg-reconfigure -plow unattended-upgrades   # choose Yes
 ```
 
-Firewall - allow SSH, SMTP, submission, HTTP (ACME challenges +
-redirect) and HTTPS; everything else is closed, including PostgreSQL and
-the admin API, which stay on loopback:
+### 1a. Two firewalls, not one
+
+On E2E there are **two** layers between the internet and Anjal, and a port
+must be open in **both** or it is dead:
+
+1. **The Security Group** - E2E's own virtual firewall, configured in the
+   MyAccount portal, outside the VM. Nothing reaches the machine unless
+   the Security Group allows it.
+2. **firewalld** - on the VM itself. E2E's own documentation uses
+   firewalld, so this runbook does too. **Do not also install ufw.**
+   Two firewalls disagreeing is the most common way to lock yourself out
+   of SSH.
+
+**Security Group** (portal → Network → Security Groups → Create):
+
+| Direction | Protocol | Ports | Source / destination | Why |
+| --- | --- | --- | --- | --- |
+| Inbound | Custom TCP | 22 | My IP (or your office range) | SSH. Leave it open to Any only if your address changes constantly |
+| Inbound | Custom TCP | 25 | Any | every mail server on the internet delivers here |
+| Inbound | Custom TCP | 80 | Any | ACME HTTP-01 challenge, and the redirect to HTTPS |
+| Inbound | Custom TCP | 443 | Any | webmail |
+| Inbound | Custom TCP | 587 | Any | your own clients, authenticated |
+| Outbound | ALL | - | Any | see the warning below |
+
+**Leave outbound permissive.** Anjal must reach port 25 on other mail
+servers, 53 for DNS, and 443 for Let's Encrypt. A tightened outbound rule
+that forgets DNS produces a server that looks healthy and silently fails
+every delivery and every certificate renewal - a genuinely confusing
+afternoon. If you must restrict it, allow at least TCP 25, 53, 80, 443
+and UDP 53.
+
+### 1b. firewalld on the VM
 
 ```
-vm$ sudo ufw default deny incoming
-vm$ sudo ufw default allow outgoing
-vm$ sudo ufw allow 22/tcp
-vm$ sudo ufw allow 25/tcp
-vm$ sudo ufw allow 587/tcp
-vm$ sudo ufw allow 80/tcp
-vm$ sudo ufw allow 443/tcp
-vm$ sudo ufw enable
-vm$ sudo ufw status numbered
+vm$ sudo apt install -y firewalld
+vm$ sudo systemctl enable --now firewalld
+vm$ sudo firewall-cmd --add-port=22/tcp --permanent
+vm$ sudo firewall-cmd --add-port=25/tcp --permanent
+vm$ sudo firewall-cmd --add-port=80/tcp --permanent
+vm$ sudo firewall-cmd --add-port=443/tcp --permanent
+vm$ sudo firewall-cmd --add-port=587/tcp --permanent
+```
+
+Outbound port 25 explicitly, per E2E's instructions (they confirmed it can
+be opened on request - do that before this step):
+
+```
+vm$ sudo firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 0 -p tcp -m tcp --dport=25 -j ACCEPT
+vm$ sudo firewall-cmd --reload
+vm$ sudo firewall-cmd --list-all
 ```
 
 fail2ban protects SSH out of the box; leave the default jail on.
 
-**Check:** `vm$ sudo ufw status` shows exactly those five ports; `vm$ timedatectl` shows UTC and `System clock synchronized: yes` (ACME and DKIM both need correct time).
+**Check - and do this now, not after installing Anjal:**
+
+```
+vm$ sudo firewall-cmd --list-ports          # the five ports above
+vm$ nc -vz gmail-smtp-in.l.google.com 25    # must connect
+vm$ nc -vz 1.1.1.1 53                       # DNS reachable
+vm$ timedatectl                             # UTC, "System clock synchronized: yes"
+```
+
+If `nc` to port 25 hangs or is refused, outbound 25 is still blocked -
+either the Security Group or E2E's network. Resolve that with E2E before
+going further; everything downstream assumes it works. If it cannot be
+opened at all, set `ANJAL_OUTBOUND_MODE=relay` in `server.env` and use a
+relay: receiving still works normally.
+
+From the laptop, after the Security Group is attached:
+
+```
+pc> Test-NetConnection -ComputerName 203.0.113.10 -Port 25
+pc> Test-NetConnection -ComputerName 203.0.113.10 -Port 443
+```
 
 ---
 
@@ -469,11 +525,11 @@ Things to watch in the first weeks:
 
 | Symptom | Look at | Likely cause |
 |---|---|---|
-| Webmail unreachable | `ufw status`, `journalctl -u anjal-webmail` | port 443 closed, or service failed to bind (must run with `CAP_NET_BIND_SERVICE` - the unit sets it) |
+| Webmail unreachable | Security Group rules, `firewall-cmd --list-ports`, `journalctl -u anjal-webmail` | port 443 closed in **either** firewall, or service failed to bind (must run with `CAP_NET_BIND_SERVICE` - the unit sets it) |
 | `/healthz` `tls` degraded, "no certificate" | `journalctl -u anjal-webmail \| grep ACME` | challenge failed: DNS, port 80, or PTR; fix and restart webmail |
 | Inbound mail never arrives | `journalctl -u anjal-server \| grep -i "rcpt\|relaying"` | MX not pointing here, or domain not registered to a tenant (`GET /api/tenant-domains`) |
 | Inbound lands in Junk | message page → spam reasons | see section 13; `SPF_NONE`/`DKIM_NONE` from a big provider means your DNS resolver on the VM is failing - check `resolvectl status` |
-| Outbound stuck | `/metrics` `anjal_outbound_pending`, `journalctl -u anjal-server \| grep -i outbound` | port 25 outbound blocked by E2E (section 0), or recipient greylisting you (normal, retries) |
+| Outbound stuck | `/metrics` `anjal_outbound_pending`, then `nc -vz gmail-smtp-in.l.google.com 25` from the VM | outbound 25 blocked in the Security Group or by E2E (sections 1a/1b), or recipient greylisting you (normal, retries) |
 | Gmail shows `DKIM: FAIL` | section 9 TXT record | public key mismatch, selector typo, or TXT split into wrong chunks by the DNS panel |
 | `452 4.2.2 Mailbox full` in logs | webmail sidebar usage | quota reached; delete mail or raise `quotaBytes` via `POST /api/mailboxes` |
 | Backup fails | `journalctl -u anjal-backup` | rclone config unreadable by `anjal` (mode 640, group anjal), wrong B2 key, or `pg_dump` cannot connect (`ANJAL_POSTGRES` in `server.env`) |

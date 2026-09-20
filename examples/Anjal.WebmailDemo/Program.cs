@@ -68,6 +68,21 @@ internal static class Program
         string port = Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_PORT") ?? "8080";
         WebApplication app = Anjal.Webmail.Program.CreateApp(args, store, maildir, "anjal.localhost", $"http://127.0.0.1:{port}");
 
+        // A sent message so the address suggestions and Sent folder have content.
+        await store.UpsertMailboxAsync(new MailboxRow
+        {
+            TenantId = tenant.Id,
+            LocalPart = "arun",
+            Domain = "anjal.localhost",
+            DisplayName = "Arun",
+            Theme = "paper",
+        });
+
+        // Seed the tenant's default categories so the dashboard and the
+        // category picker have something to show.
+        var seedService = new Anjal.Webmail.Services.MailboxService(store, store, maildir, "anjal.localhost");
+        await seedService.EnsureTenantDefaultsAsync(tenant.Id);
+
         Console.WriteLine($"Anjal webmail demo: http://127.0.0.1:{port}/");
         Console.WriteLine("Sign in as   arun@anjal.localhost   password   demo-password");
         Console.WriteLine($"Maildir root: {root}");

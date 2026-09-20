@@ -202,6 +202,7 @@ public sealed partial class InMemoryMessageStore
             {
                 existing.TenantId = mailbox.TenantId;
                 existing.DisplayName = mailbox.DisplayName;
+                existing.Theme = string.IsNullOrWhiteSpace(mailbox.Theme) ? existing.Theme : mailbox.Theme;
                 existing.Enabled = mailbox.Enabled;
                 existing.QuotaBytes = mailbox.QuotaBytes;
                 if (!string.IsNullOrEmpty(mailbox.PasswordPbkdf2))
@@ -219,6 +220,7 @@ public sealed partial class InMemoryMessageStore
                 Domain = domain,
                 PasswordPbkdf2 = mailbox.PasswordPbkdf2,
                 DisplayName = mailbox.DisplayName,
+                Theme = string.IsNullOrWhiteSpace(mailbox.Theme) ? MailboxRow.DefaultTheme : mailbox.Theme,
                 Enabled = mailbox.Enabled,
                 QuotaBytes = mailbox.QuotaBytes,
                 UsedBytes = 0,
@@ -427,6 +429,76 @@ public sealed partial class InMemoryMessageStore
     }
 
     /// <inheritdoc/>
+    public Task<long> CountUnreadAsync(System.Guid mailboxId, System.Guid? folderId, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            long count = 0;
+            foreach (MessageRow m in this.mailboxMessages)
+            {
+                if (m.MailboxId == mailboxId && !m.Seen && (folderId is null || m.FolderId == folderId.Value))
+                {
+                    count++;
+                }
+            }
+            return Task.FromResult(count);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<MessageRow>> SearchMessagesAsync(System.Guid mailboxId, System.Guid? folderId, string query, int limit, int offset, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(query);
+        lock (this.gate)
+        {
+            List<MessageRow> matched = this.SearchLocked(mailboxId, folderId, query);
+            var page = new List<MessageRow>();
+            for (int i = System.Math.Max(0, offset); i < matched.Count && page.Count < System.Math.Max(0, limit); i++)
+            {
+                page.Add(Clone(matched[i]));
+            }
+            return Task.FromResult<IReadOnlyList<MessageRow>>(page);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<long> CountSearchAsync(System.Guid mailboxId, System.Guid? folderId, string query, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(query);
+        lock (this.gate)
+        {
+            return Task.FromResult((long)this.SearchLocked(mailboxId, folderId, query).Count);
+        }
+    }
+
+    private List<MessageRow> SearchLocked(System.Guid mailboxId, System.Guid? folderId, string query)
+    {
+        string q = query.Trim();
+        var matched = new List<MessageRow>();
+        foreach (MessageRow m in this.mailboxMessages)
+        {
+            if (m.MailboxId != mailboxId || (folderId is not null && m.FolderId != folderId.Value))
+            {
+                continue;
+            }
+            if (q.Length == 0 ||
+                m.Subject.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
+                m.FromHeader.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
+                m.ToHeader.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
+                m.EnvelopeFrom.Contains(q, System.StringComparison.OrdinalIgnoreCase))
+            {
+                matched.Add(m);
+            }
+        }
+        matched.Sort((a, b) =>
+        {
+            int c = b.ReceivedAt.CompareTo(a.ReceivedAt);
+            return c != 0 ? c : this.mailboxMessages.IndexOf(b).CompareTo(this.mailboxMessages.IndexOf(a));
+        });
+        return matched;
+    }
+
+    /// <inheritdoc/>
     public Task<MessageRow?> SetMessageFlagsAsync(System.Guid id, bool seen, bool flagged, bool answered, string? maildirFile, CancellationToken ct = default)
     {
         lock (this.gate)
@@ -583,6 +655,7 @@ public sealed partial class InMemoryMessageStore
         Domain = m.Domain,
         PasswordPbkdf2 = m.PasswordPbkdf2,
         DisplayName = m.DisplayName,
+        Theme = m.Theme,
         Enabled = m.Enabled,
         QuotaBytes = m.QuotaBytes,
         UsedBytes = m.UsedBytes,
@@ -616,5 +689,329 @@ public sealed partial class InMemoryMessageStore
         Answered = m.Answered,
         SpamScore = m.SpamScore,
         ReceivedAt = m.ReceivedAt,
+        CategoryId = m.CategoryId,
+        HasAttachments = m.HasAttachments,
     };
+
+    // ================= Categories (v0.15.0) =================
+
+    private readonly List<CategoryRow> categories = new();
+    private readonly List<CategoryRuleRow> categoryRules = new();
+
+    /// <inheritdoc/>
+    public Task<CategoryRow> UpsertCategoryAsync(CategoryRow category, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(category);
+        lock (this.gate)
+        {
+            CategoryRow? existing = category.Id != System.Guid.Empty
+                ? this.categories.Find(c => c.Id == category.Id)
+                : this.categories.Find(c => c.TenantId == category.TenantId && c.MailboxId == category.MailboxId &&
+                                            string.Equals(c.Name, category.Name, System.StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                existing.Name = category.Name;
+                existing.Slot = category.Slot;
+                return Task.FromResult(Clone(existing));
+            }
+            var row = new CategoryRow
+            {
+                Id = System.Guid.NewGuid(),
+                TenantId = category.TenantId,
+                MailboxId = category.MailboxId,
+                Name = category.Name,
+                Slot = category.Slot,
+                CreatedAt = System.DateTimeOffset.UtcNow,
+            };
+            this.categories.Add(row);
+            return Task.FromResult(Clone(row));
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<CategoryRow>> ListCategoriesAsync(System.Guid tenantId, System.Guid? mailboxId, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            var result = new List<CategoryRow>();
+            foreach (CategoryRow c in this.categories)
+            {
+                if (c.TenantId != tenantId)
+                {
+                    continue;
+                }
+                if (c.MailboxId is null || (mailboxId is not null && c.MailboxId == mailboxId))
+                {
+                    result.Add(Clone(c));
+                }
+            }
+            result.Sort((a, b) =>
+            {
+                int shared = (a.IsShared ? 0 : 1).CompareTo(b.IsShared ? 0 : 1);
+                if (shared != 0)
+                {
+                    return shared;
+                }
+                int slot = a.Slot.CompareTo(b.Slot);
+                return slot != 0 ? slot : string.CompareOrdinal(a.Name, b.Name);
+            });
+            return Task.FromResult<IReadOnlyList<CategoryRow>>(result);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<CategoryRow?> GetCategoryAsync(System.Guid id, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            CategoryRow? row = this.categories.Find(c => c.Id == id);
+            return Task.FromResult(row is null ? null : Clone(row));
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteCategoryAsync(System.Guid id, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            int removed = this.categories.RemoveAll(c => c.Id == id);
+            this.categoryRules.RemoveAll(r => r.CategoryId == id);
+            foreach (MessageRow m in this.mailboxMessages)
+            {
+                if (m.CategoryId == id)
+                {
+                    m.CategoryId = null;
+                }
+            }
+            return Task.FromResult(removed > 0);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<MessageRow?> SetMessageCategoryAsync(System.Guid mailboxId, System.Guid messageId, System.Guid? categoryId, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            MessageRow? row = this.mailboxMessages.Find(m => m.Id == messageId && m.MailboxId == mailboxId);
+            if (row is null)
+            {
+                return Task.FromResult<MessageRow?>(null);
+            }
+            row.CategoryId = categoryId;
+            return Task.FromResult<MessageRow?>(Clone(row));
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<CategoryRuleRow> UpsertCategoryRuleAsync(CategoryRuleRow rule, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(rule);
+        lock (this.gate)
+        {
+            CategoryRuleRow? existing = this.categoryRules.Find(r => r.MailboxId == rule.MailboxId &&
+                string.Equals(r.Pattern, rule.Pattern, System.StringComparison.OrdinalIgnoreCase));
+            if (existing is not null)
+            {
+                existing.CategoryId = rule.CategoryId;
+                return Task.FromResult(new CategoryRuleRow
+                {
+                    Id = existing.Id,
+                    MailboxId = existing.MailboxId,
+                    Pattern = existing.Pattern,
+                    CategoryId = existing.CategoryId,
+                    CreatedAt = existing.CreatedAt,
+                });
+            }
+            var row = new CategoryRuleRow
+            {
+                Id = System.Guid.NewGuid(),
+                MailboxId = rule.MailboxId,
+                Pattern = rule.Pattern.ToLowerInvariant(),
+                CategoryId = rule.CategoryId,
+                CreatedAt = System.DateTimeOffset.UtcNow,
+            };
+            this.categoryRules.Add(row);
+            return Task.FromResult(row);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<CategoryRuleRow>> ListCategoryRulesAsync(System.Guid mailboxId, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            var result = new List<CategoryRuleRow>();
+            foreach (CategoryRuleRow r in this.categoryRules)
+            {
+                if (r.MailboxId == mailboxId)
+                {
+                    result.Add(new CategoryRuleRow { Id = r.Id, MailboxId = r.MailboxId, Pattern = r.Pattern, CategoryId = r.CategoryId, CreatedAt = r.CreatedAt });
+                }
+            }
+            return Task.FromResult<IReadOnlyList<CategoryRuleRow>>(result);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteCategoryRuleAsync(System.Guid id, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            return Task.FromResult(this.categoryRules.RemoveAll(r => r.Id == id) > 0);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            var folders = new Dictionary<System.Guid, string>();
+            foreach (FolderRow f in this.folders)
+            {
+                if (f.MailboxId == mailboxId)
+                {
+                    folders[f.Id] = f.Name;
+                }
+            }
+            var names = new Dictionary<System.Guid, (string Name, int Slot)>();
+            foreach (CategoryRow c in this.categories)
+            {
+                names[c.Id] = (c.Name, c.Slot);
+            }
+
+            var activity = new MailboxActivity { From = periodStart, To = periodEnd };
+            var byFolder = new Dictionary<string, long>(System.StringComparer.Ordinal);
+            var byCategory = new Dictionary<string, (long Count, int Slot)>(System.StringComparer.Ordinal);
+            var bySender = new Dictionary<string, long>(System.StringComparer.OrdinalIgnoreCase);
+            var byDay = new Dictionary<System.DateTimeOffset, (long Received, long Sent)>();
+
+            foreach (MessageRow m in this.mailboxMessages)
+            {
+                if (m.MailboxId != mailboxId || m.ReceivedAt < periodStart || m.ReceivedAt >= periodEnd)
+                {
+                    continue;
+                }
+                string folder = folders.TryGetValue(m.FolderId, out string? f) ? f : "Unknown";
+                bool sent = string.Equals(folder, "Sent", System.StringComparison.Ordinal);
+                bool junk = string.Equals(folder, "Junk", System.StringComparison.Ordinal);
+                bool draft = string.Equals(folder, "Drafts", System.StringComparison.Ordinal);
+                System.DateTimeOffset day = new(m.ReceivedAt.UtcDateTime.Date, System.TimeSpan.Zero);
+                byDay.TryGetValue(day, out (long Received, long Sent) counts);
+
+                if (sent)
+                {
+                    activity.Sent++;
+                    if (m.HasAttachments)
+                    {
+                        activity.SentWithAttachments++;
+                    }
+                    byDay[day] = (counts.Received, counts.Sent + 1);
+                    continue;
+                }
+                if (draft)
+                {
+                    continue;
+                }
+
+                byDay[day] = (counts.Received + 1, counts.Sent);
+                if (junk)
+                {
+                    activity.Junked++;
+                }
+                else
+                {
+                    activity.Delivered++;
+                }
+                if (m.HasAttachments)
+                {
+                    activity.ReceivedWithAttachments++;
+                }
+
+                byFolder.TryGetValue(folder, out long fc);
+                byFolder[folder] = fc + 1;
+
+                string categoryName = m.CategoryId is System.Guid cid && names.TryGetValue(cid, out (string Name, int Slot) cat) ? cat.Name : "Uncategorised";
+                int slot = m.CategoryId is System.Guid cid2 && names.TryGetValue(cid2, out (string Name, int Slot) cat2) ? cat2.Slot : CategoryRow.NoSlot;
+                byCategory.TryGetValue(categoryName, out (long Count, int Slot) cc);
+                byCategory[categoryName] = (cc.Count + 1, slot);
+
+                string sender = SenderKey(m);
+                bySender.TryGetValue(sender, out long sc);
+                bySender[sender] = sc + 1;
+            }
+
+            activity.ByFolder = Rank(byFolder);
+            var cats = new List<NamedCount>();
+            foreach (KeyValuePair<string, (long Count, int Slot)> kv in byCategory)
+            {
+                cats.Add(new NamedCount { Name = kv.Key, Count = kv.Value.Count, Slot = kv.Value.Slot });
+            }
+            cats.Sort((a, b) => b.Count.CompareTo(a.Count));
+            activity.ByCategory = cats;
+            activity.TopSenders = Rank(bySender, 5);
+
+            var days = new List<DailyCount>();
+            foreach (KeyValuePair<System.DateTimeOffset, (long Received, long Sent)> kv in byDay)
+            {
+                days.Add(new DailyCount { Day = kv.Key, Received = kv.Value.Received, Sent = kv.Value.Sent });
+            }
+            days.Sort((a, b) => a.Day.CompareTo(b.Day));
+            activity.ByDay = days;
+
+            activity.RecoveredFromJunk = this.recoveredFromJunk.TryGetValue(mailboxId, out long r) ? r : 0;
+            return Task.FromResult(activity);
+        }
+    }
+
+    private readonly Dictionary<System.Guid, long> recoveredFromJunk = new();
+
+    /// <summary>Record that a message was moved out of Junk by the reader.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    public void NoteRecoveredFromJunk(System.Guid mailboxId)
+    {
+        lock (this.gate)
+        {
+            this.recoveredFromJunk.TryGetValue(mailboxId, out long n);
+            this.recoveredFromJunk[mailboxId] = n + 1;
+        }
+    }
+
+    private static string SenderKey(MessageRow m)
+    {
+        string from = m.FromHeader.Length > 0 ? m.FromHeader : m.EnvelopeFrom;
+        int lt = from.LastIndexOf('<');
+        int gt = from.LastIndexOf('>');
+        if (lt >= 0 && gt > lt)
+        {
+            return from.Substring(lt + 1, gt - lt - 1).Trim();
+        }
+        return from.Trim();
+    }
+
+    private static List<NamedCount> Rank(Dictionary<string, long> source, int? take = null)
+    {
+        var list = new List<NamedCount>();
+        foreach (KeyValuePair<string, long> kv in source)
+        {
+            list.Add(new NamedCount { Name = kv.Key, Count = kv.Value });
+        }
+        list.Sort((a, b) =>
+        {
+            int c = b.Count.CompareTo(a.Count);
+            return c != 0 ? c : string.CompareOrdinal(a.Name, b.Name);
+        });
+        return take is int n && list.Count > n ? list.GetRange(0, n) : list;
+    }
+
+    private static CategoryRow Clone(CategoryRow c) => new()
+    {
+        Id = c.Id,
+        TenantId = c.TenantId,
+        MailboxId = c.MailboxId,
+        Name = c.Name,
+        Slot = c.Slot,
+        CreatedAt = c.CreatedAt,
+    };
+
 }
