@@ -8,7 +8,8 @@ Classic greylisting. The first time a given (client /24 or /64, sender, recipien
 
 - **#ctor** *(method)* - Construct.
 - **NetworkKey** *(method)* - Group clients by network so a sending pool with several outbound IPs (common for large providers) counts as one: /24 for IPv4, /64 for IPv6.
-- **OnConnect** *(method)* - _(no description)_
-- **OnMailFrom** *(method)* - _(no description)_
-- **OnRcptTo** *(method)* - _(no description)_
+- **OnConnectAsync** *(method)* - _(no description)_
+- **OnMailFromAsync** *(method)* - _(no description)_
+- **OnRcptTo** *(method)* - Synchronous RCPT TO check.
+- **OnRcptToAsync** *(method)* - _(no description)_
 - **Count** *(property)* - Number of triplets currently remembered (pending or passed).

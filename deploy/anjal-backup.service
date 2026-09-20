@@ -1,0 +1,22 @@
+# One backup run: pg_dump, then Maildir + ACME store to Backblaze B2 via rclone.
+# Triggered by anjal-backup.timer; run manually with `systemctl start anjal-backup`.
+[Unit]
+Description=Anjal backup to Backblaze B2
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=anjal
+Group=anjal
+EnvironmentFile=/etc/anjal/server.env
+ExecStart=/opt/anjal/bin/backup.sh
+Nice=10
+IOSchedulingClass=idle
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/anjal
+ReadOnlyPaths=/var/mail/anjal
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=anjal-backup

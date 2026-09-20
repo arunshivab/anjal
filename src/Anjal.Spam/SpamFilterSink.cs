@@ -188,8 +188,10 @@ public sealed class SpamFilterSink : IMessageSink
 
         this.log?.Invoke($"Spam: score {verdict.Score} for <{ctx.EnvelopeFrom}> from {ctx.RemoteAddress}: {(verdict.Reasons.Count == 0 ? "none" : verdict.ReasonsHeaderValue)}");
 
+        Counters.Increment("anjal_spam_scored_total");
         if (this.Action == SpamAction.Reject && verdict.Score >= this.RejectThreshold)
         {
+            Counters.Increment("anjal_spam_rejected_total");
             return new DeliveryResult
             {
                 Outcome = DeliveryOutcome.PermanentFailure,

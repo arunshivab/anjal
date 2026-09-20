@@ -41,3 +41,6 @@ iframe.body { width:100%; min-height:480px; border:1px solid var(--line); backgr
 .login input, .compose input[type=text], .compose input[type=email], .compose textarea { width:100%; padding:8px; border:1px solid var(--line); border-radius:6px; font:inherit; margin-top:4px; }
 .compose textarea { margin-bottom:10px; }
 .actions { display:flex; gap:8px; }
+.usage { margin:0 8px 10px; }
+.usage .bar { height:6px; background:var(--bg); border:1px solid var(--line); border-radius:3px; overflow:hidden; }
+.usage .bar span { display:block; height:100%; background:var(--accent); }

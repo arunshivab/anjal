@@ -114,6 +114,14 @@ public interface IMessageStore
     System.Threading.Tasks.Task<OutboundMessage?> GetOutboundByIdAsync(System.Guid id, System.Threading.CancellationToken ct = default);
 
     /// <summary>
+    /// Count outbound messages by status. Used by <c>/metrics</c> for queue
+    /// depth; a cheap indexed count.
+    /// </summary>
+    /// <param name="status">The status to count.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<long> CountOutboundAsync(OutboundStatus status, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
     /// Fetch a single inbound message by id. Returns <see langword="null"/>
     /// if not found.
     /// </summary>

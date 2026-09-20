@@ -1,5 +1,6 @@
 @page "/compose"
 @attribute [Authorize]
+@inject MailboxService Mail
 
 <PageTitle>Anjal - compose</PageTitle>
 
@@ -8,6 +9,10 @@
 @if (Error is not null)
 {
     <p class="error">@Error</p>
+}
+@if (full)
+{
+    <p class="error">Your mailbox is full - free some space before sending.</p>
 }
 
 <form method="post" action="/compose" enctype="multipart/form-data" class="compose">
@@ -18,7 +23,7 @@
     <label>Attachments <input type="file" name="attachments" multiple /></label>
     <textarea name="body" rows="18" placeholder="Write your message"></textarea>
     <div class="actions">
-        <button type="submit" class="btn primary">Send</button>
+        <button type="submit" class="btn primary" disabled="@full">Send</button>
         <a class="btn subtle" href="/">Cancel</a>
     </div>
 </form>
@@ -28,4 +33,21 @@
     [SupplyParameterFromQuery] private string? Cc { get; set; }
     [SupplyParameterFromQuery] private string? Subject { get; set; }
     [SupplyParameterFromQuery] private string? Error { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private bool full;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
+        if (mailboxId is not null)
+        {
+            MailboxRow? mb = (await Mail.GetContextAsync(mailboxId.Value))?.Mailbox;
+            full = mb is not null && Anjal.Mailbox.QuotaPolicy.IsFull(mb);
+        }
+    }
 }

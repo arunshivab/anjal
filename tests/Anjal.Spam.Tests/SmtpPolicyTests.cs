@@ -30,7 +30,7 @@ public class SmtpPolicyTests
     }
 
     [Fact]
-    public void RateLimiter_Messages_PerIpAndPerUser()
+    public async System.Threading.Tasks.Task RateLimiter_Messages_PerIpAndPerUser()
     {
         var clock = new Clock();
         var limiter = new RateLimiter(new RateLimitOptions { MessagesPerHourPerIp = 2, MessagesPerHourPerUser = 1 }, () => clock.Now);
@@ -43,7 +43,7 @@ public class SmtpPolicyTests
         PolicyDecision d = limiter.OnMailFrom("9.9.9.9", "ARUN@anjal.co.in", "arun@anjal.co.in");
         Assert.False(d.Allowed);
         Assert.Equal(451, d.ReplyCode);
-        Assert.True(limiter.OnRcptTo("1.2.3.4", null, "a@b", "c@d").Allowed);
+        Assert.True((await limiter.OnRcptToAsync("1.2.3.4", null, "a@b", "c@d")).Allowed);
 
         clock.Advance(System.TimeSpan.FromHours(1) + System.TimeSpan.FromSeconds(1));
         Assert.True(limiter.OnMailFrom("1.2.3.4", "arun@anjal.co.in", "arun@anjal.co.in").Allowed);
@@ -102,17 +102,17 @@ public class SmtpPolicyTests
     }
 
     [Fact]
-    public void Composite_FirstRefusalWins()
+    public async System.Threading.Tasks.Task Composite_FirstRefusalWins()
     {
         var clock = new Clock();
         var limiter = new RateLimiter(new RateLimitOptions { ConnectionsPerMinute = 1 }, () => clock.Now);
         var grey = new Greylist(null, () => clock.Now);
         var composite = new CompositeSmtpPolicy(limiter, grey);
 
-        Assert.True(composite.OnConnect("203.0.113.10").Allowed);
-        Assert.False(composite.OnConnect("203.0.113.10").Allowed);
-        Assert.True(composite.OnMailFrom("203.0.113.10", null, "a@b").Allowed);
-        Assert.False(composite.OnRcptTo("203.0.113.10", null, "a@b", "c@d").Allowed);
+        Assert.True((await composite.OnConnectAsync("203.0.113.10")).Allowed);
+        Assert.False((await composite.OnConnectAsync("203.0.113.10")).Allowed);
+        Assert.True((await composite.OnMailFromAsync("203.0.113.10", null, "a@b")).Allowed);
+        Assert.False((await composite.OnRcptToAsync("203.0.113.10", null, "a@b", "c@d")).Allowed);
     }
 
     [Fact]

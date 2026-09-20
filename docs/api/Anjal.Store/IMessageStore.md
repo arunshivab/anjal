@@ -6,6 +6,7 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 
 ## Members
 
+- **CountOutboundAsync** *(method)* - Count outbound messages by status. Used by /metrics for queue depth; a cheap indexed count.
 - **CreateTagGrantAsync** *(method)* - Create a new tag grant for time-bounded per-case authorisation. Returns the saved grant with populated.
 - **DeleteDkimKeyAsync** *(method)* - Remove the DKIM key for a sender domain.
 - **DeleteLocalDomainAsync** *(method)* - Remove a local domain.

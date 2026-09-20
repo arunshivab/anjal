@@ -105,13 +105,14 @@ public sealed class SmtpSession
     {
         try
         {
-            PolicyDecision connect = this.Consult(p => p.OnConnect(this.remoteAddress));
+            PolicyDecision connect = await this.ConsultAsync(p => p.OnConnectAsync(this.remoteAddress, ct)).ConfigureAwait(false);
             if (!connect.Allowed)
             {
                 await this.WriteLineAsync($"{connect.ReplyCode} {connect.ReplyText}", ct).ConfigureAwait(false);
                 return;
             }
 
+            Counters.Increment(this.options.Role == SmtpServerRole.Submission ? "anjal_smtp_submission_connections_total" : "anjal_smtp_mta_connections_total");
             await this.WriteLineAsync($"220 {this.options.AdvertisedHostName} Anjal SMTP service ready", ct).ConfigureAwait(false);
             this.state = State.AwaitingHelo;
 
@@ -521,7 +522,7 @@ public sealed class SmtpSession
             }
         }
 
-        PolicyDecision mailPolicy = this.Consult(p => p.OnMailFrom(this.remoteAddress, this.authenticatedUser?.Username, addr));
+        PolicyDecision mailPolicy = await this.ConsultAsync(p => p.OnMailFromAsync(this.remoteAddress, this.authenticatedUser?.Username, addr, ct)).ConfigureAwait(false);
         if (!mailPolicy.Allowed)
         {
             await this.WriteLineAsync($"{mailPolicy.ReplyCode} {mailPolicy.ReplyText}", ct).ConfigureAwait(false);
@@ -539,7 +540,7 @@ public sealed class SmtpSession
     /// Ask the configured policy. A missing policy, or one that throws,
     /// allows the command - a policy bug must never take the server down.
     /// </summary>
-    private PolicyDecision Consult(System.Func<ISmtpPolicy, PolicyDecision> check)
+    private async System.Threading.Tasks.Task<PolicyDecision> ConsultAsync(System.Func<ISmtpPolicy, System.Threading.Tasks.Task<PolicyDecision>> check)
     {
         ISmtpPolicy? policy = this.options.Policy;
         if (policy is null)
@@ -548,7 +549,7 @@ public sealed class SmtpSession
         }
         try
         {
-            return check(policy) ?? PolicyDecision.Allow;
+            return await check(policy).ConfigureAwait(false) ?? PolicyDecision.Allow;
         }
 #pragma warning disable CA1031 // Policy failures are fail-open by design.
         catch (System.Exception)
@@ -603,7 +604,7 @@ public sealed class SmtpSession
             }
         }
 
-        PolicyDecision rcptPolicy = this.Consult(p => p.OnRcptTo(this.remoteAddress, this.authenticatedUser?.Username, this.envelopeFrom, addr));
+        PolicyDecision rcptPolicy = await this.ConsultAsync(p => p.OnRcptToAsync(this.remoteAddress, this.authenticatedUser?.Username, this.envelopeFrom, addr, ct)).ConfigureAwait(false);
         if (!rcptPolicy.Allowed)
         {
             await this.WriteLineAsync($"{rcptPolicy.ReplyCode} {rcptPolicy.ReplyText}", ct).ConfigureAwait(false);
@@ -723,6 +724,12 @@ public sealed class SmtpSession
             DeliveryOutcome.PermanentFailure => "550",
             _ => "451",
         };
+        Counters.Increment(result.Outcome switch
+        {
+            DeliveryOutcome.Accepted => "anjal_smtp_messages_accepted_total",
+            DeliveryOutcome.TransientFailure => "anjal_smtp_messages_deferred_total",
+            _ => "anjal_smtp_messages_rejected_total",
+        });
         await this.WriteLineAsync($"{code} {result.ReplyText}", ct).ConfigureAwait(false);
         this.ResetTransaction();
         return true;

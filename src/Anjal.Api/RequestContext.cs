@@ -123,6 +123,24 @@ public sealed class RequestContext
     }
 
     /// <summary>
+    /// Write a plain-text response.
+    /// </summary>
+    /// <param name="statusCode">HTTP status code.</param>
+    /// <param name="contentType">Content type, e.g. <c>text/plain; version=0.0.4; charset=utf-8</c>.</param>
+    /// <param name="text">Body text.</param>
+    public async System.Threading.Tasks.Task WriteTextAsync(int statusCode, string contentType, string text)
+    {
+        System.ArgumentNullException.ThrowIfNull(contentType);
+        System.ArgumentNullException.ThrowIfNull(text);
+        byte[] bytes = Encoding.UTF8.GetBytes(text);
+        this.context.Response.StatusCode = statusCode;
+        this.context.Response.ContentType = contentType;
+        this.context.Response.ContentLength64 = bytes.Length;
+        await this.context.Response.OutputStream.WriteAsync(bytes.AsMemory(0, bytes.Length)).ConfigureAwait(false);
+        this.context.Response.OutputStream.Close();
+    }
+
+    /// <summary>
     /// Write an empty response with the given status code (used for 204 etc.).
     /// </summary>
     /// <param name="statusCode">HTTP status code.</param>

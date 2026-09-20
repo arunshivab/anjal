@@ -16,17 +16,17 @@ public class SmtpPolicyHookTests
 
         public bool Throw { get; set; }
 
-        public PolicyDecision OnConnect(string remoteAddress)
+        public System.Threading.Tasks.Task<PolicyDecision> OnConnectAsync(string remoteAddress, System.Threading.CancellationToken ct = default)
         {
             if (this.Throw) throw new System.InvalidOperationException("boom");
-            return this.RefuseConnect ? PolicyDecision.Defer("4.7.1 Too many connections", 421) : PolicyDecision.Allow;
+            return System.Threading.Tasks.Task.FromResult(this.RefuseConnect ? PolicyDecision.Defer("4.7.1 Too many connections", 421) : PolicyDecision.Allow);
         }
 
-        public PolicyDecision OnMailFrom(string remoteAddress, string? authenticatedUser, string envelopeFrom) =>
-            this.DeferMail ? PolicyDecision.Defer("4.7.1 Rate limited") : PolicyDecision.Allow;
+        public System.Threading.Tasks.Task<PolicyDecision> OnMailFromAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, System.Threading.CancellationToken ct = default) =>
+            System.Threading.Tasks.Task.FromResult(this.DeferMail ? PolicyDecision.Defer("4.7.1 Rate limited") : PolicyDecision.Allow);
 
-        public PolicyDecision OnRcptTo(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient) =>
-            this.DeferRcpt ? PolicyDecision.Defer("4.7.1 Greylisted, please retry in 300 seconds") : PolicyDecision.Allow;
+        public System.Threading.Tasks.Task<PolicyDecision> OnRcptToAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient, System.Threading.CancellationToken ct = default) =>
+            System.Threading.Tasks.Task.FromResult(this.DeferRcpt ? PolicyDecision.Defer("4.7.1 Greylisted, please retry in 300 seconds") : PolicyDecision.Allow);
     }
 
     private sealed class AcceptSink : IMessageSink

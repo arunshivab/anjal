@@ -38,6 +38,9 @@
 - [Anjal.Api.DkimKeysHandler](Anjal.Api/DkimKeysHandler.md)
 - [Anjal.Api.ErrorResponse](Anjal.Api/ErrorResponse.md)
 - [Anjal.Api.FolderResponse](Anjal.Api/FolderResponse.md)
+- [Anjal.Api.HealthComponent](Anjal.Api/HealthComponent.md)
+- [Anjal.Api.HealthHandler](Anjal.Api/HealthHandler.md)
+- [Anjal.Api.HealthResponse](Anjal.Api/HealthResponse.md)
 - [Anjal.Api.InboundHandler](Anjal.Api/InboundHandler.md)
 - [Anjal.Api.InboundResponse](Anjal.Api/InboundResponse.md)
 - [Anjal.Api.LocalDomainRequest](Anjal.Api/LocalDomainRequest.md)
@@ -124,6 +127,7 @@
 - [Anjal.Mailbox.MaildirStore](Anjal.Mailbox/MaildirStore.md)
 - [Anjal.Mailbox.MaildirWriteResult](Anjal.Mailbox/MaildirWriteResult.md)
 - [Anjal.Mailbox.ModuleInfo](Anjal.Mailbox/ModuleInfo.md)
+- [Anjal.Mailbox.QuotaPolicy](Anjal.Mailbox/QuotaPolicy.md)
 
 ## Anjal.Mime
 
@@ -174,6 +178,7 @@
 
 - [Anjal.Smtp.AuthenticatedUser](Anjal.Smtp/AuthenticatedUser.md)
 - [Anjal.Smtp.CompositeMessageSink](Anjal.Smtp/CompositeMessageSink.md)
+- [Anjal.Smtp.Counters](Anjal.Smtp/Counters.md)
 - [Anjal.Smtp.DeliveryContext](Anjal.Smtp/DeliveryContext.md)
 - [Anjal.Smtp.DeliveryOutcome](Anjal.Smtp/DeliveryOutcome.md)
 - [Anjal.Smtp.DeliveryResult](Anjal.Smtp/DeliveryResult.md)

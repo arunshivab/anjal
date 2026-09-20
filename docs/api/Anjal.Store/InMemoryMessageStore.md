@@ -8,6 +8,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
+- **CountOutboundAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
 - **DeleteLocalDomainAsync** *(method)* - _(no description)_

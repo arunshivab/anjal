@@ -42,6 +42,18 @@ public sealed class RateLimiter : ISmtpPolicy
     }
 
     /// <inheritdoc/>
+    public Task<PolicyDecision> OnConnectAsync(string remoteAddress, CancellationToken ct = default) => Task.FromResult(this.OnConnect(remoteAddress));
+
+    /// <inheritdoc/>
+    public Task<PolicyDecision> OnMailFromAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, CancellationToken ct = default) =>
+        Task.FromResult(this.OnMailFrom(remoteAddress, authenticatedUser, envelopeFrom));
+
+    /// <inheritdoc/>
+    public Task<PolicyDecision> OnRcptToAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient, CancellationToken ct = default) =>
+        Task.FromResult(PolicyDecision.Allow);
+
+    /// <summary>Synchronous connect check.</summary>
+    /// <param name="remoteAddress">Client IP.</param>
     public PolicyDecision OnConnect(string remoteAddress)
     {
         ArgumentNullException.ThrowIfNull(remoteAddress);
@@ -52,10 +64,13 @@ public sealed class RateLimiter : ISmtpPolicy
         }
         return this.Hit(this.connections, remoteAddress, TimeSpan.FromMinutes(1), this.options.ConnectionsPerMinute)
             ? PolicyDecision.Allow
-            : PolicyDecision.Defer("4.7.1 Too many connections, try again later", 421);
+            : Refused("anjal_ratelimit_connections_refused_total", PolicyDecision.Defer("4.7.1 Too many connections, try again later", 421));
     }
 
-    /// <inheritdoc/>
+    /// <summary>Synchronous MAIL FROM check.</summary>
+    /// <param name="remoteAddress">Client IP.</param>
+    /// <param name="authenticatedUser">Authenticated user, or null.</param>
+    /// <param name="envelopeFrom">MAIL FROM address.</param>
     public PolicyDecision OnMailFrom(string remoteAddress, string? authenticatedUser, string envelopeFrom)
     {
         ArgumentNullException.ThrowIfNull(remoteAddress);
@@ -67,7 +82,7 @@ public sealed class RateLimiter : ISmtpPolicy
             }
             return this.Hit(this.userMessages, authenticatedUser, TimeSpan.FromHours(1), this.options.MessagesPerHourPerUser)
                 ? PolicyDecision.Allow
-                : PolicyDecision.Defer("4.7.1 Sending rate limit reached for this account, try again later");
+                : Refused("anjal_ratelimit_messages_refused_total", PolicyDecision.Defer("4.7.1 Sending rate limit reached for this account, try again later"));
         }
         if (this.options.MessagesPerHourPerIp <= 0)
         {
@@ -75,11 +90,14 @@ public sealed class RateLimiter : ISmtpPolicy
         }
         return this.Hit(this.ipMessages, remoteAddress, TimeSpan.FromHours(1), this.options.MessagesPerHourPerIp)
             ? PolicyDecision.Allow
-            : PolicyDecision.Defer("4.7.1 Too many messages from your address, try again later");
+            : Refused("anjal_ratelimit_messages_refused_total", PolicyDecision.Defer("4.7.1 Too many messages from your address, try again later"));
     }
 
-    /// <inheritdoc/>
-    public PolicyDecision OnRcptTo(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient) => PolicyDecision.Allow;
+    private static PolicyDecision Refused(string counter, PolicyDecision decision)
+    {
+        Counters.Increment(counter);
+        return decision;
+    }
 
     /// <summary>Record one event and report whether the key is still within its limit.</summary>
     private bool Hit(ConcurrentDictionary<string, Window> table, string key, TimeSpan span, int limit)
@@ -189,12 +207,20 @@ public sealed class Greylist : ISmtpPolicy
     public int Count => this.entries.Count;
 
     /// <inheritdoc/>
-    public PolicyDecision OnConnect(string remoteAddress) => PolicyDecision.Allow;
+    public Task<PolicyDecision> OnConnectAsync(string remoteAddress, CancellationToken ct = default) => Task.FromResult(PolicyDecision.Allow);
 
     /// <inheritdoc/>
-    public PolicyDecision OnMailFrom(string remoteAddress, string? authenticatedUser, string envelopeFrom) => PolicyDecision.Allow;
+    public Task<PolicyDecision> OnMailFromAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, CancellationToken ct = default) => Task.FromResult(PolicyDecision.Allow);
 
     /// <inheritdoc/>
+    public Task<PolicyDecision> OnRcptToAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient, CancellationToken ct = default) =>
+        Task.FromResult(this.OnRcptTo(remoteAddress, authenticatedUser, envelopeFrom, recipient));
+
+    /// <summary>Synchronous RCPT TO check.</summary>
+    /// <param name="remoteAddress">Client IP.</param>
+    /// <param name="authenticatedUser">Authenticated user, or null.</param>
+    /// <param name="envelopeFrom">MAIL FROM address.</param>
+    /// <param name="recipient">RCPT TO address.</param>
     public PolicyDecision OnRcptTo(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient)
     {
         ArgumentNullException.ThrowIfNull(remoteAddress);
@@ -222,6 +248,7 @@ public sealed class Greylist : ISmtpPolicy
                 return PolicyDecision.Allow;
             }
             int seconds = (int)Math.Ceiling((this.options.Delay - (now - e.FirstSeen)).TotalSeconds);
+            Counters.Increment("anjal_greylist_deferred_total");
             return PolicyDecision.Defer($"4.7.1 Greylisted, please retry in {seconds} seconds");
         }
     }
@@ -327,11 +354,11 @@ public sealed class CompositeSmtpPolicy : ISmtpPolicy
     }
 
     /// <inheritdoc/>
-    public PolicyDecision OnConnect(string remoteAddress)
+    public async Task<PolicyDecision> OnConnectAsync(string remoteAddress, CancellationToken ct = default)
     {
         foreach (ISmtpPolicy p in this.policies)
         {
-            PolicyDecision d = p.OnConnect(remoteAddress);
+            PolicyDecision d = await p.OnConnectAsync(remoteAddress, ct).ConfigureAwait(false);
             if (!d.Allowed)
             {
                 return d;
@@ -341,11 +368,11 @@ public sealed class CompositeSmtpPolicy : ISmtpPolicy
     }
 
     /// <inheritdoc/>
-    public PolicyDecision OnMailFrom(string remoteAddress, string? authenticatedUser, string envelopeFrom)
+    public async Task<PolicyDecision> OnMailFromAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, CancellationToken ct = default)
     {
         foreach (ISmtpPolicy p in this.policies)
         {
-            PolicyDecision d = p.OnMailFrom(remoteAddress, authenticatedUser, envelopeFrom);
+            PolicyDecision d = await p.OnMailFromAsync(remoteAddress, authenticatedUser, envelopeFrom, ct).ConfigureAwait(false);
             if (!d.Allowed)
             {
                 return d;
@@ -355,11 +382,11 @@ public sealed class CompositeSmtpPolicy : ISmtpPolicy
     }
 
     /// <inheritdoc/>
-    public PolicyDecision OnRcptTo(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient)
+    public async Task<PolicyDecision> OnRcptToAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient, CancellationToken ct = default)
     {
         foreach (ISmtpPolicy p in this.policies)
         {
-            PolicyDecision d = p.OnRcptTo(remoteAddress, authenticatedUser, envelopeFrom, recipient);
+            PolicyDecision d = await p.OnRcptToAsync(remoteAddress, authenticatedUser, envelopeFrom, recipient, ct).ConfigureAwait(false);
             if (!d.Allowed)
             {
                 return d;
