@@ -267,6 +267,18 @@ public sealed class MailboxServiceTests : System.IDisposable
     }
 
     [Fact]
+    public async System.Threading.Tasks.Task Send_RefusedWhenMailboxFull()
+    {
+        await this.SeedAsync();
+        await this.store.UpsertMailboxAsync(new MailboxRow { TenantId = this.tenant.Id, LocalPart = "arun", Domain = "anjal.co.in", QuotaBytes = 10 });
+        await this.store.AddMailboxUsageAsync(this.mailbox.Id, 10);
+        string? error = await this.svc.SendAsync(this.mailbox.Id, new ComposeRequest { To = "a@b.c", Subject = "x" });
+        Assert.NotNull(error);
+        Assert.Contains("full", error, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(await this.store.LeaseOutboundBatchAsync(10, System.DateTimeOffset.UtcNow.AddMinutes(1)));
+    }
+
+    [Fact]
     public void EncodeHeaderText_OnlyWhenNeeded()
     {
         Assert.Equal("plain", MailboxService.EncodeHeaderText("plain"));

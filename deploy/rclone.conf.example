@@ -1,0 +1,21 @@
+# /etc/anjal/rclone.conf - root:anjal 640
+# Two remotes: "b2" is the raw Backblaze bucket, "b2crypt" wraps it with
+# client-side encryption. backup.sh and restore.sh only ever use b2crypt.
+#
+# Generate the two crypt passwords with:  rclone obscure "$(openssl rand -base64 32)"
+# Keep a copy of this file somewhere safe OFF the VM: without the crypt
+# passwords the backup cannot be decrypted.
+
+[b2]
+type = b2
+account = CHANGE-ME-keyID
+key = CHANGE-ME-applicationKey
+hard_delete = true
+
+[b2crypt]
+type = crypt
+remote = b2:anjal-backup
+filename_encryption = standard
+directory_name_encryption = true
+password = CHANGE-ME-obscured-password-1
+password2 = CHANGE-ME-obscured-password-2

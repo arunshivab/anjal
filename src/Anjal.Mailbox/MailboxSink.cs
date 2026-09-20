@@ -220,6 +220,8 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                 }
 
                 this.log?.Invoke($"Delivered {rcpt} -> {tenant.Slug}/{mailbox.Address}/{Anjal.Store.FolderRow.MaildirNameFor(folder.Name)}/{written.RelativePath} ({written.SizeBytes} bytes, spam score {spamScore})");
+                Anjal.Smtp.Counters.Increment(folderName == JunkFolder ? "anjal_mailbox_junked_total" : "anjal_mailbox_delivered_total");
+                Anjal.Smtp.Counters.Add("anjal_mailbox_bytes_stored_total", written.SizeBytes);
                 delivered++;
             }
             catch (System.IO.IOException ex)

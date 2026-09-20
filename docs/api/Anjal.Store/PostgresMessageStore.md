@@ -9,6 +9,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **#ctor** *(method)* - Create the store with a PostgreSQL connection string.
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
+- **CountOutboundAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
 - **DeleteLocalDomainAsync** *(method)* - _(no description)_

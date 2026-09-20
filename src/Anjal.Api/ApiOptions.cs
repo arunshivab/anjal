@@ -32,4 +32,16 @@ public sealed class ApiOptions
     /// whichever process hosts the renewal service. Null disables both routes.
     /// </summary>
     public string? AcmeDirectory { get; init; }
+
+    /// <summary>
+    /// Maildir root to probe for writability in <c>/healthz</c>. Null skips
+    /// the check.
+    /// </summary>
+    public string? MaildirRoot { get; init; }
+
+    /// <summary>
+    /// Days of certificate validity below which <c>/healthz</c> reports the
+    /// TLS component as degraded. Default 7.
+    /// </summary>
+    public int CertificateWarnDays { get; init; } = 7;
 }

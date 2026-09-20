@@ -26,6 +26,7 @@ public sealed class ApiServer : System.IDisposable
     private readonly TenantsHandler? tenants;
     private readonly MailboxesHandler? mailboxes;
     private readonly AcmeHandler? acme;
+    private readonly HealthHandler health;
     private readonly System.Action<string>? log;
     private bool started;
     private bool disposed;
@@ -79,6 +80,7 @@ public sealed class ApiServer : System.IDisposable
         {
             this.acme = new AcmeHandler(new Anjal.Acme.CertificateStore(options.AcmeDirectory));
         }
+        this.health = new HealthHandler(store, options);
 
         this.routingRules = new RoutingRulesHandler(store);
         this.tagGrants = new TagGrantsHandler(store);
@@ -191,6 +193,19 @@ public sealed class ApiServer : System.IDisposable
         try
         {
             this.log?.Invoke($"{ctx.Method} {ctx.Path}");
+
+            // /healthz is unauthenticated so external monitors can probe it;
+            // it reveals only component up/down states.
+            if (ctx.Path.Equals("/healthz", System.StringComparison.OrdinalIgnoreCase))
+            {
+                if (ctx.Method != "GET")
+                {
+                    await ctx.WriteErrorAsync(405, "method_not_allowed", "GET only.").ConfigureAwait(false);
+                    return;
+                }
+                await this.health.WriteHealthAsync(ctx).ConfigureAwait(false);
+                return;
+            }
 
             // Auth check first, before anything else.
             if (!this.CheckAuth(ctx))
@@ -445,6 +460,12 @@ public sealed class ApiServer : System.IDisposable
         if (this.tenants is not null && this.mailboxes is not null &&
             await this.TryDispatchMailboxAsync(ctx, path).ConfigureAwait(false))
         {
+            return;
+        }
+
+        if (path.Equals("/metrics", System.StringComparison.OrdinalIgnoreCase) && ctx.Method == "GET")
+        {
+            await this.health.WriteMetricsAsync(ctx).ConfigureAwait(false);
             return;
         }
 

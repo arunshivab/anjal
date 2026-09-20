@@ -319,6 +319,17 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
     }
 
     /// <inheritdoc/>
+    public async Task<long> CountOutboundAsync(OutboundStatus status, CancellationToken ct = default)
+    {
+        const string sql = "SELECT count(*) FROM outbound_messages WHERE status = @status;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("status", (int)status);
+        object? result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is long n ? n : 0;
+    }
+
+    /// <inheritdoc/>
     public async Task<OutboundMessage?> GetOutboundByIdAsync(System.Guid id, CancellationToken ct = default)
     {
         const string sql = @"

@@ -10,7 +10,17 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.12.0** - full SMTP server with bidirectional mail + DKIM signing +
+**v0.13.0** - everything below plus **deployment hardening**: hard
+mailbox quota (`452 4.2.2 Mailbox full` at RCPT, compose disabled in
+the webmail when full), an unauthenticated `/healthz` (store, Maildir,
+certificate) and an authenticated Prometheus `/metrics`, and a
+`deploy/` folder with systemd units, env templates, an installer, an
+rclone-to-Backblaze backup with restore, a self-contained publish script
+and a step-by-step runbook (`deploy/DEPLOY.md`) from fresh Ubuntu VM to
+first mail. This is the last release before the first production
+deployment.
+
+Previously: **v0.12.0** - full SMTP server with bidirectional mail + DKIM signing +
 SPF/DKIM/DMARC inbound verification + SMTP submission authentication on
 dual-port (25/587) with open-relay guard + multi-tenant mailbox storage +
 webmail + minimum-heuristics anti-spam + **built-in ACME (Let's Encrypt)
@@ -169,6 +179,38 @@ the local Lipi instance). Add more users via the API as needed.
 | `ANJAL_RATE_USER_MSG_PER_HOUR` | `100` | Messages per authenticated user per hour on the submission port |
 | `ANJAL_GREYLIST` | `true` | `false` disables greylisting on the MTA port |
 | `ANJAL_GREYLIST_DELAY_SECONDS` | `300` | How long a first-seen (network, sender, recipient) triplet is deferred |
+
+### Deployment
+
+See `deploy/DEPLOY.md` for the full runbook. In short: `deploy/publish.ps1`
+builds self-contained linux-x64 binaries and a tarball; `install.sh` on
+the VM creates the `anjal` user, `/opt/anjal`, `/etc/anjal` (templates
+`server.env`, `webmail.env`, `rclone.conf`), `/var/mail/anjal`,
+`/var/lib/anjal`, and installs the units `anjal-server`, `anjal-webmail`
+and `anjal-backup.timer`. Both services run as `anjal` with systemd
+hardening and `CAP_NET_BIND_SERVICE` for the low ports.
+
+### Health and metrics
+
+    GET /healthz            # no auth: {"status":"ok|degraded|down","components":[store, maildir, tls]}; 503 when down
+    GET /metrics            # bearer token: Prometheus text format
+
+Counters: `anjal_smtp_{mta,submission}_connections_total`,
+`anjal_smtp_messages_{accepted,deferred,rejected}_total`,
+`anjal_mailbox_{delivered,junked}_total`, `anjal_mailbox_bytes_stored_total`,
+`anjal_quota_refusals_total`, `anjal_greylist_deferred_total`,
+`anjal_ratelimit_{connections,messages}_refused_total`,
+`anjal_spam_{scored,rejected}_total`. Gauges: `anjal_outbound_pending`,
+`anjal_outbound_sending`, `anjal_greylist_entries`, `anjal_uptime_seconds`.
+
+### Quota
+
+Each mailbox has `quotaBytes` (default 2 GiB, `0` = unlimited). At or
+above it, RCPT TO that mailbox is deferred with `452 4.2.2 Mailbox
+full`, so the sending server retries for a few days while the owner
+frees space; the webmail shows usage in the sidebar and refuses to send
+while full. Deleting permanently (Trash → Delete permanently) releases
+the bytes.
 
 ### TLS and ACME
 

@@ -269,6 +269,23 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore
     }
 
     /// <inheritdoc/>
+    public Task<long> CountOutboundAsync(OutboundStatus status, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            long n = 0;
+            foreach (OutboundMessage m in this.outbound)
+            {
+                if (m.Status == status)
+                {
+                    n++;
+                }
+            }
+            return Task.FromResult(n);
+        }
+    }
+
+    /// <inheritdoc/>
     public Task<OutboundMessage?> GetOutboundByIdAsync(System.Guid id, CancellationToken ct = default)
     {
         lock (this.gate)

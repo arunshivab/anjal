@@ -97,7 +97,7 @@ public static class Program
         // Anti-spam (v0.11.0): score unauthenticated mail before fan-out.
         // Verdict headers ride along; the mailbox sink files Junk.
         Anjal.Spam.SpamFilterSink sink = BuildSpamFilter(fanOut, Log);
-        Anjal.Spam.CompositeSmtpPolicy mtaPolicy = BuildMtaPolicy(Log);
+        Anjal.Spam.CompositeSmtpPolicy mtaPolicy = BuildMtaPolicy(mailboxStore, Log);
         Anjal.Spam.RateLimiter submissionPolicy = BuildSubmissionPolicy();
 
         // TLS cert for SMTP receiver: a static file (ANJAL_TLS_CERT_PATH) or,
@@ -248,7 +248,19 @@ public static class Program
                 Port = apiPort,
                 BearerToken = token,
                 AcmeDirectory = acme.Configured ? acme.Directory : null,
+                MaildirRoot = maildir.Root,
             }, store, Log, mailboxStore, maildir);
+            Anjal.Smtp.Counters.RegisterGauge("anjal_outbound_pending", "Outbound messages waiting to be sent.", () => store.CountOutboundAsync(Anjal.Store.OutboundStatus.Pending).GetAwaiter().GetResult());
+            Anjal.Smtp.Counters.RegisterGauge("anjal_outbound_sending", "Outbound messages currently leased by the worker.", () => store.CountOutboundAsync(Anjal.Store.OutboundStatus.Sending).GetAwaiter().GetResult());
+            Anjal.Smtp.Counters.Describe("anjal_smtp_messages_accepted_total", "Messages accepted at DATA (250).");
+            Anjal.Smtp.Counters.Describe("anjal_smtp_messages_deferred_total", "Messages deferred at DATA (451).");
+            Anjal.Smtp.Counters.Describe("anjal_smtp_messages_rejected_total", "Messages rejected at DATA (550).");
+            Anjal.Smtp.Counters.Describe("anjal_mailbox_delivered_total", "Messages filed in a mailbox INBOX.");
+            Anjal.Smtp.Counters.Describe("anjal_mailbox_junked_total", "Messages filed in a mailbox Junk folder.");
+            Anjal.Smtp.Counters.Describe("anjal_quota_refusals_total", "RCPT commands refused with 452 because the mailbox is full.");
+            Anjal.Smtp.Counters.Describe("anjal_greylist_deferred_total", "RCPT commands deferred by greylisting.");
+            Anjal.Smtp.Counters.Describe("anjal_spam_scored_total", "Unauthenticated deliveries scored by the spam filter.");
+            Log($"Health at http://{apiBind}:{apiPort}/healthz (no auth), metrics at /metrics (bearer token).");
             apiTask = apiServer.StartAsync(cts.Token);
             string authNote = string.IsNullOrEmpty(token) ? " (auth disabled - DO NOT use in production)" : string.Empty;
             Log($"API listening on http://{apiBind}:{apiPort}/api/...{authNote}");
@@ -538,7 +550,7 @@ public static class Program
     }
 
     /// <summary>MTA-port policy: rate limits plus greylisting.</summary>
-    private static Anjal.Spam.CompositeSmtpPolicy BuildMtaPolicy(System.Action<string> log)
+    private static Anjal.Spam.CompositeSmtpPolicy BuildMtaPolicy(Anjal.Store.IMailboxStore mailboxStore, System.Action<string> log)
     {
         var limits = new Anjal.Spam.RateLimitOptions
         {
@@ -560,6 +572,16 @@ public static class Program
             log("Greylisting: off.");
         }
         log($"Rate limits: {limits.ConnectionsPerMinute} conn/min, {limits.MessagesPerHourPerIp} msg/hr per IP.");
+
+        // Hard quota: RCPT to a full mailbox is deferred with 452 (v0.13.0).
+        policies.Add(new Anjal.Mailbox.QuotaPolicy(mailboxStore, log));
+        foreach (Anjal.Smtp.ISmtpPolicy p in policies)
+        {
+            if (p is Anjal.Spam.Greylist g)
+            {
+                Anjal.Smtp.Counters.RegisterGauge("anjal_greylist_entries", "Triplets currently remembered by the greylist.", () => g.Count);
+            }
+        }
         return new Anjal.Spam.CompositeSmtpPolicy(policies.ToArray());
     }
 

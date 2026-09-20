@@ -491,6 +491,10 @@ public sealed class MailboxService
             return "Mailbox is not available.";
         }
         (TenantRow tenant, MailboxRow mailbox) = context.Value;
+        if (QuotaPolicy.IsFull(mailbox))
+        {
+            return "Your mailbox is full. Delete some messages (Trash, then Delete permanently) before sending.";
+        }
 
         IReadOnlyList<MailAddress> to = AddressParser.Parse(request.To);
         IReadOnlyList<MailAddress> cc = AddressParser.Parse(request.Cc);

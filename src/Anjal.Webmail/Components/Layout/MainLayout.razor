@@ -16,6 +16,13 @@
             </header>
             <div class="main">
                 <nav class="sidebar">
+                    @if (mailbox is not null)
+                    {
+                        <div class="usage">
+                            <div class="bar"><span style="width:@UsagePercent%"></span></div>
+                            <div class="muted small">@Size(mailbox.UsedBytes) of @(mailbox.QuotaBytes > 0 ? Size(mailbox.QuotaBytes) : "unlimited")@(Anjal.Mailbox.QuotaPolicy.IsFull(mailbox) ? " - full" : "")</div>
+                        </div>
+                    }
                     @if (folders is not null)
                     {
                         <ul>
@@ -47,6 +54,12 @@
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private IReadOnlyList<FolderView>? folders;
+    private MailboxRow? mailbox;
+
+    private int UsagePercent => mailbox is null || mailbox.QuotaBytes <= 0 ? 0 : (int)Math.Min(100, mailbox.UsedBytes * 100 / mailbox.QuotaBytes);
+
+    private static string Size(long bytes) =>
+        bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB" : bytes < 1024L * 1024 * 1024 ? $"{bytes / (1024.0 * 1024.0):0.#} MB" : $"{bytes / (1024.0 * 1024.0 * 1024.0):0.##} GB";
 
     protected override async Task OnInitializedAsync()
     {
@@ -59,6 +72,7 @@
         if (mailboxId is not null)
         {
             folders = await Mail.ListFoldersAsync(mailboxId.Value);
+            mailbox = (await Mail.GetContextAsync(mailboxId.Value))?.Mailbox;
         }
     }
 

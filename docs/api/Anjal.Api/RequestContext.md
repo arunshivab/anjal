@@ -12,6 +12,7 @@ Wraps an with conveniences for reading the body and writing JSON responses.
 - **WriteEmptyAsync** *(method)* - Write an empty response with the given status code (used for 204 etc.).
 - **WriteErrorAsync** *(method)* - Write a standard error response with status code and JSON body.
 - **WriteJsonAsync** *(method)* - Write a JSON body and an HTTP status code, then close the response.
+- **WriteTextAsync** *(method)* - Write a plain-text response.
 - **AuthorizationHeader** *(property)* - The Authorization header value, or empty if not set.
 - **Method** *(property)* - HTTP method (GET, POST, etc.) in uppercase.
 - **Path** *(property)* - Absolute path of the URL (e.g. "/api/routing-rules").

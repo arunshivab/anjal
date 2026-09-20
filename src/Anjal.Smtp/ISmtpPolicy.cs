@@ -44,10 +44,11 @@ public sealed class PolicyDecision
 /// <summary>
 /// Connection-level and transaction-level policy consulted by
 /// <see cref="SmtpSession"/> before it acts on a command. Used for rate
-/// limiting and greylisting. Implementations must be thread-safe: one
-/// instance serves every concurrent session of a listener. Any exception
-/// thrown is treated as "allow" so a policy bug can never take the
-/// server down.
+/// limiting, greylisting and mailbox quota. Implementations must be
+/// thread-safe: one instance serves every concurrent session of a
+/// listener. Any exception thrown is treated as "allow" so a policy bug
+/// can never take the server down. Methods are asynchronous so a policy
+/// may consult the store (quota) as well as in-memory state.
 /// </summary>
 public interface ISmtpPolicy
 {
@@ -56,7 +57,8 @@ public interface ISmtpPolicy
     /// the connection after sending the reply.
     /// </summary>
     /// <param name="remoteAddress">Client IP in dotted/colon form.</param>
-    PolicyDecision OnConnect(string remoteAddress);
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<PolicyDecision> OnConnectAsync(string remoteAddress, System.Threading.CancellationToken ct = default);
 
     /// <summary>
     /// Called on MAIL FROM after syntax and authorization checks.
@@ -64,7 +66,8 @@ public interface ISmtpPolicy
     /// <param name="remoteAddress">Client IP.</param>
     /// <param name="authenticatedUser">Authenticated username on the submission port, or null.</param>
     /// <param name="envelopeFrom">The MAIL FROM address.</param>
-    PolicyDecision OnMailFrom(string remoteAddress, string? authenticatedUser, string envelopeFrom);
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<PolicyDecision> OnMailFromAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, System.Threading.CancellationToken ct = default);
 
     /// <summary>
     /// Called on RCPT TO after the relay check, once per recipient.
@@ -73,5 +76,6 @@ public interface ISmtpPolicy
     /// <param name="authenticatedUser">Authenticated username, or null.</param>
     /// <param name="envelopeFrom">The MAIL FROM address.</param>
     /// <param name="recipient">The RCPT TO address.</param>
-    PolicyDecision OnRcptTo(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient);
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<PolicyDecision> OnRcptToAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient, System.Threading.CancellationToken ct = default);
 }

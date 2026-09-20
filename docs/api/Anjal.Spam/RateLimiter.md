@@ -8,6 +8,8 @@ In-memory sliding-window rate limiter. Counts are per process and reset on resta
 
 - **#ctor** *(method)* - Construct.
 - **Hit** *(method)* - Record one event and report whether the key is still within its limit.
-- **OnConnect** *(method)* - _(no description)_
-- **OnMailFrom** *(method)* - _(no description)_
-- **OnRcptTo** *(method)* - _(no description)_
+- **OnConnect** *(method)* - Synchronous connect check.
+- **OnConnectAsync** *(method)* - _(no description)_
+- **OnMailFrom** *(method)* - Synchronous MAIL FROM check.
+- **OnMailFromAsync** *(method)* - _(no description)_
+- **OnRcptToAsync** *(method)* - _(no description)_
