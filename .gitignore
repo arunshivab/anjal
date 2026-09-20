@@ -52,3 +52,8 @@ desktop.ini
 *.log
 *.local.json
 secrets.json
+
+# Release tarballs built by deploy/publish.ps1. Large, reproducible from a
+# tag, and never committed: keeping them out also stops a stray "git add -A"
+# from pulling ~200 MB of publish output into the history.
+artifacts/
