@@ -264,6 +264,61 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
     }
 
     /// <summary>
+    /// File a copy of a message a mailbox itself sent into its Sent folder,
+    /// already marked read - what the webmail does after sending, for mail
+    /// that arrives through SMTP submission instead. Returns false when the
+    /// address is not a local mailbox (a service account, for example).
+    /// </summary>
+    /// <param name="address">The sending mailbox's address.</param>
+    /// <param name="rawBytes">The message as submitted.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async System.Threading.Tasks.Task<bool> FileSentCopyAsync(string address, byte[] rawBytes, System.Threading.CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(address);
+        System.ArgumentNullException.ThrowIfNull(rawBytes);
+        (Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)? resolved = await this.ResolveAsync(address, ct).ConfigureAwait(false);
+        if (resolved is null)
+        {
+            return false;
+        }
+        (Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox) = resolved.Value;
+
+        Anjal.Mime.MimeMessage? parsed;
+        try
+        {
+            parsed = Anjal.Mime.MimeParser.Parse(rawBytes);
+        }
+#pragma warning disable CA1031 // An unparseable copy is still filed; the raw bytes are the truth.
+        catch (System.Exception)
+        {
+            parsed = null;
+        }
+#pragma warning restore CA1031
+
+        Anjal.Store.FolderRow sent = await this.store.EnsureFolderAsync(mailbox.Id, "Sent", ct).ConfigureAwait(false);
+        MaildirWriteResult written = await this.maildir.WriteAsync(tenant.Slug, mailbox.Address, sent.Name, rawBytes, ct).ConfigureAwait(false);
+        string? seenPath = this.maildir.SetFlags(tenant.Slug, mailbox.Address, sent.Name, written.RelativePath, seen: true, flagged: false, answered: false);
+        await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
+        {
+            MailboxId = mailbox.Id,
+            FolderId = sent.Id,
+            MaildirFile = seenPath ?? written.RelativePath,
+            EnvelopeFrom = mailbox.Address,
+            MessageId = parsed?.MessageId ?? string.Empty,
+            FromHeader = parsed?.Headers.Get("From") ?? mailbox.Address,
+            ToHeader = parsed?.Headers.Get("To") ?? string.Empty,
+            Subject = parsed?.Subject ?? string.Empty,
+            DateHeader = parsed?.Date ?? string.Empty,
+            SizeBytes = written.SizeBytes,
+            Seen = true,
+            HasAttachments = HasAttachment(parsed?.Body),
+        }, ct).ConfigureAwait(false);
+        await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
+        this.log?.Invoke($"Filed sent copy for {mailbox.Address} ({written.SizeBytes} bytes)");
+        return true;
+    }
+
+    /// <summary>
     /// Whether a parsed message carries an attachment: any part with a
     /// filename, or any non-text part inside a multipart body. A plain
     /// text or HTML message on its own does not count.

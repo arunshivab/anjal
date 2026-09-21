@@ -10,7 +10,20 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.16.0** - **security hardening** from two independent audits, every
+**v0.16.1** - **fixes from manual QA**. Running Anjal against PostgreSQL
+for the first time, while writing the QA plan, found defects the automated
+suite could not see; all are fixed and covered by new tests. A database
+outage now makes the MTA defer (451) instead of refusing mail permanently.
+Mail submitted on ports 587 and 465 reaches outside addresses through the
+outbound queue, DKIM-signed, with a copy filed in Sent. The dashboard no
+longer fails with PostgreSQL, and a new test harness renders every page
+against an asynchronous store so that class of fault is caught in CI.
+Malformed page and message ids in URLs no longer cause an error. Every
+module reports the real version from Directory.Build.props, publish.ps1
+stamps it into the binaries and refuses to build a version that does not
+match the source or its tag, and the MTA listener's diagnostic log is wired.
+
+Previously: **v0.16.0** - **security hardening** from two independent audits, every
 finding fixed and covered by a regression test. The SMTP read path is
 rebuilt: buffered, with an idle timeout, a hard session lifetime, global
 and per-address connection caps, overlong-line and oversize-DATA draining,

@@ -4,6 +4,15 @@
 
 <PageTitle>Dashboard — Anjal</PageTitle>
 
+@* The page renders once before its figures arrive; with PostgreSQL that
+   first pass is real. Nothing is computed from the empty placeholder data,
+   so nothing can throw (DEF-001). *@
+@if (!loaded)
+{
+    <div class="stack dash"><p class="lead">Loading your figures…</p></div>
+}
+else
+{
 <div class="stack dash">
     <div class="dashhead">
         <div>
@@ -154,12 +163,14 @@
         <p class="railnote">Nothing here is locked behind a colour or a pointer.</p>
     </section>
 </div>
+}
 
 @code {
     [SupplyParameterFromQuery(Name = "period")] private string? Period { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private MailboxActivity activity = new();
+    private bool loaded;
 
     private static System.Globalization.CultureInfo Inv => System.Globalization.CultureInfo.InvariantCulture;
 
@@ -258,5 +269,6 @@
             return;
         }
         activity = await Mail.GetActivityAsync(mailboxId.Value, PeriodKey);
+        loaded = true;
     }
 }

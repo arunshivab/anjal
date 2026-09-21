@@ -71,9 +71,16 @@
 
 @code {
     [Parameter] public Guid? DraftId { get; set; }
-    [SupplyParameterFromQuery(Name = "reply")] private Guid? Reply { get; set; }
-    [SupplyParameterFromQuery(Name = "replyall")] private Guid? ReplyAll { get; set; }
-    [SupplyParameterFromQuery(Name = "forward")] private Guid? Forward { get; set; }
+    // Read as text and parsed here: a malformed id in a hand-edited link
+    // opens a blank compose instead of failing the request (DEF-005).
+    [SupplyParameterFromQuery(Name = "reply")] private string? ReplyText { get; set; }
+    [SupplyParameterFromQuery(Name = "replyall")] private string? ReplyAllText { get; set; }
+    [SupplyParameterFromQuery(Name = "forward")] private string? ForwardText { get; set; }
+    private Guid? Reply => ParseId(ReplyText);
+    private Guid? ReplyAll => ParseId(ReplyAllText);
+    private Guid? Forward => ParseId(ForwardText);
+
+    private static Guid? ParseId(string? text) => Guid.TryParse(text, out Guid id) ? id : null;
     [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
     [SupplyParameterFromQuery(Name = "to")] private string? ToQuery { get; set; }
     [SupplyParameterFromQuery(Name = "cc")] private string? CcQuery { get; set; }

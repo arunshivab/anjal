@@ -60,7 +60,11 @@ else
     [SupplyParameterFromQuery(Name = "q")] private string? Q { get; set; }
     [SupplyParameterFromQuery(Name = "scope")] private string? Scope { get; set; }
     [SupplyParameterFromQuery(Name = "from")] private string? From { get; set; }
-    [SupplyParameterFromQuery(Name = "page")] private int? PageQuery { get; set; }
+    // Read as text and parsed here: a non-numeric or out-of-range value in a
+    // hand-edited link falls back to the first page instead of failing the
+    // request while the parameter is bound (DEF-005).
+    [SupplyParameterFromQuery(Name = "page")] private string? PageText { get; set; }
+    private int? PageQuery => int.TryParse(PageText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int page) ? page : null;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private IReadOnlyList<MessageRow>? items;

@@ -179,6 +179,7 @@
 - [Anjal.Server.ServerLocalDomainResolver](Anjal.Server/ServerLocalDomainResolver.md)
 - [Anjal.Server.ServerSmtpAuthenticator](Anjal.Server/ServerSmtpAuthenticator.md)
 - [Anjal.Server.StoreBackedDkimResolver](Anjal.Server/StoreBackedDkimResolver.md)
+- [Anjal.Server.SubmissionSink](Anjal.Server/SubmissionSink.md)
 - [Anjal.Server.WebhookWorker](Anjal.Server/WebhookWorker.md)
 
 ## Anjal.Smtp

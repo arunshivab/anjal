@@ -172,6 +172,7 @@ public static class Program
             MaxSessionDuration = System.TimeSpan.FromMinutes(ParseIntEnv("ANJAL_SMTP_MAX_SESSION_MINUTES", 15)),
             MaxConcurrentSessions = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS", 200),
             MaxSessionsPerAddress = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS_PER_IP", 10),
+            Log = Log,
         };
         Log($"SMTP limits: idle {smtpOptions.CommandTimeout.TotalSeconds:0}s, session {smtpOptions.MaxSessionDuration.TotalMinutes:0} min, " +
             $"{smtpOptions.MaxConcurrentSessions} connections ({smtpOptions.MaxSessionsPerAddress} per address).");
@@ -248,7 +249,11 @@ public static class Program
                     System.TimeSpan.FromMinutes(15)),
             };
 
-            submissionServer = new Anjal.Smtp.SmtpServer(submissionOptions, sink,
+            // Authenticated submission reaches outside addresses through the
+            // outbound queue and files a Sent copy (DEF-002); local recipients
+            // go through the same sink as inbound mail.
+            var submissionSink = new SubmissionSink(sink, localDomains, store, mailboxSink, Log);
+            submissionServer = new Anjal.Smtp.SmtpServer(submissionOptions, submissionSink,
                 authenticator: null, enforceReject: false,
                 smtpAuthenticator: submissionAuth, localDomains: null);
 
@@ -277,7 +282,7 @@ public static class Program
                     AuthFailures = submissionOptions.AuthFailures,
                     Log = Log,
                 };
-                implicitTlsServer = new Anjal.Smtp.SmtpServer(implicitOptions, sink,
+                implicitTlsServer = new Anjal.Smtp.SmtpServer(implicitOptions, submissionSink,
                     authenticator: null, enforceReject: false,
                     smtpAuthenticator: submissionAuth, localDomains: null);
                 Log($"Anjal SMTP (Submission, implicit TLS, port {implicitPort}) listening on {bind}");
