@@ -675,15 +675,26 @@ public sealed class SmtpSession
         if (this.options.Role == SmtpServerRole.Mta && this.authenticatedUser is null && this.localDomains is not null)
         {
             string rcptDomain = ExtractDomain(addr);
-            bool isLocal = false;
+            bool isLocal;
             try
             {
                 isLocal = await this.localDomains.IsLocalAsync(rcptDomain, ct).ConfigureAwait(false);
             }
-#pragma warning disable CA1031
-            catch (System.Exception)
+            catch (System.OperationCanceledException)
             {
-                isLocal = false;
+                throw;
+            }
+#pragma warning disable CA1031 // A failed lookup means "cannot tell right now", never "not ours".
+            catch (System.Exception ex)
+            {
+                // The store is unreachable, so this server cannot know whether
+                // the recipient is local. A permanent 550 here would make the
+                // sending server return the message to its sender - mail lost
+                // during any database hiccup (DEF-003). A 451 makes it retry.
+                Counters.Increment("anjal_smtp_lookup_deferrals_total");
+                this.options.Log?.Invoke($"Local-domain lookup for {rcptDomain} failed ({ex.GetType().Name}); deferring.");
+                await this.WriteLineAsync("451 4.3.0 Temporary server error, try again later", ct).ConfigureAwait(false);
+                return true;
             }
 #pragma warning restore CA1031
             if (!isLocal)

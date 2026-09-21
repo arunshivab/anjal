@@ -7,13 +7,30 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
+
+# ---- Guards: build only what the version number claims ----
+# The version in Directory.Build.props is the one source of truth. A mismatch
+# means the working tree is not the release being asked for.
+$props = [xml](Get-Content (Join-Path $repo "Directory.Build.props") -Raw)
+$sourceVersion = ($props.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
+if ($sourceVersion -ne $Version) {
+    throw "Asked for $Version but Directory.Build.props says $sourceVersion. Check out the v$Version tag first."
+}
+# The commit must be the one tagged v$Version, with nothing uncommitted on top.
+$tag = (git -C $repo describe --exact-match --tags HEAD 2>$null)
+if ($tag -ne "v$Version") {
+    throw "HEAD is not tagged v$Version (it is '$tag'). Run: git checkout v$Version"
+}
+if (git -C $repo status --porcelain --untracked-files=no) {
+    throw "The working tree has uncommitted changes; a release must be built from the tag exactly."
+}
 $out = Join-Path $repo "artifacts\anjal-$Version"
 Remove-Item $out -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Path "$out\bin" | Out-Null
 
 foreach ($app in @("Server", "Webmail")) {
     dotnet publish "$repo\src\Anjal.$app\Anjal.$app.csproj" -c Release -r linux-x64 --self-contained true `
-        -p:PublishSingleFile=false -p:DebugType=none -o "$out\$($app.ToLower())"
+        -p:PublishSingleFile=false -p:DebugType=none -p:Version=$Version -o "$out\$($app.ToLower())"
     if ($LASTEXITCODE -ne 0) { throw "publish failed for $app" }
 }
 

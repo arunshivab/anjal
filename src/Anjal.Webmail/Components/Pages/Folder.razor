@@ -174,7 +174,11 @@ else
 
 @code {
     [Parameter] public string? FolderName { get; set; }
-    [SupplyParameterFromQuery(Name = "page")] private int? PageQuery { get; set; }
+    // Read as text and parsed here: a non-numeric or out-of-range value in a
+    // hand-edited link falls back to the first page instead of failing the
+    // request while the parameter is bound (DEF-005).
+    [SupplyParameterFromQuery(Name = "page")] private string? PageText { get; set; }
+    private int? PageQuery => int.TryParse(PageText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int page) ? page : null;
     [SupplyParameterFromQuery(Name = "sent")] private string? Sent { get; set; }
     [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
