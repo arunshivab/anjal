@@ -92,9 +92,31 @@ public sealed class SmtpClientSession : System.IDisposable
     /// <param name="ct">Cancellation.</param>
     /// <returns>The 220 reply on success. If the server replies with anything
     /// other than 2xx, this returns the reply without performing the upgrade.</returns>
+    public System.Threading.Tasks.Task<SmtpReply> StartTlsAsync(
+        string targetHostname,
+        bool validateCertificate,
+        System.Threading.CancellationToken ct = default)
+        => this.StartTlsAsync(targetHostname, validateCertificate, System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck, ct);
+
+    /// <summary>
+    /// Issue STARTTLS and upgrade, with an explicit revocation policy for the
+    /// peer certificate. Revocation is only consulted when
+    /// <paramref name="validateCertificate"/> is true. With
+    /// <see cref="System.Security.Cryptography.X509Certificates.X509RevocationMode.Online"/>
+    /// a revoked certificate always fails; a certificate whose revocation
+    /// status cannot be obtained (no CRL or OCSP endpoint, or the endpoint is
+    /// unreachable) is accepted - the soft-fail every browser uses, since a
+    /// hard fail there would stop mail whenever a CA's server is down.
+    /// </summary>
+    /// <param name="targetHostname">The hostname expected on the server certificate.</param>
+    /// <param name="validateCertificate">Validate chain and name.</param>
+    /// <param name="revocation">How to check revocation when validating.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The 220 reply on success, or the refusal without upgrading.</returns>
     public async System.Threading.Tasks.Task<SmtpReply> StartTlsAsync(
         string targetHostname,
         bool validateCertificate,
+        System.Security.Cryptography.X509Certificates.X509RevocationMode revocation,
         System.Threading.CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(targetHostname);
@@ -114,21 +136,24 @@ public sealed class SmtpClientSession : System.IDisposable
         // text reader/writer because they have ASCII-encoded internal buffers
         // pinned to the plaintext stream; we replace them with new ones bound
         // to the SslStream after handshake.
-#pragma warning disable CA5359 // Accept-any-cert is deliberate when validateCertificate=false; caller opts in for testing.
+#pragma warning disable CA5359 // Accept-any-cert is deliberate when validateCertificate=false: opportunistic TLS (RFC 7435).
         var ssl = new System.Net.Security.SslStream(
             this.stream,
             leaveInnerStreamOpen: false,
             validateCertificate
-                ? null
+                ? (sender, certificate, chain, errors) => IsAcceptable(errors, chain)
                 : (sender, certificate, chain, errors) => true);
 #pragma warning restore CA5359
         try
         {
             await ssl.AuthenticateAsClientAsync(
-                targetHostname,
-                clientCertificates: null,
-                enabledSslProtocols: System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
-                checkCertificateRevocation: false).ConfigureAwait(false);
+                new System.Net.Security.SslClientAuthenticationOptions
+                {
+                    TargetHost = targetHostname,
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                    CertificateRevocationCheckMode = validateCertificate ? revocation : System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
+                },
+                ct).ConfigureAwait(false);
         }
         catch (System.Exception ex)
         {
@@ -141,6 +166,36 @@ public sealed class SmtpClientSession : System.IDisposable
         this.writer = new System.IO.StreamWriter(this.stream, Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true };
         this.isTls = true;
         return reply;
+    }
+
+    /// <summary>
+    /// Certificate acceptance when validating: no errors at all, or chain
+    /// errors that consist only of revocation status being unavailable.
+    /// A name mismatch, an untrusted root, an expired certificate or a
+    /// revoked one are all refused.
+    /// </summary>
+    /// <param name="errors">The policy errors reported by the handshake.</param>
+    /// <param name="chain">The built chain.</param>
+    public static bool IsAcceptable(System.Net.Security.SslPolicyErrors errors, System.Security.Cryptography.X509Certificates.X509Chain? chain)
+    {
+        if (errors == System.Net.Security.SslPolicyErrors.None)
+        {
+            return true;
+        }
+        if (errors != System.Net.Security.SslPolicyErrors.RemoteCertificateChainErrors || chain is null)
+        {
+            return false;
+        }
+        foreach (System.Security.Cryptography.X509Certificates.X509ChainStatus status in chain.ChainStatus)
+        {
+            if (status.Status != System.Security.Cryptography.X509Certificates.X509ChainStatusFlags.RevocationStatusUnknown &&
+                status.Status != System.Security.Cryptography.X509Certificates.X509ChainStatusFlags.OfflineRevocation &&
+                status.Status != System.Security.Cryptography.X509Certificates.X509ChainStatusFlags.NoError)
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>
@@ -248,6 +303,12 @@ public sealed class SmtpClientSession : System.IDisposable
     public static byte[] DotStuff(byte[] data)
     {
         System.ArgumentNullException.ThrowIfNull(data);
+
+        // Every line ending leaves as CRLF. A bare CR or LF in a message
+        // relayed from elsewhere (or submitted through the API) could be read
+        // by a lenient receiver as a line break our dot-stuffing did not see,
+        // turning "<CR>.<CR>" into an end-of-data marker - SMTP smuggling.
+        data = SmtpSession.NormaliseLineEndings(data);
         using var ms = new System.IO.MemoryStream(data.Length + 8);
         bool atLineStart = true;
         foreach (byte b in data)

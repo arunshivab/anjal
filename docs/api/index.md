@@ -94,6 +94,7 @@
 - [Anjal.Auth.ModuleInfo](Anjal.Auth/ModuleInfo.md)
 - [Anjal.Auth.SpfDetail](Anjal.Auth/SpfDetail.md)
 - [Anjal.Auth.SpfResult](Anjal.Auth/SpfResult.md)
+- [Anjal.Auth.SpfState](Anjal.Auth/SpfState.md)
 - [Anjal.Auth.SpfVerifier](Anjal.Auth/SpfVerifier.md)
 
 ## Anjal.Dkim
@@ -145,10 +146,12 @@
 - [Anjal.Mime.MimeHeader](Anjal.Mime/MimeHeader.md)
 - [Anjal.Mime.MimeMessage](Anjal.Mime/MimeMessage.md)
 - [Anjal.Mime.MimeMultipart](Anjal.Mime/MimeMultipart.md)
+- [Anjal.Mime.MimeParseException](Anjal.Mime/MimeParseException.md)
 - [Anjal.Mime.MimeParser](Anjal.Mime/MimeParser.md)
 - [Anjal.Mime.MimePart](Anjal.Mime/MimePart.md)
 - [Anjal.Mime.ModuleInfo](Anjal.Mime/ModuleInfo.md)
 - [Anjal.Mime.MultipartFactory](Anjal.Mime/MultipartFactory.md)
+- [Anjal.Mime.PartBudget](Anjal.Mime/PartBudget.md)
 - [Anjal.Mime.QuotedPrintableCodec](Anjal.Mime/QuotedPrintableCodec.md)
 
 ## Anjal.Routing
@@ -163,9 +166,11 @@
 - [Anjal.Routing.StoreBackedRoutingTable](Anjal.Routing/StoreBackedRoutingTable.md)
 - [Anjal.Routing.WebhookDispatchResult](Anjal.Routing/WebhookDispatchResult.md)
 - [Anjal.Routing.WebhookPayload](Anjal.Routing/WebhookPayload.md)
+- [Anjal.Routing.WebhookTargetPolicy](Anjal.Routing/WebhookTargetPolicy.md)
 
 ## Anjal.Server
 
+- [Anjal.Server.BounceNotice](Anjal.Server/BounceNotice.md)
 - [Anjal.Server.OutboundWorker](Anjal.Server/OutboundWorker.md)
 - [Anjal.Server.OutboundWorkerOptions](Anjal.Server/OutboundWorkerOptions.md)
 - [Anjal.Server.Program](Anjal.Server/Program.md)
@@ -174,12 +179,15 @@
 - [Anjal.Server.ServerLocalDomainResolver](Anjal.Server/ServerLocalDomainResolver.md)
 - [Anjal.Server.ServerSmtpAuthenticator](Anjal.Server/ServerSmtpAuthenticator.md)
 - [Anjal.Server.StoreBackedDkimResolver](Anjal.Server/StoreBackedDkimResolver.md)
+- [Anjal.Server.WebhookWorker](Anjal.Server/WebhookWorker.md)
 
 ## Anjal.Smtp
 
+- [Anjal.Smtp.AuthFailureLimiter](Anjal.Smtp/AuthFailureLimiter.md)
 - [Anjal.Smtp.AuthenticatedUser](Anjal.Smtp/AuthenticatedUser.md)
 - [Anjal.Smtp.CompositeMessageSink](Anjal.Smtp/CompositeMessageSink.md)
 - [Anjal.Smtp.Counters](Anjal.Smtp/Counters.md)
+- [Anjal.Smtp.DataResult](Anjal.Smtp/DataResult.md)
 - [Anjal.Smtp.DeliveryContext](Anjal.Smtp/DeliveryContext.md)
 - [Anjal.Smtp.DeliveryOutcome](Anjal.Smtp/DeliveryOutcome.md)
 - [Anjal.Smtp.DeliveryResult](Anjal.Smtp/DeliveryResult.md)
@@ -191,6 +199,7 @@
 - [Anjal.Smtp.IMessageSink](Anjal.Smtp/IMessageSink.md)
 - [Anjal.Smtp.ISmtpAuthenticator](Anjal.Smtp/ISmtpAuthenticator.md)
 - [Anjal.Smtp.ISmtpPolicy](Anjal.Smtp/ISmtpPolicy.md)
+- [Anjal.Smtp.IdleTimeoutException](Anjal.Smtp/IdleTimeoutException.md)
 - [Anjal.Smtp.InboundAuthResult](Anjal.Smtp/InboundAuthResult.md)
 - [Anjal.Smtp.ModuleInfo](Anjal.Smtp/ModuleInfo.md)
 - [Anjal.Smtp.OutboundDelivery](Anjal.Smtp/OutboundDelivery.md)
@@ -230,6 +239,7 @@
 
 ## Anjal.Store
 
+- [Anjal.Store.AuditEvent](Anjal.Store/AuditEvent.md)
 - [Anjal.Store.CategoryRow](Anjal.Store/CategoryRow.md)
 - [Anjal.Store.CategoryRuleRow](Anjal.Store/CategoryRuleRow.md)
 - [Anjal.Store.DailyCount](Anjal.Store/DailyCount.md)
@@ -250,6 +260,7 @@
 - [Anjal.Store.OutboundTlsPolicy](Anjal.Store/OutboundTlsPolicy.md)
 - [Anjal.Store.PostgresMessageStore](Anjal.Store/PostgresMessageStore.md)
 - [Anjal.Store.RoutingRule](Anjal.Store/RoutingRule.md)
+- [Anjal.Store.SecretProtector](Anjal.Store/SecretProtector.md)
 - [Anjal.Store.SenderRuleAction](Anjal.Store/SenderRuleAction.md)
 - [Anjal.Store.SenderRuleRow](Anjal.Store/SenderRuleRow.md)
 - [Anjal.Store.SmtpUserRow](Anjal.Store/SmtpUserRow.md)
@@ -258,3 +269,5 @@
 - [Anjal.Store.TenantRow](Anjal.Store/TenantRow.md)
 - [Anjal.Store.TlsMode](Anjal.Store/TlsMode.md)
 - [Anjal.Store.WebhookDelivery](Anjal.Store/WebhookDelivery.md)
+- [Anjal.Store.WebhookJob](Anjal.Store/WebhookJob.md)
+- [Anjal.Store.WebhookJobStatus](Anjal.Store/WebhookJobStatus.md)

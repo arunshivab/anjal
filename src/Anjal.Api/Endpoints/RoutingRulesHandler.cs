@@ -9,15 +9,26 @@ namespace Anjal.Api.Endpoints;
 public sealed class RoutingRulesHandler
 {
     private readonly IMessageStore store;
+    private readonly Anjal.Routing.WebhookTargetPolicy webhookPolicy;
 
     /// <summary>
     /// Construct with the backing store.
     /// </summary>
     /// <param name="store">Store for persisting rules.</param>
     public RoutingRulesHandler(IMessageStore store)
+        : this(store, Anjal.Routing.WebhookTargetPolicy.FromEnvironment())
+    {
+    }
+
+    /// <summary>Construct with an explicit webhook target policy.</summary>
+    /// <param name="store">The store.</param>
+    /// <param name="webhookPolicy">Where webhooks may point.</param>
+    public RoutingRulesHandler(IMessageStore store, Anjal.Routing.WebhookTargetPolicy webhookPolicy)
     {
         System.ArgumentNullException.ThrowIfNull(store);
         this.store = store;
+        System.ArgumentNullException.ThrowIfNull(webhookPolicy);
+        this.webhookPolicy = webhookPolicy;
     }
 
     /// <summary>
@@ -53,6 +64,12 @@ public sealed class RoutingRulesHandler
             await ctx.WriteErrorAsync(400, "invalid_request", "webhookUrl is required.").ConfigureAwait(false);
             return;
         }
+        string? urlProblem = this.webhookPolicy.Validate(req.WebhookUrl.Trim());
+        if (urlProblem is not null)
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", urlProblem).ConfigureAwait(false);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(req.WebhookSecret))
         {
             await ctx.WriteErrorAsync(400, "invalid_request", "webhookSecret is required.").ConfigureAwait(false);
@@ -62,7 +79,7 @@ public sealed class RoutingRulesHandler
         RoutingRule saved = await this.store.UpsertRoutingRuleAsync(new RoutingRule
         {
             LocalPart = req.LocalPart,
-            WebhookUrl = req.WebhookUrl,
+            WebhookUrl = req.WebhookUrl.Trim(),
             WebhookSecret = req.WebhookSecret,
         }).ConfigureAwait(false);
 

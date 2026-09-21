@@ -25,6 +25,25 @@ public sealed class SmtpSession
     private readonly string remoteAddress;
     private bool isTls;
 
+    // Buffered input. One 16 KB window instead of an allocation and a
+    // stream read per byte; over TLS each of those reads was a full trip
+    // through the decryption path.
+    private readonly byte[] inBuf = new byte[16 * 1024];
+    private int inStart;
+    private int inEnd;
+    private int pushedBack = -1;
+    private bool lastLineTooLong;
+    private int authFailures;
+
+    // DATA-mode history of the raw bytes, for spotting a lone "." line that
+    // is delimited by anything other than CRLF.
+    private bool inData;
+    private int h1;
+    private int h2;
+    private int h3;
+    private bool pendingDotCr;
+    private bool bareDotSeen;
+
     private State state;
     private string clientHostName = string.Empty;
     private string envelopeFrom = string.Empty;
@@ -103,8 +122,19 @@ public sealed class SmtpSession
     /// <param name="ct">Cancellation that closes the connection if signalled.</param>
     public async System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken ct = default)
     {
+        // Every read and write in the session runs under this token, so the
+        // whole conversation - however active - ends at MaxSessionDuration.
+        using var lifetime = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct);
+        lifetime.CancelAfter(this.options.MaxSessionDuration);
+        System.Threading.CancellationToken outer = ct;
+        ct = lifetime.Token;
         try
         {
+            if (this.options.ImplicitTls && !await this.BeginImplicitTlsAsync(ct).ConfigureAwait(false))
+            {
+                return;
+            }
+
             PolicyDecision connect = await this.ConsultAsync(p => p.OnConnectAsync(this.remoteAddress, ct)).ConfigureAwait(false);
             if (!connect.Allowed)
             {
@@ -123,6 +153,13 @@ public sealed class SmtpSession
                 {
                     break;
                 }
+                if (this.lastLineTooLong)
+                {
+                    // The rest of the line was read and discarded, so the
+                    // next command starts cleanly rather than mid-line.
+                    await this.WriteLineAsync("500 5.5.2 Line too long", ct).ConfigureAwait(false);
+                    continue;
+                }
 
                 bool keep = await this.HandleCommandAsync(line, ct).ConfigureAwait(false);
                 if (!keep)
@@ -130,6 +167,15 @@ public sealed class SmtpSession
                     break;
                 }
             }
+        }
+        catch (IdleTimeoutException)
+        {
+            await this.TryWriteFinalAsync("421 4.4.2 Idle timeout, closing connection").ConfigureAwait(false);
+        }
+        catch (System.OperationCanceledException) when (!outer.IsCancellationRequested)
+        {
+            // The session lifetime ran out rather than the server stopping.
+            await this.TryWriteFinalAsync("421 4.4.2 Session time limit reached, closing connection").ConfigureAwait(false);
         }
         catch (System.IO.IOException)
         {
@@ -239,6 +285,13 @@ public sealed class SmtpSession
         // Per RFC 3207, we send "220 Ready to start TLS" first, then immediately
         // upgrade the stream. After upgrade the client must re-issue EHLO and the
         // session state resets (clientHostName, envelope, etc.).
+        // Anything the client sent after STARTTLS in the same packet arrived in
+        // plaintext. Keeping it would let those bytes be read back as though
+        // they came through TLS - a man in the middle could append commands
+        // (CVE-2011-0411). They are discarded, never interpreted.
+        this.inStart = this.inEnd = 0;
+        this.pushedBack = -1;
+
         await this.WriteLineAsync("220 Ready to start TLS", ct).ConfigureAwait(false);
 
         var ssl = new System.Net.Security.SslStream(this.stream, leaveInnerStreamOpen: false);
@@ -448,20 +501,47 @@ public sealed class SmtpSession
     /// </summary>
     private async System.Threading.Tasks.Task<bool> CompleteAuthAsync(string username, string password, System.Threading.CancellationToken ct)
     {
+        // An address that has failed too often recently is refused before the
+        // password is checked, so guessing costs the attacker time and costs
+        // this server nothing.
+        if (this.options.AuthFailures is AuthFailureLimiter limiter && !limiter.IsAllowed(this.remoteAddress))
+        {
+            Counters.Increment("anjal_smtp_auth_throttled_total");
+            await this.WriteLineAsync("454 4.7.0 Too many failed attempts, try again later", ct).ConfigureAwait(false);
+            return false;
+        }
+
         AuthenticatedUser? user = null;
+        bool authenticatorFailed = false;
         try
         {
             user = await this.smtpAuthenticator!.AuthenticateAsync(username, password, ct).ConfigureAwait(false);
         }
-#pragma warning disable CA1031 // Authenticator failure is "auth failed" - don't leak details.
+#pragma warning disable CA1031 // Authenticator failure is reported as a temporary error, not "bad password".
         catch (System.Exception)
         {
-            user = null;
+            authenticatorFailed = true;
         }
 #pragma warning restore CA1031
 
+        if (authenticatorFailed)
+        {
+            // A dead database is not a wrong password: say so with a 4xx so
+            // the client retries, and do not count it against the address.
+            Counters.Increment("anjal_smtp_auth_errors_total");
+            await this.WriteLineAsync("454 4.7.0 Temporary authentication failure", ct).ConfigureAwait(false);
+            return true;
+        }
+
         if (user is null)
         {
+            Counters.Increment("anjal_smtp_auth_failures_total");
+            this.options.AuthFailures?.RecordFailure(this.remoteAddress);
+            if (++this.authFailures >= this.options.MaxAuthFailuresPerSession)
+            {
+                await this.WriteLineAsync("421 4.7.0 Too many authentication failures, closing connection", ct).ConfigureAwait(false);
+                return false;
+            }
             await this.WriteLineAsync("535 5.7.8 Authentication credentials invalid", ct).ConfigureAwait(false);
             return true;
         }
@@ -494,6 +574,15 @@ public sealed class SmtpSession
         if (addr is null)
         {
             await this.WriteLineAsync("501 Syntax: MAIL FROM:<address>", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        // RFC 1870: a client that declares SIZE= larger than the limit is
+        // refused here, before a byte of the body is sent.
+        long declared = DeclaredSize(args);
+        if (declared > this.options.MaxMessageBytes)
+        {
+            await this.WriteLineAsync($"552 5.3.4 Message size exceeds fixed maximum of {this.options.MaxMessageBytes} bytes", ct).ConfigureAwait(false);
             return true;
         }
 
@@ -638,13 +727,29 @@ public sealed class SmtpSession
 
         await this.WriteLineAsync("354 End data with <CR><LF>.<CR><LF>", ct).ConfigureAwait(false);
 
-        byte[]? body = await this.ReadDataBodyAsync(ct).ConfigureAwait(false);
-        if (body is null)
+        DataResult data = await this.ReadDataBodyAsync(ct).ConfigureAwait(false);
+        if (data.TooLarge)
         {
-            await this.WriteLineAsync("552 Message size exceeds maximum permitted", ct).ConfigureAwait(false);
+            // The whole oversized body was read and discarded, so the
+            // session is still in step with the client.
+            await this.WriteLineAsync("552 5.3.4 Message size exceeds maximum permitted", ct).ConfigureAwait(false);
             this.ResetTransaction();
             return true;
         }
+        if (data.IsBareDot)
+        {
+            // The client and this server may now disagree about where the
+            // message ended, so nothing further on this connection can be
+            // trusted: refuse and close.
+            Counters.Increment("anjal_smtp_bare_dot_rejected_total");
+            await this.WriteLineAsync("554 5.5.2 Line endings around \".\" must be CRLF; message rejected", ct).ConfigureAwait(false);
+            return false;
+        }
+        if (data.Body is null)
+        {
+            return false;
+        }
+        byte[] body = data.Body;
 
         // Inbound authentication (SPF/DKIM/DMARC). Runs only if an
         // authenticator was supplied. Failures here MUST NOT crash the
@@ -681,14 +786,24 @@ public sealed class SmtpSession
                 }
             }
 #pragma warning disable CA1031 // Authenticator failures must not crash the session.
-            catch (System.Exception)
+            catch (System.Exception ex)
             {
-                // Treat any authenticator failure as auth-not-performed.
+                // Treat any authenticator failure as auth-not-performed, but
+                // record it: a silent failure here would hide a broken DNS
+                // resolver behind every message scoring as unauthenticated.
+                Counters.Increment("anjal_inbound_auth_errors_total");
+                this.options.Log?.Invoke($"Inbound authentication failed for mail from {this.remoteAddress}: {ex.GetType().Name}: {ex.Message}");
                 authResult = null;
                 bodyToDeliver = body;
             }
 #pragma warning restore CA1031
         }
+
+        // RFC 5321 section 4.4: every server that handles a message adds a
+        // trace line. It records where the message came from and when, which
+        // is what an abuse report or a delivery investigation starts from,
+        // and it lets loops be detected.
+        bodyToDeliver = PrependHeader(bodyToDeliver, this.ReceivedHeader());
 
         var deliveryCtx = new DeliveryContext
         {
@@ -769,54 +884,123 @@ public sealed class SmtpSession
         this.state = string.IsNullOrEmpty(this.clientHostName) ? State.AwaitingHelo : State.Ready;
     }
 
-    private async System.Threading.Tasks.Task<byte[]?> ReadDataBodyAsync(System.Threading.CancellationToken ct)
+    /// <summary>
+    /// Read a DATA body up to the end-of-data marker.
+    /// <para>
+    /// Only <c>CRLF.CRLF</c> ends the body. A dot line ended by a bare LF or a
+    /// bare CR does not, which is what keeps Anjal from being a receiver that
+    /// SMTP smuggling (CVE-2023-51764 class) can split. Once the body is
+    /// complete, any bare CR or LF left inside it is rewritten as CRLF, so the
+    /// stored message - and anything later relayed from it - carries no
+    /// ambiguous line endings for a lenient downstream server to misread.
+    /// </para>
+    /// <para>
+    /// When the body passes <see cref="SmtpServerOptions.MaxMessageBytes"/>
+    /// the rest is read and discarded up to the marker, so the remainder is
+    /// never parsed as commands; the caller then replies 552. A body that
+    /// runs past twice the limit without ending is treated as abuse and the
+    /// connection is dropped.
+    /// </para>
+    /// </summary>
+    private async System.Threading.Tasks.Task<DataResult> ReadDataBodyAsync(System.Threading.CancellationToken ct)
     {
-        // Read until terminator <CRLF>.<CRLF>. Unstuff dots (leading "." doubled
-        // by sender per RFC 5321 section 4.5.2). Enforce size limit.
+        // The body starts just after the CRLF that ended the DATA command.
+        this.inData = true;
+        this.h3 = '\r';
+        this.h2 = '\n';
+        this.h1 = -1;
+        this.pendingDotCr = false;
+        this.bareDotSeen = false;
+        try
+        {
+            return await this.ReadDataBodyCoreAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            this.inData = false;
+        }
+    }
+
+    private async System.Threading.Tasks.Task<DataResult> ReadDataBodyCoreAsync(System.Threading.CancellationToken ct)
+    {
         using var ms = new MemoryStream();
-        var lineBuf = new MemoryStream();
+        using var lineBuf = new MemoryStream(256);
+        long seen = 0;
+        long ceiling = (long)this.options.MaxMessageBytes * 2 + 64 * 1024;
+        bool tooBig = false;
 
         while (true)
         {
             int b = await this.ReadByteAsync(ct).ConfigureAwait(false);
             if (b < 0)
             {
-                return null; // Connection dropped mid-DATA.
+                return this.bareDotSeen ? DataResult.BareDot : DataResult.Dropped;
+            }
+            if (++seen > ceiling)
+            {
+                return DataResult.Dropped;
             }
 
             if (b == '\r')
             {
                 int next = await this.ReadByteAsync(ct).ConfigureAwait(false);
+                if (next < 0 && this.bareDotSeen)
+                {
+                    return DataResult.BareDot;
+                }
                 if (next == '\n')
                 {
-                    byte[] line = lineBuf.ToArray();
+                    // A real line end.
+                    if (lineBuf.Length == 1 && lineBuf.GetBuffer()[0] == (byte)'.')
+                    {
+                        return tooBig ? DataResult.Oversized : DataResult.Of(NormaliseLineEndings(ms.ToArray()));
+                    }
+                    if (!tooBig)
+                    {
+                        // Dot-unstuffing: strip one leading "." (RFC 5321 section 4.5.2).
+                        byte[] line = lineBuf.GetBuffer();
+                        int length = (int)lineBuf.Length;
+                        int offset = length > 0 && line[0] == (byte)'.' ? 1 : 0;
+                        ms.Write(line, offset, length - offset);
+                        ms.WriteByte((byte)'\r');
+                        ms.WriteByte((byte)'\n');
+                        if (ms.Length > this.options.MaxMessageBytes)
+                        {
+                            tooBig = true;
+                            ms.SetLength(0);
+                        }
+                    }
                     lineBuf.SetLength(0);
-
-                    if (line.Length == 1 && line[0] == (byte)'.')
-                    {
-                        // End-of-data marker.
-                        return ms.ToArray();
-                    }
-
-                    // Dot-unstuffing: strip a leading "." if present.
-                    int offset = (line.Length > 0 && line[0] == (byte)'.') ? 1 : 0;
-                    ms.Write(line, offset, line.Length - offset);
-                    ms.WriteByte((byte)'\r');
-                    ms.WriteByte((byte)'\n');
-
-                    if (ms.Length > this.options.MaxMessageBytes)
-                    {
-                        return null;
-                    }
                     continue;
                 }
 
-                // Lone CR - keep in buffer (defensive, shouldn't really happen).
+                // A CR not followed by LF stays in the line as data. The byte
+                // after it is pushed back and examined afresh, so "CR CR LF"
+                // still ends the line at the second CR.
                 lineBuf.WriteByte((byte)'\r');
                 if (next >= 0)
                 {
-                    lineBuf.WriteByte((byte)next);
+                    this.PushBack(next);
                 }
+                continue;
+            }
+
+            if (!tooBig)
+            {
+                lineBuf.WriteByte((byte)b);
+                if (lineBuf.Length > this.options.MaxMessageBytes)
+                {
+                    tooBig = true;
+                    ms.SetLength(0);
+                    lineBuf.SetLength(0);
+                }
+            }
+            else if (b != '.' || lineBuf.Length > 1)
+            {
+                // Past the limit, keep only enough of each line to recognise
+                // the terminator.
+                lineBuf.SetLength(0);
+                lineBuf.WriteByte(0);
             }
             else
             {
@@ -825,25 +1009,167 @@ public sealed class SmtpSession
         }
     }
 
-    private async System.Threading.Tasks.Task<int> ReadByteAsync(System.Threading.CancellationToken ct)
+    /// <summary>
+    /// Rewrite every bare CR and bare LF as CRLF, leaving existing CRLF pairs
+    /// alone. Applied to a completed DATA body, after the terminator has
+    /// already been found strictly, so it cannot change where the message
+    /// ended.
+    /// </summary>
+    /// <param name="data">Message bytes.</param>
+    public static byte[] NormaliseLineEndings(byte[] data)
     {
-        byte[] buf = new byte[1];
-        int n = await this.stream.ReadAsync(buf.AsMemory(0, 1), ct).ConfigureAwait(false);
-        return n <= 0 ? -1 : buf[0];
+        System.ArgumentNullException.ThrowIfNull(data);
+        bool clean = true;
+        for (int i = 0; i < data.Length; i++)
+        {
+            byte c = data[i];
+            if ((c == (byte)'\r' && (i + 1 >= data.Length || data[i + 1] != (byte)'\n')) ||
+                (c == (byte)'\n' && (i == 0 || data[i - 1] != (byte)'\r')))
+            {
+                clean = false;
+                break;
+            }
+        }
+        if (clean)
+        {
+            return data;
+        }
+
+        using var ms = new MemoryStream(data.Length + 64);
+        for (int i = 0; i < data.Length; i++)
+        {
+            byte c = data[i];
+            if (c == (byte)'\r')
+            {
+                ms.WriteByte((byte)'\r');
+                ms.WriteByte((byte)'\n');
+                if (i + 1 < data.Length && data[i + 1] == (byte)'\n')
+                {
+                    i++;
+                }
+            }
+            else if (c == (byte)'\n')
+            {
+                ms.WriteByte((byte)'\r');
+                ms.WriteByte((byte)'\n');
+            }
+            else
+            {
+                ms.WriteByte(c);
+            }
+        }
+        return ms.ToArray();
     }
 
+    /// <summary>
+    /// Next byte from the buffered input, refilling it as needed. Each refill
+    /// waits at most <see cref="SmtpServerOptions.CommandTimeout"/>; a client
+    /// that sends nothing for that long ends the session with 421, which is
+    /// what stops a slowloris from holding connections open indefinitely.
+    /// </summary>
+    private async System.Threading.Tasks.Task<int> ReadByteAsync(System.Threading.CancellationToken ct)
+    {
+        if (this.pushedBack >= 0)
+        {
+            // Already seen once: not inspected again.
+            int b = this.pushedBack;
+            this.pushedBack = -1;
+            return b;
+        }
+        if (this.inStart < this.inEnd)
+        {
+            return this.Inspect(this.inBuf[this.inStart++]);
+        }
+
+        using var idle = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct);
+        idle.CancelAfter(this.options.CommandTimeout);
+        int n;
+        try
+        {
+            n = await this.stream.ReadAsync(this.inBuf.AsMemory(0, this.inBuf.Length), idle.Token).ConfigureAwait(false);
+        }
+        catch (System.OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new IdleTimeoutException();
+        }
+        if (n <= 0)
+        {
+            return -1;
+        }
+        this.inStart = 1;
+        this.inEnd = n;
+        return this.Inspect(this.inBuf[0]);
+    }
+
+    /// <summary>
+    /// During DATA, watch the raw bytes for a single "." standing on a line
+    /// of its own where either line break is not CRLF: LF.LF, CR.CR, LF.CRLF
+    /// and the like. A compliant client dot-stuffs every such line, so this
+    /// only ever comes from an attempt to smuggle a second message past a
+    /// lenient server, or from a client that would otherwise hang waiting
+    /// for a terminator Anjal will never accept. Either way the message is
+    /// refused. The real terminator, CRLF.CRLF, passes.
+    /// </summary>
+    private int Inspect(int b)
+    {
+        if (!this.inData || b < 0)
+        {
+            return b;
+        }
+        bool eol = b == '\r' || b == '\n';
+        if (this.pendingDotCr)
+        {
+            // Seen CRLF "." CR - the terminator only if LF comes next.
+            this.pendingDotCr = false;
+            if (b != '\n')
+            {
+                this.bareDotSeen = true;
+                return -1;
+            }
+        }
+        else if (eol && this.h1 == '.' && (this.h2 == '\r' || this.h2 == '\n'))
+        {
+            if (b == '\r' && this.h2 == '\n' && this.h3 == '\r')
+            {
+                this.pendingDotCr = true;
+            }
+            else
+            {
+                this.bareDotSeen = true;
+                return -1;
+            }
+        }
+        this.h3 = this.h2;
+        this.h2 = this.h1;
+        this.h1 = b;
+        return b;
+    }
+
+    private void PushBack(int b) => this.pushedBack = b;
+
+    /// <summary>
+    /// Read one command line. A line longer than the RFC 5321 limit is read
+    /// to its end and discarded, and <see cref="lastLineTooLong"/> is set so
+    /// the caller replies 500 - the overflow is never mistaken for the next
+    /// command.
+    /// </summary>
     private async System.Threading.Tasks.Task<string?> ReadLineAsync(System.Threading.CancellationToken ct)
     {
+        this.lastLineTooLong = false;
         using var buf = new MemoryStream(64);
         while (true)
         {
             int b = await this.ReadByteAsync(ct).ConfigureAwait(false);
             if (b < 0)
             {
-                return buf.Length == 0 ? null : Encoding.ASCII.GetString(buf.ToArray());
+                return buf.Length == 0 && !this.lastLineTooLong ? null : Encoding.ASCII.GetString(buf.ToArray());
             }
             if (b == '\n')
             {
+                if (this.lastLineTooLong)
+                {
+                    return string.Empty;
+                }
                 byte[] bytes = buf.ToArray();
                 int len = bytes.Length;
                 if (len > 0 && bytes[len - 1] == (byte)'\r')
@@ -852,12 +1178,165 @@ public sealed class SmtpSession
                 }
                 return Encoding.ASCII.GetString(bytes, 0, len);
             }
+            if (this.lastLineTooLong)
+            {
+                continue; // discarding the rest of an overlong line
+            }
             if (buf.Length >= MaxLineLength)
             {
-                return Encoding.ASCII.GetString(buf.ToArray());
+                this.lastLineTooLong = true;
+                buf.SetLength(0);
+                continue;
             }
             buf.WriteByte((byte)b);
         }
+    }
+
+    /// <summary>
+    /// The trace header for this message:
+    /// <c>Received: from helo (ip) by host with ESMTPS id x; date</c>.
+    /// The protocol word follows RFC 3848: ESMTP, plus S when TLS was in
+    /// use and A when the client authenticated.
+    /// </summary>
+    private string ReceivedHeader()
+    {
+        string protocol = "ESMTP" + (this.isTls ? "S" : string.Empty) + (this.authenticatedUser is not null ? "A" : string.Empty);
+        string helo = SanitiseTraceToken(this.clientHostName.Length > 0 ? this.clientHostName : "unknown");
+        string id = System.Guid.NewGuid().ToString("N").Substring(0, 16);
+        string date = System.DateTimeOffset.UtcNow.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", System.Globalization.CultureInfo.InvariantCulture);
+        return $"Received: from {helo} ([{this.remoteAddress}])\r\n\tby {this.options.AdvertisedHostName} with {protocol} id {id};\r\n\t{date}\r\n";
+    }
+
+    /// <summary>
+    /// The client's HELO name is untrusted text going into a header; keep
+    /// only characters that can appear in a host name or address literal.
+    /// </summary>
+    private static string SanitiseTraceToken(string value)
+    {
+        var sb = new StringBuilder(System.Math.Min(value.Length, 255));
+        foreach (char c in value)
+        {
+            if (sb.Length >= 255)
+            {
+                break;
+            }
+            if (char.IsAsciiLetterOrDigit(c) || c == '.' || c == '-' || c == '_' || c == ':' || c == '[' || c == ']')
+            {
+                sb.Append(c);
+            }
+        }
+        return sb.Length == 0 ? "unknown" : sb.ToString();
+    }
+
+    private static byte[] PrependHeader(byte[] message, string headerLines)
+    {
+        byte[] head = Encoding.ASCII.GetBytes(headerLines);
+        byte[] combined = new byte[head.Length + message.Length];
+        System.Buffer.BlockCopy(head, 0, combined, 0, head.Length);
+        System.Buffer.BlockCopy(message, 0, combined, head.Length, message.Length);
+        return combined;
+    }
+
+    /// <summary>
+    /// Wrap the connection in TLS before anything is said (port 465). The
+    /// handshake itself is bounded by the idle timeout, so a client that
+    /// connects and never speaks TLS cannot hold the slot.
+    /// </summary>
+    private async System.Threading.Tasks.Task<bool> BeginImplicitTlsAsync(System.Threading.CancellationToken ct)
+    {
+        if (this.tlsCertificate is null)
+        {
+            // No certificate yet (a fresh install before ACME finishes): an
+            // implicit-TLS port has nothing it can safely say in plaintext.
+            return false;
+        }
+        var ssl = new System.Net.Security.SslStream(this.stream, leaveInnerStreamOpen: false);
+        using var handshake = System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct);
+        handshake.CancelAfter(this.options.CommandTimeout);
+        try
+        {
+            await ssl.AuthenticateAsServerAsync(
+                new System.Net.Security.SslServerAuthenticationOptions
+                {
+                    ServerCertificate = this.tlsCertificate,
+                    ClientCertificateRequired = false,
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                    CertificateRevocationCheckMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
+                },
+                handshake.Token).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Any handshake failure closes the connection.
+        catch (System.Exception)
+        {
+            try { await ssl.DisposeAsync().ConfigureAwait(false); } catch (System.Exception) { /* closing */ }
+            return false;
+        }
+#pragma warning restore CA1031
+        this.stream = ssl;
+        this.isTls = true;
+        return true;
+    }
+
+    /// <summary>The SIZE= value on a MAIL FROM line, or 0 when absent or unreadable.</summary>
+    private static long DeclaredSize(string args)
+    {
+        foreach (string part in args.Split(' ', System.StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part.StartsWith("SIZE=", System.StringComparison.OrdinalIgnoreCase) &&
+                long.TryParse(part.AsSpan(5), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long size))
+            {
+                return size;
+            }
+        }
+        return 0;
+    }
+
+    /// <summary>Best-effort final reply on a session that is closing anyway.</summary>
+    private async System.Threading.Tasks.Task TryWriteFinalAsync(string line)
+    {
+        try
+        {
+            using var cts = new System.Threading.CancellationTokenSource(System.TimeSpan.FromSeconds(5));
+            await this.WriteLineAsync(line, cts.Token).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // The connection is being closed; a failed goodbye changes nothing.
+        catch (System.Exception)
+        {
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>A read waited longer than the idle timeout.</summary>
+    private sealed class IdleTimeoutException : System.Exception
+    {
+    }
+
+    /// <summary>The outcome of reading a DATA body.</summary>
+    private readonly struct DataResult
+    {
+        private DataResult(byte[]? body, bool tooLarge, bool bareDot = false)
+        {
+            this.Body = body;
+            this.TooLarge = tooLarge;
+            this.IsBareDot = bareDot;
+        }
+
+        public bool IsBareDot { get; }
+
+        /// <summary>The body could not be read: the connection must close.</summary>
+        public static DataResult Dropped => new(null, false);
+
+        /// <summary>The body was read in full but exceeded the size limit.</summary>
+        public static DataResult Oversized => new(null, true);
+
+        /// <summary>A lone "." line with non-CRLF line breaks: refused, and the session closed.</summary>
+        public static DataResult BareDot => new(null, false, bareDot: true);
+
+        public byte[]? Body { get; }
+
+        public bool TooLarge { get; }
+
+        public static DataResult Of(byte[] body) => new(body, false);
     }
 
     private async System.Threading.Tasks.Task WriteLineAsync(string line, System.Threading.CancellationToken ct)

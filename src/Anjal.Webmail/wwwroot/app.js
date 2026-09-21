@@ -300,6 +300,16 @@
     });
   }());
 
+  /* ---------- 5b. Auto-submitting selects ----------
+     A select marked data-autosubmit submits its form on change. Kept here
+     rather than inline so the content security policy can forbid inline
+     script entirely; without the script the form's own button submits. */
+  (function autosubmit() {
+    $$("select[data-autosubmit]").forEach(function (sel) {
+      sel.addEventListener("change", function () { if (sel.form) { sel.form.submit(); } });
+    });
+  }());
+
   /* ---------- 6. Client-side form checks ----------
      A courtesy only: the server validates every field again and returns
      the same banner, so nothing depends on this running. */

@@ -214,6 +214,115 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore
         }
     }
 
+    private readonly List<AuditEvent> audit = new();
+    private readonly List<WebhookJob> webhookJobs = new();
+
+    /// <inheritdoc/>
+    public Task<WebhookJob> EnqueueWebhookJobAsync(WebhookJob job, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(job);
+        lock (this.gate)
+        {
+            job.Id = System.Guid.NewGuid();
+            job.CreatedAt = System.DateTimeOffset.UtcNow;
+            job.Status = WebhookJobStatus.Pending;
+            this.webhookJobs.Add(job);
+            return Task.FromResult(job);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<WebhookJob>> LeaseWebhookJobsAsync(int batchSize, System.DateTimeOffset now, CancellationToken ct = default)
+    {
+        System.ArgumentOutOfRangeException.ThrowIfLessThan(batchSize, 1);
+        lock (this.gate)
+        {
+            var leased = new List<WebhookJob>();
+            foreach (WebhookJob j in this.webhookJobs)
+            {
+                if (leased.Count >= batchSize)
+                {
+                    break;
+                }
+                bool due = j.Status == WebhookJobStatus.Pending && j.NextAttemptAt <= now;
+                bool abandoned = j.Status == WebhookJobStatus.Sending && j.LeaseExpiresAt is System.DateTimeOffset e && e <= now;
+                if (due || abandoned)
+                {
+                    j.Status = WebhookJobStatus.Sending;
+                    j.LeaseExpiresAt = now + WebhookJob.LeaseDuration;
+                    leased.Add(j);
+                }
+            }
+            return Task.FromResult<IReadOnlyList<WebhookJob>>(leased);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task CompleteWebhookJobAsync(System.Guid id, WebhookJobStatus status, System.DateTimeOffset nextAttemptAt, string lastError, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(lastError);
+        lock (this.gate)
+        {
+            WebhookJob? j = this.webhookJobs.Find(x => x.Id == id);
+            if (j is not null)
+            {
+                j.Status = status;
+                j.Attempts++;
+                j.NextAttemptAt = nextAttemptAt;
+                j.LastError = lastError;
+                j.LeaseExpiresAt = null;
+            }
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<long> CountWebhookJobsAsync(WebhookJobStatus status, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            return Task.FromResult((long)this.webhookJobs.FindAll(j => j.Status == status).Count);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<AuditEvent> AppendAuditAsync(AuditEvent audit, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(audit);
+        lock (this.gate)
+        {
+            var row = new AuditEvent
+            {
+                Id = System.Guid.NewGuid(),
+                At = System.DateTimeOffset.UtcNow,
+                Actor = audit.Actor,
+                Action = audit.Action,
+                Subject = audit.Subject,
+                Detail = audit.Detail,
+                RemoteAddress = audit.RemoteAddress,
+            };
+            this.audit.Add(row);
+            return Task.FromResult(row);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<AuditEvent>> ListAuditAsync(int limit, System.DateTimeOffset? before = null, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            var result = new List<AuditEvent>();
+            for (int i = this.audit.Count - 1; i >= 0 && result.Count < limit; i--)
+            {
+                if (before is null || this.audit[i].At < before.Value)
+                {
+                    result.Add(this.audit[i]);
+                }
+            }
+            return Task.FromResult<IReadOnlyList<AuditEvent>>(result);
+        }
+    }
+
     /// <inheritdoc/>
     public Task<IReadOnlyList<OutboundMessage>> LeaseOutboundBatchAsync(int batchSize, System.DateTimeOffset now, CancellationToken ct = default)
     {
@@ -230,9 +339,12 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore
                 {
                     break;
                 }
-                if (m.Status == OutboundStatus.Pending && m.NextAttemptAt <= now)
+                bool due = m.Status == OutboundStatus.Pending && m.NextAttemptAt <= now;
+                bool abandoned = m.Status == OutboundStatus.Sending && m.LeaseExpiresAt is System.DateTimeOffset expiry && expiry <= now;
+                if (due || abandoned)
                 {
                     m.Status = OutboundStatus.Sending;
+                    m.LeaseExpiresAt = now + OutboundMessage.LeaseDuration;
                     leased.Add(m);
                 }
             }
@@ -260,6 +372,7 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore
             found.Status = newStatus;
             found.LastError = lastError;
             found.Attempts++;
+            found.LeaseExpiresAt = null;
             if (newStatus == OutboundStatus.Pending)
             {
                 found.NextAttemptAt = nextAttemptAt;

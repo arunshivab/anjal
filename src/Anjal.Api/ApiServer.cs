@@ -14,6 +14,7 @@ namespace Anjal.Api;
 public sealed class ApiServer : System.IDisposable
 {
     private readonly ApiOptions options;
+    private readonly IMessageStore auditStore;
     private readonly HttpListener listener;
     private readonly RoutingRulesHandler routingRules;
     private readonly TagGrantsHandler tagGrants;
@@ -68,6 +69,7 @@ public sealed class ApiServer : System.IDisposable
         System.ArgumentNullException.ThrowIfNull(options);
         System.ArgumentNullException.ThrowIfNull(store);
         this.options = options;
+        this.auditStore = store;
         this.log = log;
 
         IMailboxStore? mbStore = mailboxStore ?? store as IMailboxStore;
@@ -215,6 +217,7 @@ public sealed class ApiServer : System.IDisposable
             }
 
             await this.DispatchAsync(ctx).ConfigureAwait(false);
+            await this.AuditAsync(ctx).ConfigureAwait(false);
         }
         catch (System.IO.InvalidDataException ex)
         {
@@ -223,8 +226,12 @@ public sealed class ApiServer : System.IDisposable
 #pragma warning disable CA1031 // Intentional: any error must produce a response, not crash the server.
         catch (System.Exception ex)
         {
-            this.log?.Invoke($"  500 - {ex.GetType().Name}: {ex.Message}");
-            await TrySafeErrorAsync(ctx, 500, "internal_error", ex.Message).ConfigureAwait(false);
+            // The detail goes to the log only. Exception messages from the
+            // database driver carry SQL fragments and host names that the
+            // caller has no business seeing.
+            string reference = System.Guid.NewGuid().ToString("N").Substring(0, 12);
+            this.log?.Invoke($"  500 [{reference}] - {ex.GetType().Name}: {ex.Message}");
+            await TrySafeErrorAsync(ctx, 500, "internal_error", $"Internal error. Reference {reference}.").ConfigureAwait(false);
         }
 #pragma warning restore CA1031
     }
@@ -269,6 +276,37 @@ public sealed class ApiServer : System.IDisposable
         return CryptographicOperations.FixedTimeEquals(aBytes, bBytes);
     }
 
+    /// <summary>
+    /// Record every request that changes something. Method, path, outcome and
+    /// client address only - never the body, which carries passwords, DKIM
+    /// private keys and webhook secrets. A failure to record is logged, not
+    /// fatal: the change has already been made.
+    /// </summary>
+    private async System.Threading.Tasks.Task AuditAsync(RequestContext ctx)
+    {
+        if (ctx.Method == "GET" || ctx.Method == "HEAD" || ctx.Method == "OPTIONS")
+        {
+            return;
+        }
+        try
+        {
+            await this.auditStore.AppendAuditAsync(new AuditEvent
+            {
+                Actor = "api",
+                Action = ctx.Method + " " + ctx.Path,
+                Subject = ctx.Path,
+                Detail = "status " + ctx.ResponseStatus.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                RemoteAddress = ctx.RemoteAddress,
+            }).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Auditing must never turn a completed change into an error.
+        catch (System.Exception ex)
+        {
+            this.log?.Invoke($"  audit write failed: {ex.GetType().Name}: {ex.Message}");
+        }
+#pragma warning restore CA1031
+    }
+
     private async System.Threading.Tasks.Task DispatchAsync(RequestContext ctx)
     {
         // /api/routing-rules         POST, GET
@@ -278,6 +316,15 @@ public sealed class ApiServer : System.IDisposable
         // /api/outbound/{id}         GET
         // /api/inbound/{id}          GET
         string path = ctx.Path;
+
+        if (path.Equals("/api/audit", System.StringComparison.OrdinalIgnoreCase) && ctx.Method == "GET")
+        {
+            int limit = int.TryParse(ctx.Query("limit"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int l) ? l : 100;
+            System.DateTimeOffset? before = System.DateTimeOffset.TryParse(ctx.Query("before"), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AssumeUniversal, out System.DateTimeOffset b) ? b : null;
+            IReadOnlyList<AuditEvent> events = await this.auditStore.ListAuditAsync(System.Math.Clamp(limit, 1, 1000), before).ConfigureAwait(false);
+            await ctx.WriteJsonAsync(200, events).ConfigureAwait(false);
+            return;
+        }
 
         if (path.Equals("/api/routing-rules", System.StringComparison.OrdinalIgnoreCase) ||
             path.Equals("/api/routing-rules/", System.StringComparison.OrdinalIgnoreCase))

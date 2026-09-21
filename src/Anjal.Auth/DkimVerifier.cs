@@ -11,6 +11,9 @@ namespace Anjal.Auth;
 /// </summary>
 public sealed class DkimVerifier
 {
+    /// <summary>The shortest RSA key accepted (RFC 8301 section 3.2).</summary>
+    public const int MinimumKeyBits = 1024;
+
     private readonly Anjal.Dns.DnsResolver dns;
 
     /// <summary>Construct.</summary>
@@ -102,6 +105,22 @@ public sealed class DkimVerifier
             return new DkimDetail { Result = DkimResult.PermError, Explanation = "Missing b= (signature) tag." };
         }
 
+        // x= (RFC 6376 section 3.5): a signature past its expiry is not
+        // valid, however well it verifies.
+        if (tags.TryGetValue("x", out string? expiryText) &&
+            long.TryParse(expiryText.Trim(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long expiry) &&
+            expiry < System.DateTimeOffset.UtcNow.ToUnixTimeSeconds())
+        {
+            return new DkimDetail
+            {
+                Result = DkimResult.PermError,
+                Domain = domain,
+                Selector = selector,
+                Algorithm = algorithm,
+                Explanation = "Signature has expired (x= is in the past).",
+            };
+        }
+
         HashAlgorithmName hashAlg;
         if (string.Equals(algorithm, "rsa-sha256", System.StringComparison.OrdinalIgnoreCase))
         {
@@ -109,7 +128,17 @@ public sealed class DkimVerifier
         }
         else if (string.Equals(algorithm, "rsa-sha1", System.StringComparison.OrdinalIgnoreCase))
         {
-            hashAlg = HashAlgorithmName.SHA1;
+            // RFC 8301 section 3.1: verifiers MUST NOT consider rsa-sha1
+            // signatures valid. SHA-1 collisions are practical, and a forged
+            // DKIM pass would carry DMARC with it.
+            return new DkimDetail
+            {
+                Result = DkimResult.PermError,
+                Domain = domain,
+                Selector = selector,
+                Algorithm = algorithm,
+                Explanation = "rsa-sha1 signatures are not accepted (RFC 8301).",
+            };
         }
         else
         {
@@ -216,33 +245,7 @@ public sealed class DkimVerifier
             };
         }
 
-        try
-        {
-            using RSA rsa = RSA.Create();
-            rsa.ImportSubjectPublicKeyInfo(System.Convert.FromBase64String(StripWhitespace(publicKeyBase64)), out _);
-            bool valid = rsa.VerifyData(signedBytes, signature, hashAlg, RSASignaturePadding.Pkcs1);
-            return new DkimDetail
-            {
-                Result = valid ? DkimResult.Pass : DkimResult.Fail,
-                Domain = domain,
-                Selector = selector,
-                Algorithm = algorithm,
-                Explanation = valid
-                    ? $"Signature verified against {selector}._domainkey.{domain}."
-                    : $"Signature did not match public key at {selector}._domainkey.{domain}.",
-            };
-        }
-        catch (System.Exception ex) when (ex is System.FormatException || ex is CryptographicException)
-        {
-            return new DkimDetail
-            {
-                Result = DkimResult.PermError,
-                Domain = domain,
-                Selector = selector,
-                Algorithm = algorithm,
-                Explanation = $"Public key import failed: {ex.Message}",
-            };
-        }
+        return CheckSignature(publicKeyBase64, signedBytes, signature, hashAlg, domain, selector, algorithm);
     }
 
     /// <summary>
@@ -370,6 +373,57 @@ public sealed class DkimVerifier
         public DkimKeyFetchError(string message, bool transient) : base(message)
         {
             this.Transient = transient;
+        }
+    }
+
+    /// <summary>
+    /// Verify an RSA signature against a published key, applying the RFC 8301
+    /// minimum key size. Separated from the DNS fetch so it can be exercised
+    /// directly.
+    /// </summary>
+    internal static DkimDetail CheckSignature(string publicKeyBase64, byte[] signedBytes, byte[] signature, HashAlgorithmName hashAlg, string domain, string selector, string algorithm)
+    {
+        try
+        {
+            using RSA rsa = RSA.Create();
+            rsa.ImportSubjectPublicKeyInfo(System.Convert.FromBase64String(StripWhitespace(publicKeyBase64)), out _);
+
+            // RFC 8301 section 3.2: keys shorter than 1024 bits MUST NOT be
+            // treated as valid. A 512-bit key can be factored cheaply.
+            if (rsa.KeySize < MinimumKeyBits)
+            {
+                return new DkimDetail
+                {
+                    Result = DkimResult.PermError,
+                    Domain = domain,
+                    Selector = selector,
+                    Algorithm = algorithm,
+                    Explanation = $"Key at {selector}._domainkey.{domain} is {rsa.KeySize} bits; at least {MinimumKeyBits} are required (RFC 8301).",
+                };
+            }
+
+            bool valid = rsa.VerifyData(signedBytes, signature, hashAlg, RSASignaturePadding.Pkcs1);
+            return new DkimDetail
+            {
+                Result = valid ? DkimResult.Pass : DkimResult.Fail,
+                Domain = domain,
+                Selector = selector,
+                Algorithm = algorithm,
+                Explanation = valid
+                    ? $"Signature verified against {selector}._domainkey.{domain}."
+                    : $"Signature did not match public key at {selector}._domainkey.{domain}.",
+            };
+        }
+        catch (System.Exception ex) when (ex is System.FormatException || ex is CryptographicException)
+        {
+            return new DkimDetail
+            {
+                Result = DkimResult.PermError,
+                Domain = domain,
+                Selector = selector,
+                Algorithm = algorithm,
+                Explanation = $"Public key import failed: {ex.Message}",
+            };
         }
     }
 }

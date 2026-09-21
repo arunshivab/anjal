@@ -63,6 +63,21 @@ public interface IMessageStore
     /// </summary>
     System.Threading.Tasks.Task<WebhookDelivery> SaveWebhookDeliveryAsync(WebhookDelivery delivery, System.Threading.CancellationToken ct = default);
 
+    /// <summary>Queue a webhook notification. <see cref="WebhookJob.Id"/> and <see cref="WebhookJob.CreatedAt"/> are assigned.</summary>
+    System.Threading.Tasks.Task<WebhookJob> EnqueueWebhookJobAsync(WebhookJob job, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Lease due notifications, including any whose previous lease lapsed
+    /// (a worker stopped mid-attempt). Leased jobs move to Sending.
+    /// </summary>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<WebhookJob>> LeaseWebhookJobsAsync(int batchSize, System.DateTimeOffset now, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Record an attempt's outcome and schedule the next one if Pending.</summary>
+    System.Threading.Tasks.Task CompleteWebhookJobAsync(System.Guid id, WebhookJobStatus status, System.DateTimeOffset nextAttemptAt, string lastError, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Count queued notifications by state, for metrics.</summary>
+    System.Threading.Tasks.Task<long> CountWebhookJobsAsync(WebhookJobStatus status, System.Threading.CancellationToken ct = default);
+
     // -------- Outbound queue --------
 
     /// <summary>
@@ -120,6 +135,20 @@ public interface IMessageStore
     /// <param name="status">The status to count.</param>
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<long> CountOutboundAsync(OutboundStatus status, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Append an entry to the audit trail. Entries are never updated or
+    /// deleted; in PostgreSQL a trigger refuses any attempt to.
+    /// </summary>
+    /// <param name="audit">The event; <see cref="AuditEvent.Id"/> and <see cref="AuditEvent.At"/> are assigned.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<AuditEvent> AppendAuditAsync(AuditEvent audit, System.Threading.CancellationToken ct = default);
+
+    /// <summary>The most recent audit entries, newest first.</summary>
+    /// <param name="limit">How many.</param>
+    /// <param name="before">Only entries strictly before this time, for paging; null for the newest.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<AuditEvent>> ListAuditAsync(int limit, System.DateTimeOffset? before = null, System.Threading.CancellationToken ct = default);
 
     /// <summary>
     /// Fetch a single inbound message by id. Returns <see langword="null"/>

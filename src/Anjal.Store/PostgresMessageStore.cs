@@ -23,6 +23,17 @@ public sealed partial class PostgresMessageStore : IMessageStore, IMailboxStore
         this.connectionString = connectionString;
     }
 
+    /// <summary>
+    /// Seals DKIM private keys before they are written and opens them when
+    /// read. Null stores and returns them as given (development, or before a
+    /// KEK is configured); existing plaintext rows are re-sealed the next
+    /// time they are saved.
+    /// </summary>
+    public SecretProtector? Secrets { get; init; }
+
+    private static string DkimContext(string domain, string selector) =>
+        "dkim:" + domain.ToLowerInvariant() + ":" + selector.ToLowerInvariant();
+
     private async Task<NpgsqlConnection> OpenAsync(CancellationToken ct)
     {
         var conn = new NpgsqlConnection(this.connectionString);
@@ -242,6 +253,162 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
         return ReadOutbound(reader);
     }
 
+    private const string WebhookJobColumns = "id, inbound_message_id, recipient, local_part, tag, correlation_key, auth_results_json, status, attempts, next_attempt_at, lease_expires_at, give_up_at, last_error, created_at";
+
+    /// <inheritdoc/>
+    public async Task<WebhookJob> EnqueueWebhookJobAsync(WebhookJob job, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(job);
+        const string sql = @"
+INSERT INTO webhook_jobs (inbound_message_id, recipient, local_part, tag, correlation_key, auth_results_json, next_attempt_at, give_up_at)
+VALUES (@inbound, @recipient, @local_part, @tag, @correlation, @auth, @next, @give_up)
+RETURNING " + WebhookJobColumns + ";";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("inbound", job.InboundMessageId);
+        cmd.Parameters.AddWithValue("recipient", job.Recipient);
+        cmd.Parameters.AddWithValue("local_part", job.LocalPart);
+        cmd.Parameters.AddWithValue("tag", job.Tag);
+        cmd.Parameters.AddWithValue("correlation", job.CorrelationKey);
+        cmd.Parameters.AddWithValue("auth", job.AuthResultsJson);
+        cmd.Parameters.AddWithValue("next", job.NextAttemptAt);
+        cmd.Parameters.AddWithValue("give_up", job.GiveUpAt);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadWebhookJob(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<WebhookJob>> LeaseWebhookJobsAsync(int batchSize, System.DateTimeOffset now, CancellationToken ct = default)
+    {
+        System.ArgumentOutOfRangeException.ThrowIfLessThan(batchSize, 1);
+        const string sql = @"
+WITH due AS (
+    SELECT id FROM webhook_jobs
+    WHERE (status = 0 AND next_attempt_at <= @now)
+       OR (status = 1 AND lease_expires_at IS NOT NULL AND lease_expires_at <= @now)
+    ORDER BY next_attempt_at
+    LIMIT @batch
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE webhook_jobs w SET status = 1, lease_expires_at = @lease_until
+FROM due WHERE w.id = due.id
+RETURNING w.id, w.inbound_message_id, w.recipient, w.local_part, w.tag, w.correlation_key, w.auth_results_json, w.status, w.attempts, w.next_attempt_at, w.lease_expires_at, w.give_up_at, w.last_error, w.created_at;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("now", now);
+        cmd.Parameters.AddWithValue("lease_until", now + WebhookJob.LeaseDuration);
+        cmd.Parameters.AddWithValue("batch", batchSize);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<WebhookJob>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadWebhookJob(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task CompleteWebhookJobAsync(System.Guid id, WebhookJobStatus status, System.DateTimeOffset nextAttemptAt, string lastError, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(lastError);
+        const string sql = @"
+UPDATE webhook_jobs SET status = @status, attempts = attempts + 1, next_attempt_at = @next,
+    last_error = @error, lease_expires_at = NULL
+WHERE id = @id;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("status", (int)status);
+        cmd.Parameters.AddWithValue("next", nextAttemptAt);
+        cmd.Parameters.AddWithValue("error", Clip(lastError, 1000));
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task<long> CountWebhookJobsAsync(WebhookJobStatus status, CancellationToken ct = default)
+    {
+        const string sql = "SELECT count(*) FROM webhook_jobs WHERE status = @status;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("status", (int)status);
+        object? result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return result is long n ? n : 0;
+    }
+
+    private static WebhookJob ReadWebhookJob(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        InboundMessageId = r.GetGuid(1),
+        Recipient = r.GetString(2),
+        LocalPart = r.GetString(3),
+        Tag = r.GetString(4),
+        CorrelationKey = r.GetString(5),
+        AuthResultsJson = r.GetString(6),
+        Status = (WebhookJobStatus)r.GetInt32(7),
+        Attempts = r.GetInt32(8),
+        NextAttemptAt = r.GetFieldValue<System.DateTimeOffset>(9),
+        LeaseExpiresAt = r.IsDBNull(10) ? null : r.GetFieldValue<System.DateTimeOffset>(10),
+        GiveUpAt = r.GetFieldValue<System.DateTimeOffset>(11),
+        LastError = r.GetString(12),
+        CreatedAt = r.GetFieldValue<System.DateTimeOffset>(13),
+    };
+
+    /// <inheritdoc/>
+    public async Task<AuditEvent> AppendAuditAsync(AuditEvent audit, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(audit);
+        const string sql = @"
+INSERT INTO audit_events (actor, action, subject, detail, remote_address)
+VALUES (@actor, @action, @subject, @detail, @remote)
+RETURNING id, at, actor, action, subject, detail, remote_address;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("actor", Clip(audit.Actor, 320));
+        cmd.Parameters.AddWithValue("action", Clip(audit.Action, 200));
+        cmd.Parameters.AddWithValue("subject", Clip(audit.Subject, 500));
+        cmd.Parameters.AddWithValue("detail", Clip(audit.Detail, 1000));
+        cmd.Parameters.AddWithValue("remote", Clip(audit.RemoteAddress, 64));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadAudit(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<AuditEvent>> ListAuditAsync(int limit, System.DateTimeOffset? before = null, CancellationToken ct = default)
+    {
+        const string sql = @"
+SELECT id, at, actor, action, subject, detail, remote_address FROM audit_events
+WHERE (@before IS NULL OR at < @before)
+ORDER BY at DESC, id DESC
+LIMIT @limit;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.Add(new NpgsqlParameter<System.DateTimeOffset?>("before", NpgsqlTypes.NpgsqlDbType.TimestampTz) { TypedValue = before });
+        cmd.Parameters.AddWithValue("limit", System.Math.Clamp(limit, 1, 1000));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<AuditEvent>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadAudit(reader));
+        }
+        return result;
+    }
+
+    private static AuditEvent ReadAudit(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        At = r.GetFieldValue<System.DateTimeOffset>(1),
+        Actor = r.GetString(2),
+        Action = r.GetString(3),
+        Subject = r.GetString(4),
+        Detail = r.GetString(5),
+        RemoteAddress = r.GetString(6),
+    };
+
+    private static string Clip(string value, int max) =>
+        value is null ? string.Empty : value.Length <= max ? value : value.Substring(0, max);
+
     /// <inheritdoc/>
     public async Task<IReadOnlyList<OutboundMessage>> LeaseOutboundBatchAsync(int batchSize, System.DateTimeOffset now, CancellationToken ct = default)
     {
@@ -252,27 +419,32 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
 
         // CTE pattern with SELECT ... FOR UPDATE SKIP LOCKED to safely lease
         // rows across multiple workers. UPDATE then RETURNING to flip status.
+        // A row still in Sending whose lease has lapsed was abandoned by a
+        // worker that stopped mid-batch; it is taken again in the same
+        // statement, so reclaiming needs no separate job and cannot race.
         const string sql = @"
 WITH due AS (
     SELECT id
     FROM outbound_messages
-    WHERE status = @pending_status
-      AND next_attempt_at <= @now
+    WHERE (status = @pending_status AND next_attempt_at <= @now)
+       OR (status = @sending_status AND lease_expires_at IS NOT NULL AND lease_expires_at <= @now)
     ORDER BY next_attempt_at ASC
     LIMIT @batch_size
     FOR UPDATE SKIP LOCKED
 )
 UPDATE outbound_messages o
-SET status = @sending_status
+SET status = @sending_status,
+    lease_expires_at = @lease_until
 FROM due
 WHERE o.id = due.id
-RETURNING o.id, o.envelope_from, o.envelope_to, o.raw_bytes, o.status, o.attempts, o.created_at, o.next_attempt_at, o.give_up_at, o.last_error;";
+RETURNING o.id, o.envelope_from, o.envelope_to, o.raw_bytes, o.status, o.attempts, o.created_at, o.next_attempt_at, o.give_up_at, o.last_error, o.lease_expires_at;";
 
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("pending_status", (int)OutboundStatus.Pending);
         cmd.Parameters.AddWithValue("sending_status", (int)OutboundStatus.Sending);
         cmd.Parameters.AddWithValue("now", now);
+        cmd.Parameters.AddWithValue("lease_until", now + OutboundMessage.LeaseDuration);
         cmd.Parameters.AddWithValue("batch_size", batchSize);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -299,7 +471,8 @@ UPDATE outbound_messages
 SET status          = @status,
     attempts        = attempts + 1,
     next_attempt_at = @next_attempt_at,
-    last_error      = @last_error
+    last_error      = @last_error,
+    lease_expires_at = NULL
 WHERE id = @id
 RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error;";
 
@@ -466,7 +639,8 @@ RETURNING id, domain, selector, private_key_pem, updated_at;";
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("domain", key.Domain ?? string.Empty);
         cmd.Parameters.AddWithValue("selector", key.Selector ?? string.Empty);
-        cmd.Parameters.AddWithValue("pem", key.PrivateKeyPem ?? string.Empty);
+        string pem = key.PrivateKeyPem ?? string.Empty;
+        cmd.Parameters.AddWithValue("pem", this.Secrets is null || pem.Length == 0 ? pem : this.Secrets.Seal(pem, DkimContext(key.Domain ?? string.Empty, key.Selector ?? string.Empty)));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -527,14 +701,27 @@ LIMIT 1;";
         return affected > 0;
     }
 
-    private static DkimKeyRow ReadDkimKey(NpgsqlDataReader r) => new()
+    private DkimKeyRow ReadDkimKey(NpgsqlDataReader r)
     {
-        Id = r.GetGuid(0),
-        Domain = r.GetString(1),
-        Selector = r.GetString(2),
-        PrivateKeyPem = r.GetString(3),
-        UpdatedAt = r.GetFieldValue<System.DateTimeOffset>(4),
-    };
+        string domain = r.GetString(1);
+        string selector = r.GetString(2);
+        string stored = r.GetString(3);
+        if (SecretProtector.IsSealed(stored) && this.Secrets is null)
+        {
+            // Sealed in the database but no KEK in this process: refuse
+            // loudly rather than hand ciphertext to the signer.
+            throw new System.InvalidOperationException(
+                $"DKIM key for {selector}._domainkey.{domain} is encrypted, but ANJAL_KEK is not set.");
+        }
+        return new DkimKeyRow
+        {
+            Id = r.GetGuid(0),
+            Domain = domain,
+            Selector = selector,
+            PrivateKeyPem = this.Secrets is null ? stored : this.Secrets.Open(stored, DkimContext(domain, selector)),
+            UpdatedAt = r.GetFieldValue<System.DateTimeOffset>(4),
+        };
+    }
 
     private static OutboundTlsPolicy ReadTlsPolicy(NpgsqlDataReader r) => new()
     {
@@ -598,6 +785,7 @@ LIMIT 1;";
         NextAttemptAt = r.GetFieldValue<System.DateTimeOffset>(7),
         GiveUpAt = r.GetFieldValue<System.DateTimeOffset>(8),
         LastError = r.GetString(9),
+        LeaseExpiresAt = r.FieldCount > 10 && !r.IsDBNull(10) ? r.GetFieldValue<System.DateTimeOffset>(10) : null,
     };
 
     /// <inheritdoc/>

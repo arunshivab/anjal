@@ -50,6 +50,16 @@ public sealed class DkimKeysHandler
             await ctx.WriteErrorAsync(400, "invalid_request", "selector is required.").ConfigureAwait(false);
             return;
         }
+        // Fail closed: without a key-encryption key the private key would sit
+        // in the database in plaintext. Refuse unless that was chosen
+        // deliberately.
+        if (System.Environment.GetEnvironmentVariable("ANJAL_KEK") is not { Length: > 0 } &&
+            !string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_ALLOW_PLAINTEXT_KEYS"), "true", System.StringComparison.OrdinalIgnoreCase) &&
+            this.store is PostgresMessageStore)
+        {
+            await ctx.WriteErrorAsync(409, "kek_required", "Set ANJAL_KEK so DKIM keys are stored encrypted (openssl rand -base64 32), then restart.").ConfigureAwait(false);
+            return;
+        }
         if (string.IsNullOrWhiteSpace(req.PrivateKeyPem) ||
             !req.PrivateKeyPem.Contains("-----BEGIN", System.StringComparison.Ordinal))
         {

@@ -144,7 +144,13 @@ public sealed class DirectMailSender : IMailSender
                 }
                 if (mode != Anjal.Store.TlsMode.Disabled && offered)
                 {
-                    SmtpReply tlsReply = await session.StartTlsAsync(host, this.options.Tls.ValidateCertificate, ct).ConfigureAwait(false);
+                    // Opportunistic TLS encrypts without authenticating the
+                    // peer (RFC 7435): many MX hosts present self-signed or
+                    // mismatched certificates, and refusing them would mean
+                    // sending nothing at all rather than sending encrypted.
+                    // A domain whose policy requires TLS gets full validation.
+                    bool validate = mode == Anjal.Store.TlsMode.Required && this.options.Tls.ValidateCertificate;
+                    SmtpReply tlsReply = await session.StartTlsAsync(host, validate, this.options.Tls.Revocation, ct).ConfigureAwait(false);
                     if (tlsReply.Code != 220)
                     {
                         await session.QuitAsync(ct).ConfigureAwait(false);

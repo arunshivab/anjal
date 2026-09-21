@@ -168,6 +168,20 @@ public sealed class OutboundMessage
 
     /// <summary>The reply text of the most recent attempt (success or failure).</summary>
     public string LastError { get; set; } = string.Empty;
+
+    /// <summary>
+    /// While <see cref="OutboundStatus.Sending"/>, when the lease lapses. A
+    /// worker that stops mid-batch (crash, restart, deploy) leaves its leased
+    /// messages in Sending; once this time passes they are leased again
+    /// rather than stranded. Null when not leased.
+    /// </summary>
+    public System.DateTimeOffset? LeaseExpiresAt { get; set; }
+
+    /// <summary>
+    /// How long a lease lasts. Longer than any single delivery attempt can
+    /// take with its timeouts, so a slow but live send is never taken over.
+    /// </summary>
+    public static readonly System.TimeSpan LeaseDuration = System.TimeSpan.FromMinutes(15);
 }
 
 /// <summary>
@@ -279,4 +293,105 @@ public sealed class WebhookDelivery
 
     /// <summary>Error message if the call failed before returning a status.</summary>
     public string ErrorMessage { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One entry in the append-only audit trail: who changed what, when. Admin
+/// API changes and security-relevant webmail actions (sign-ins, password
+/// changes) are recorded. Request bodies are never stored - they carry
+/// passwords, private keys and webhook secrets.
+/// </summary>
+public sealed class AuditEvent
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>When it happened (UTC), assigned by the store.</summary>
+    public System.DateTimeOffset At { get; set; }
+
+    /// <summary>Who acted: <c>api</c>, a mailbox address, or <c>system</c>.</summary>
+    public string Actor { get; set; } = string.Empty;
+
+    /// <summary>What was done, e.g. <c>POST /api/mailboxes</c> or <c>webmail.password.changed</c>.</summary>
+    public string Action { get; set; } = string.Empty;
+
+    /// <summary>What it was done to, e.g. an address or a path.</summary>
+    public string Subject { get; set; } = string.Empty;
+
+    /// <summary>Short outcome or context: a status code, a client address.</summary>
+    public string Detail { get; set; } = string.Empty;
+
+    /// <summary>The client address the action came from, when known.</summary>
+    public string RemoteAddress { get; set; } = string.Empty;
+}
+
+/// <summary>State of a queued webhook notification.</summary>
+public enum WebhookJobStatus
+{
+    /// <summary>Waiting for its next attempt.</summary>
+    Pending = 0,
+
+    /// <summary>Leased by the worker; an attempt is in progress.</summary>
+    Sending = 1,
+
+    /// <summary>The receiver answered 2xx.</summary>
+    Delivered = 2,
+
+    /// <summary>Retried until its give-up time without success.</summary>
+    Failed = 3,
+}
+
+/// <summary>
+/// A webhook notification waiting to be delivered. Persisted when a message
+/// is accepted, so a notification survives a restart and a receiver that is
+/// briefly down still hears about every message. The payload is rebuilt at
+/// send time from the stored inbound message; the signing secret is read
+/// from the routing rule then, so it is never copied into the queue.
+/// </summary>
+public sealed class WebhookJob
+{
+    /// <summary>Identifier assigned by the store.</summary>
+    public System.Guid Id { get; set; }
+
+    /// <summary>The stored inbound message this notification is about.</summary>
+    public System.Guid InboundMessageId { get; set; }
+
+    /// <summary>The recipient address as received.</summary>
+    public string Recipient { get; set; } = string.Empty;
+
+    /// <summary>Local part used to find the routing rule at send time.</summary>
+    public string LocalPart { get; set; } = string.Empty;
+
+    /// <summary>Plus-tag, if any.</summary>
+    public string Tag { get; set; } = string.Empty;
+
+    /// <summary>Correlation key from the tag grant, if any.</summary>
+    public string CorrelationKey { get; set; } = string.Empty;
+
+    /// <summary>SPF/DKIM/DMARC results as JSON, captured at receipt.</summary>
+    public string AuthResultsJson { get; set; } = string.Empty;
+
+    /// <summary>Current state.</summary>
+    public WebhookJobStatus Status { get; set; }
+
+    /// <summary>Attempts made so far.</summary>
+    public int Attempts { get; set; }
+
+    /// <summary>When the next attempt is due.</summary>
+    public System.DateTimeOffset NextAttemptAt { get; set; }
+
+    /// <summary>When a lease lapses (Sending only); a stale lease is taken again.</summary>
+    public System.DateTimeOffset? LeaseExpiresAt { get; set; }
+
+    /// <summary>When to stop retrying.</summary>
+    public System.DateTimeOffset GiveUpAt { get; set; }
+
+    /// <summary>The last failure, for diagnosis.</summary>
+    public string LastError { get; set; } = string.Empty;
+
+    /// <summary>When the job was queued.</summary>
+    public System.DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>How long a lease lasts: well beyond one webhook's timeout.</summary>
+    public static readonly System.TimeSpan LeaseDuration = System.TimeSpan.FromMinutes(5);
 }

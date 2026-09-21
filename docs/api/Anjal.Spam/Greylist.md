@@ -12,4 +12,5 @@ Classic greylisting. The first time a given (client /24 or /64, sender, recipien
 - **OnMailFromAsync** *(method)* - _(no description)_
 - **OnRcptTo** *(method)* - Synchronous RCPT TO check.
 - **OnRcptToAsync** *(method)* - _(no description)_
+- **Shrink** *(method)* - Forget expired triplets now; if still full, the least recently seen tenth.
 - **Count** *(property)* - Number of triplets currently remembered (pending or passed).

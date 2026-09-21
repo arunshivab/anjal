@@ -17,6 +17,9 @@ public sealed class SpfVerifier
     /// <summary>Maximum total DNS lookups during a single check (RFC 7208 §4.6.4).</summary>
     public const int MaxLookups = 10;
 
+    /// <summary>Lookups returning no answer allowed per evaluation (RFC 7208 section 4.6.4).</summary>
+    public const int MaxVoidLookups = 2;
+
     private readonly Anjal.Dns.DnsResolver dns;
 
     /// <summary>Construct.</summary>
@@ -250,7 +253,7 @@ public sealed class SpfVerifier
             string? cidr = null;
             ParseADomainAndCidr(mech, "a", currentDomain, out targetDomain, out cidr);
             state.IncrementLookups();
-            bool matched = await this.MatchesAOrMxAsync(targetDomain, cidr, state.PeerAddress, useMx: false, ct).ConfigureAwait(false);
+            bool matched = await this.MatchesAOrMxAsync(targetDomain, cidr, state.PeerAddress, useMx: false, state, ct).ConfigureAwait(false);
             return (matched, $"a:{targetDomain}");
         }
 
@@ -263,7 +266,7 @@ public sealed class SpfVerifier
             string? cidr = null;
             ParseADomainAndCidr(mech, "mx", currentDomain, out targetDomain, out cidr);
             state.IncrementLookups();
-            bool matched = await this.MatchesAOrMxAsync(targetDomain, cidr, state.PeerAddress, useMx: true, ct).ConfigureAwait(false);
+            bool matched = await this.MatchesAOrMxAsync(targetDomain, cidr, state.PeerAddress, useMx: true, state, ct).ConfigureAwait(false);
             return (matched, $"mx:{targetDomain}");
         }
 
@@ -275,11 +278,20 @@ public sealed class SpfVerifier
             try
             {
                 IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(ex, ct).ConfigureAwait(false);
+                if (addresses.Length == 0)
+                {
+                    state.IncrementVoidLookups();
+                }
                 return (addresses.Length > 0, $"exists:{ex}");
+            }
+            catch (SpfPermError)
+            {
+                throw;
             }
 #pragma warning disable CA1031
             catch (System.Exception)
             {
+                state.IncrementVoidLookups();
                 return (false, $"exists:{ex}");
             }
 #pragma warning restore CA1031
@@ -303,6 +315,7 @@ public sealed class SpfVerifier
         string? cidr,
         IPAddress peer,
         bool useMx,
+        SpfState state,
         System.Threading.CancellationToken ct)
     {
         IPAddress[] addresses;
@@ -339,6 +352,12 @@ public sealed class SpfVerifier
                 addresses = System.Array.Empty<IPAddress>();
             }
 #pragma warning restore CA1031
+        }
+
+        // A lookup that returned nothing counts towards the void-lookup limit.
+        if (addresses.Length == 0)
+        {
+            state.IncrementVoidLookups();
         }
 
         foreach (IPAddress ip in addresses)
@@ -467,12 +486,28 @@ public sealed class SpfVerifier
         public IPAddress PeerAddress { get; init; } = IPAddress.None;
         public int LookupCount { get; private set; }
 
+        public int VoidLookupCount { get; private set; }
+
         public void IncrementLookups()
         {
             this.LookupCount++;
             if (this.LookupCount > MaxLookups)
             {
                 throw new SpfPermError($"DNS lookup limit ({MaxLookups}) exceeded.");
+            }
+        }
+
+        /// <summary>
+        /// RFC 7208 section 4.6.4: lookups that return no answer are capped
+        /// separately, because a record built from names that do not resolve
+        /// costs the evaluator DNS round trips while never matching anything.
+        /// </summary>
+        public void IncrementVoidLookups()
+        {
+            this.VoidLookupCount++;
+            if (this.VoidLookupCount > MaxVoidLookups)
+            {
+                throw new SpfPermError($"Void lookup limit ({MaxVoidLookups}) exceeded.");
             }
         }
     }

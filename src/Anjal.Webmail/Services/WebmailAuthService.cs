@@ -48,25 +48,35 @@ public sealed class WebmailAuthService
         ArgumentNullException.ThrowIfNull(address);
         ArgumentNullException.ThrowIfNull(password);
 
+        // Every refusal below costs the same as a wrong password, so timing
+        // cannot be used to learn which addresses exist or are disabled.
         if (!Anjal.Mailbox.MailboxSink.TrySplitAddress(address, out string local, out string domain) ||
             address.Contains('+', StringComparison.Ordinal))
         {
+            Anjal.Smtp.Pbkdf2Hasher.VerifyAgainstDummy(password);
             return null;
         }
 
         MailboxRow? mailbox = await this.store.GetMailboxAsync(local, domain, ct).ConfigureAwait(false);
         if (mailbox is null || !mailbox.Enabled || mailbox.PasswordPbkdf2.Length == 0)
         {
+            Anjal.Smtp.Pbkdf2Hasher.VerifyAgainstDummy(password);
             return null;
         }
         TenantRow? tenant = await this.store.GetTenantByIdAsync(mailbox.TenantId, ct).ConfigureAwait(false);
         if (tenant is null || !tenant.Enabled)
         {
+            Anjal.Smtp.Pbkdf2Hasher.VerifyAgainstDummy(password);
             return null;
         }
         if (!Anjal.Smtp.Pbkdf2Hasher.Verify(password, mailbox.PasswordPbkdf2))
         {
             return null;
+        }
+        if (Anjal.Smtp.Pbkdf2Hasher.NeedsRehash(mailbox.PasswordPbkdf2))
+        {
+            mailbox.PasswordPbkdf2 = Anjal.Smtp.Pbkdf2Hasher.Hash(password);
+            await this.store.UpsertMailboxAsync(mailbox, ct).ConfigureAwait(false);
         }
 
         var identity = new ClaimsIdentity("AnjalWebmail");

@@ -118,13 +118,30 @@ public sealed class SmtpServer : System.IDisposable
                     return;
                 }
 
+                // Admission control happens before a session exists, so a
+                // flood of connections costs a refusal each and nothing more.
+                string address = RemoteAddressOf(client);
+                if (!this.TryAdmit(address))
+                {
+                    Counters.Increment("anjal_smtp_connections_refused_total");
+                    _ = RefuseAsync(client);
+                    continue;
+                }
+
                 // Fire and forget - exceptions inside the session are handled there.
                 _ = System.Threading.Tasks.Task.Run(async () =>
                 {
-                    var session = new SmtpSession(client, this.options, this.sink,
-                        this.authenticator, this.enforceReject,
-                        this.smtpAuthenticator, this.localDomains);
-                    await session.RunAsync(ct).ConfigureAwait(false);
+                    try
+                    {
+                        var session = new SmtpSession(client, this.options, this.sink,
+                            this.authenticator, this.enforceReject,
+                            this.smtpAuthenticator, this.localDomains);
+                        await session.RunAsync(ct).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        this.Release(address);
+                    }
                 }, ct);
             }
         }
@@ -156,6 +173,75 @@ public sealed class SmtpServer : System.IDisposable
         catch (System.Net.Sockets.SocketException)
         {
             // Already stopped - swallow.
+        }
+    }
+
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> perAddress = new(System.StringComparer.Ordinal);
+    private int active;
+
+    /// <summary>Sessions currently being served by this listener.</summary>
+    public int ActiveSessions => System.Threading.Volatile.Read(ref this.active);
+
+    /// <summary>
+    /// Take a session slot for this address, or refuse. Both the global cap
+    /// and the per-address cap must have room.
+    /// </summary>
+    private bool TryAdmit(string address)
+    {
+        if (System.Threading.Interlocked.Increment(ref this.active) > this.options.MaxConcurrentSessions)
+        {
+            System.Threading.Interlocked.Decrement(ref this.active);
+            return false;
+        }
+        int mine = this.perAddress.AddOrUpdate(address, 1, (_, n) => n + 1);
+        if (mine > this.options.MaxSessionsPerAddress)
+        {
+            this.Release(address);
+            return false;
+        }
+        return true;
+    }
+
+    private void Release(string address)
+    {
+        System.Threading.Interlocked.Decrement(ref this.active);
+        int left = this.perAddress.AddOrUpdate(address, 0, (_, n) => n - 1);
+        if (left <= 0)
+        {
+            ((System.Collections.Generic.ICollection<System.Collections.Generic.KeyValuePair<string, int>>)this.perAddress)
+                .Remove(new System.Collections.Generic.KeyValuePair<string, int>(address, left));
+        }
+    }
+
+    private static string RemoteAddressOf(TcpClient client)
+    {
+        try
+        {
+            return (client.Client.RemoteEndPoint as System.Net.IPEndPoint)?.Address.ToString() ?? "unknown";
+        }
+        catch (System.ObjectDisposedException)
+        {
+            return "unknown";
+        }
+    }
+
+    /// <summary>Tell a refused client why, briefly, then close.</summary>
+    private static async System.Threading.Tasks.Task RefuseAsync(TcpClient client)
+    {
+        try
+        {
+            using var cts = new System.Threading.CancellationTokenSource(System.TimeSpan.FromSeconds(5));
+            byte[] reply = System.Text.Encoding.ASCII.GetBytes("421 4.7.0 Too many connections, try again later\r\n");
+            await client.GetStream().WriteAsync(reply, cts.Token).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // Refusing anyway; a failed goodbye changes nothing.
+        catch (System.Exception)
+        {
+        }
+#pragma warning restore CA1031
+        finally
+        {
+            client.Close();
         }
     }
 }

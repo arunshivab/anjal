@@ -390,7 +390,19 @@ public sealed partial class MailboxService
         {
             return null;
         }
-        FolderRow to = await this.store.EnsureFolderAsync(mailboxId, toFolderName, ct).ConfigureAwait(false);
+        // A move may only target a folder that already exists in this
+        // mailbox. The name arrives from a form field; creating folders from
+        // it would let a request invent arbitrary rows and directories (and
+        // "../x" would reach the filesystem layer before being refused).
+        // The system folders are always valid targets and are created on
+        // first use; any other name must already exist.
+        FolderRow? to = DefaultFolders.Contains(toFolderName)
+            ? await this.store.EnsureFolderAsync(mailboxId, toFolderName, ct).ConfigureAwait(false)
+            : await this.GetFolderAsync(mailboxId, toFolderName, ct).ConfigureAwait(false);
+        if (to is null)
+        {
+            return null;
+        }
         if (to.Id == from.Id)
         {
             return row;
@@ -645,14 +657,16 @@ public sealed partial class MailboxService
         msg.Headers.Add("From", FormatFrom(mailbox));
         if (draftHeaders is not null)
         {
-            msg.Headers.Add("To", draftHeaders.To.Trim());
+            // Draft fields are kept as typed, but a line break inside one
+            // would start a new header on the wire, so it becomes a space.
+            msg.Headers.Add("To", MimeHeader.Neutralise(draftHeaders.To.Trim()));
             if (draftHeaders.Cc.Trim().Length > 0)
             {
-                msg.Headers.Add("Cc", draftHeaders.Cc.Trim());
+                msg.Headers.Add("Cc", MimeHeader.Neutralise(draftHeaders.Cc.Trim()));
             }
             if (draftHeaders.Bcc.Trim().Length > 0)
             {
-                msg.Headers.Add("Bcc", draftHeaders.Bcc.Trim());
+                msg.Headers.Add("Bcc", MimeHeader.Neutralise(draftHeaders.Bcc.Trim()));
             }
         }
         else
@@ -663,16 +677,53 @@ public sealed partial class MailboxService
                 msg.Headers.Add("Cc", FormatAddresses(cc));
             }
         }
-        if (request.InReplyTo.Length > 0)
+        // Reply linkage is emitted only when it is a well-formed message id.
+        // It arrives from a hidden form field, so it is attacker-controlled;
+        // anything else is dropped and the reply simply is not threaded.
+        string inReplyTo = request.InReplyTo.Trim().Trim('<', '>');
+        if (IsValidMessageId(inReplyTo))
         {
-            msg.Headers.Add("In-Reply-To", "<" + request.InReplyTo.Trim('<', '>') + ">");
-            msg.Headers.Add("References", "<" + request.InReplyTo.Trim('<', '>') + ">");
+            msg.Headers.Add("In-Reply-To", "<" + inReplyTo + ">");
+            msg.Headers.Add("References", "<" + inReplyTo + ">");
         }
         msg.Subject = EncodeHeaderText(request.Subject.Trim());
         msg.Date = FormatDate(DateTimeOffset.UtcNow);
         msg.Headers.Add("Message-ID", $"<{Guid.NewGuid():N}@{mailbox.Domain}>");
         msg.Headers.Add("MIME-Version", "1.0");
         return MimeBuilder.Build(msg);
+    }
+
+    /// <summary>
+    /// Whether a string is an acceptable message id (without angle brackets):
+    /// <c>left@right</c>, printable ASCII, no whitespace, brackets or a second
+    /// <c>@</c>, at most 250 characters.
+    /// </summary>
+    /// <param name="id">The candidate id.</param>
+    public static bool IsValidMessageId(string id)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+        if (id.Length == 0 || id.Length > 250)
+        {
+            return false;
+        }
+        int at = -1;
+        for (int i = 0; i < id.Length; i++)
+        {
+            char c = id[i];
+            if (c <= ' ' || c > '~' || c == '<' || c == '>')
+            {
+                return false;
+            }
+            if (c == '@')
+            {
+                if (at >= 0)
+                {
+                    return false;
+                }
+                at = i;
+            }
+        }
+        return at > 0 && at < id.Length - 1;
     }
 
     /// <summary>

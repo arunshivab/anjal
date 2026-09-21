@@ -41,6 +41,28 @@ public sealed class TenantStatePolicy : Anjal.Smtp.ISmtpPolicy
     /// <inheritdoc/>
     public async System.Threading.Tasks.Task<Anjal.Smtp.PolicyDecision> OnRcptToAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient, System.Threading.CancellationToken ct = default)
     {
+        // This policy protects stored state. If the store cannot be read,
+        // deferring is the only safe answer: the sender retries later, and a
+        // database outage never becomes a window in which limits vanish.
+        try
+        {
+            return await this.CheckAsync(recipient, ct).ConfigureAwait(false);
+        }
+        catch (System.OperationCanceledException)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // Any store failure means "cannot decide": defer.
+        catch (System.Exception ex)
+        {
+            this.log?.Invoke($"Tenant state: cannot check {recipient} ({ex.GetType().Name}); deferring.");
+            return Anjal.Smtp.PolicyDecision.Defer("4.3.0 Temporary server error, try again later", 451);
+        }
+#pragma warning restore CA1031
+    }
+
+    private async System.Threading.Tasks.Task<Anjal.Smtp.PolicyDecision> CheckAsync(string recipient, System.Threading.CancellationToken ct)
+    {
         System.ArgumentNullException.ThrowIfNull(recipient);
         if (!MailboxSink.TrySplitAddress(recipient, out string local, out string domain))
         {

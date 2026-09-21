@@ -1,4 +1,4 @@
--- Anjal PostgreSQL schema (v0.15.0)
+-- Anjal PostgreSQL schema (v0.16.0)
 --
 -- The store layer keeps three concerns separated:
 --   routing_rules   - maps a local-part to a webhook URL + signing secret
@@ -264,5 +264,79 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS has_attachments BOOLEAN NOT NULL D
 -- The dashboard reads a period of one mailbox, grouped several ways.
 CREATE INDEX IF NOT EXISTS messages_activity_idx ON messages (mailbox_id, received_at);
 CREATE INDEX IF NOT EXISTS messages_category_idx ON messages (category_id) WHERE category_id IS NOT NULL;
+
+-- Hardening (v0.16.0): outbound leases expire, so a worker that stops mid-batch
+-- does not strand the messages it had leased in Sending forever.
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS outbound_messages_stale_lease_idx
+    ON outbound_messages (lease_expires_at)
+    WHERE status = 1;
+
+-- Search (v0.16.0). Webmail search is a case-insensitive substring match
+-- (ILIKE '%term%'), which an ordinary B-tree index cannot serve. Trigram
+-- GIN indexes can, so search stays fast as a mailbox grows without changing
+-- what it matches. pg_trgm is a trusted extension: the database owner may
+-- create it without superuser rights.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX IF NOT EXISTS messages_subject_trgm_idx      ON messages USING gin (subject gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS messages_from_trgm_idx         ON messages USING gin (from_header gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS messages_to_trgm_idx           ON messages USING gin (to_header gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS messages_envelope_from_trgm_idx ON messages USING gin (envelope_from gin_trgm_ops);
+
+-- Audit trail (v0.16.0). Admin API changes and security-relevant webmail
+-- actions. Append-only, and enforced as such here rather than trusted to the
+-- application: a trigger refuses UPDATE and DELETE, so a compromised or buggy
+-- process cannot rewrite what it did. Truncation needs table ownership and
+-- is a deliberate operator act.
+CREATE TABLE IF NOT EXISTS audit_events (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    actor          TEXT NOT NULL,
+    action         TEXT NOT NULL,
+    subject        TEXT NOT NULL DEFAULT '',
+    detail         TEXT NOT NULL DEFAULT '',
+    remote_address TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS audit_events_at_idx ON audit_events (at DESC);
+
+CREATE OR REPLACE FUNCTION audit_events_append_only() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'audit_events is append-only';
+END;
+$$;
+
+DROP TRIGGER IF EXISTS audit_events_no_change ON audit_events;
+CREATE TRIGGER audit_events_no_change
+    BEFORE UPDATE OR DELETE ON audit_events
+    FOR EACH ROW EXECUTE FUNCTION audit_events_append_only();
+
+-- Webhook queue (v0.16.0). A notification is queued when a message is
+-- accepted and delivered by a background worker with retries, so the SMTP
+-- transaction never waits on the receiver and a receiver that is briefly
+-- down still hears about every message. The signing secret is not copied
+-- here; it is read from the routing rule at send time.
+CREATE TABLE IF NOT EXISTS webhook_jobs (
+    id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    inbound_message_id UUID NOT NULL REFERENCES inbound_messages(id) ON DELETE CASCADE,
+    recipient          TEXT NOT NULL,
+    local_part         TEXT NOT NULL,
+    tag                TEXT NOT NULL DEFAULT '',
+    correlation_key    TEXT NOT NULL DEFAULT '',
+    auth_results_json  TEXT NOT NULL DEFAULT '',
+    status             INTEGER NOT NULL DEFAULT 0,   -- 0=Pending 1=Sending 2=Delivered 3=Failed
+    attempts           INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    lease_expires_at   TIMESTAMPTZ,
+    give_up_at         TIMESTAMPTZ NOT NULL,
+    last_error         TEXT NOT NULL DEFAULT '',
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS webhook_jobs_due_idx ON webhook_jobs (next_attempt_at) WHERE status = 0;
+CREATE INDEX IF NOT EXISTS webhook_jobs_stale_idx ON webhook_jobs (lease_expires_at) WHERE status = 1;
 
 COMMIT;

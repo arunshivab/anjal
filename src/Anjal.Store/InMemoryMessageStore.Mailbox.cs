@@ -321,6 +321,10 @@ public sealed partial class InMemoryMessageStore
     public Task<FolderRow> EnsureFolderAsync(System.Guid mailboxId, string name, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(name);
+        if (!FolderRow.IsValidName(name))
+        {
+            throw new System.ArgumentException($"'{name}' is not a valid folder name.", nameof(name));
+        }
         lock (this.gate)
         {
             FolderRow? existing = this.folders.Find(f =>

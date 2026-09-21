@@ -24,7 +24,48 @@ public sealed class SmtpServerOptions
     public int MaxMessageBytes { get; init; } = 25 * 1024 * 1024;
 
     /// <summary>Idle-timeout per command. Connections that go this long with no data are closed.</summary>
-    public System.TimeSpan CommandTimeout { get; init; } = System.TimeSpan.FromSeconds(60);
+    public System.TimeSpan CommandTimeout { get; init; } = System.TimeSpan.FromSeconds(120);
+
+    /// <summary>
+    /// The longest a single session may last, however active. Stops a client
+    /// that drips one byte just inside <see cref="CommandTimeout"/> from
+    /// holding a connection forever. Generous enough for a 25 MB message
+    /// over a slow link. Default 15 minutes.
+    /// </summary>
+    public System.TimeSpan MaxSessionDuration { get; init; } = System.TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// Concurrent sessions this listener serves at once. Past this, new
+    /// connections get <c>421 4.7.0</c> and are closed before a session is
+    /// created. Default 200.
+    /// </summary>
+    public int MaxConcurrentSessions { get; init; } = 200;
+
+    /// <summary>
+    /// Concurrent sessions from one client address. Large senders open a few
+    /// connections in parallel; ten leaves room for that. Default 10.
+    /// </summary>
+    public int MaxSessionsPerAddress { get; init; } = 10;
+
+    /// <summary>Failed AUTH attempts allowed in one session before it is closed. Default 3.</summary>
+    public int MaxAuthFailuresPerSession { get; init; } = 3;
+
+    /// <summary>
+    /// Shared per-address AUTH failure counter for this listener. Null
+    /// disables the cross-session limit (the per-session one still applies).
+    /// </summary>
+    public AuthFailureLimiter? AuthFailures { get; init; }
+
+    /// <summary>
+    /// Implicit TLS (RFC 8314): the TLS handshake happens as soon as the
+    /// client connects, before the banner, as on port 465. No plaintext is
+    /// ever exchanged, so there is no STARTTLS to strip. A connection whose
+    /// handshake fails is closed without a word.
+    /// </summary>
+    public bool ImplicitTls { get; init; }
+
+    /// <summary>Optional diagnostic log for errors a session recovers from but should not hide.</summary>
+    public System.Action<string>? Log { get; init; }
 
     /// <summary>
     /// X.509 certificate (with private key) used for STARTTLS. When set,

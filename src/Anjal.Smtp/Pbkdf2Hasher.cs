@@ -16,8 +16,13 @@ namespace Anjal.Smtp;
 /// </summary>
 public static class Pbkdf2Hasher
 {
-    /// <summary>Default iteration count.</summary>
-    public const int DefaultIterations = 100_000;
+    /// <summary>
+    /// Default iteration count: 600,000 rounds of HMAC-SHA256, the OWASP
+    /// recommendation for PBKDF2-SHA256. Hashes stored with fewer rounds
+    /// still verify (the count travels in the hash) and are upgraded on the
+    /// next successful sign-in; see <see cref="NeedsRehash"/>.
+    /// </summary>
+    public const int DefaultIterations = 600_000;
 
     /// <summary>Hash output length in bytes (32 = 256 bits).</summary>
     private const int HashBytes = 32;
@@ -30,7 +35,7 @@ public static class Pbkdf2Hasher
     /// <c>pbkdf2$iterations$salt-b64$hash-b64</c>.
     /// </summary>
     /// <param name="password">Plaintext password.</param>
-    /// <param name="iterations">PBKDF2 iteration count. Defaults to 100,000.</param>
+    /// <param name="iterations">PBKDF2 iteration count. Defaults to <see cref="DefaultIterations"/>.</param>
     public static string Hash(string password, int iterations = DefaultIterations)
     {
         System.ArgumentNullException.ThrowIfNull(password);
@@ -94,4 +99,35 @@ public static class Pbkdf2Hasher
 
         return CryptographicOperations.FixedTimeEquals(expectedHash, computedHash);
     }
+
+    /// <summary>
+    /// Whether a stored hash uses fewer rounds than <see cref="DefaultIterations"/>
+    /// (or is unreadable) and should be replaced after the next successful
+    /// verification, while the plaintext is in hand.
+    /// </summary>
+    /// <param name="storedHash">The stored hash.</param>
+    public static bool NeedsRehash(string storedHash)
+    {
+        System.ArgumentNullException.ThrowIfNull(storedHash);
+        string[] parts = storedHash.Split('$');
+        return parts.Length != 4 ||
+            !int.TryParse(parts[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int iterations) ||
+            iterations < DefaultIterations;
+    }
+
+    /// <summary>
+    /// Spend the same time a real verification would, and return false. Used
+    /// on every path where there is no hash to check - unknown address,
+    /// disabled mailbox - so the response time does not reveal which
+    /// addresses exist.
+    /// </summary>
+    /// <param name="password">The password that was presented.</param>
+    public static bool VerifyAgainstDummy(string password)
+    {
+        System.ArgumentNullException.ThrowIfNull(password);
+        Verify(password, DummyHash.Value);
+        return false;
+    }
+
+    private static readonly System.Lazy<string> DummyHash = new(() => Hash("anjal-timing-equaliser"));
 }

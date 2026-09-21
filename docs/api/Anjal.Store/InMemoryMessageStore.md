@@ -7,10 +7,13 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 ## Members
 
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
+- **AppendAuditAsync** *(method)* - _(no description)_
+- **CompleteWebhookJobAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
 - **CountOutboundAsync** *(method)* - _(no description)_
 - **CountSearchAsync** *(method)* - _(no description)_
 - **CountUnreadAsync** *(method)* - _(no description)_
+- **CountWebhookJobsAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DeleteCategoryAsync** *(method)* - _(no description)_
 - **DeleteCategoryRuleAsync** *(method)* - _(no description)_
@@ -25,6 +28,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **DeleteTenantAsync** *(method)* - _(no description)_
 - **DeleteTenantDomainAsync** *(method)* - _(no description)_
 - **EnqueueOutboundAsync** *(method)* - _(no description)_
+- **EnqueueWebhookJobAsync** *(method)* - _(no description)_
 - **EnsureFolderAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
 - **GetActivityAsync** *(method)* - _(no description)_
@@ -43,6 +47,8 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **GetTenantDomainAsync** *(method)* - _(no description)_
 - **IsLocalDomainAsync** *(method)* - _(no description)_
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
+- **LeaseWebhookJobsAsync** *(method)* - _(no description)_
+- **ListAuditAsync** *(method)* - _(no description)_
 - **ListCategoriesAsync** *(method)* - _(no description)_
 - **ListCategoryRulesAsync** *(method)* - _(no description)_
 - **ListDkimKeysAsync** *(method)* - _(no description)_

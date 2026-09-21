@@ -31,6 +31,18 @@ ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictSUIDSGID=true
 LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectProc=invisible
+# Deliberately NOT set: MemoryDenyWriteExecute=true. The .NET JIT writes
+# machine code into executable memory; with this directive the runtime
+# aborts at startup. SystemCallFilter is also left unset until it has been
+# proven against this runtime on the target VM.
 ReadWritePaths=/var/mail/anjal /var/lib/anjal
 UMask=0027
 

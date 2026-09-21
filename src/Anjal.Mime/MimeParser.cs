@@ -19,7 +19,8 @@ public static class MimeParser
     public static MimeMessage Parse(byte[] raw)
     {
         ArgumentNullException.ThrowIfNull(raw);
-        return ParseEntity(raw, 0, raw.Length, isTopLevel: true) is MimeMessage msg
+        var budget = new PartBudget();
+        return ParseEntity(raw, 0, raw.Length, isTopLevel: true, depth: 0, budget) is MimeMessage msg
             ? msg
             : new MimeMessage(new MimePart());
     }
@@ -48,8 +49,40 @@ public static class MimeParser
         return Parse(ms.ToArray());
     }
 
-    private static object ParseEntity(byte[] raw, int start, int end, bool isTopLevel)
+    /// <summary>
+    /// The deepest multipart nesting accepted. Real mail rarely exceeds
+    /// five or six levels; thirty-two leaves ample room while keeping the
+    /// recursion far from the stack limit. Without a bound, a 7 MB message
+    /// of nested multiparts - well under the size limit - overflows the
+    /// stack, which no catch block can intercept, and takes the whole
+    /// server process down.
+    /// </summary>
+    public const int MaxNestingDepth = 32;
+
+    /// <summary>
+    /// The most MIME parts accepted in one message, across every level.
+    /// Bounds the work a single message can cause even when it stays
+    /// shallow.
+    /// </summary>
+    public const int MaxParts = 1000;
+
+    /// <summary>Counts parts across the whole parse, shared by every level.</summary>
+    private sealed class PartBudget
     {
+        public int Parts;
+    }
+
+    private static object ParseEntity(byte[] raw, int start, int end, bool isTopLevel, int depth, PartBudget budget)
+    {
+        if (depth > MaxNestingDepth)
+        {
+            throw new MimeParseException($"Multipart nesting exceeds {MaxNestingDepth} levels.");
+        }
+        if (++budget.Parts > MaxParts)
+        {
+            throw new MimeParseException($"Message has more than {MaxParts} MIME parts.");
+        }
+
         // 1. Find the blank line separating headers from body.
         int headerEnd = FindHeaderBodySeparator(raw, start, end);
         int bodyStart = headerEnd < 0 ? end : headerEnd;
@@ -77,7 +110,7 @@ public static class MimeParser
         {
             var multi = new MimeMultipart();
             CopyHeaders(headers, multi.Headers);
-            ParseMultipart(raw, bodyContentStart, end, ct.Boundary!, multi);
+            ParseMultipart(raw, bodyContentStart, end, ct.Boundary!, multi, depth + 1, budget);
             entity = multi;
         }
         else
@@ -136,12 +169,20 @@ public static class MimeParser
 
             string name = line.Substring(0, colon).Trim();
             string value = line.Substring(colon + 1).TrimStart();
-            result.Add(new MimeHeader(name, value));
+
+            // Incoming mail is kept, not refused: a field name that is not a
+            // valid token is dropped, and a stray CR, LF or NUL left in a
+            // value after unfolding becomes a space.
+            if (!MimeHeader.IsValidName(name))
+            {
+                continue;
+            }
+            result.Add(new MimeHeader(name, MimeHeader.Neutralise(value)));
         }
         return result;
     }
 
-    private static void ParseMultipart(byte[] raw, int start, int end, string boundary, MimeMultipart multi)
+    private static void ParseMultipart(byte[] raw, int start, int end, string boundary, MimeMultipart multi, int depth, PartBudget budget)
     {
         byte[] dashBoundary = Encoding.ASCII.GetBytes("--" + boundary);
         var positions = FindBoundaries(raw, start, end, dashBoundary);
@@ -182,7 +223,7 @@ public static class MimeParser
             int partEnd = p + 1 < positions.Count ? positions[p + 1] : end;
             int trimmedEnd = TrimTrailingLineEnd(raw, partStart, partEnd);
 
-            object child = ParseEntity(raw, partStart, trimmedEnd, isTopLevel: false);
+            object child = ParseEntity(raw, partStart, trimmedEnd, isTopLevel: false, depth, budget);
             if (child is MimeEntity entity)
             {
                 multi.Parts.Add(entity);

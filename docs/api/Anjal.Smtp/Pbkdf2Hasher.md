@@ -6,8 +6,10 @@ PBKDF2-SHA256 password hasher for SMTP submission user passwords. Uses the BCL's
 
 ## Members
 
-- **DefaultIterations** *(field)* - Default iteration count.
+- **DefaultIterations** *(field)* - Default iteration count: 600,000 rounds of HMAC-SHA256, the OWASP recommendation for PBKDF2-SHA256. Hashes stored with fewer rounds still verify (the count travels in the hash) and are upgraded on the next successful sign-in; see .
 - **HashBytes** *(field)* - Hash output length in bytes (32 = 256 bits).
 - **SaltBytes** *(field)* - Salt length in bytes (16 = 128 bits, well above the 8-byte minimum).
 - **Hash** *(method)* - Hash a password. Returns a self-describing string of the form pbkdf2$iterations$salt-b64$hash-b64.
+- **NeedsRehash** *(method)* - Whether a stored hash uses fewer rounds than (or is unreadable) and should be replaced after the next successful verification, while the plaintext is in hand.
 - **Verify** *(method)* - Verify a password against a stored hash. Returns true on match, false on mismatch or any parse error. Uses a constant-time comparison to defend against timing attacks.
+- **VerifyAgainstDummy** *(method)* - Spend the same time a real verification would, and return false. Used on every path where there is no hash to check - unknown address, disabled mailbox - so the response time does not reveal which addresses exist.

@@ -42,7 +42,11 @@ public static partial class HtmlSanitizer
     [GeneratedRegex(@"<!--.*?-->", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex CommentRegex();
 
-    [GeneratedRegex(@"<\s*(/?)\s*([a-zA-Z][a-zA-Z0-9:-]*)((?:\s+[^\s=>/]+(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?)*)\s*(/?)\s*>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    // Parsed the way browsers parse: "<" must be followed immediately by
+    // a letter (or "/" and a letter) to start a tag - "a < b" is text, not
+    // markup. Attributes may be separated by whitespace or "/": browsers
+    // read <script/src=x> as a script tag with a src attribute.
+    [GeneratedRegex(@"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[\s/]+[^\s=>/]+(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?)*)[\s/]*?(/?)\s*>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex TagRegex();
 
     [GeneratedRegex(@"([^\s=]+)(?:\s*=\s*(?:""([^""]*)""|'([^']*)'|([^\s>]+)))?", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
@@ -71,7 +75,7 @@ public static partial class HtmlSanitizer
             // Text between tags.
             if (dropUntil is null)
             {
-                output.Append(withoutComments, pos, m.Index - pos);
+                AppendText(output, withoutComments, pos, m.Index - pos);
             }
             pos = m.Index + m.Length;
 
@@ -123,7 +127,7 @@ public static partial class HtmlSanitizer
 
         if (dropUntil is null)
         {
-            output.Append(withoutComments, pos, withoutComments.Length - pos);
+            AppendText(output, withoutComments, pos, withoutComments.Length - pos);
         }
         return output.ToString();
     }
@@ -159,9 +163,13 @@ public static partial class HtmlSanitizer
                 }
                 value = trimmed;
             }
-            else if (lower == "style" && DangerousCssRegex().IsMatch(value))
+            else if (lower == "style")
             {
-                continue;
+                value = SanitizeStyle(value);
+                if (value.Length == 0)
+                {
+                    continue;
+                }
             }
 
             output.Append(' ').Append(lower).Append("=\"").Append(Escape(value)).Append('"');
@@ -200,6 +208,115 @@ public static partial class HtmlSanitizer
         url.StartsWith("http:", StringComparison.OrdinalIgnoreCase) ||
         url.StartsWith("https:", StringComparison.OrdinalIgnoreCase) ||
         url.StartsWith("//", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Text that sat between tags. Angle brackets are escaped so a fragment
+    /// the tag pattern did not recognise can never be interpreted as markup;
+    /// character references (<c>&amp;amp;</c> and so on) pass through intact.
+    /// </summary>
+    private static void AppendText(StringBuilder output, string source, int start, int length)
+    {
+        for (int i = start; i < start + length; i++)
+        {
+            char c = source[i];
+            if (c == '<')
+            {
+                output.Append("&lt;");
+            }
+            else if (c == '>')
+            {
+                output.Append("&gt;");
+            }
+            else
+            {
+                output.Append(c);
+            }
+        }
+    }
+
+    private static readonly HashSet<string> AllowedCssProperties = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "color", "background-color", "font-family", "font-size", "font-weight", "font-style", "text-align",
+        "text-decoration", "line-height", "letter-spacing", "margin", "margin-top", "margin-right", "margin-bottom",
+        "margin-left", "padding", "padding-top", "padding-right", "padding-bottom", "padding-left", "border",
+        "border-top", "border-right", "border-bottom", "border-left", "border-color", "border-width", "border-style",
+        "border-collapse", "border-spacing", "border-radius", "width", "max-width", "min-width", "height", "max-height",
+        "min-height", "vertical-align", "white-space", "word-break", "overflow-wrap", "display", "list-style-type",
+        "text-transform", "text-indent",
+    };
+
+    private static readonly string[] AllowedCssFunctions = { "rgb(", "rgba(", "hsl(", "hsla(" };
+
+    /// <summary>
+    /// Keep only style declarations whose property is on an allowlist and
+    /// whose value cannot fetch anything or hide an escape. A backslash is
+    /// refused outright - CSS escapes are how <c>=rl(</c> becomes
+    /// <c>url(</c> after this check - as are comments, <c>@</c> rules and any
+    /// function other than colour notation. Returns the rebuilt declarations,
+    /// or an empty string when nothing survives.
+    /// </summary>
+    /// <param name="style">The style attribute's value.</param>
+    public static string SanitizeStyle(string style)
+    {
+        ArgumentNullException.ThrowIfNull(style);
+        if (style.Contains('\\', StringComparison.Ordinal) || style.Contains("/*", StringComparison.Ordinal) ||
+            style.Contains('@', StringComparison.Ordinal) || DangerousCssRegex().IsMatch(style))
+        {
+            return string.Empty;
+        }
+        var kept = new StringBuilder(style.Length);
+        foreach (string declaration in style.Split(';'))
+        {
+            int colon = declaration.IndexOf(':', StringComparison.Ordinal);
+            if (colon <= 0)
+            {
+                continue;
+            }
+            string property = declaration.Substring(0, colon).Trim();
+            string value = declaration.Substring(colon + 1).Trim();
+            if (value.Length == 0 || !AllowedCssProperties.Contains(property) || !IsSafeCssValue(value))
+            {
+                continue;
+            }
+            if (kept.Length > 0)
+            {
+                kept.Append(';');
+            }
+            kept.Append(property.ToLowerInvariant()).Append(':').Append(value);
+        }
+        return kept.ToString();
+    }
+
+    private static bool IsSafeCssValue(string value)
+    {
+        foreach (char c in value)
+        {
+            if (char.IsControl(c) || c == '<' || c == '>' || c == '"' || c == '\'' || c == '{' || c == '}')
+            {
+                return false;
+            }
+        }
+        int open = value.IndexOf('(', StringComparison.Ordinal);
+        while (open >= 0)
+        {
+            bool allowed = false;
+            foreach (string fn in AllowedCssFunctions)
+            {
+                int start = open + 1 - fn.Length;
+                if (start >= 0 && string.Compare(value, start, fn, 0, fn.Length, StringComparison.OrdinalIgnoreCase) == 0)
+                {
+                    allowed = true;
+                    break;
+                }
+            }
+            if (!allowed)
+            {
+                return false;
+            }
+            open = value.IndexOf('(', open + 1);
+        }
+        return true;
+    }
 
     /// <summary>HTML-escape text for insertion into an attribute or element.</summary>
     /// <param name="text">Text to escape.</param>
