@@ -56,16 +56,41 @@ public class Rfc8301Tests
         Assert.Contains("expired", d.Explanation, System.StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// A published 512-bit key (fixed, not generated: macOS cannot create
+    /// RSA keys below 1024 bits at all, and an attacker publishes such a key
+    /// in DNS rather than making one on our server). Generated with
+    /// openssl genrsa 512.
+    /// </summary>
+    private const string Weak512BitPublicKey =
+        "MFwwDQYJKoZIhvcNAQEBBQADSwAwSAJBALO/MltJdHWpCelwxGgrla5sFBpUWFTWKXhMjMqwX+XIHGYQX2wqKZfM8/4knEwoaNVrkLbvUCsUKzwqBTkX7T8CAwEAAQ==";
+
     [Fact]
     public void AKeyShorterThan1024Bits_IsNotAccepted()
     {
-        using RSA rsa = RSA.Create(512);
         byte[] data = Encoding.ASCII.GetBytes("signed bytes");
-        byte[] sig = rsa.SignData(data, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        byte[] anySignature = new byte[64];
         DkimDetail d = DkimVerifier.CheckSignature(
-            System.Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo()), data, sig, HashAlgorithmName.SHA256, "ex.test", "default", "rsa-sha256");
+            Weak512BitPublicKey, data, anySignature, HashAlgorithmName.SHA256, "ex.test", "default", "rsa-sha256");
+
+        // Refused on every platform: by Anjal's RFC 8301 size check where the
+        // platform can load the key, and by the import itself where it cannot
+        // (macOS). Never a pass or an ordinary signature failure.
         Assert.Equal(DkimResult.PermError, d.Result);
-        Assert.Contains("512 bits", d.Explanation, System.StringComparison.Ordinal);
+        using RSA probe = RSA.Create();
+        bool loadable = true;
+        try
+        {
+            probe.ImportSubjectPublicKeyInfo(System.Convert.FromBase64String(Weak512BitPublicKey), out _);
+        }
+        catch (CryptographicException)
+        {
+            loadable = false;
+        }
+        if (loadable)
+        {
+            Assert.Contains("512 bits", d.Explanation, System.StringComparison.Ordinal);
+        }
     }
 
     [Fact]
