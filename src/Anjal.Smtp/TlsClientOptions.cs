@@ -22,6 +22,13 @@ public sealed class TlsClientOptions
     public bool ValidateCertificate { get; init; } = true;
 
     /// <summary>
+    /// Revocation checking when a certificate is validated (Required mode and
+    /// relays). Default <see cref="System.Security.Cryptography.X509Certificates.X509RevocationMode.Online"/>.
+    /// </summary>
+    public System.Security.Cryptography.X509Certificates.X509RevocationMode Revocation { get; init; } =
+        System.Security.Cryptography.X509Certificates.X509RevocationMode.Online;
+
+    /// <summary>
     /// A function that returns the TLS mode for a given destination
     /// (domain for direct, hostname for relay). May return null to use
     /// <see cref="DefaultMode"/>. Typically backed by the store.

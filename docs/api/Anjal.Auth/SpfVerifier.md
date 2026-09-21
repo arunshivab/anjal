@@ -7,6 +7,7 @@ Verifies SPF records per RFC 7208. Supports the mechanisms all, ip4, ip6, a, mx,
 ## Members
 
 - **MaxLookups** *(field)* - Maximum total DNS lookups during a single check (RFC 7208 §4.6.4).
+- **MaxVoidLookups** *(field)* - Lookups returning no answer allowed per evaluation (RFC 7208 section 4.6.4).
 - **#ctor** *(method)* - Construct.
 - **CheckAsync** *(method)* - Run an SPF check. The is the IP that connected to Anjal; is from the SMTP MAIL FROM (RFC 7208 calls this the "MAIL FROM identity"); if MAIL FROM is empty (bounce), use the HELO identity instead.
 - **EvaluateDomainAsync** *(method)* - Recursive evaluation for include/redirect chains. Each include counts against the global lookup limit tracked on .

@@ -17,11 +17,26 @@ namespace Anjal.Server;
 ///   ANJAL_RELAY_PORT        - upstream port for relay mode, default 587.
 ///   ANJAL_API_PORT          - HTTP API port. If unset or 0, the API is disabled.
 ///   ANJAL_API_TOKEN         - bearer token clients must present.
-///   ANJAL_API_BIND          - HTTP API bind address. Defaults to ANJAL_BIND.
+///   ANJAL_API_BIND          - HTTP API bind address. Defaults to 127.0.0.1 (never ANJAL_BIND).
+///   ANJAL_API_ALLOW_NO_AUTH - "true" allows the API to run without ANJAL_API_TOKEN (development only).
+///   ANJAL_API_ALLOW_PUBLIC  - "true" allows a non-loopback ANJAL_API_BIND (only behind a TLS proxy).
+///   ANJAL_KEK               - base64 of 32 random bytes; seals DKIM private keys at rest (AES-256-GCM).
+///   ANJAL_ALLOW_PLAINTEXT_KEYS - "true" lets the API store DKIM keys without ANJAL_KEK (development only).
+///   ANJAL_WEBHOOK_ALLOW_HTTP    - "true" allows plain-http webhook URLs (default https only).
+///   ANJAL_WEBHOOK_ALLOW_PRIVATE - "true" allows webhooks to loopback/private addresses (default public only).
+///   ANJAL_SUBMISSION_TLS_PORT         - Implicit-TLS submission port, normally 465 (RFC 8314). 0 disables.
+///   ANJAL_SMTP_IDLE_TIMEOUT_SECONDS   - Close a session idle this long (default 120).
+///   ANJAL_SMTP_MAX_SESSION_MINUTES    - Hard limit on one session (default 15).
+///   ANJAL_SMTP_MAX_CONNECTIONS        - Concurrent sessions per listener (default 200).
+///   ANJAL_SMTP_MAX_CONNECTIONS_PER_IP - Concurrent sessions per client address (default 10).
+///   ANJAL_SMTP_AUTH_FAILURES_PER_IP   - Failed AUTH per address per 15 min on 587 (default 10).
 ///   ANJAL_TLS_CERT_PATH     - path to fullchain.pem (with private key, or use ANJAL_TLS_KEY_PATH).
 ///   ANJAL_TLS_KEY_PATH      - path to privkey.pem if not embedded in fullchain.
 ///   ANJAL_TLS_REQUIRE       - if "true", server refuses MAIL FROM until STARTTLS. Default false.
 ///   ANJAL_TLS_VALIDATE_PEER - if "false", outbound TLS skips cert validation (testing only). Default true.
+///                             Validation applies to domains whose TLS policy is "required" and to relays;
+///                             opportunistic TLS encrypts without validating (RFC 7435).
+///   ANJAL_TLS_REVOCATION    - "online" (default) or "nocheck": revocation checking when validating.
 ///   ANJAL_TLS_DEFAULT_MODE  - default outbound TLS mode if no per-domain policy:
 ///                             "opportunistic" (default), "required", or "disabled".
 ///   ANJAL_MAILDIR_ROOT      - root directory for tenant Maildirs. Default
@@ -72,12 +87,35 @@ public static class Program
             return 1;
         }
 
+        // DKIM private keys are sealed at rest under ANJAL_KEK. A malformed
+        // KEK stops startup; a missing one is allowed (keys then stay in
+        // plaintext) but new keys are refused by the API unless explicitly
+        // permitted - see ANJAL_ALLOW_PLAINTEXT_KEYS.
+        Anjal.Store.SecretProtector? secrets;
+        try
+        {
+            secrets = Anjal.Store.SecretProtector.FromEnvironment();
+        }
+        catch (System.InvalidOperationException ex)
+        {
+            System.Console.Error.WriteLine(ex.Message);
+            return 1;
+        }
+        if (secrets is null && pg is not null)
+        {
+            Log("WARNING: ANJAL_KEK is not set - DKIM private keys are stored unencrypted. Generate one with: openssl rand -base64 32");
+        }
+
         Anjal.Store.IMessageStore store = pg is null
             ? new Anjal.Store.InMemoryMessageStore()
-            : new Anjal.Store.PostgresMessageStore(pg);
+            : new Anjal.Store.PostgresMessageStore(pg) { Secrets = secrets };
 
         var routing = new Anjal.Routing.StoreBackedRoutingTable(store);
-        using var http = new System.Net.Http.HttpClient { Timeout = System.TimeSpan.FromSeconds(15) };
+        // Webhooks go only where the target policy allows: https to public
+        // addresses by default, checked on the address actually dialled, and
+        // never following a redirect.
+        Anjal.Routing.WebhookTargetPolicy webhookPolicy = Anjal.Routing.WebhookTargetPolicy.FromEnvironment();
+        using var http = webhookPolicy.CreateClient(System.TimeSpan.FromSeconds(15));
         var dispatcher = new Anjal.Routing.HttpWebhookDispatcher(http);
 
         void Log(string line) => System.Console.WriteLine($"[{System.DateTime.UtcNow:HH:mm:ss}] {line}");
@@ -91,7 +129,10 @@ public static class Program
 
         // Fan out: mailbox sink first, then webhook routing. An address may
         // be a mailbox, a webhook target, or both.
-        var routingSink = new RoutingMessageSink(store, routing, dispatcher, Log);
+        // Webhook notifications are queued durably and delivered by this
+        // worker; the sink wakes it the moment a job is stored.
+        using var webhookWorker = new WebhookWorker(store, dispatcher, Log);
+        var routingSink = new RoutingMessageSink(store, routing, dispatcher, Log, webhookWorker.Wake);
         var fanOut = new Anjal.Smtp.CompositeMessageSink(mailboxSink, routingSink);
 
         // Anti-spam (v0.11.0): score unauthenticated mail before fan-out.
@@ -127,7 +168,13 @@ public static class Program
             RequireTlsForMail = requireTls && (tlsCert is not null || certWatcher is not null),
             Role = Anjal.Smtp.SmtpServerRole.Mta,
             Policy = mtaPolicy,
+            CommandTimeout = System.TimeSpan.FromSeconds(ParseIntEnv("ANJAL_SMTP_IDLE_TIMEOUT_SECONDS", 120)),
+            MaxSessionDuration = System.TimeSpan.FromMinutes(ParseIntEnv("ANJAL_SMTP_MAX_SESSION_MINUTES", 15)),
+            MaxConcurrentSessions = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS", 200),
+            MaxSessionsPerAddress = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS_PER_IP", 10),
         };
+        Log($"SMTP limits: idle {smtpOptions.CommandTimeout.TotalSeconds:0}s, session {smtpOptions.MaxSessionDuration.TotalMinutes:0} min, " +
+            $"{smtpOptions.MaxConcurrentSessions} connections ({smtpOptions.MaxSessionsPerAddress} per address).");
 
         using var cts = new System.Threading.CancellationTokenSource();
         System.Console.CancelKeyPress += (_, e) =>
@@ -166,6 +213,7 @@ public static class Program
         // SMTP authentication and the server-supplied SmtpAuthenticator.
         // Disabled when ANJAL_SUBMISSION_PORT is unset or 0.
         Anjal.Smtp.SmtpServer? submissionServer = null;
+        Anjal.Smtp.SmtpServer? implicitTlsServer = null;
         int submissionPort = ParsePortOrZero(System.Environment.GetEnvironmentVariable("ANJAL_SUBMISSION_PORT"));
         if (submissionPort > 0)
         {
@@ -185,11 +233,55 @@ public static class Program
                 Role = Anjal.Smtp.SmtpServerRole.Submission,
                 AllowPlaintextAuth = allowPlaintextAuth,
                 Policy = submissionPolicy,
+                CommandTimeout = smtpOptions.CommandTimeout,
+                MaxSessionDuration = smtpOptions.MaxSessionDuration,
+                MaxConcurrentSessions = smtpOptions.MaxConcurrentSessions,
+                MaxSessionsPerAddress = smtpOptions.MaxSessionsPerAddress,
+                MaxAuthFailuresPerSession = 3,
+                Log = Log,
+
+                // Across sessions: ten failed logins from one address in 15
+                // minutes and that address is refused before any password
+                // is checked.
+                AuthFailures = new Anjal.Smtp.AuthFailureLimiter(
+                    ParseIntEnv("ANJAL_SMTP_AUTH_FAILURES_PER_IP", 10),
+                    System.TimeSpan.FromMinutes(15)),
             };
 
             submissionServer = new Anjal.Smtp.SmtpServer(submissionOptions, sink,
                 authenticator: null, enforceReject: false,
                 smtpAuthenticator: submissionAuth, localDomains: null);
+
+            // Port 465, implicit TLS (RFC 8314): same authentication, limits
+            // and policy as 587, but TLS from the first byte.
+            int implicitPort = ParsePortOrZero(System.Environment.GetEnvironmentVariable("ANJAL_SUBMISSION_TLS_PORT"));
+            if (implicitPort > 0)
+            {
+                var implicitOptions = new Anjal.Smtp.SmtpServerOptions
+                {
+                    BindAddress = submissionOptions.BindAddress,
+                    Port = implicitPort,
+                    AdvertisedHostName = hostname,
+                    TlsCertificate = tlsCert,
+                    TlsCertificateSource = certSource,
+                    RequireTlsForMail = false,
+                    Role = Anjal.Smtp.SmtpServerRole.Submission,
+                    AllowPlaintextAuth = false,
+                    ImplicitTls = true,
+                    Policy = submissionPolicy,
+                    CommandTimeout = submissionOptions.CommandTimeout,
+                    MaxSessionDuration = submissionOptions.MaxSessionDuration,
+                    MaxConcurrentSessions = submissionOptions.MaxConcurrentSessions,
+                    MaxSessionsPerAddress = submissionOptions.MaxSessionsPerAddress,
+                    MaxAuthFailuresPerSession = submissionOptions.MaxAuthFailuresPerSession,
+                    AuthFailures = submissionOptions.AuthFailures,
+                    Log = Log,
+                };
+                implicitTlsServer = new Anjal.Smtp.SmtpServer(implicitOptions, sink,
+                    authenticator: null, enforceReject: false,
+                    smtpAuthenticator: submissionAuth, localDomains: null);
+                Log($"Anjal SMTP (Submission, implicit TLS, port {implicitPort}) listening on {bind}");
+            }
 
             Log($"Anjal SMTP (Submission, port {submissionPort}) listening on {bind} as {hostname}");
             if (allowPlaintextAuth)
@@ -215,7 +307,28 @@ public static class Program
             var worker = new OutboundWorker(
                 store,
                 mailSender,
-                new OutboundWorkerOptions(),
+                new OutboundWorkerOptions
+                {
+                    // A message that fails for good gets a bounce notice in
+                    // the sender's own INBOX; nothing is sent outbound.
+                    OnFinalFailure = async (message, reason, permanent, token) =>
+                    {
+                        if (message.EnvelopeFrom.Length == 0)
+                        {
+                            return; // never bounce a bounce
+                        }
+                        byte[] notice = BounceNotice.Build(hostname, message, reason, permanent, System.DateTimeOffset.UtcNow);
+                        await mailboxSink.DeliverAsync(new Anjal.Smtp.DeliveryContext
+                        {
+                            EnvelopeFrom = string.Empty,
+                            EnvelopeTo = new[] { message.EnvelopeFrom },
+                            RawBytes = notice,
+                            RemoteAddress = "127.0.0.1",
+                            ClientHostName = hostname,
+                            AuthenticatedUser = "anjal-bounce",
+                        }, token).ConfigureAwait(false);
+                    },
+                },
                 log: Log,
                 dkimResolver: dkimResolver,
                 dkimSigner: dkimSigner,
@@ -239,8 +352,37 @@ public static class Program
             int.TryParse(apiPortStr, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int apiPort) &&
             apiPort > 0)
         {
-            string apiBind = System.Environment.GetEnvironmentVariable("ANJAL_API_BIND") ?? bind;
+            // The admin API manages every tenant, mailbox and DKIM key. It
+            // listens on loopback unless told otherwise explicitly - never
+            // inherited from ANJAL_BIND, which is 0.0.0.0 for SMTP.
+            string apiBind = System.Environment.GetEnvironmentVariable("ANJAL_API_BIND") ?? "127.0.0.1";
+
+            // The API speaks plain HTTP by design and is reached through an SSH
+            // tunnel. Binding it to anything but loopback would put the bearer
+            // token on the wire in clear, so it needs a deliberate opt-in.
+            bool publicApi = !System.Net.IPAddress.IsLoopback(System.Net.IPAddress.Parse(apiBind));
+            if (publicApi && !string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_API_ALLOW_PUBLIC"), "true", System.StringComparison.OrdinalIgnoreCase))
+            {
+                Log($"ANJAL_API_BIND={apiBind} is not a loopback address; refusing to start. The admin API is plain HTTP: " +
+                    "reach it over SSH (ssh -L 8025:127.0.0.1:8025), or set ANJAL_API_ALLOW_PUBLIC=true behind a TLS proxy.");
+                return 1;
+            }
             string token = System.Environment.GetEnvironmentVariable("ANJAL_API_TOKEN") ?? string.Empty;
+
+            // Fail closed: an API with no token would hand tenant, mailbox and
+            // DKIM management to anyone who can reach the port. Running
+            // without one needs an explicit, deliberately awkward opt-in.
+            bool allowNoAuth = string.Equals(
+                System.Environment.GetEnvironmentVariable("ANJAL_API_ALLOW_NO_AUTH"), "true", System.StringComparison.OrdinalIgnoreCase);
+            if (token.Length == 0 && !allowNoAuth)
+            {
+                Log("ANJAL_API_TOKEN is not set; refusing to start. Set a token, or ANJAL_API_ALLOW_NO_AUTH=true for local development only.");
+                return 1;
+            }
+            if (token.Length == 0)
+            {
+                Log("WARNING: the API is running WITHOUT authentication (ANJAL_API_ALLOW_NO_AUTH=true).");
+            }
 
             apiServer = new Anjal.Api.ApiServer(new Anjal.Api.ApiOptions
             {
@@ -252,6 +394,7 @@ public static class Program
             }, store, Log, mailboxStore, maildir);
             Anjal.Smtp.Counters.RegisterGauge("anjal_outbound_pending", "Outbound messages waiting to be sent.", () => store.CountOutboundAsync(Anjal.Store.OutboundStatus.Pending).GetAwaiter().GetResult());
             Anjal.Smtp.Counters.RegisterGauge("anjal_outbound_sending", "Outbound messages currently leased by the worker.", () => store.CountOutboundAsync(Anjal.Store.OutboundStatus.Sending).GetAwaiter().GetResult());
+            Anjal.Smtp.Counters.RegisterGauge("anjal_webhook_pending", "Webhook notifications waiting to be delivered.", () => store.CountWebhookJobsAsync(Anjal.Store.WebhookJobStatus.Pending).GetAwaiter().GetResult());
             Anjal.Smtp.Counters.Describe("anjal_smtp_messages_accepted_total", "Messages accepted at DATA (250).");
             Anjal.Smtp.Counters.Describe("anjal_smtp_messages_deferred_total", "Messages deferred at DATA (451).");
             Anjal.Smtp.Counters.Describe("anjal_smtp_messages_rejected_total", "Messages rejected at DATA (550).");
@@ -292,16 +435,20 @@ public static class Program
 
         try
         {
-            System.Threading.Tasks.Task mtaTask = server.StartAsync(cts.Token);
-            System.Threading.Tasks.Task? submissionTask = submissionServer?.StartAsync(cts.Token);
-            if (submissionTask is not null)
+            var listeners = new System.Collections.Generic.List<System.Threading.Tasks.Task>
             {
-                await System.Threading.Tasks.Task.WhenAll(mtaTask, submissionTask).ConfigureAwait(false);
-            }
-            else
+                server.StartAsync(cts.Token),
+                webhookWorker.RunAsync(cts.Token),
+            };
+            if (submissionServer is not null)
             {
-                await mtaTask.ConfigureAwait(false);
+                listeners.Add(submissionServer.StartAsync(cts.Token));
             }
+            if (implicitTlsServer is not null)
+            {
+                listeners.Add(implicitTlsServer.StartAsync(cts.Token));
+            }
+            await System.Threading.Tasks.Task.WhenAll(listeners).ConfigureAwait(false);
         }
         catch (System.OperationCanceledException)
         {
@@ -310,6 +457,7 @@ public static class Program
         finally
         {
             submissionServer?.Dispose();
+            implicitTlsServer?.Dispose();
         }
 
         if (workerTask is not null)
@@ -373,10 +521,19 @@ public static class Program
 
         bool validate = !string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_TLS_VALIDATE_PEER"), "false", System.StringComparison.OrdinalIgnoreCase);
 
+        // ANJAL_TLS_REVOCATION: "online" (default) checks CRL/OCSP when a
+        // certificate is validated, soft-failing only when status is
+        // unobtainable; "nocheck" skips revocation.
+        System.Security.Cryptography.X509Certificates.X509RevocationMode revocation =
+            string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_TLS_REVOCATION"), "nocheck", System.StringComparison.OrdinalIgnoreCase)
+                ? System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck
+                : System.Security.Cryptography.X509Certificates.X509RevocationMode.Online;
+
         return new Anjal.Smtp.TlsClientOptions
         {
             DefaultMode = defaultMode,
             ValidateCertificate = validate,
+            Revocation = revocation,
             PolicyLookup = async (domain, ct) =>
             {
                 Anjal.Store.OutboundTlsPolicy? p = await store.GetOutboundTlsPolicyAsync(domain, ct).ConfigureAwait(false);

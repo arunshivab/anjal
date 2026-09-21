@@ -236,8 +236,20 @@ else
         }
     }
 
+    /// <summary>
+    /// The frame's own content security policy. It allows nothing to load
+    /// except inline images, until the reader chooses Load images, and even
+    /// then only images. Scripts are already impossible (sandbox=""); this
+    /// closes the remaining channels - stylesheets, fonts, media - that could
+    /// otherwise report an open back to a sender.
+    /// </summary>
+    private string FrameCsp =>
+        "default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:" +
+        (Images == "1" ? " https: http:" : string.Empty);
+
     private string Srcdoc =>
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">" +
+        "<meta http-equiv=\"Content-Security-Policy\" content=\"" + FrameCsp + "\">" +
         "<style>body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;" +
         "margin:18px;color:#1a1a1a;background:#fff;word-wrap:break-word}img{max-width:100%}" +
         "pre{white-space:pre-wrap;font-family:inherit;margin:0}a{color:#0b5d8f}</style></head><body>" +

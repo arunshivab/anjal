@@ -93,7 +93,11 @@ public sealed class ServerSmtpAuthenticator : Anjal.Smtp.ISmtpAuthenticator
             Anjal.Store.SmtpUserRow? row = await this.store.GetSmtpUserAsync(username, ct).ConfigureAwait(false);
             if (row is not null)
             {
-                if (!row.Enabled || !Anjal.Smtp.Pbkdf2Hasher.Verify(password, row.PasswordPbkdf2))
+                if (!row.Enabled)
+                {
+                    return DummyMiss(password);
+                }
+                if (!Anjal.Smtp.Pbkdf2Hasher.Verify(password, row.PasswordPbkdf2))
                 {
                     // Username exists as a service account - do not fall through
                     // to mailboxes, so one name cannot be probed against two hashes.
@@ -116,16 +120,21 @@ public sealed class ServerSmtpAuthenticator : Anjal.Smtp.ISmtpAuthenticator
             Anjal.Store.MailboxRow? mailbox = await this.mailboxStore.GetMailboxAsync(local, domain, ct).ConfigureAwait(false);
             if (mailbox is null || !mailbox.Enabled || mailbox.PasswordPbkdf2.Length == 0)
             {
-                return null;
+                return DummyMiss(password);
             }
             Anjal.Store.TenantRow? tenant = await this.mailboxStore.GetTenantByIdAsync(mailbox.TenantId, ct).ConfigureAwait(false);
             if (tenant is null || !tenant.Enabled)
             {
-                return null;
+                return DummyMiss(password);
             }
             if (!Anjal.Smtp.Pbkdf2Hasher.Verify(password, mailbox.PasswordPbkdf2))
             {
                 return null;
+            }
+            if (Anjal.Smtp.Pbkdf2Hasher.NeedsRehash(mailbox.PasswordPbkdf2))
+            {
+                mailbox.PasswordPbkdf2 = Anjal.Smtp.Pbkdf2Hasher.Hash(password);
+                await this.mailboxStore.UpsertMailboxAsync(mailbox, ct).ConfigureAwait(false);
             }
             return new Anjal.Smtp.AuthenticatedUser
             {
@@ -134,6 +143,14 @@ public sealed class ServerSmtpAuthenticator : Anjal.Smtp.ISmtpAuthenticator
             };
         }
 
+        // No such user anywhere: spend the time a real check would take.
+        return DummyMiss(password);
+    }
+
+    /// <summary>Equalise timing on a path with no hash to check, then refuse.</summary>
+    private static Anjal.Smtp.AuthenticatedUser? DummyMiss(string password)
+    {
+        Anjal.Smtp.Pbkdf2Hasher.VerifyAgainstDummy(password);
         return null;
     }
 }

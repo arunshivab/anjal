@@ -477,31 +477,28 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public async Task<int> MarkFolderReadAsync(Guid mailboxId, Guid folderId, CancellationToken ct = default)
     {
+        // One pass through the folder by offset. Marking a message seen does
+        // not change its position, and the offset only ever grows, so this
+        // ends even if a flag fails to persist - unlike re-reading "the first
+        // unread page" until it comes back empty.
+        const int batchSize = 200;
         int changed = 0;
+        int offset = 0;
         while (true)
         {
-            IReadOnlyList<MessageRow> batch = await this.store.ListMessagesAsync(mailboxId, folderId, 200, 0, ct).ConfigureAwait(false);
-            var unread = new List<MessageRow>();
+            IReadOnlyList<MessageRow> batch = await this.store.ListMessagesAsync(mailboxId, folderId, batchSize, offset, ct).ConfigureAwait(false);
             foreach (MessageRow m in batch)
             {
-                if (!m.Seen)
+                if (!m.Seen && await this.SetFlagsAsync(mailboxId, m.Id, true, m.Flagged, m.Answered, ct).ConfigureAwait(false) is not null)
                 {
-                    unread.Add(m);
+                    changed++;
                 }
             }
-            if (unread.Count == 0)
+            if (batch.Count < batchSize)
             {
                 return changed;
             }
-            foreach (MessageRow m in unread)
-            {
-                await this.SetFlagsAsync(mailboxId, m.Id, true, m.Flagged, m.Answered, ct).ConfigureAwait(false);
-                changed++;
-            }
-            if (batch.Count < 200)
-            {
-                return changed;
-            }
+            offset += batch.Count;
         }
     }
 
@@ -520,6 +517,13 @@ public sealed partial class MailboxService
         if (displayName.Length > 100)
         {
             return "A display name can be at most 100 characters.";
+        }
+        foreach (char c in displayName)
+        {
+            if (char.IsControl(c))
+            {
+                return "A display name cannot contain line breaks or control characters.";
+            }
         }
         (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
         if (context is null)

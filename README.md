@@ -10,7 +10,31 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.15.0** - everything below plus **categories and the dashboard**.
+**v0.16.0** - **security hardening** from two independent audits, every
+finding fixed and covered by a regression test. The SMTP read path is
+rebuilt: buffered, with an idle timeout, a hard session lifetime, global
+and per-address connection caps, overlong-line and oversize-DATA draining,
+RFC 1870 SIZE enforcement at MAIL FROM, and refusal of any lone "." line
+wrapped in non-CRLF endings (SMTP smuggling). MIME nesting and part counts
+are bounded, so a crafted message can no longer crash the process. Header
+values are validated at the type boundary, closing a header-injection path
+that DKIM would have signed. AUTH and webmail sign-in are throttled;
+PBKDF2 is at 600,000 rounds with upgrade-on-login and constant-time
+misses. Outbound leases expire and are reclaimed; failed outbound mail
+produces an RFC 3464 bounce in the sender's INBOX; webhooks move to a
+durable, retried queue. DKIM verification follows RFC 8301; SPF enforces
+the void-lookup limit; DNS replies must come from the server asked. DKIM
+private keys are sealed at rest with AES-256-GCM under `ANJAL_KEK`; an
+append-only audit trail (enforced by a database trigger) records every
+admin change and webmail sign-in. The webmail sends a strict content
+security policy and the usual security headers, its sanitizer parses tags
+the way browsers do, webhooks are SSRF-guarded on the address actually
+dialled, and the admin API refuses to run without a token or on a public
+address. Port 465 (implicit TLS) is available. Opportunistic outbound TLS
+no longer fails delivery on self-signed MX certificates (RFC 7435); domains
+that require TLS are validated with revocation checking.
+
+Previously: **v0.15.0** - everything below plus **categories and the dashboard**.
 Categories exist at two levels: a tenant's defaults, shared by every
 mailbox and the only ones an institution can report across, and a
 mailbox's own additions, private to it. Eight colour slots are a

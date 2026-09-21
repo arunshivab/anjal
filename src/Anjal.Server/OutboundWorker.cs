@@ -211,6 +211,7 @@ public sealed class OutboundWorker
             case Anjal.Smtp.SendOutcome.PermanentFailure:
                 await this.store.MarkOutboundResultAsync(m.Id, Anjal.Store.OutboundStatus.Failed, now, result.Message, ct).ConfigureAwait(false);
                 this.log?.Invoke($"failed (permanent) {m.Id} -> {m.EnvelopeTo}: {result.Message}");
+                await this.NotifyFinalFailureAsync(m, result.Message, permanent: true, ct).ConfigureAwait(false);
                 break;
 
             case Anjal.Smtp.SendOutcome.TransientFailure:
@@ -223,6 +224,7 @@ public sealed class OutboundWorker
                     await this.store.MarkOutboundResultAsync(m.Id, Anjal.Store.OutboundStatus.Failed, now,
                         $"Give-up reached after {m.Attempts + 1} attempts. Last error: {result.Message}", ct).ConfigureAwait(false);
                     this.log?.Invoke($"failed (give-up) {m.Id} -> {m.EnvelopeTo}");
+                    await this.NotifyFinalFailureAsync(m, result.Message, permanent: false, ct).ConfigureAwait(false);
                 }
                 else
                 {
@@ -231,6 +233,25 @@ public sealed class OutboundWorker
                 }
                 break;
         }
+    }
+
+    /// <summary>Tell the sender, without letting a failure to tell them disturb the queue.</summary>
+    private async System.Threading.Tasks.Task NotifyFinalFailureAsync(Anjal.Store.OutboundMessage m, string reason, bool permanent, System.Threading.CancellationToken ct)
+    {
+        if (this.options.OnFinalFailure is null)
+        {
+            return;
+        }
+        try
+        {
+            await this.options.OnFinalFailure(m, reason, permanent, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // A notice that cannot be filed is logged; the message's status is already final.
+        catch (System.Exception ex)
+        {
+            this.log?.Invoke($"could not file bounce notice for {m.Id}: {ex.GetType().Name}: {ex.Message}");
+        }
+#pragma warning restore CA1031
     }
 
     /// <summary>
@@ -279,4 +300,12 @@ public sealed class OutboundWorkerOptions
 
     /// <summary>Maximum messages to lease per iteration.</summary>
     public int BatchSize { get; init; } = 10;
+
+    /// <summary>
+    /// Called once when a message has failed for good - refused permanently,
+    /// or retried until its give-up time. Used to file a bounce notice in the
+    /// sender's INBOX. Failures inside it are logged and do not affect the
+    /// queue.
+    /// </summary>
+    public System.Func<Anjal.Store.OutboundMessage, string, bool, System.Threading.CancellationToken, System.Threading.Tasks.Task>? OnFinalFailure { get; init; }
 }

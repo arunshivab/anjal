@@ -87,7 +87,8 @@ public sealed class RelayMailSender : IMailSender
                 }
                 if (mode != Anjal.Store.TlsMode.Disabled && offered)
                 {
-                    SmtpReply tlsReply = await session.StartTlsAsync(this.options.Host, this.options.Tls.ValidateCertificate, ct).ConfigureAwait(false);
+                    // A relay is a named, configured provider: always validated.
+                    SmtpReply tlsReply = await session.StartTlsAsync(this.options.Host, this.options.Tls.ValidateCertificate, this.options.Tls.Revocation, ct).ConfigureAwait(false);
                     if (tlsReply.Code != 220)
                     {
                         await session.QuitAsync(ct).ConfigureAwait(false);

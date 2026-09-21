@@ -296,6 +296,10 @@ RETURNING used_bytes;";
     public async Task<FolderRow> EnsureFolderAsync(System.Guid mailboxId, string name, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(name);
+        if (!FolderRow.IsValidName(name))
+        {
+            throw new System.ArgumentException($"'{name}' is not a valid folder name.", nameof(name));
+        }
 
         // ON CONFLICT DO UPDATE with a no-op assignment so RETURNING yields
         // the existing row on the second and later calls.

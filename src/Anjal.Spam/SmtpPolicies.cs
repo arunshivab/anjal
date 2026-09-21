@@ -14,6 +14,15 @@ public sealed class RateLimitOptions
 
     /// <summary>Messages (MAIL FROM) per authenticated user per hour. Default 100.</summary>
     public int MessagesPerHourPerUser { get; init; } = 100;
+
+    /// <summary>
+    /// Most keys any one table remembers. Past it, expired keys are swept at
+    /// once instead of waiting for the ten-minute sweep, and if that is not
+    /// enough the least recently active keys are forgotten. A flood of
+    /// distinct source addresses can then cost bounded memory, not the
+    /// process. Default 100,000.
+    /// </summary>
+    public int MaxEntries { get; init; } = 100_000;
 }
 
 /// <summary>
@@ -29,6 +38,9 @@ public sealed class RateLimiter : ISmtpPolicy
     private readonly ConcurrentDictionary<string, Window> connections = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Window> ipMessages = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Window> userMessages = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Keys currently held across the limiter's tables (for metrics and tests).</summary>
+    public int TrackedAddresses => this.connections.Count + this.ipMessages.Count + this.userMessages.Count;
     private long lastSweepTicks;
 
     /// <summary>Construct.</summary>
@@ -103,6 +115,10 @@ public sealed class RateLimiter : ISmtpPolicy
     private bool Hit(ConcurrentDictionary<string, Window> table, string key, TimeSpan span, int limit)
     {
         DateTimeOffset now = this.clock();
+        if (table.Count >= this.options.MaxEntries && !table.ContainsKey(key))
+        {
+            this.Shrink(table, now - span);
+        }
         Window w = table.GetOrAdd(key, _ => new Window());
         lock (w)
         {
@@ -133,6 +149,30 @@ public sealed class RateLimiter : ISmtpPolicy
         Sweep(this.userMessages, now - TimeSpan.FromHours(1));
     }
 
+    /// <summary>Sweep now; if still at capacity, drop the least recently active tenth.</summary>
+    private void Shrink(ConcurrentDictionary<string, Window> table, DateTimeOffset cutoff)
+    {
+        Sweep(table, cutoff);
+        if (table.Count < this.options.MaxEntries)
+        {
+            return;
+        }
+        var byActivity = new List<(DateTimeOffset Last, string Key)>(table.Count);
+        foreach (KeyValuePair<string, Window> kv in table)
+        {
+            lock (kv.Value)
+            {
+                byActivity.Add((kv.Value.Last, kv.Key));
+            }
+        }
+        byActivity.Sort((a, b) => a.Last.CompareTo(b.Last));
+        int drop = Math.Max(1, table.Count / 10);
+        for (int i = 0; i < drop && i < byActivity.Count; i++)
+        {
+            table.TryRemove(byActivity[i].Key, out _);
+        }
+    }
+
     private static void Sweep(ConcurrentDictionary<string, Window> table, DateTimeOffset cutoff)
     {
         foreach (KeyValuePair<string, Window> kv in table)
@@ -154,7 +194,13 @@ public sealed class RateLimiter : ISmtpPolicy
 
         public int Count => this.hits.Count;
 
-        public void Add(DateTimeOffset at) => this.hits.Enqueue(at);
+        public DateTimeOffset Last { get; private set; } = DateTimeOffset.MinValue;
+
+        public void Add(DateTimeOffset at)
+        {
+            this.hits.Enqueue(at);
+            this.Last = at;
+        }
 
         public void Prune(DateTimeOffset cutoff)
         {
@@ -177,6 +223,13 @@ public sealed class GreylistOptions
 
     /// <summary>How long a triplet that passed stays whitelisted after its last use. Default 36 hours.</summary>
     public TimeSpan PassedLifetime { get; init; } = TimeSpan.FromHours(36);
+
+    /// <summary>
+    /// Most triplets remembered. Past it the table is swept immediately and,
+    /// if still full, the least recently seen triplets are forgotten - which
+    /// only means those senders are greylisted once more. Default 200,000.
+    /// </summary>
+    public int MaxEntries { get; init; } = 200_000;
 }
 
 /// <summary>
@@ -234,6 +287,10 @@ public sealed class Greylist : ISmtpPolicy
 
         string key = NetworkKey(remoteAddress) + "|" + envelopeFrom.ToLowerInvariant() + "|" + recipient.ToLowerInvariant();
         DateTimeOffset now = this.clock();
+        if (this.entries.Count >= this.options.MaxEntries && !this.entries.ContainsKey(key))
+        {
+            this.Shrink(now);
+        }
         Entry e = this.entries.GetOrAdd(key, _ => new Entry { FirstSeen = now, LastSeen = now, Passed = false });
         lock (e)
         {
@@ -299,6 +356,35 @@ public sealed class Greylist : ISmtpPolicy
             return b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168);
         }
         return ip.IsIPv6LinkLocal || ip.IsIPv6UniqueLocal;
+    }
+
+    /// <summary>Forget expired triplets now; if still full, the least recently seen tenth.</summary>
+    private void Shrink(DateTimeOffset now)
+    {
+        var live = new List<(DateTimeOffset Last, string Key)>(this.entries.Count);
+        foreach (KeyValuePair<string, Entry> kv in this.entries)
+        {
+            TimeSpan idle = now - kv.Value.LastSeen;
+            bool expired = kv.Value.Passed ? idle > this.options.PassedLifetime : idle > this.options.PendingLifetime;
+            if (expired)
+            {
+                this.entries.TryRemove(kv.Key, out _);
+            }
+            else
+            {
+                live.Add((kv.Value.LastSeen, kv.Key));
+            }
+        }
+        if (this.entries.Count < this.options.MaxEntries)
+        {
+            return;
+        }
+        live.Sort((a, b) => a.Last.CompareTo(b.Last));
+        int drop = Math.Max(1, live.Count / 10);
+        for (int k = 0; k < drop && k < live.Count; k++)
+        {
+            this.entries.TryRemove(live[k].Key, out _);
+        }
     }
 
     private void SweepIfDue()

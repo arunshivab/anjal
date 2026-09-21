@@ -9,8 +9,8 @@ public sealed class RoutingMessageSink : Anjal.Smtp.IMessageSink
 {
     private readonly Anjal.Store.IMessageStore store;
     private readonly Anjal.Routing.IRoutingTable routing;
-    private readonly Anjal.Routing.IWebhookDispatcher dispatcher;
     private readonly System.Action<string>? log;
+    private readonly System.Action? onQueued;
 
     /// <summary>
     /// Construct the sink.
@@ -19,19 +19,23 @@ public sealed class RoutingMessageSink : Anjal.Smtp.IMessageSink
     /// <param name="routing">The routing table for recipient resolution.</param>
     /// <param name="dispatcher">The webhook dispatcher to notify subscribers.</param>
     /// <param name="log">Optional log sink. Called for each accepted/rejected message.</param>
+    /// <param name="onQueued">Called after each notification is queued, to wake the webhook worker.</param>
     public RoutingMessageSink(
         Anjal.Store.IMessageStore store,
         Anjal.Routing.IRoutingTable routing,
         Anjal.Routing.IWebhookDispatcher dispatcher,
-        System.Action<string>? log = null)
+        System.Action<string>? log = null,
+        System.Action? onQueued = null)
     {
+        // The dispatcher is kept in the signature for callers; delivery itself
+        // now happens in WebhookWorker, which owns its own dispatcher.
         System.ArgumentNullException.ThrowIfNull(store);
         System.ArgumentNullException.ThrowIfNull(routing);
         System.ArgumentNullException.ThrowIfNull(dispatcher);
         this.store = store;
         this.routing = routing;
-        this.dispatcher = dispatcher;
         this.log = log;
+        this.onQueued = onQueued;
     }
 
     /// <inheritdoc/>
@@ -92,38 +96,28 @@ public sealed class RoutingMessageSink : Anjal.Smtp.IMessageSink
             };
             stored = await this.store.SaveInboundMessageAsync(stored, ct).ConfigureAwait(false);
 
-            var payload = new Anjal.Routing.WebhookPayload
+            // Queue the notification durably and return. The SMTP client is
+            // answered as soon as the message and its job are stored; the
+            // worker delivers it (with retries) independently of this
+            // transaction, so a slow or failing receiver never holds a
+            // connection and never loses a message.
+            System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
+            await this.store.EnqueueWebhookJobAsync(new Anjal.Store.WebhookJob
             {
                 InboundMessageId = stored.Id,
                 Recipient = rcpt,
                 LocalPart = decision.Address.LocalPart,
                 Tag = decision.Address.Tag,
                 CorrelationKey = decision.Grant?.CorrelationKey ?? string.Empty,
-                EnvelopeFrom = ctx.EnvelopeFrom,
-                Subject = parsed.Subject,
-                MessageId = parsed.MessageId,
-                ReceivedAt = stored.ReceivedAt,
-                RawBytesBase64 = Anjal.Mime.Base64Codec.Encode(ctx.RawBytes),
                 AuthResultsJson = ctx.AuthResults is Anjal.Auth.AuthenticationResults ar
                     ? Anjal.Auth.AuthResultsJson.Serialize(ar)
                     : string.Empty,
-            };
+                NextAttemptAt = now,
+                GiveUpAt = now + WebhookWorker.GiveUpAfter,
+            }, ct).ConfigureAwait(false);
+            this.onQueued?.Invoke();
 
-            Anjal.Routing.WebhookDispatchResult dispatch = await this.dispatcher
-                .SendAsync(decision.Rule.WebhookUrl, decision.Rule.WebhookSecret, payload, ct)
-                .ConfigureAwait(false);
-
-            await this.store.SaveWebhookDeliveryAsync(
-                new Anjal.Store.WebhookDelivery
-                {
-                    InboundMessageId = stored.Id,
-                    Url = decision.Rule.WebhookUrl,
-                    StatusCode = dispatch.StatusCode,
-                    ErrorMessage = dispatch.ErrorMessage,
-                },
-                ct).ConfigureAwait(false);
-
-            this.log?.Invoke($"Delivered {rcpt} -> {decision.Rule.WebhookUrl} (HTTP {dispatch.StatusCode})");
+            this.log?.Invoke($"Accepted {rcpt}; webhook to {decision.Rule.WebhookUrl} queued");
             delivered++;
         }
 

@@ -16,3 +16,5 @@ Wraps an with conveniences for reading the body and writing JSON responses.
 - **AuthorizationHeader** *(property)* - The Authorization header value, or empty if not set.
 - **Method** *(property)* - HTTP method (GET, POST, etc.) in uppercase.
 - **Path** *(property)* - Absolute path of the URL (e.g. "/api/routing-rules").
+- **RemoteAddress** *(property)* - The client address, or empty when unknown.
+- **ResponseStatus** *(property)* - The status code of the response written so far (200 until set).

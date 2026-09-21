@@ -79,7 +79,8 @@ must be open in **both** or it is dead:
 | Inbound | Custom TCP | 25 | Any | every mail server on the internet delivers here |
 | Inbound | Custom TCP | 80 | Any | ACME HTTP-01 challenge, and the redirect to HTTPS |
 | Inbound | Custom TCP | 443 | Any | webmail |
-| Inbound | Custom TCP | 587 | Any | your own clients, authenticated |
+| Inbound | Custom TCP | 587 | Any | your own clients, authenticated (STARTTLS) |
+| Inbound | Custom TCP | 465 | Any | your own clients, authenticated (implicit TLS, RFC 8314) |
 | Outbound | ALL | - | Any | see the warning below |
 
 **Leave outbound permissive.** Anjal must reach port 25 on other mail
@@ -99,6 +100,7 @@ vm$ sudo firewall-cmd --add-port=25/tcp --permanent
 vm$ sudo firewall-cmd --add-port=80/tcp --permanent
 vm$ sudo firewall-cmd --add-port=443/tcp --permanent
 vm$ sudo firewall-cmd --add-port=587/tcp --permanent
+vm$ sudo firewall-cmd --add-port=465/tcp --permanent
 ```
 
 Outbound port 25 explicitly, per E2E's instructions (they confirmed it can
@@ -115,7 +117,7 @@ fail2ban protects SSH out of the box; leave the default jail on.
 **Check - and do this now, not after installing Anjal:**
 
 ```
-vm$ sudo firewall-cmd --list-ports          # the five ports above
+vm$ sudo firewall-cmd --list-ports          # the six ports above
 vm$ nc -vz gmail-smtp-in.l.google.com 25    # must connect
 vm$ nc -vz 1.1.1.1 53                       # DNS reachable
 vm$ timedatectl                             # UTC, "System clock synchronized: yes"
@@ -212,7 +214,14 @@ vm$ sudo nano /etc/anjal/webmail.env
 Required changes in `server.env`:
 
 - `ANJAL_POSTGRES` - the password from section 2.
-- `ANJAL_API_TOKEN` - `openssl rand -hex 32`.
+- `ANJAL_API_TOKEN` - `openssl rand -hex 32`. The server refuses to start
+  without one.
+- `ANJAL_KEK` - `openssl rand -base64 32`. This key encrypts DKIM private
+  keys inside the database. **Copy it into your password manager now**,
+  next to the database password: a backup restored without it has
+  unreadable DKIM keys (recoverable only by generating new keys and
+  republishing DNS). The placeholder in the template is deliberately
+  invalid, so the server will not start until you replace it.
 - Leave `ANJAL_ACME_STAGING` **commented out for now** - section 7 explains the rehearsal.
 
 Required changes in `webmail.env`:
@@ -453,7 +462,8 @@ vm$ sudo nano /etc/anjal/rclone.conf
 vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsd b2crypt:   # empty listing, no error
 ```
 
-**Copy `/etc/anjal/rclone.conf` to a password manager now.** The crypt
+**Copy `/etc/anjal/rclone.conf` to a password manager now** (alongside
+`ANJAL_KEK` from section 4). The crypt
 passwords are the only way to read the backup; losing them makes the
 backup worthless.
 
@@ -492,6 +502,24 @@ Repeat the drill after any change to `backup.sh`, and at least twice a year.
 
 ---
 
+## 12a. What protects what (for audits)
+
+A summary of the controls this deployment relies on, so an auditor or a
+future you can see each one and where it lives.
+
+| Concern | Control | Where |
+| --- | --- | --- |
+| Network exposure | Security Group plus firewalld; only 22, 25, 80, 443, 465, 587 open | sections 1a, 1b |
+| Admin API | Loopback only, bearer token required, refuses to start otherwise; reached over SSH | `server.env`, section 13 |
+| Password storage | PBKDF2-HMAC-SHA256, 600,000 rounds, upgraded on sign-in | application |
+| Brute force | SMTP AUTH: 3 per session, 10 per address per 15 min. Webmail: 5 per address+account, 50 per account | application |
+| Connection floods | 120 s idle timeout, 15 min session limit, 200 connections, 10 per address | `server.env` |
+| DKIM private keys | AES-256-GCM in the database under `ANJAL_KEK`, which lives only in `server.env` and your password manager | section 4 |
+| Everything else at rest | Mail, database, and certificates on the VM's disk. **Confirm with E2E that the volume is encrypted at rest**; if it is not, ask for an encrypted volume before going live | E2E ticket |
+| Backups | rclone crypt (client-side encryption) to Backblaze B2 | section 11 |
+| Changes | Every admin API change and webmail sign-in/password change is recorded in `audit_events`, which the database itself makes append-only | section 13 |
+| Service isolation | Dedicated `anjal` user, `ProtectSystem=strict`, `NoNewPrivileges`, restricted address families and namespaces | systemd units |
+
 ## 13. Operating
 
 | Task | Command |
@@ -506,6 +534,8 @@ Repeat the drill after any change to `backup.sh`, and at least twice a year.
 | Add a mailbox | `POST /api/mailboxes` (section 8) |
 | Block a sender for a tenant | `POST /api/tenants/imagiqa/sender-rules -d '{"pattern":"@spammer.example","action":"block"}'` |
 | Spam threshold | `POST /api/tenants -d '{"slug":"imagiqa","displayName":"imagiQa","spamThreshold":5}'` |
+| Audit trail | `curl -s -H "Authorization: Bearer API_TOKEN" "http://127.0.0.1:8025/api/audit?limit=50" \| jq .` |
+| Webhook queue | `/metrics` → `anjal_webhook_pending`; `anjal_webhook_failed_total` should stay at 0 |
 
 Things to watch in the first weeks:
 

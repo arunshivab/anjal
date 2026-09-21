@@ -6,7 +6,10 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 
 ## Members
 
+- **AppendAuditAsync** *(method)* - Append an entry to the audit trail. Entries are never updated or deleted; in PostgreSQL a trigger refuses any attempt to.
+- **CompleteWebhookJobAsync** *(method)* - Record an attempt's outcome and schedule the next one if Pending.
 - **CountOutboundAsync** *(method)* - Count outbound messages by status. Used by /metrics for queue depth; a cheap indexed count.
+- **CountWebhookJobsAsync** *(method)* - Count queued notifications by state, for metrics.
 - **CreateTagGrantAsync** *(method)* - Create a new tag grant for time-bounded per-case authorisation. Returns the saved grant with populated.
 - **DeleteDkimKeyAsync** *(method)* - Remove the DKIM key for a sender domain.
 - **DeleteLocalDomainAsync** *(method)* - Remove a local domain.
@@ -14,6 +17,7 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 - **DeleteRoutingRuleAsync** *(method)* - Remove the rule for a given local-part. Returns if a rule was deleted.
 - **DeleteSmtpUserAsync** *(method)* - Remove an SMTP user by username.
 - **EnqueueOutboundAsync** *(method)* - Enqueue an outbound message for delivery. Sets status to and assigns identifiers.
+- **EnqueueWebhookJobAsync** *(method)* - Queue a webhook notification. and are assigned.
 - **GetActiveTagGrantAsync** *(method)* - Look up an active (unexpired) grant by (local-part, tag). Returns if no matching grant exists or all matching grants have expired.
 - **GetDkimKeyAsync** *(method)* - Look up the DKIM signing key for a sender domain.
 - **GetInboundByIdAsync** *(method)* - Fetch a single inbound message by id. Returns if not found.
@@ -23,6 +27,8 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 - **GetSmtpUserAsync** *(method)* - Look up an SMTP user by username (case-insensitive).
 - **IsLocalDomainAsync** *(method)* - Check whether a domain is local (case-insensitive).
 - **LeaseOutboundBatchAsync** *(method)* - Lease up to messages whose next-attempt time has passed. Leased messages have their status flipped to so other workers won't pick them up. The worker must call after each attempt to release the lease (success, retry, or give up).
+- **LeaseWebhookJobsAsync** *(method)* - Lease due notifications, including any whose previous lease lapsed (a worker stopped mid-attempt). Leased jobs move to Sending.
+- **ListAuditAsync** *(method)* - The most recent audit entries, newest first.
 - **ListDkimKeysAsync** *(method)* - List all configured DKIM keys. The field IS populated; callers handling API responses should redact it.
 - **ListLocalDomainsAsync** *(method)* - List all local domains.
 - **ListOutboundTlsPoliciesAsync** *(method)* - List all configured TLS policies.

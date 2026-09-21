@@ -13,3 +13,5 @@ In-memory sliding-window rate limiter. Counts are per process and reset on resta
 - **OnMailFrom** *(method)* - Synchronous MAIL FROM check.
 - **OnMailFromAsync** *(method)* - _(no description)_
 - **OnRcptToAsync** *(method)* - _(no description)_
+- **Shrink** *(method)* - Sweep now; if still at capacity, drop the least recently active tenth.
+- **TrackedAddresses** *(property)* - Keys currently held across the limiter's tables (for metrics and tests).

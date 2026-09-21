@@ -8,10 +8,13 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 
 - **#ctor** *(method)* - Create the store with a PostgreSQL connection string.
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
+- **AppendAuditAsync** *(method)* - _(no description)_
+- **CompleteWebhookJobAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
 - **CountOutboundAsync** *(method)* - _(no description)_
 - **CountSearchAsync** *(method)* - _(no description)_
 - **CountUnreadAsync** *(method)* - _(no description)_
+- **CountWebhookJobsAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DeleteCategoryAsync** *(method)* - _(no description)_
 - **DeleteCategoryRuleAsync** *(method)* - _(no description)_
@@ -26,6 +29,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **DeleteTenantAsync** *(method)* - _(no description)_
 - **DeleteTenantDomainAsync** *(method)* - _(no description)_
 - **EnqueueOutboundAsync** *(method)* - _(no description)_
+- **EnqueueWebhookJobAsync** *(method)* - _(no description)_
 - **EnsureFolderAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
 - **GetActivityAsync** *(method)* - _(no description)_
@@ -44,6 +48,8 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **GetTenantDomainAsync** *(method)* - _(no description)_
 - **IsLocalDomainAsync** *(method)* - _(no description)_
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
+- **LeaseWebhookJobsAsync** *(method)* - _(no description)_
+- **ListAuditAsync** *(method)* - _(no description)_
 - **ListCategoriesAsync** *(method)* - _(no description)_
 - **ListCategoryRulesAsync** *(method)* - _(no description)_
 - **ListDkimKeysAsync** *(method)* - _(no description)_
@@ -76,3 +82,4 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **UpsertSmtpUserAsync** *(method)* - _(no description)_
 - **UpsertTenantAsync** *(method)* - _(no description)_
 - **UpsertTenantDomainAsync** *(method)* - _(no description)_
+- **Secrets** *(property)* - Seals DKIM private keys before they are written and opens them when read. Null stores and returns them as given (development, or before a KEK is configured); existing plaintext rows are re-sealed the next time they are saved.

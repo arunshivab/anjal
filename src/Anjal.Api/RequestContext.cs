@@ -33,6 +33,12 @@ public sealed class RequestContext
     /// <summary>Absolute path of the URL (e.g. "/api/routing-rules").</summary>
     public string Path => this.context.Request.Url?.AbsolutePath ?? "/";
 
+    /// <summary>The status code of the response written so far (200 until set).</summary>
+    public int ResponseStatus => this.context.Response.StatusCode;
+
+    /// <summary>The client address, or empty when unknown.</summary>
+    public string RemoteAddress => this.context.Request.RemoteEndPoint?.Address.ToString() ?? string.Empty;
+
     /// <summary>The Authorization header value, or empty if not set.</summary>
     public string AuthorizationHeader => this.context.Request.Headers["Authorization"] ?? string.Empty;
 

@@ -11,7 +11,7 @@
             <p class="lead">@PeriodLabel · @activity.From.ToLocalTime().ToString("d MMM yyyy", Inv) to @activity.To.AddDays(-1).ToLocalTime().ToString("d MMM yyyy", Inv)</p>
         </div>
         <form method="get" action="/dashboard" class="periodpick">
-            <select name="period" class="scope" aria-label="Period" onchange="this.form.submit()">
+            <select name="period" class="scope" aria-label="Period" data-autosubmit>
                 @foreach ((string Key, string Label, int Days) p in MailboxService.Periods)
                 {
                     <option value="@p.Key" selected="@(PeriodKey == p.Key)">@p.Label</option>

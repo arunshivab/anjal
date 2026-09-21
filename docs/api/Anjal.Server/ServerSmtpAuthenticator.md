@@ -9,3 +9,4 @@ SMTP submission authenticator that chains three sources: an in-memory env-var de
 - **#ctor** *(method)* - Construct with optional env-var single user and optional DB-backed store. At least one must be non-empty for AUTH to succeed.
 - **#ctor** *(method)* - Construct with optional env-var single user, optional DB-backed store and optional mailbox store.
 - **AuthenticateAsync** *(method)* - _(no description)_
+- **DummyMiss** *(method)* - Equalise timing on a path with no hash to check, then refuse.

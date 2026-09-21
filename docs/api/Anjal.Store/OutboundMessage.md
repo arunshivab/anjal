@@ -6,6 +6,7 @@ A queued outbound message. Created by the API layer or by a webhook auto-reply r
 
 ## Members
 
+- **LeaseDuration** *(field)* - How long a lease lasts. Longer than any single delivery attempt can take with its timeouts, so a slow but live send is never taken over.
 - **Attempts** *(property)* - Number of send attempts made so far.
 - **CreatedAt** *(property)* - Time the message was enqueued.
 - **EnvelopeFrom** *(property)* - The SMTP envelope sender (no angle brackets).
@@ -13,6 +14,7 @@ A queued outbound message. Created by the API layer or by a webhook auto-reply r
 - **GiveUpAt** *(property)* - Cutoff after which the message should be permanently failed regardless of remaining retry budget. Default is 24 hours after creation; the caller can override per-message.
 - **Id** *(property)* - Identifier assigned by the store.
 - **LastError** *(property)* - The reply text of the most recent attempt (success or failure).
+- **LeaseExpiresAt** *(property)* - While , when the lease lapses. A worker that stops mid-batch (crash, restart, deploy) leaves its leased messages in Sending; once this time passes they are leased again rather than stranded. Null when not leased.
 - **NextAttemptAt** *(property)* - Earliest time the next send attempt should be tried.
 - **RawBytes** *(property)* - The raw RFC 5322 message bytes to send in the DATA phase.
 - **Status** *(property)* - Current status.

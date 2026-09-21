@@ -175,6 +175,11 @@ public static class Program
         var listenUri = new Uri(url);
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
+            // A compose with attachments is the largest thing a browser sends.
+            // The per-file check in /compose gives the user a message; this
+            // hard ceiling stops anything bigger from being read at all.
+            kestrel.Limits.MaxRequestBodySize = MaxRequestBytes;
+            kestrel.Limits.MaxRequestHeadersTotalSize = 32 * 1024;
             System.Net.IPAddress httpAddress = listenUri.Host == "localhost" ? System.Net.IPAddress.Loopback : System.Net.IPAddress.Parse(listenUri.Host);
             kestrel.Listen(httpAddress, listenUri.Port);
             if (httpsOn)
@@ -211,6 +216,13 @@ public static class Program
         builder.Services.AddCascadingAuthenticationState();
         builder.Services.AddRazorComponents();
         builder.Services.AddAntiforgery();
+        builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(forms =>
+        {
+            forms.MultipartBodyLengthLimit = MaxRequestBytes;
+            forms.ValueLengthLimit = 4 * 1024 * 1024;
+        });
+        builder.Services.AddSingleton(new LoginThrottle());
+        builder.Services.AddSingleton(new AuditTrail(store));
 
         WebApplication app = builder.Build();
 
@@ -236,14 +248,18 @@ public static class Program
             {
                 if (!http.Request.IsHttps && (watcher?.Current ?? staticCert) is not null)
                 {
-                    string host = http.Request.Host.Host;
+                    // The Host header is whatever the client sent; redirecting
+                    // to it would make this an open redirect. Only a name this
+                    // server answers to is used, otherwise the configured one.
+                    string requested = http.Request.Host.Host;
+                    string host = IsOwnHost(requested, hostName, tls!.Acme) ? requested : hostName;
                     string portPart = tls!.HttpsPort == 443 ? string.Empty : ":" + tls.HttpsPort.ToString(CultureInfo.InvariantCulture);
                     http.Response.Redirect("https://" + host + portPart + http.Request.PathBase + http.Request.Path + http.Request.QueryString, permanent: true);
                     return;
                 }
                 if (http.Request.IsHttps)
                 {
-                    http.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+                    http.Response.Headers.StrictTransportSecurity = "max-age=31536000; includeSubDomains";
                 }
                 await next().ConfigureAwait(false);
             });
@@ -267,6 +283,12 @@ public static class Program
                     context.Response.Redirect("/sign-in?expired=1");
                 }
             }
+        });
+
+        app.Use(async (http, next) =>
+        {
+            ApplySecurityHeaders(http.Response.Headers);
+            await next().ConfigureAwait(false);
         });
 
         app.UseAuthentication();
@@ -293,20 +315,38 @@ public static class Program
         app.MapGet("/logos/{file}", (string file) => Asset("logos/" + file));
 
         // ---- session ----
-        app.MapPost("/auth/login", async (HttpContext http, [FromForm] string address, [FromForm] string password, WebmailAuthService auth, CancellationToken ct) =>
+        app.MapPost("/auth/login", async (HttpContext http, [FromForm] string address, [FromForm] string password, WebmailAuthService auth, LoginThrottle throttle, AuditTrail audit, CancellationToken ct) =>
         {
+            string client = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            string account = address.Trim().ToLowerInvariant();
+            if (!throttle.IsAllowed(client, account))
+            {
+                // Refused before the password is checked: guessing costs the
+                // attacker the wait, and costs this server nothing.
+                await audit.RecordAsync("anonymous", "webmail.signin.throttled", account, client).ConfigureAwait(false);
+                return Results.Redirect("/sign-in?throttled=1");
+            }
             ClaimsPrincipal? principal = await auth.AuthenticateAsync(address.Trim(), password, ct).ConfigureAwait(false);
             if (principal is null)
             {
+                throttle.RecordFailure(client, account);
+                await audit.RecordAsync("anonymous", "webmail.signin.failed", account, client).ConfigureAwait(false);
                 return Results.Redirect("/sign-in?error=1");
             }
+            throttle.RecordSuccess(client, account);
+            await audit.RecordAsync(account, "webmail.signin", account, client).ConfigureAwait(false);
             await http.SignInAsync(CookieScheme, principal, new AuthenticationProperties { IsPersistent = false }).ConfigureAwait(false);
             return Results.Redirect("/folder/INBOX");
         });
 
-        app.MapPost("/sign-out", async (HttpContext http, IAntiforgery antiforgery) =>
+        app.MapPost("/sign-out", async (HttpContext http, IAntiforgery antiforgery, AuditTrail audit) =>
         {
             await antiforgery.ValidateRequestAsync(http).ConfigureAwait(false);
+            string who = http.User.Identity?.Name ?? string.Empty;
+            if (who.Length > 0)
+            {
+                await audit.RecordAsync(who, "webmail.signout", who, http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
+            }
             await http.SignOutAsync(CookieScheme).ConfigureAwait(false);
             return Results.Redirect("/sign-in");
         });
@@ -469,7 +509,21 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
-            ComposeRequest request = await BuildRequestAsync(to, cc, bcc, subject, body, draftId, inReplyTo, attachments, ct).ConfigureAwait(false);
+            ComposeRequest request;
+            try
+            {
+                request = await BuildRequestAsync(to, cc, bcc, subject, body, draftId, inReplyTo, attachments, ct).ConfigureAwait(false);
+            }
+            catch (AttachmentsTooLargeException)
+            {
+                return Results.Redirect("/compose" + ComposeQuery(AttachmentsTooLargeException.UserMessage, new ComposeRequest
+                {
+                    To = to,
+                    Cc = cc ?? string.Empty,
+                    Subject = subject ?? string.Empty,
+                    Body = body ?? string.Empty,
+                }));
+            }
             string? error = await svc.SendAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
             if (error is not null)
             {
@@ -485,7 +539,15 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
-            ComposeRequest request = await BuildRequestAsync(to ?? string.Empty, cc, bcc, subject, body, draftId, inReplyTo, attachments, ct).ConfigureAwait(false);
+            ComposeRequest request;
+            try
+            {
+                request = await BuildRequestAsync(to ?? string.Empty, cc, bcc, subject, body, draftId, inReplyTo, attachments, ct).ConfigureAwait(false);
+            }
+            catch (AttachmentsTooLargeException)
+            {
+                return Results.Redirect("/compose?error=" + Uri.EscapeDataString(AttachmentsTooLargeException.UserMessage));
+            }
             Guid? saved = await svc.SaveDraftAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
             if (saved is null)
             {
@@ -507,6 +569,12 @@ public static class Program
                 return Results.Redirect("/sign-in");
             }
             string? error = await svc.SetDisplayNameAsync(mailboxId.Value, displayName ?? string.Empty, ct).ConfigureAwait(false);
+            if (error is null)
+            {
+                string who = http.User.Identity?.Name ?? string.Empty;
+                await http.RequestServices.GetRequiredService<AuditTrail>().RecordAsync(
+                    who, "webmail.displayname.changed", who, http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
+            }
             return Results.Redirect(error is null ? "/settings?saved=name" : "/settings?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
@@ -535,6 +603,10 @@ public static class Program
                 return Results.Redirect("/sign-in");
             }
             string? error = await svc.ChangePasswordAsync(mailboxId.Value, current, next, confirm, ct).ConfigureAwait(false);
+            string who = http.User.Identity?.Name ?? string.Empty;
+            await http.RequestServices.GetRequiredService<AuditTrail>().RecordAsync(
+                who, error is null ? "webmail.password.changed" : "webmail.password.change-refused", who,
+                http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
             return Results.Redirect(error is null ? "/settings?saved=password" : "/settings?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
@@ -664,6 +736,18 @@ public static class Program
         {
             request.DraftId = parsed;
         }
+        // Refuse before reading a byte: the total the browser declared is
+        // checked first, so an oversized upload never lands in memory.
+        long declared = 0;
+        foreach (IFormFile file in attachments)
+        {
+            declared += Math.Max(0, file.Length);
+        }
+        if (declared > MaxAttachmentBytes)
+        {
+            throw new AttachmentsTooLargeException();
+        }
+
         foreach (IFormFile file in attachments)
         {
             if (file.Length <= 0)
@@ -683,6 +767,92 @@ public static class Program
         $"&subject={Uri.EscapeDataString(request.Subject)}&body={Uri.EscapeDataString(request.Body)}";
 
     /// <summary>Only allow same-origin relative redirects from form "back" fields.</summary>
-    private static string SafeBack(string? back, string fallback) =>
-        !string.IsNullOrEmpty(back) && back.StartsWith('/') && !back.StartsWith("//", StringComparison.Ordinal) ? back : fallback;
+    /// <remarks>
+    /// Browsers treat a backslash as a slash, so <c>/\evil.example</c> is as
+    /// much a protocol-relative URL as <c>//evil.example</c>. Any backslash
+    /// or control character in the value refuses it.
+    /// </remarks>
+    private static string SafeBack(string? back, string fallback)
+    {
+        if (string.IsNullOrEmpty(back) || back[0] != '/' || back.Length > 2048)
+        {
+            return fallback;
+        }
+        if (back.Length > 1 && (back[1] == '/' || back[1] == '\\'))
+        {
+            return fallback;
+        }
+        foreach (char c in back)
+        {
+            if (c == '\\' || char.IsControl(c))
+            {
+                return fallback;
+            }
+        }
+        return back;
+    }
+
+    /// <summary>The largest request body accepted: a compose with attachments.</summary>
+    internal const long MaxRequestBytes = 30L * 1024 * 1024;
+
+    /// <summary>Total attachment bytes one message may carry, before encoding.</summary>
+    internal const long MaxAttachmentBytes = 18L * 1024 * 1024;
+
+    /// <summary>Whether a Host header names this server and is safe to redirect to.</summary>
+    /// <param name="requested">The Host header value.</param>
+    /// <param name="hostName">The configured host name.</param>
+    /// <param name="acme">ACME settings, whose domains are also this server's names.</param>
+    public static bool IsOwnHost(string requested, string hostName, AcmeEnvironment? acme)
+    {
+        ArgumentNullException.ThrowIfNull(hostName);
+        if (string.IsNullOrEmpty(requested))
+        {
+            return false;
+        }
+        if (string.Equals(requested, hostName, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(requested, "localhost", StringComparison.OrdinalIgnoreCase) ||
+            requested == "127.0.0.1" || requested == "::1" || requested == "[::1]")
+        {
+            return true;
+        }
+        if (acme is not null)
+        {
+            foreach (string d in acme.Domains)
+            {
+                if (string.Equals(requested, d, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Headers every webmail response carries. The content security policy
+    /// allows only this origin's own script, style and fonts. Images may be
+    /// remote because the message frame inherits this policy and "Load
+    /// images" must work there; the frame carries its own stricter policy,
+    /// and remote images are rewritten away by the sanitizer until the
+    /// reader asks for them.
+    /// </summary>
+    internal static void ApplySecurityHeaders(IHeaderDictionary headers)
+    {
+        headers.XContentTypeOptions = "nosniff";
+        headers.XFrameOptions = "DENY";
+        headers["Referrer-Policy"] = "no-referrer";
+        headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=(), usb=()";
+        headers["Cross-Origin-Opener-Policy"] = "same-origin";
+        headers.ContentSecurityPolicy =
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+            "img-src 'self' data: https:; font-src 'self'; connect-src 'self'; " +
+            "frame-src 'self'; child-src 'self'; object-src 'none'; base-uri 'self'; " +
+            "form-action 'self'; frame-ancestors 'none'";
+    }
+
+    /// <summary>The attachments on one message add up to more than <see cref="MaxAttachmentBytes"/>.</summary>
+    private sealed class AttachmentsTooLargeException : Exception
+    {
+        public const string UserMessage = "The attachments add up to more than 18 MB. Remove some, or send them in more than one message.";
+    }
 }

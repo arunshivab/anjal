@@ -74,7 +74,9 @@ public sealed class DnsResolver
             throw new System.ArgumentException("Domain cannot be empty.", nameof(domain));
         }
 
-        ushort transactionId = (ushort)System.Random.Shared.Next(1, 0xFFFF);
+        // Unpredictable transaction ids are half of what stops an off-path
+        // attacker forging a reply; the other half is checking who replied.
+        ushort transactionId = (ushort)System.Security.Cryptography.RandomNumberGenerator.GetInt32(1, 0xFFFF);
         byte[] query = BuildQuery(transactionId, domain, TypeMx);
 
         byte[] response = await this.SendQueryAsync(query, ct).ConfigureAwait(false);
@@ -130,7 +132,9 @@ public sealed class DnsResolver
             throw new System.ArgumentException("Domain cannot be empty.", nameof(domain));
         }
 
-        ushort transactionId = (ushort)System.Random.Shared.Next(1, 0xFFFF);
+        // Unpredictable transaction ids are half of what stops an off-path
+        // attacker forging a reply; the other half is checking who replied.
+        ushort transactionId = (ushort)System.Security.Cryptography.RandomNumberGenerator.GetInt32(1, 0xFFFF);
         byte[] query = BuildQuery(transactionId, domain, TypeTxt);
 
         byte[] response = await this.SendQueryAsync(query, ct).ConfigureAwait(false);
@@ -172,8 +176,16 @@ public sealed class DnsResolver
         timeoutCts.CancelAfter(UdpReceiveTimeoutMs);
         try
         {
-            UdpReceiveResult res = await udp.ReceiveAsync(timeoutCts.Token).ConfigureAwait(false);
-            return res.Buffer;
+            // Only the server that was asked may answer. A datagram from any
+            // other address is ignored and the wait continues.
+            while (true)
+            {
+                UdpReceiveResult res = await udp.ReceiveAsync(timeoutCts.Token).ConfigureAwait(false);
+                if (res.RemoteEndPoint.Address.Equals(this.nameServer.Address) && res.RemoteEndPoint.Port == this.nameServer.Port)
+                {
+                    return res.Buffer;
+                }
+            }
         }
         catch (System.OperationCanceledException)
         {

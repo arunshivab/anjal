@@ -168,6 +168,33 @@ public sealed class FolderRow
     /// <summary>The name of the inbox folder.</summary>
     public const string Inbox = "INBOX";
 
+    /// <summary>The longest folder name accepted.</summary>
+    public const int MaxNameLength = 64;
+
+    /// <summary>
+    /// Whether a name is acceptable for a folder: 1-64 printable ASCII
+    /// characters, no path separators, not starting with a dot. The store
+    /// refuses anything else, so no caller can create a folder whose name
+    /// would mean something to the filesystem.
+    /// </summary>
+    /// <param name="name">Candidate name.</param>
+    public static bool IsValidName(string name)
+    {
+        System.ArgumentNullException.ThrowIfNull(name);
+        if (name.Length == 0 || name.Length > MaxNameLength || name[0] == '.' || name.Trim().Length != name.Length)
+        {
+            return false;
+        }
+        foreach (char c in name)
+        {
+            if (c < ' ' || c > '~' || c == '/' || c == '\\')
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /// <summary>Identifier assigned by the store.</summary>
     public System.Guid Id { get; set; }
 
