@@ -20,6 +20,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
 - **DeleteLocalDomainAsync** *(method)* - _(no description)_
 - **DeleteMailboxAsync** *(method)* - _(no description)_
+- **DeleteMailboxSenderRuleAsync** *(method)* - _(no description)_
 - **DeleteMessageAsync** *(method)* - _(no description)_
 - **DeleteOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **DeleteRoutingRuleAsync** *(method)* - _(no description)_
@@ -41,6 +42,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **GetOutboundByIdAsync** *(method)* - _(no description)_
 - **GetOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **GetRoutingRuleAsync** *(method)* - _(no description)_
+- **GetSignatureAsync** *(method)* - _(no description)_
 - **GetSmtpUserAsync** *(method)* - _(no description)_
 - **GetTenantAsync** *(method)* - _(no description)_
 - **GetTenantByIdAsync** *(method)* - _(no description)_
@@ -54,6 +56,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **ListDkimKeysAsync** *(method)* - _(no description)_
 - **ListFoldersAsync** *(method)* - _(no description)_
 - **ListLocalDomainsAsync** *(method)* - _(no description)_
+- **ListMailboxSenderRulesAsync** *(method)* - _(no description)_
 - **ListMailboxesAsync** *(method)* - _(no description)_
 - **ListMessagesAsync** *(method)* - _(no description)_
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
@@ -71,11 +74,13 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **SearchMessagesAsync** *(method)* - _(no description)_
 - **SetMessageCategoryAsync** *(method)* - _(no description)_
 - **SetMessageFlagsAsync** *(method)* - _(no description)_
+- **SetSignatureAsync** *(method)* - _(no description)_
 - **UpsertCategoryAsync** *(method)* - _(no description)_
 - **UpsertCategoryRuleAsync** *(method)* - _(no description)_
 - **UpsertDkimKeyAsync** *(method)* - _(no description)_
 - **UpsertLocalDomainAsync** *(method)* - _(no description)_
 - **UpsertMailboxAsync** *(method)* - _(no description)_
+- **UpsertMailboxSenderRuleAsync** *(method)* - _(no description)_
 - **UpsertOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **UpsertRoutingRuleAsync** *(method)* - _(no description)_
 - **UpsertSenderRuleAsync** *(method)* - _(no description)_

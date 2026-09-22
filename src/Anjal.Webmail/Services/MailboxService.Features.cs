@@ -181,6 +181,8 @@ public sealed partial class MailboxService
         {
             MailboxId = mailbox.Id,
             FolderId = drafts.Id,
+            HasAttachments = request.Attachments.Count > 0,
+            BodyText = Anjal.Mailbox.MessageText.Extract(TryParse(raw)),
             MaildirFile = seenPath ?? written.RelativePath,
             EnvelopeFrom = mailbox.Address,
             FromHeader = FormatFrom(mailbox),
@@ -227,6 +229,7 @@ public sealed partial class MailboxService
             Bcc = EncodedWordDecoder.Decode(parsed.Headers.Get("Bcc") ?? string.Empty),
             Subject = parsed.Subject ?? string.Empty,
             Body = FirstPlainText(parsed.Body),
+            BodyHtml = FirstHtml(parsed.Body),
             InReplyTo = parsed.Headers.Get("In-Reply-To")?.Trim('<', '>', ' ') ?? string.Empty,
         };
         return request;
@@ -245,6 +248,147 @@ public sealed partial class MailboxService
 
         /// <summary>Forward to a new recipient.</summary>
         Forward = 2,
+    }
+
+    /// <summary>The longest signature accepted, in characters of HTML.</summary>
+    public const int MaxSignatureChars = 10_000;
+
+    /// <summary>This mailbox's signature, formatted and plain.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    public Task<(string Html, string Text)> GetSignatureAsync(Guid mailboxId, CancellationToken ct = default) =>
+        this.store.GetSignatureAsync(mailboxId, ct);
+
+    /// <summary>
+    /// Save the signature. The HTML is sanitised and the plain form derived
+    /// from it; with no HTML (JavaScript off) the plain text is used as typed.
+    /// Returns a message for the user, or null on success.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="html">The editor's HTML, or empty.</param>
+    /// <param name="text">The plain text box.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<string?> SetSignatureAsync(Guid mailboxId, string html, string text, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(html);
+        ArgumentNullException.ThrowIfNull(text);
+        string clean = html.Trim().Length == 0 ? string.Empty : HtmlSanitizer.Sanitize(html).Trim();
+        string plain = clean.Length > 0 ? HtmlText.ToPlain(clean) : text.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();
+        if (clean.Length == 0 && plain.Length > 0)
+        {
+            clean = HtmlText.FromQuotedPlain(plain);
+        }
+        if (clean.Length > MaxSignatureChars)
+        {
+            return "That signature is too long. Keep it to a few lines.";
+        }
+        await this.store.SetSignatureAsync(mailboxId, clean, plain, ct).ConfigureAwait(false);
+        return null;
+    }
+
+    /// <summary>
+    /// The opening body of a new message, reply or forward: space to write,
+    /// then the signature (after the conventional "-- " line), then any
+    /// quoted original - in plain and formatted forms that say the same.
+    /// A reopened draft does not come through here, so its signature is
+    /// never added twice.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="quoted">The quoted original (plain text, "&gt;" lines), or empty.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<(string Text, string Html)> StartBodyAsync(Guid mailboxId, string quoted, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(quoted);
+        (string sigHtml, string sigText) = await this.store.GetSignatureAsync(mailboxId, ct).ConfigureAwait(false);
+        string original = quoted.Replace("\r\n", "\n", StringComparison.Ordinal).TrimStart('\n');
+        var text = new System.Text.StringBuilder("\n\n");
+        var html = new System.Text.StringBuilder("<div><br></div>");
+        if (sigText.Length > 0)
+        {
+            text.Append("-- \n").Append(sigText).Append('\n');
+            html.Append("<div data-signature=\"\">-- <br>").Append(sigHtml).Append("</div>");
+        }
+        if (original.Length > 0)
+        {
+            text.Append('\n').Append(original);
+            html.Append("<div><br></div>").Append(HtmlText.FromQuotedPlain(original));
+        }
+        return (text.ToString(), html.ToString());
+    }
+
+    /// <summary>The first HTML body part, sanitised; empty when there is none.</summary>
+    private static string FirstHtml(MimeEntity? body)
+    {
+        if (body is null)
+        {
+            return string.Empty;
+        }
+        MimePart? html = null;
+        MimePart? text = null;
+        var ignored = new List<(MimePart Part, AttachmentView View)>();
+        Walk(body, ref html, ref text, ignored);
+        return html is null ? string.Empty : HtmlSanitizer.Sanitize(html.GetBodyAsText());
+    }
+
+    /// <summary>The most attachment data one message may carry, before encoding: 18 MB.</summary>
+    public const long MaxAttachmentBytes = 18L * 1024 * 1024;
+
+    /// <summary>
+    /// The attachments of one of this mailbox's messages, without marking it
+    /// read. Null when the message is not this mailbox's.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The message.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<IReadOnlyList<AttachmentView>?> ListAttachmentsAsync(Guid mailboxId, Guid messageId, CancellationToken ct = default)
+    {
+        (MessageRow Row, FolderRow Folder, byte[] Raw)? loaded = await this.ReadRawAsync(mailboxId, messageId, ct).ConfigureAwait(false);
+        if (loaded is null)
+        {
+            return null;
+        }
+        MimeMessage? parsed = TryParse(loaded.Value.Raw);
+        var found = new List<(MimePart Part, AttachmentView View)>();
+        if (parsed is not null)
+        {
+            MimePart? html = null;
+            MimePart? text = null;
+            Walk(parsed.Body, ref html, ref text, found);
+        }
+        return found.ConvertAll(f => f.View);
+    }
+
+    /// <summary>
+    /// Copy the chosen attachments of <see cref="ComposeRequest.CarryFrom"/>
+    /// into the request, reading each through the same ownership check as a
+    /// download. Returns a message for the user when the total, with any new
+    /// uploads, would exceed <see cref="MaxAttachmentBytes"/>; otherwise null.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="request">The message being sent or saved.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<string?> AddCarriedAttachmentsAsync(Guid mailboxId, ComposeRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.CarryFrom is Guid source)
+        {
+            foreach (int index in request.CarryIndexes.Distinct())
+            {
+                (AttachmentView View, byte[] Bytes)? found = await this.GetAttachmentAsync(mailboxId, source, index, ct).ConfigureAwait(false);
+                if (found is not null)
+                {
+                    request.Attachments.Add((found.Value.View.FileName, found.Value.View.ContentType, found.Value.Bytes));
+                }
+            }
+        }
+        long total = 0;
+        foreach ((string _, string _, byte[] bytes) in request.Attachments)
+        {
+            total += bytes.LongLength;
+        }
+        return total > MaxAttachmentBytes
+            ? "The attachments add up to more than 18 MB. Remove some, or send them in more than one message."
+            : null;
     }
 
     /// <summary>
@@ -434,6 +578,12 @@ public sealed partial class MailboxService
 
         /// <summary>Move to INBOX and allow the sender.</summary>
         NotSpam = 4,
+
+        /// <summary>Move from Trash back to INBOX.</summary>
+        Restore = 5,
+
+        /// <summary>Delete permanently. Only messages already in Trash are affected.</summary>
+        Purge = 6,
     }
 
     /// <summary>
@@ -448,11 +598,25 @@ public sealed partial class MailboxService
     {
         ArgumentNullException.ThrowIfNull(messageIds);
         int changed = 0;
+
+        // Permanent deletion is only ever of mail already in Trash, so a
+        // forged or mistaken request cannot skip the Trash step.
+        FolderRow? trash = action == BulkAction.Purge
+            ? await this.GetFolderAsync(mailboxId, "Trash", ct).ConfigureAwait(false)
+            : null;
         foreach (Guid id in messageIds)
         {
             MessageRow? row = await this.GetOwnedRowAsync(mailboxId, id, ct).ConfigureAwait(false);
             if (row is null)
             {
+                continue;
+            }
+            if (action == BulkAction.Purge)
+            {
+                if (trash is not null && row.FolderId == trash.Id && await this.DeleteAsync(mailboxId, id, ct).ConfigureAwait(false))
+                {
+                    changed++;
+                }
                 continue;
             }
             object? result = action switch
@@ -461,6 +625,7 @@ public sealed partial class MailboxService
                 BulkAction.MarkRead => await this.SetFlagsAsync(mailboxId, id, true, row.Flagged, row.Answered, ct).ConfigureAwait(false),
                 BulkAction.MarkUnread => await this.SetFlagsAsync(mailboxId, id, false, row.Flagged, row.Answered, ct).ConfigureAwait(false),
                 BulkAction.ReportSpam => await this.ReportSpamAsync(mailboxId, id, ct).ConfigureAwait(false),
+                BulkAction.Restore => await this.MoveAsync(mailboxId, id, FolderRow.Inbox, ct).ConfigureAwait(false),
                 _ => await this.MarkNotSpamAsync(mailboxId, id, ct).ConfigureAwait(false),
             };
             if (result is not null)
@@ -469,6 +634,39 @@ public sealed partial class MailboxService
             }
         }
         return changed;
+    }
+
+    /// <summary>
+    /// Delete everything in Trash permanently. Returns how many were deleted.
+    /// Works through the folder in pages; each pass re-reads the first page,
+    /// and stops if a pass deletes nothing, so it cannot loop.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<int> EmptyTrashAsync(Guid mailboxId, CancellationToken ct = default)
+    {
+        FolderRow? trash = await this.GetFolderAsync(mailboxId, "Trash", ct).ConfigureAwait(false);
+        if (trash is null)
+        {
+            return 0;
+        }
+        int deleted = 0;
+        while (true)
+        {
+            IReadOnlyList<MessageRow> batch = await this.store.ListMessagesAsync(mailboxId, trash.Id, 200, 0, ct).ConfigureAwait(false);
+            int before = deleted;
+            foreach (MessageRow m in batch)
+            {
+                if (await this.DeleteAsync(mailboxId, m.Id, ct).ConfigureAwait(false))
+                {
+                    deleted++;
+                }
+            }
+            if (batch.Count == 0 || deleted == before)
+            {
+                return deleted;
+            }
+        }
     }
 
     /// <summary>Mark every message in a folder seen. Returns how many changed.</summary>

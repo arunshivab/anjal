@@ -7,6 +7,7 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 ## Members
 
 - **Answered** *(property)* - Maildir "R" flag - the message has been replied to.
+- **BodyText** *(property)* - The message's readable text, for search (see Anjal.Mailbox.MessageText). Written when the message is stored; listing queries do not read it back, so it is empty on rows loaded for display.
 - **CategoryId** *(property)* - The category this message carries, or null.
 - **DateHeader** *(property)* - The raw Date header value, or empty.
 - **EnvelopeFrom** *(property)* - SMTP envelope MAIL FROM.

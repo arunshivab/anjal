@@ -63,6 +63,13 @@ public sealed class SenderRuleRow
     /// <summary>The owning tenant.</summary>
     public System.Guid TenantId { get; set; }
 
+    /// <summary>
+    /// Set for a personal rule, made by one mailbox's Report spam or Not
+    /// spam; it affects only that mailbox. Null for a tenant-wide rule,
+    /// which only an administrator sets, through the API.
+    /// </summary>
+    public System.Guid? MailboxId { get; set; }
+
     /// <summary>Address or "@domain" pattern, lowercase.</summary>
     public string Pattern { get; set; } = string.Empty;
 
@@ -276,6 +283,13 @@ public sealed class MessageRow
 
     /// <summary>True when the message has at least one attachment part.</summary>
     public bool HasAttachments { get; set; }
+
+    /// <summary>
+    /// The message's readable text, for search (see Anjal.Mailbox.MessageText).
+    /// Written when the message is stored; listing queries do not read it back,
+    /// so it is empty on rows loaded for display.
+    /// </summary>
+    public string BodyText { get; set; } = string.Empty;
 
     /// <summary>Spam score assigned at delivery (0 when scoring was not run).</summary>
     public int SpamScore { get; set; }

@@ -26,6 +26,12 @@ public static partial class HtmlSanitizer
         "html", "body", "head", "title",
     };
 
+    /// <summary>Elements that never have content or a closing tag.</summary>
+    private static readonly HashSet<string> VoidElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr",
+    };
+
     private static readonly HashSet<string> DropWithContent = new(StringComparer.OrdinalIgnoreCase)
     {
         "script", "style", "iframe", "frame", "frameset", "object", "embed", "applet", "form", "button", "input", "select",
@@ -38,6 +44,9 @@ public static partial class HtmlSanitizer
         "rowspan", "bgcolor", "color", "face", "size", "dir", "lang", "style", "class", "id", "name", "start", "type", "cite",
         "datetime", "open",
     };
+
+    [GeneratedRegex(@"<![A-Za-z\[][^>]*>|<\?[^>]*>", RegexOptions.CultureInvariant)]
+    private static partial Regex DeclarationRegex();
 
     [GeneratedRegex(@"<!--.*?-->", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
     private static partial Regex CommentRegex();
@@ -65,7 +74,10 @@ public static partial class HtmlSanitizer
     {
         ArgumentNullException.ThrowIfNull(html);
 
-        string withoutComments = CommentRegex().Replace(html, string.Empty);
+        // Comments, and declarations such as <!DOCTYPE html> or <?xml ...?>,
+        // are removed first. Left in, a doctype was escaped as text and shown
+        // at the top of every HTML email (DEF-031).
+        string withoutComments = DeclarationRegex().Replace(CommentRegex().Replace(html, string.Empty), string.Empty);
         var output = new StringBuilder(withoutComments.Length);
         int pos = 0;
         string? dropUntil = null;
@@ -95,7 +107,11 @@ public static partial class HtmlSanitizer
 
             if (DropWithContent.Contains(tag))
             {
-                if (!closing && !selfClosing)
+                // A void element has no closing tag, so "drop until it closes"
+                // would discard the rest of the document: every HTML email with
+                // a <meta> in its head used to open blank (DEF-032). Void
+                // elements are dropped on their own.
+                if (!closing && !selfClosing && !VoidElements.Contains(tag))
                 {
                     dropUntil = tag;
                 }

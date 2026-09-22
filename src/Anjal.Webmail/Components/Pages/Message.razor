@@ -80,6 +80,10 @@ else
             </div>
 
             <h1 class="readsubj">@(string.IsNullOrWhiteSpace(view.Subject) ? "(no subject)" : view.Subject)</h1>
+            @if (view.Row.CategoryId is Guid currentCat && categories.FirstOrDefault(c => c.Row.Id == currentCat) is CategoryView shown)
+            {
+                <p class="readcat"><span class="chip slot-@shown.Row.Slot"><i></i>@shown.Row.Name</span></p>
+            }
             <p class="byline">
                 <span class="seal" aria-hidden="true">@Initial</span>
                 <span><b>@SenderName</b><span class="sep">·</span>@view.Date</span>
@@ -114,7 +118,17 @@ else
             <section class="railcard">
                 <h2 class="railhead">Details</h2>
                 <dl class="raildl">
-                    <dt>From</dt><dd>@view.From</dd>
+                    <dt>From</dt>
+                    @if (string.IsNullOrWhiteSpace(view.From))
+                    {
+                        @* No From header: show who actually sent it, and say so (DEF-022). *@
+                        <dd>@(string.IsNullOrWhiteSpace(view.Row.EnvelopeFrom) ? "(unknown)" : view.Row.EnvelopeFrom)
+                            <span class="railnote">envelope sender; the message has no From header</span></dd>
+                    }
+                    else
+                    {
+                        <dd>@view.From</dd>
+                    }
                     <dt>To</dt><dd>@view.To</dd>
                     @if (view.Cc.Length > 0)
                     {
@@ -124,45 +138,6 @@ else
                     <dt>Folder</dt><dd>@view.Folder.Name</dd>
                     <dt>Size</dt><dd>@MainLayout.Size(view.Row.SizeBytes)</dd>
                 </dl>
-            </section>
-
-            <section class="railcard">
-                <h2 class="railhead">Category</h2>
-                <form method="post" action="/message/@Id/category">
-                    <AntiforgeryToken />
-                    <input type="hidden" name="back" value="/message/@Id" />
-                    <select class="railinp" name="categoryId" aria-label="Category">
-                        <option value="">@MailboxService.Uncategorised</option>
-                        @foreach (CategoryView c in categories)
-                        {
-                            <option value="@c.Row.Id" selected="@(view.Row.CategoryId == c.Row.Id)">
-                                @c.Row.Name@(c.Shared ? "" : " (yours)")
-                            </option>
-                        }
-                    </select>
-                    <label class="checkline">
-                        <input type="checkbox" name="future" value="1" />
-                        <span>Also file future mail from @SenderName here</span>
-                    </label>
-                    <button type="submit" class="btn btn-s railbtn">Save category</button>
-                </form>
-            </section>
-
-            <section class="railcard">
-                <h2 class="railhead">Checks</h2>
-                @if (view.Row.SpamScore > 0)
-                {
-                    <p class="scoreline @(view.Row.SpamScore >= 5 ? "hi" : "")">score @view.Row.SpamScore</p>
-                    @if (view.SpamReasons.Length > 0)
-                    {
-                        <p class="railnote">@view.SpamReasons</p>
-                    }
-                }
-                else
-                {
-                    <p class="railnote"><LipiIcon Name="check" Size="14" /> Nothing suspicious. Spam score 0.</p>
-                }
-                <p class="railnote"><LipiIcon Name="security" Size="14" /> Shown in a sandbox; scripts cannot run.</p>
             </section>
 
             @if (view.Attachments.Count > 0)
@@ -183,6 +158,49 @@ else
                 </section>
             }
 
+            <section class="railcard">
+                <h2 class="railhead">Checks</h2>
+                @if (view.Row.SpamScore > 0)
+                {
+                    <p class="scoreline @(view.Row.SpamScore >= 5 ? "hi" : "")">score @view.Row.SpamScore</p>
+                    @if (view.SpamReasons.Length > 0)
+                    {
+                        <p class="railnote">@view.SpamReasons</p>
+                    }
+                }
+                else
+                {
+                    <p class="railnote"><LipiIcon Name="check" Size="14" /> Nothing suspicious. Spam score 0.</p>
+                }
+                <p class="railnote"><LipiIcon Name="security" Size="14" /> Shown in a sandbox; scripts cannot run.</p>
+            </section>
+
+            @* Category is for mail you keep: not offered in Junk or Trash. *@
+            @if (view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder && view.Folder.Name != "Trash")
+            {
+                <section class="railcard">
+                    <h2 class="railhead">Category</h2>
+                    <form method="post" action="/message/@Id/category">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="back" value="/message/@Id" />
+                        <select class="railinp" name="categoryId" aria-label="Category">
+                            <option value="">@MailboxService.Uncategorised</option>
+                            @foreach (CategoryView c in categories)
+                            {
+                                <option value="@c.Row.Id" selected="@(view.Row.CategoryId == c.Row.Id)">
+                                    @c.Row.Name@(c.Shared ? "" : " (yours)")
+                                </option>
+                            }
+                        </select>
+                        <label class="checkline">
+                            <input type="checkbox" name="future" value="1" />
+                            <span>Also file future mail from @SenderName here</span>
+                        </label>
+                        <button type="submit" class="btn btn-s railbtn">Save category</button>
+                    </form>
+                </section>
+
+            }
             <section class="railcard">
                 <h2 class="railhead">This message</h2>
                 <a class="raillink" href="/message/@Id/raw.eml"><LipiIcon Name="download" Size="15" /> Download .eml</a>
@@ -209,6 +227,7 @@ else
     [Parameter] public Guid Id { get; set; }
     [SupplyParameterFromQuery(Name = "images")] private string? Images { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [CascadingParameter] private HttpContext? Http { get; set; }
 
     private MessageView? view;
     private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
@@ -244,13 +263,39 @@ else
     /// otherwise report an open back to a sender.
     /// </summary>
     private string FrameCsp =>
-        "default-src 'none'; style-src 'unsafe-inline'; font-src data:; img-src data:" +
-        (Images == "1" ? " https: http:" : string.Empty);
+        "default-src 'none'; style-src 'unsafe-inline'; font-src data:" + (FontOrigin is string o ? " " + o : string.Empty) +
+        "; img-src data:" + (Images == "1" ? " https: http:" : string.Empty);
+
+    /// <summary>
+    /// This server's own address, for loading LiPi Sans into the frame
+    /// (DEF-021). The frame may fetch fonts from here and nowhere else. The
+    /// value comes from the request's Host header, so it is used only when
+    /// it is made of host-name characters; otherwise the frame keeps the
+    /// system font.
+    /// </summary>
+    private string? FontOrigin
+    {
+        get
+        {
+            if (Http is null)
+            {
+                return null;
+            }
+            string host = Http.Request.Host.Value ?? string.Empty;
+            string scheme = Http.Request.Scheme;
+            bool safe = host.Length > 0 && host.Length <= 255 && (scheme == "https" || scheme == "http") &&
+                host.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '-' || c == ':' || c == '[' || c == ']');
+            return safe ? $"{scheme}://{host}" : null;
+        }
+    }
+
+    /// <summary>LiPi Sans's @font-face rules with absolute addresses, or nothing.</summary>
+    private string FontFaces => FontOrigin is string origin ? Services.FrameFonts.FaceRules(origin) : string.Empty;
 
     private string Srcdoc =>
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">" +
         "<meta http-equiv=\"Content-Security-Policy\" content=\"" + FrameCsp + "\">" +
-        "<style>body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;" +
+        "<style>" + FontFaces + "body{font-family:'LiPi Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;" +
         "margin:18px;color:#1a1a1a;background:#fff;word-wrap:break-word}img{max-width:100%}" +
         "pre{white-space:pre-wrap;font-family:inherit;margin:0}a{color:#0b5d8f}</style></head><body>" +
         (view?.BodyHtml ?? string.Empty) + "</body></html>";
@@ -268,6 +313,18 @@ else
             return;
         }
         view = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
+        if (view is null && Http is not null)
+        {
+            // The friendly page stays; the status says what happened (DEF-013).
+            // Set as the headers go out: a 404 set during rendering makes
+            // Blazor discard the page and send an empty body.
+            HttpContext http = Http;
+            http.Response.OnStarting(() =>
+            {
+                http.Response.StatusCode = StatusCodes.Status404NotFound;
+                return Task.CompletedTask;
+            });
+        }
         categories = await Mail.ListCategoriesAsync(mailboxId.Value);
     }
 }

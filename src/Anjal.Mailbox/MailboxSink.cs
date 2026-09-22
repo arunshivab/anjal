@@ -190,7 +190,14 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     rules = await this.store.ListSenderRulesAsync(tenant.Id, ct).ConfigureAwait(false);
                     rulesByTenant[tenant.Id] = rules;
                 }
-                string folderName = ChooseFolder(spamScore, tenant.SpamThreshold, Anjal.Spam.SenderRules.Evaluate(rules, ctx.EnvelopeFrom, fromHeaderAddress));
+                // The tenant's rules (set by an administrator) and this
+                // mailbox's own (from its Report spam / Not spam) are judged
+                // together: an exact address beats a domain, block beats allow.
+                IReadOnlyList<Anjal.Store.SenderRuleRow> personal = await this.store.ListMailboxSenderRulesAsync(mailbox.Id, ct).ConfigureAwait(false);
+                IReadOnlyList<Anjal.Store.SenderRuleRow> effective = personal.Count == 0
+                    ? rules
+                    : new System.Collections.Generic.List<Anjal.Store.SenderRuleRow>(rules.Concat(personal));
+                string folderName = ChooseFolder(spamScore, tenant.SpamThreshold, Anjal.Spam.SenderRules.Evaluate(effective, ctx.EnvelopeFrom, fromHeaderAddress));
 
                 Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
                 MaildirWriteResult written = await this.maildir
@@ -211,6 +218,7 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     SizeBytes = written.SizeBytes,
                     SpamScore = spamScore,
                     HasAttachments = HasAttachment(parsed?.Body),
+                    BodyText = MessageText.Extract(parsed),
                     CategoryId = await this.CategoryForAsync(mailbox.Id, ctx.EnvelopeFrom, parsed?.Headers.Get("From") ?? string.Empty, ct).ConfigureAwait(false),
                 }, ct).ConfigureAwait(false);
 
@@ -312,6 +320,7 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             SizeBytes = written.SizeBytes,
             Seen = true,
             HasAttachments = HasAttachment(parsed?.Body),
+            BodyText = MessageText.Extract(parsed),
         }, ct).ConfigureAwait(false);
         await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
         this.log?.Invoke($"Filed sent copy for {mailbox.Address} ({written.SizeBytes} bytes)");

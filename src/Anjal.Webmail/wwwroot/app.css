@@ -1,3 +1,6 @@
+/* The hidden attribute always hides, whatever display a class sets (DEF-020). */
+[hidden] { display: none !important; }
+
 /* Anjal webmail — application stylesheet.
    Built from the design system's exported screens. Colour, spacing,
    radius and type all come from tokens.css; nothing here hard-codes a
@@ -795,3 +798,78 @@ table.plain .num { text-align: right; font-family: var(--font-mono); font-varian
 /* A read row keeps the dot's slot so sender names line up down the
    column whether or not a row is unread. */
 .udot.off { background: transparent; box-shadow: none; }
+
+/* ---- v0.17.0 list layout ---- */
+/* Headers sit where their values sit: numbers are right-aligned, and the
+   From header starts where the names do - the cell's 12px padding plus the
+   unread-dot slot (7px dot + 8px gap) plus the dot's ring. Measured in a
+   browser, not assumed. */
+table.ml th.right { text-align: right; }
+table.ml th.c-from.withdot { padding-left: 28px; }
+/* A date never wraps onto a second line. */
+table.ml td.c-time { white-space: nowrap; }
+/* The message's category, shown under its subject. */
+.readcat { margin: 4px 0 8px; }
+/* Settings: add a sender rule on one line, wrapping on narrow screens. */
+.ruleadd { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 14px; }
+.ruleadd .inp:first-of-type { flex: 1 1 260px; }
+
+/* ---- Formatting editor (compose, reply, signature) ---- */
+/* The toolbar: uniform square buttons in groups, with thin dividers. */
+.rte-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 10px 0 2px; }
+.rte-bar[hidden] { display: none !important; }
+.rte-grp { display: inline-flex; gap: 2px; }
+.rte-sep { width: 1px; height: 18px; background: var(--line); margin: 0 6px; }
+.rte-btn { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center;
+           padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-muted);
+           cursor: pointer; font: inherit; font-size: 15px; line-height: 1;
+           transition: background 120ms var(--ease), color 120ms var(--ease); }
+.rte-btn:hover { background: var(--surface-300); color: var(--ink); }
+.rte-btn:focus-visible { outline: 2px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 1px; }
+.rte-btn[aria-pressed="true"] { background: color-mix(in srgb, var(--brand) 14%, transparent); color: var(--brand); }
+.rte-b { font-weight: 800; font-style: normal; }
+.rte-i { font-style: italic; font-weight: 600; font-family: Georgia, "Times New Roman", serif; }
+/* The body writes straight onto the card: no inner box, grip or ring. The
+   card itself (.sheet) shows focus. */
+.rte-ed { overflow-y: auto; outline: none; white-space: normal; }
+.rte-ed.rte-canvas { resize: none; border: 0; box-shadow: none; margin-top: 8px; }
+.rte-ed.rte-canvas:focus, .rte-ed.rte-canvas:focus-visible { outline: none; box-shadow: none; }
+.rte-ed blockquote { margin: 6px 0; padding-left: 12px; border-left: 3px solid var(--line-strong); color: var(--ink-muted); }
+.rte-ed ul, .rte-ed ol { padding-left: 22px; }
+.rte-ed [data-signature] { color: var(--ink-muted); }
+
+/* ---- Attachment column: its own narrow slot, so every subject starts at
+   the same place. ---- */
+table.ml th.c-att, table.ml td.c-att { width: 22px; padding-left: 0; padding-right: 0; text-align: center; color: var(--ink-subtle); }
+table.ml td.c-att svg { vertical-align: -2px; }
+@media (max-width: 720px) {
+  table.ml td.c-subject { grid-column: 2; }
+  table.ml td.c-att { grid-column: 3; grid-row: 2; text-align: right; }
+}
+
+/* ---- Settings in two panes ---- */
+.settings { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: start; }
+.setnav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 16px; }
+.setnav a { padding: 8px 12px; border-radius: var(--radius-sm); color: var(--ink); text-decoration: none; font-weight: 500; }
+.setnav a:hover { background: var(--surface-300); }
+.setnav a.on { background: var(--surface-300); font-weight: 700; }
+.sigbox { width: 100%; min-height: 120px; }
+@media (max-width: 720px) {
+  .settings { grid-template-columns: 1fr; }
+  .setnav { flex-direction: row; flex-wrap: wrap; position: static; }
+}
+
+/* Text for screen readers only. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+           clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+
+/* The file picker's button matches the other secondary buttons; the native
+   "No file chosen" text stays, quieter. Pure CSS, so it works without JavaScript. */
+.railfile { font: inherit; font-size: 13px; color: var(--ink-subtle); max-width: 100%; }
+.railfile::file-selector-button {
+  font: inherit; font-size: 12px; font-weight: 550; height: 30px; padding: 0 14px; margin-right: 10px;
+  border-radius: var(--radius-pill); border: 1px solid var(--line); background: var(--surface-200);
+  color: var(--ink); box-shadow: var(--shadow-sm); cursor: pointer;
+  transition: background 160ms var(--ease), border-color 160ms var(--ease);
+}
+.railfile::file-selector-button:hover { border-color: var(--line-strong); background: var(--surface-100); }

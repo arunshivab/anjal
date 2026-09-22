@@ -174,7 +174,7 @@ public sealed class AsyncStoreRenderingTests : IAsyncLifetime, IDisposable
     [InlineData("compose?forward=00000000-0000-0000-0000-000000000000")]
     public async Task MalformedOrUnknownUrlParameters_AreIgnored_NotAnError(string path)
     {
-        // DEF-005: a hand-edited or truncated link used to throw while binding
+        // DEF-019: a hand-edited or truncated link used to throw while binding
         // the parameter. It now falls back: page 1, or a blank compose.
         HttpResponseMessage res = await this.client.GetAsync(path);
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);

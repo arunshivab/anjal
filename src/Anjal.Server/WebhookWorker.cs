@@ -80,29 +80,32 @@ public sealed class WebhookWorker : System.IDisposable
     /// <param name="ct">Cancellation.</param>
     public async System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken ct)
     {
+        var backoff = new FailureBackoff("webhook worker", this.pollInterval, System.TimeSpan.FromSeconds(60), this.log);
         while (!ct.IsCancellationRequested)
         {
+            System.TimeSpan wait;
             try
             {
                 while (await this.RunOnceAsync(ct).ConfigureAwait(false) > 0)
                 {
                     // Keep draining while there is work.
                 }
+                wait = backoff.Succeeded();
             }
             catch (System.OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return;
             }
-#pragma warning disable CA1031 // A failed pass is logged and retried at the next tick.
+#pragma warning disable CA1031 // A failed pass is logged once, then retried with backoff.
             catch (System.Exception ex)
             {
-                this.log?.Invoke($"webhook worker: {ex.GetType().Name}: {ex.Message}");
+                wait = backoff.Failed(ex);
             }
 #pragma warning restore CA1031
 
             try
             {
-                await this.wake.WaitAsync(this.pollInterval, ct).ConfigureAwait(false);
+                await this.wake.WaitAsync(wait, ct).ConfigureAwait(false);
             }
             catch (System.OperationCanceledException)
             {

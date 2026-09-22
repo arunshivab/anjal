@@ -312,11 +312,12 @@ public sealed class WebmailFeatureTests : System.IDisposable
         await this.SeedAsync();
         MessageRow a = await this.DeliverAsync(ThreadMail);
         Assert.Equal(1, await this.svc.BulkAsync(this.mailbox.Id, new[] { a.Id }, MailboxService.BulkAction.ReportSpam));
-        SenderRuleRow blocked = Assert.Single(await this.store.ListSenderRulesAsync(this.tenant.Id));
+        Assert.Empty(await this.store.ListSenderRulesAsync(this.tenant.Id));
+        SenderRuleRow blocked = Assert.Single(await this.store.ListMailboxSenderRulesAsync(this.mailbox.Id));
         Assert.Equal(SenderRuleAction.Block, blocked.Action);
 
         Assert.Equal(1, await this.svc.BulkAsync(this.mailbox.Id, new[] { a.Id }, MailboxService.BulkAction.NotSpam));
-        SenderRuleRow allowed = Assert.Single(await this.store.ListSenderRulesAsync(this.tenant.Id));
+        SenderRuleRow allowed = Assert.Single(await this.store.ListMailboxSenderRulesAsync(this.mailbox.Id));
         Assert.Equal(SenderRuleAction.Allow, allowed.Action);
     }
 

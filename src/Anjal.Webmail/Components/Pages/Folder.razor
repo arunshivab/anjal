@@ -7,7 +7,7 @@
 
 <div class="pagehead">
     <h1>@Name</h1>
-    <span class="cnt">@total message@(total == 1 ? "" : "s")@(unread > 0 ? $" · {unread} unread" : "")</span>
+    <span class="cnt" data-count data-total="@total">@total message@(total == 1 ? "" : "s")@(unread > 0 ? $" · {unread} unread" : "")</span>
 </div>
 
 @if (Sent is not null)
@@ -45,14 +45,27 @@ else
         <input type="hidden" name="page" value="@pageIndex" />
         <div class="bulk">
             <span class="lbl" data-bulklabel>With selected:</span>
-            <button class="btn btn-s btn-sm" name="action" value="trash" type="submit" data-bulkaction>Trash</button>
+            @if (Name == "Trash")
+            {
+                @* Trash offers what makes sense there: put back, or delete for good (DEF-023). *@
+                <button class="btn btn-s btn-sm" name="action" value="restore" type="submit" data-bulkaction>Restore to INBOX</button>
+                <details class="confirm">
+                    <summary class="btn btn-s btn-sm">Delete permanently…</summary>
+                    <button class="btn btn-d btn-sm" name="action" value="purge" type="submit" data-bulkaction>Yes, delete the selected messages for good</button>
+                </details>
+            }
+            else
+            {
+                <button class="btn btn-s btn-sm" name="action" value="trash" type="submit" data-bulkaction>Trash</button>
+            }
             <button class="btn btn-s btn-sm" name="action" value="read" type="submit" data-bulkaction>Mark read</button>
             <button class="btn btn-s btn-sm" name="action" value="unread" type="submit" data-bulkaction>Mark unread</button>
             @if (Name == Anjal.Mailbox.MailboxSink.JunkFolder)
             {
                 <button class="btn btn-s btn-sm" name="action" value="notspam" type="submit" data-bulkaction>Not spam</button>
             }
-            @if (categories.Count > 0 && Name != "Drafts")
+            @* Categories are for mail you keep: not offered in Drafts, Junk or Trash. *@
+            @if (categories.Count > 0 && Name != "Drafts" && Name != Anjal.Mailbox.MailboxSink.JunkFolder && Name != "Trash")
             {
                 <span class="bulkcat">
                     <select name="categoryId" class="scope" aria-label="Category to apply" data-bulkaction>
@@ -66,11 +79,20 @@ else
                     <button class="btn btn-s btn-sm" name="action" value="categorise" type="submit" data-bulkaction>Apply</button>
                 </span>
             }
-            else if (Name != "Sent" && Name != "Drafts")
+            @* Independent of categories: it used to sit in their else branch, so it
+               vanished whenever a mailbox had any category (DEF-030). *@
+            @if (Name != "Sent" && Name != "Drafts" && Name != Anjal.Mailbox.MailboxSink.JunkFolder)
             {
                 <button class="btn btn-s btn-sm" name="action" value="spam" type="submit" data-bulkaction>Report spam</button>
             }
             <span style="margin-left:auto">
+                @if (Name == "Trash" && total > 0)
+                {
+                    <details class="confirm">
+                        <summary class="btn btn-q btn-sm">Empty Trash…</summary>
+                        <button type="submit" class="btn btn-d btn-sm" formaction="/folder/Trash/empty" formnovalidate>Yes, delete all @total for good</button>
+                    </details>
+                }
                 <button type="submit" class="btn btn-q btn-sm" formaction="/folder/@Uri.EscapeDataString(Name)/readall"
                         formnovalidate data-markallread-btn>Mark all read</button>
             </span>
@@ -92,11 +114,12 @@ else
                     {
                         <th class="c-fl"><span class="sr">Flag</span></th>
                     }
-                    <th class="c-from">From</th>
+                    <th class="c-from withdot">@(IsOutgoing ? "To" : "From")</th>
+                    <th class="c-att"><span class="sr-only">Attachments</span></th>
                     <th>Subject</th>
                     <th class="c-cat">Category</th>
-                    <th class="c-time">Received</th>
-                    <th class="c-size">Size</th>
+                    <th class="c-time right">Received</th>
+                    <th class="c-size right">Size</th>
                     <th class="c-score" title="Spam score">Score</th>
                 </tr>
             </thead>
@@ -127,8 +150,14 @@ else
                                 {
                                     <span class="udot" aria-label="Unread"></span>
                                 }
-                                <span class="sname">@Sender(m)</span>
+                                <span class="sname">@(IsOutgoing ? Recipient(m) : Sender(m))</span>
                             </span>
+                        </td>
+<td class="c-att">
+                            @if (m.HasAttachments)
+                            {
+                                <span data-attachment title="Has attachments" aria-label="Has attachments"><LipiIcon Name="attachment" Size="14" /></span>
+                            }
                         </td>
                         <td class="c-subject">
                             <span class="subj">
@@ -141,7 +170,7 @@ else
                                 <span class="chip slot-@cat.Row.Slot"><i></i>@cat.Row.Name</span>
                             }
                         </td>
-                        <td class="c-time num">@When(m.ReceivedAt)</td>
+                        <td class="c-time num">@MainLayout.When(m.ReceivedAt)</td>
                         <td class="c-size num">@MainLayout.Size(m.SizeBytes)</td>
                         <td class="c-score">
                             @if (m.SpamScore > 0)
@@ -176,12 +205,13 @@ else
     [Parameter] public string? FolderName { get; set; }
     // Read as text and parsed here: a non-numeric or out-of-range value in a
     // hand-edited link falls back to the first page instead of failing the
-    // request while the parameter is bound (DEF-005).
+    // request while the parameter is bound (DEF-019).
     [SupplyParameterFromQuery(Name = "page")] private string? PageText { get; set; }
     private int? PageQuery => int.TryParse(PageText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int page) ? page : null;
     [SupplyParameterFromQuery(Name = "sent")] private string? Sent { get; set; }
     [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [CascadingParameter] private HttpContext? Http { get; set; }
 
     private IReadOnlyList<MessageRow>? items;
     private FolderRow? folder;
@@ -221,6 +251,27 @@ else
     private string OpenLink(MessageRow m) =>
         Name == "Drafts" ? $"/draft/{m.Id}" : $"/message/{m.Id}";
 
+    /// <summary>
+    /// Sent and Drafts are about who a message went to; the list shows the
+    /// recipient there, not the owner's own name on every row (DEF-009).
+    /// </summary>
+    private bool IsOutgoing => Name == "Sent" || Name == "Drafts";
+
+    private static bool IsSystemFolder(string name) =>
+        name == FolderRow.Inbox || name == "Sent" || name == "Drafts" || name == Anjal.Mailbox.MailboxSink.JunkFolder || name == "Trash";
+
+    private static string Recipient(MessageRow m)
+    {
+        string decoded = Anjal.Mime.EncodedWordDecoder.Decode(m.ToHeader);
+        var parsed = Anjal.Mime.AddressParser.Parse(decoded);
+        if (parsed.Count == 0)
+        {
+            return string.IsNullOrWhiteSpace(decoded) ? "(no recipient)" : decoded;
+        }
+        string first = parsed[0].DisplayName.Length > 0 ? parsed[0].DisplayName : parsed[0].Address;
+        return parsed.Count == 1 ? first : $"{first} +{parsed.Count - 1}";
+    }
+
     private static string Sender(MessageRow m)
     {
         string decoded = Anjal.Mime.EncodedWordDecoder.Decode(m.FromHeader);
@@ -233,18 +284,6 @@ else
     }
 
     /// <summary>Today shows the clock; this week the weekday; older the date.</summary>
-    private static string When(DateTimeOffset at)
-    {
-        DateTime local = at.ToLocalTime().DateTime;
-        DateTime today = DateTime.Now.Date;
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (local.Date == today) { return local.ToString("HH:mm", inv); }
-        if (local.Date == today.AddDays(-1)) { return "Yesterday"; }
-        if (local.Date > today.AddDays(-7)) { return local.ToString("ddd", inv); }
-        if (local.Year == today.Year) { return local.ToString("d MMM", inv); }
-        return local.ToString("d MMM yyyy", inv);
-    }
-
     protected override async Task OnParametersSetAsync()
     {
         items = null;
@@ -262,6 +301,20 @@ else
         folder = await Mail.GetFolderAsync(mailboxId.Value, Name);
         if (folder is null)
         {
+            // A folder that does not exist is a 404, so links to it are not
+            // mistaken for healthy ones (DEF-018). A system folder a new
+            // mailbox has not used yet is simply empty, not missing.
+            if (Http is not null && !IsSystemFolder(Name))
+            {
+                // Set as the headers go out: a 404 set during rendering makes
+                // Blazor discard the page and send an empty body.
+                HttpContext http = Http;
+                http.Response.OnStarting(() =>
+                {
+                    http.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return Task.CompletedTask;
+                });
+            }
             return;
         }
         (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);

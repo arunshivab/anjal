@@ -339,8 +339,8 @@ RETURNING " + FolderColumns + ";";
         System.ArgumentNullException.ThrowIfNull(message);
 
         const string sql = @"
-INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments)
-VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments)
+INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text)
+VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text)
 RETURNING " + MessageColumns + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -356,6 +356,7 @@ RETURNING " + MessageColumns + ";";
         cmd.Parameters.AddWithValue("size_bytes", message.SizeBytes);
         cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("category_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = message.CategoryId });
         cmd.Parameters.AddWithValue("has_attachments", message.HasAttachments);
+        cmd.Parameters.AddWithValue("body_text", message.BodyText ?? string.Empty);
         cmd.Parameters.AddWithValue("seen", message.Seen);
         cmd.Parameters.AddWithValue("flagged", message.Flagged);
         cmd.Parameters.AddWithValue("answered", message.Answered);
@@ -432,7 +433,7 @@ LIMIT @limit OFFSET @offset;";
 
     private const string SearchWhere = @"
 WHERE mailbox_id = @mailbox_id AND (@folder_id IS NULL OR folder_id = @folder_id)
-  AND (@q = '' OR subject ILIKE @pattern OR from_header ILIKE @pattern OR to_header ILIKE @pattern OR envelope_from ILIKE @pattern)";
+  AND (@q = '' OR subject ILIKE @pattern OR from_header ILIKE @pattern OR to_header ILIKE @pattern OR envelope_from ILIKE @pattern OR body_text ILIKE @pattern)";
 
     private static string LikePattern(string query)
     {
@@ -593,6 +594,88 @@ RETURNING " + SenderRuleColumns + ";";
         Enabled = r.GetBoolean(3),
         SpamThreshold = r.GetInt32(4),
         CreatedAt = r.GetFieldValue<System.DateTimeOffset>(5),
+    };
+
+    /// <inheritdoc/>
+    public async Task<(string Html, string Text)> GetSignatureAsync(System.Guid mailboxId, CancellationToken ct = default)
+    {
+        const string sql = "SELECT signature_html, signature_text FROM mailboxes WHERE id = @id;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", mailboxId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? (reader.GetString(0), reader.GetString(1)) : (string.Empty, string.Empty);
+    }
+
+    /// <inheritdoc/>
+    public async Task SetSignatureAsync(System.Guid mailboxId, string html, string text, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(html);
+        System.ArgumentNullException.ThrowIfNull(text);
+        const string sql = "UPDATE mailboxes SET signature_html = @html, signature_text = @text, updated_at = now() WHERE id = @id;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", mailboxId);
+        cmd.Parameters.AddWithValue("html", html);
+        cmd.Parameters.AddWithValue("text", text);
+        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private const string MailboxSenderRuleColumns = "id, mailbox_id, pattern, action, created_at";
+
+    /// <inheritdoc/>
+    public async Task<SenderRuleRow> UpsertMailboxSenderRuleAsync(System.Guid mailboxId, string pattern, SenderRuleAction action, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(pattern);
+        const string sql = @"
+INSERT INTO mailbox_sender_rules (mailbox_id, pattern, action)
+VALUES (@mailbox_id, lower(@pattern), @action)
+ON CONFLICT (mailbox_id, pattern) DO UPDATE SET action = EXCLUDED.action
+RETURNING " + MailboxSenderRuleColumns + ";";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        cmd.Parameters.AddWithValue("pattern", pattern.Trim());
+        cmd.Parameters.AddWithValue("action", action == SenderRuleAction.Block ? "block" : "allow");
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        await reader.ReadAsync(ct).ConfigureAwait(false);
+        return ReadMailboxSenderRule(reader);
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<SenderRuleRow>> ListMailboxSenderRulesAsync(System.Guid mailboxId, CancellationToken ct = default)
+    {
+        const string sql = "SELECT " + MailboxSenderRuleColumns + " FROM mailbox_sender_rules WHERE mailbox_id = @mailbox_id ORDER BY pattern;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<SenderRuleRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadMailboxSenderRule(reader));
+        }
+        return result;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> DeleteMailboxSenderRuleAsync(System.Guid mailboxId, System.Guid ruleId, CancellationToken ct = default)
+    {
+        const string sql = "DELETE FROM mailbox_sender_rules WHERE mailbox_id = @mailbox_id AND id = @id;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        cmd.Parameters.AddWithValue("id", ruleId);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
+    }
+
+    private static SenderRuleRow ReadMailboxSenderRule(NpgsqlDataReader r) => new()
+    {
+        Id = r.GetGuid(0),
+        MailboxId = r.GetGuid(1),
+        Pattern = r.GetString(2),
+        Action = string.Equals(r.GetString(3), "block", System.StringComparison.OrdinalIgnoreCase) ? SenderRuleAction.Block : SenderRuleAction.Allow,
+        CreatedAt = r.GetFieldValue<System.DateTimeOffset>(4),
     };
 
     private static SenderRuleRow ReadSenderRule(NpgsqlDataReader r) => new()

@@ -256,8 +256,14 @@
           if (!r.ok) { window.location.reload(); return; }
           $$("tr.unread").forEach(function (tr) { tr.classList.remove("unread"); });
           $$(".udot").forEach(function (d) { d.remove(); });
+          // Hide the badge outright; an emptied badge is still a red pill (DEF-014).
           var badge = $("[data-unread-badge]");
-          if (badge) { badge.textContent = ""; }
+          if (badge) { badge.textContent = ""; badge.hidden = true; }
+          var count = $("[data-count]");
+          if (count) {
+            var total = count.getAttribute("data-total") || "0";
+            count.textContent = total + (total === "1" ? " message" : " messages");
+          }
         })
         .catch(function () { window.location.reload(); });
     });
@@ -294,8 +300,124 @@
         var reply = rows[index].getAttribute("data-reply");
         if (reply) { e.preventDefault(); window.location.href = reply; }
       } else if (e.key === "#" && index >= 0) {
-        var trash = rows[index].querySelector("form[data-trash]");
-        if (trash) { e.preventDefault(); trash.submit(); }
+        // Rows live inside the bulk form, so '#' selects just this row and
+        // presses the form's own Trash button (DEF-017).
+        var box = rows[index].querySelector("input[data-rowcheck]");
+        var trash = $("button[data-bulkaction][value='trash']");
+        if (box && trash) {
+          e.preventDefault();
+          $$("input[data-rowcheck]").forEach(function (c) { c.checked = false; });
+          box.checked = true;
+          box.dispatchEvent(new Event("change", { bubbles: true }));
+          trash.disabled = false;
+          trash.click();
+        }
+      }
+    });
+  }());
+
+  /* ---------- 5d. Formatting editor ----------
+     A textarea marked data-rte becomes a formatting editor with a toolbar.
+     The textarea stays in the form, hidden, and is kept in step with the
+     editor's plain text; the hidden data-rte-html input carries its HTML.
+     The server sanitises the HTML and derives the plain part from it, so
+     nothing here is trusted. Without JavaScript, or where the browser cannot
+     edit rich text, the plain textarea is simply what the user types in. */
+  (function formattingEditor() {
+    if (typeof document.execCommand !== "function") { return; }
+    function textToHtml(text) {
+      return String(text || "").split(/\r?\n/).map(function (line) {
+        var safe = line.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return "<div>" + (safe.length ? safe : "<br>") + "</div>";
+      }).join("");
+    }
+    $$("textarea[data-rte]").forEach(function (area) {
+      var form = area.form;
+      var html = form ? form.querySelector("input[data-rte-html]") : null;
+      if (!form || !html) { return; }
+
+      // The toolbar is part of the page (shared component), hidden until now.
+      var bar = form.querySelector("[data-rte-bar]");
+      if (!bar) { return; }
+      var editor = document.createElement("div");
+      editor.className = "rte-ed " + area.className.replace("canvas", "canvas rte-canvas");
+      editor.contentEditable = "true";
+      editor.setAttribute("role", "textbox");
+      editor.setAttribute("aria-multiline", "true");
+      editor.setAttribute("aria-label", area.getAttribute("aria-label") || "Message");
+      editor.innerHTML = html.value && html.value.trim() ? html.value : textToHtml(area.value);
+      area.parentNode.insertBefore(editor, area);
+      bar.hidden = false;
+      area.hidden = true;
+      area.setAttribute("aria-hidden", "true");
+
+      function sync() {
+        html.value = editor.innerHTML;
+        area.value = editor.innerText;
+      }
+      // Show which formatting applies where the cursor is.
+      var STATEFUL = ["bold", "italic", "underline", "insertUnorderedList", "insertOrderedList"];
+      function reflect() {
+        var sel = window.getSelection();
+        var inside = sel && sel.rangeCount > 0 && editor.contains(sel.anchorNode);
+        STATEFUL.forEach(function (cmd) {
+          var b = bar.querySelector("[data-cmd='" + cmd + "']");
+          if (b) { b.setAttribute("aria-pressed", inside && document.queryCommandState(cmd) ? "true" : "false"); }
+        });
+      }
+      document.addEventListener("selectionchange", reflect);
+      editor.addEventListener("input", sync);
+      form.addEventListener("submit", sync, true);
+      // Keep the text selection when a toolbar button is pressed.
+      bar.addEventListener("mousedown", function (e) {
+        if (e.target.closest("button")) { e.preventDefault(); }
+      });
+      bar.addEventListener("click", function (e) {
+        var b = e.target.closest("button[data-cmd]");
+        if (!b) { return; }
+        e.preventDefault();
+        editor.focus();
+        var cmd = b.getAttribute("data-cmd");
+        if (cmd === "link") {
+          var url = window.prompt("Link address", "https://");
+          url = url ? url.trim() : "";
+          // Only web and mail links: never javascript: or data:.
+          if (/^(https?:\/\/|mailto:)/i.test(url)) { document.execCommand("createLink", false, url); }
+        } else if (cmd === "quote") {
+          document.execCommand("formatBlock", false, "blockquote");
+        } else if (cmd === "clear") {
+          document.execCommand("removeFormat");
+          document.execCommand("unlink");
+          document.execCommand("formatBlock", false, "div");
+        } else {
+          document.execCommand(cmd);
+        }
+        sync();
+        reflect();
+      });
+      sync();
+    });
+  }());
+
+  /* ---------- 5c. Attachment size, checked before uploading ----------
+     A file over the limit would otherwise be sent in full, only for the
+     connection to be cut once the server's request limit is reached, with
+     nothing shown to the user (DEF-010). The server still checks. */
+  (function attachmentLimit() {
+    var LIMIT = 18 * 1024 * 1024;
+    var input = $("input[type='file'][name='attachments']");
+    var notice = $("[data-client-error]");
+    if (!input || !input.form) { return; }
+    input.form.addEventListener("submit", function (e) {
+      var total = 0;
+      Array.prototype.forEach.call(input.files || [], function (f) { total += f.size; });
+      if (total > LIMIT) {
+        e.preventDefault();
+        if (notice) {
+          notice.textContent = "The attachments add up to more than 18 MB. Remove some, or send them in more than one message.";
+          notice.hidden = false;
+          notice.scrollIntoView({ block: "nearest" });
+        }
       }
     });
   }());

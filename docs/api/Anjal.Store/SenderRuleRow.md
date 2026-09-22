@@ -9,5 +9,6 @@ A per-tenant sender allow/block rule. The pattern is either a full address (alic
 - **Action** *(property)* - Allow or block.
 - **CreatedAt** *(property)* - When the rule was created.
 - **Id** *(property)* - Identifier assigned by the store.
+- **MailboxId** *(property)* - Set for a personal rule, made by one mailbox's Report spam or Not spam; it affects only that mailbox. Null for a tenant-wide rule, which only an administrator sets, through the API.
 - **Pattern** *(property)* - Address or "@domain" pattern, lowercase.
 - **TenantId** *(property)* - The owning tenant.

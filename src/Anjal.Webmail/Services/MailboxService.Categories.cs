@@ -298,6 +298,61 @@ public sealed partial class MailboxService
         return row.EnvelopeFrom.ToLowerInvariant();
     }
 
+    /// <summary>
+    /// Create a sender rule from Settings (item 7 of the v0.17.0 review):
+    /// always to Junk, never to Junk, or file in one of this mailbox's
+    /// categories. Returns a message for the user when the input is not
+    /// acceptable; null on success.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="pattern">An address, or "@domain".</param>
+    /// <param name="rule">"block", "allow", or "cat:" followed by a category id.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<string?> AddSenderRuleAsync(Guid mailboxId, string pattern, string rule, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        ArgumentNullException.ThrowIfNull(rule);
+        string p = pattern.Trim().ToLowerInvariant();
+        if (!Anjal.Spam.SenderRules.IsValidPattern(p))
+        {
+            return "Enter an address such as name@hospital.example, or a whole domain such as @hospital.example.";
+        }
+        if (rule == "block" || rule == "allow")
+        {
+            await this.store.UpsertMailboxSenderRuleAsync(mailboxId, p, rule == "block" ? SenderRuleAction.Block : SenderRuleAction.Allow, ct).ConfigureAwait(false);
+            return null;
+        }
+        if (rule.StartsWith("cat:", StringComparison.Ordinal) && Guid.TryParse(rule.AsSpan(4), out Guid categoryId))
+        {
+            // Only one of this mailbox's own categories (its own or its tenant's shared ones).
+            IReadOnlyList<CategoryView> mine = await this.ListCategoriesAsync(mailboxId, ct).ConfigureAwait(false);
+            if (!mine.Any(c => c.Row.Id == categoryId))
+            {
+                return "Choose one of your categories.";
+            }
+            await this.store.UpsertCategoryRuleAsync(new CategoryRuleRow { MailboxId = mailboxId, Pattern = p, CategoryId = categoryId }, ct).ConfigureAwait(false);
+            return null;
+        }
+        return "Choose what should happen to this sender's mail.";
+    }
+
+    /// <summary>This mailbox's own blocked and allowed senders, from its Report spam and Not spam.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    public Task<IReadOnlyList<SenderRuleRow>> ListSenderRulesAsync(Guid mailboxId, CancellationToken ct = default) =>
+        this.store.ListMailboxSenderRulesAsync(mailboxId, ct);
+
+    /// <summary>
+    /// Remove one of this mailbox's own blocked or allowed senders. The store
+    /// matches on the mailbox as well as the rule, so another mailbox's rule
+    /// cannot be removed from here.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ruleId">The rule.</param>
+    /// <param name="ct">Cancellation.</param>
+    public Task<bool> DeleteSenderRuleAsync(Guid mailboxId, Guid ruleId, CancellationToken ct = default) =>
+        this.store.DeleteMailboxSenderRuleAsync(mailboxId, ruleId, ct);
+
     /// <summary>The mailbox's sender-to-category rules, newest patterns first.</summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="ct">Cancellation.</param>

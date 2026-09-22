@@ -8,12 +8,14 @@
     <meta name="color-scheme" content="light dark" />
     <base href="/" />
     <link rel="icon" href="/logos/anjal-favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/tokens.css" />
-    <link rel="stylesheet" href="/app.css" />
+    @* Each link carries a fingerprint of the file's contents, so an upgrade
+       reaches every browser at once instead of an hour later (DEF-033). *@
+    <link rel="stylesheet" href="/tokens.css?v=@StaticAssets.Fingerprint("tokens.css")" />
+    <link rel="stylesheet" href="/app.css?v=@StaticAssets.Fingerprint("app.css")" />
     <HeadOutlet />
 </head>
 <body>
     <Routes />
-    <script src="/app.js" defer></script>
+    <script src="/app.js?v=@StaticAssets.Fingerprint("app.js")" defer></script>
 </body>
 </html>

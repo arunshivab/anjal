@@ -292,6 +292,21 @@ public static class Program
         });
 
         app.UseAuthentication();
+
+        // A form posted after the session has ended cannot be saved. Say so on
+        // the sign-in page, rather than discarding the change silently
+        // (DEF-012). The sign-in form itself is the one anonymous POST.
+        app.Use(async (http, next) =>
+        {
+            if (HttpMethods.IsPost(http.Request.Method) &&
+                http.User.Identity?.IsAuthenticated != true &&
+                !http.Request.Path.StartsWithSegments("/auth/login", StringComparison.OrdinalIgnoreCase))
+            {
+                http.Response.Redirect("/sign-in?unsaved=1");
+                return;
+            }
+            await next().ConfigureAwait(false);
+        });
         app.UseAuthorization();
         app.UseAntiforgery();
 
@@ -310,9 +325,9 @@ public static class Program
     private static void MapEndpoints(WebApplication app)
     {
         // ---- embedded static assets ----
-        app.MapGet("/{file:regex(^(tokens\\.css|app\\.css|app\\.js)$)}", (string file) => Asset(file));
-        app.MapGet("/fonts/{file}", (string file) => Asset("fonts/" + file));
-        app.MapGet("/logos/{file}", (string file) => Asset("logos/" + file));
+        app.MapGet("/{file:regex(^(tokens\\.css|app\\.css|app\\.js)$)}", (string file, HttpContext http) => Asset(file, http));
+        app.MapGet("/fonts/{file}", (string file, HttpContext http) => Asset("fonts/" + file, http));
+        app.MapGet("/logos/{file}", (string file, HttpContext http) => Asset("logos/" + file, http));
 
         // ---- session ----
         app.MapPost("/auth/login", async (HttpContext http, [FromForm] string address, [FromForm] string password, WebmailAuthService auth, LoginThrottle throttle, AuditTrail audit, CancellationToken ct) =>
@@ -459,6 +474,8 @@ public static class Program
                 "unread" => MailboxService.BulkAction.MarkUnread,
                 "spam" => MailboxService.BulkAction.ReportSpam,
                 "notspam" => MailboxService.BulkAction.NotSpam,
+                "restore" => MailboxService.BulkAction.Restore,
+                "purge" => MailboxService.BulkAction.Purge,
                 _ => null,
             };
             if (bulk is not null && id.Length > 0)
@@ -479,8 +496,12 @@ public static class Program
             return Results.Redirect($"/folder/{Uri.EscapeDataString(name)}?page={System.Math.Max(0, page ?? 0)}");
         }).RequireAuthorization();
 
-        app.MapPost("/folder/{name}/readall", async (HttpContext http, string name, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/folder/{name}/readall", async (HttpContext http, string name, MailboxService svc, IAntiforgery antiforgery, CancellationToken ct) =>
         {
+            // This endpoint binds no form fields, so the framework's automatic
+            // antiforgery check does not apply; without this line another site
+            // could mark a whole folder read on the user's behalf (DEF-027).
+            await antiforgery.ValidateRequestAsync(http).ConfigureAwait(false);
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
             {
@@ -499,6 +520,20 @@ public static class Program
                 return Results.Json(new { changed });
             }
             return Results.Redirect($"/folder/{Uri.EscapeDataString(name)}");
+        }).RequireAuthorization();
+
+        app.MapPost("/folder/Trash/empty", async (HttpContext http, MailboxService svc, IAntiforgery antiforgery, CancellationToken ct) =>
+        {
+            // Permanent deletion: the token is checked explicitly, never left
+            // to form binding (DEF-023).
+            await antiforgery.ValidateRequestAsync(http).ConfigureAwait(false);
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.EmptyTrashAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            return Results.Redirect("/folder/Trash");
         }).RequireAuthorization();
 
         // ---- compose, drafts ----
@@ -524,7 +559,9 @@ public static class Program
                     Body = body ?? string.Empty,
                 }));
             }
-            string? error = await svc.SendAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
+            ReadCarry(http.Request.Form, request);
+            string? carryError = await svc.AddCarriedAttachmentsAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
+            string? error = carryError ?? await svc.SendAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
             if (error is not null)
             {
                 return Results.Redirect("/compose" + ComposeQuery(error, request));
@@ -547,6 +584,12 @@ public static class Program
             catch (AttachmentsTooLargeException)
             {
                 return Results.Redirect("/compose?error=" + Uri.EscapeDataString(AttachmentsTooLargeException.UserMessage));
+            }
+            ReadCarry(http.Request.Form, request);
+            string? carryError = await svc.AddCarriedAttachmentsAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
+            if (carryError is not null)
+            {
+                return Results.Redirect("/compose?error=" + Uri.EscapeDataString(carryError));
             }
             Guid? saved = await svc.SaveDraftAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
             if (saved is null)
@@ -575,7 +618,7 @@ public static class Program
                 await http.RequestServices.GetRequiredService<AuditTrail>().RecordAsync(
                     who, "webmail.displayname.changed", who, http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
             }
-            return Results.Redirect(error is null ? "/settings?saved=name" : "/settings?error=" + Uri.EscapeDataString(error));
+            return Results.Redirect(error is null ? "/settings/profile?saved=name" : "/settings/profile?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
         app.MapPost("/settings/theme", async (HttpContext http, [FromForm] string theme, MailboxService svc, CancellationToken ct) =>
@@ -592,7 +635,7 @@ public static class Program
                 // of the very next page, with no extra query per request.
                 await http.SignInAsync(CookieScheme, WebmailAuthService.WithTheme(http.User, theme.Trim().ToLowerInvariant())).ConfigureAwait(false);
             }
-            return Results.Redirect(error is null ? "/settings?saved=theme" : "/settings?error=" + Uri.EscapeDataString(error));
+            return Results.Redirect(error is null ? "/settings/appearance?saved=theme" : "/settings/appearance?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
         app.MapPost("/settings/password", async (HttpContext http, [FromForm] string current, [FromForm] string next, [FromForm] string confirm, MailboxService svc, CancellationToken ct) =>
@@ -607,7 +650,7 @@ public static class Program
             await http.RequestServices.GetRequiredService<AuditTrail>().RecordAsync(
                 who, error is null ? "webmail.password.changed" : "webmail.password.change-refused", who,
                 http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
-            return Results.Redirect(error is null ? "/settings?saved=password" : "/settings?error=" + Uri.EscapeDataString(error));
+            return Results.Redirect(error is null ? "/settings/password?saved=password" : "/settings/password?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
         // ---- categories ----
@@ -631,7 +674,7 @@ public static class Program
                 return Results.Redirect("/sign-in");
             }
             string? error = await svc.AddCategoryAsync(mailboxId.Value, name ?? string.Empty, ct).ConfigureAwait(false);
-            return Results.Redirect(error is null ? "/settings?saved=category" : "/settings?error=" + Uri.EscapeDataString(error));
+            return Results.Redirect(error is null ? "/settings/categories?saved=category" : "/settings/categories?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
         app.MapPost("/settings/categories/delete", async (HttpContext http, [FromForm] Guid categoryId, MailboxService svc, CancellationToken ct) =>
@@ -642,7 +685,7 @@ public static class Program
                 return Results.Redirect("/sign-in");
             }
             string? error = await svc.DeleteCategoryAsync(mailboxId.Value, categoryId, ct).ConfigureAwait(false);
-            return Results.Redirect(error is null ? "/settings?saved=categoryremoved" : "/settings?error=" + Uri.EscapeDataString(error));
+            return Results.Redirect(error is null ? "/settings/categories?saved=categoryremoved" : "/settings/categories?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
         app.MapPost("/settings/categories/rules/delete", async (HttpContext http, [FromForm] Guid ruleId, MailboxService svc, CancellationToken ct) =>
@@ -653,7 +696,42 @@ public static class Program
                 return Results.Redirect("/sign-in");
             }
             await svc.DeleteCategoryRuleAsync(mailboxId.Value, ruleId, ct).ConfigureAwait(false);
-            return Results.Redirect("/settings?saved=ruleremoved");
+            return Results.Redirect("/settings/senders?saved=ruleremoved");
+        }).RequireAuthorization();
+
+        app.MapPost("/settings/signature", async (HttpContext http, [FromForm] string? signatureHtml, [FromForm] string? signatureText, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.SetSignatureAsync(mailboxId.Value, signatureHtml ?? string.Empty, signatureText ?? string.Empty, ct).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/settings/signature?saved=signature" : "/settings/signature?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
+        app.MapPost("/settings/senders/add", async (HttpContext http, [FromForm] string? pattern, [FromForm] string? rule, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.AddSenderRuleAsync(mailboxId.Value, pattern ?? string.Empty, rule ?? string.Empty, ct).ConfigureAwait(false);
+            return error is null
+                ? Results.Redirect("/settings/senders?saved=senderadded")
+                : Results.Redirect("/settings/senders?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
+        app.MapPost("/settings/senders/delete", async (HttpContext http, [FromForm] Guid ruleId, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.DeleteSenderRuleAsync(mailboxId.Value, ruleId, ct).ConfigureAwait(false);
+            return Results.Redirect("/settings/senders?saved=senderremoved");
         }).RequireAuthorization();
 
         // ---- enhancement endpoints ----
@@ -677,14 +755,22 @@ public static class Program
     /// script for an hour with an ETag carrying the build version, so a
     /// redeploy invalidates them.
     /// </summary>
-    private static IResult Asset(string relativePath)
+    private static IResult Asset(string relativePath, HttpContext http)
     {
         byte[]? bytes = StaticAssets.Load(relativePath);
-        if (bytes is null)
+        string? fingerprint = StaticAssets.Fingerprint(relativePath);
+        if (bytes is null || fingerprint is null)
         {
             return Results.NotFound();
         }
-        return new AssetResult(bytes, StaticAssets.ContentType(relativePath), StaticAssets.IsImmutable(relativePath));
+
+        // Cached for good only when the address carries the current
+        // fingerprint (a change gives a new address) or the file is a font
+        // binary or logo, fixed per name. Everything else - including
+        // fonts/lipi.css - is revalidated on each use against its fingerprint.
+        bool versioned = string.Equals(http.Request.Query["v"].ToString(), fingerprint, StringComparison.Ordinal);
+        bool fixedFile = relativePath.EndsWith(".woff2", StringComparison.Ordinal) || relativePath.StartsWith("logos/", StringComparison.Ordinal);
+        return new AssetResult(bytes, StaticAssets.ContentType(relativePath), versioned || fixedFile, fingerprint);
     }
 
     /// <summary>Writes an embedded asset with caching headers and ETag revalidation.</summary>
@@ -693,22 +779,30 @@ public static class Program
         private readonly byte[] bytes;
         private readonly string contentType;
         private readonly bool immutable;
+        private readonly string fingerprint;
 
-        public AssetResult(byte[] bytes, string contentType, bool immutable)
+        public AssetResult(byte[] bytes, string contentType, bool immutable, string fingerprint)
         {
             this.bytes = bytes;
             this.contentType = contentType;
             this.immutable = immutable;
+            this.fingerprint = fingerprint;
         }
 
         public async Task ExecuteAsync(HttpContext httpContext)
         {
             ArgumentNullException.ThrowIfNull(httpContext);
-            string etag = '"' + StaticAssets.Version + '"';
+            string etag = '"' + this.fingerprint + '"';
             httpContext.Response.Headers.CacheControl = this.immutable
                 ? "public, max-age=31536000, immutable"
-                : "public, max-age=3600";
+                : "no-cache";
             httpContext.Response.Headers.ETag = etag;
+            if (this.contentType.StartsWith("font/", StringComparison.Ordinal))
+            {
+                // The message frame is sandboxed without an origin, so its font
+                // requests are cross-origin. Fonts are public and carry no data.
+                httpContext.Response.Headers.AccessControlAllowOrigin = "*";
+            }
             if (httpContext.Request.Headers.IfNoneMatch.Contains(etag))
             {
                 httpContext.Response.StatusCode = StatusCodes.Status304NotModified;
@@ -717,6 +811,24 @@ public static class Program
             httpContext.Response.ContentType = this.contentType;
             httpContext.Response.ContentLength = this.bytes.Length;
             await httpContext.Response.Body.WriteAsync(this.bytes).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>Read which attachments to carry from a forwarded original or the draft being edited.</summary>
+    private static void ReadCarry(IFormCollection form, ComposeRequest request)
+    {
+        // The formatting editor's HTML, when JavaScript is on; sanitised before use.
+        request.BodyHtml = form["bodyHtml"].ToString();
+        if (Guid.TryParse(form["carryFrom"].ToString(), out Guid from))
+        {
+            request.CarryFrom = from;
+            foreach (string? value in form["carry"])
+            {
+                if (int.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int index))
+                {
+                    request.CarryIndexes.Add(index);
+                }
+            }
         }
     }
 
@@ -793,10 +905,16 @@ public static class Program
     }
 
     /// <summary>The largest request body accepted: a compose with attachments.</summary>
-    internal const long MaxRequestBytes = 30L * 1024 * 1024;
+    /// <remarks>
+    /// Well above the 18 MB attachment limit plus encoding overhead, so an
+    /// over-size upload is read and answered with a clear message rather
+    /// than having its connection cut part-way (DEF-010). The browser
+    /// checks the size before uploading as well.
+    /// </remarks>
+    internal const long MaxRequestBytes = 64L * 1024 * 1024;
 
     /// <summary>Total attachment bytes one message may carry, before encoding.</summary>
-    internal const long MaxAttachmentBytes = 18L * 1024 * 1024;
+    internal const long MaxAttachmentBytes = MailboxService.MaxAttachmentBytes;
 
     /// <summary>Whether a Host header names this server and is safe to redirect to.</summary>
     /// <param name="requested">The Host header value.</param>

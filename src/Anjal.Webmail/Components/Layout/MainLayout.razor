@@ -162,6 +162,23 @@
         _ => "email",
     };
 
+    /// <summary>
+    /// When a message arrived, as short as it can be while still clear: the
+    /// time today, "Yesterday", the weekday this week, the day and month this
+    /// year, the full date otherwise. Shared by every list so they agree.
+    /// </summary>
+    internal static string When(DateTimeOffset at)
+    {
+        DateTime local = at.ToLocalTime().DateTime;
+        DateTime today = DateTime.Now.Date;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        if (local.Date == today) { return local.ToString("HH:mm", inv); }
+        if (local.Date == today.AddDays(-1)) { return "Yesterday"; }
+        if (local.Date > today.AddDays(-7)) { return local.ToString("ddd", inv); }
+        if (local.Year == today.Year) { return local.ToString("d MMM", inv); }
+        return local.ToString("d MMM yyyy", inv);
+    }
+
     internal static string Size(long bytes) =>
         bytes < 1024 ? $"{bytes} B"
         : bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB"

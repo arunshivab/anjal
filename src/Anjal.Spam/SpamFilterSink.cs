@@ -67,6 +67,28 @@ public static class SpamHeaders
 public static class SenderRules
 {
     /// <summary>
+    /// Whether a rule pattern is well formed: <c>local@domain</c> or
+    /// <c>@domain</c>, the domain containing a dot, with no whitespace or
+    /// slashes. Shared by the admin API and the webmail so both accept exactly
+    /// the same patterns.
+    /// </summary>
+    /// <param name="pattern">Lowercased pattern.</param>
+    public static bool IsValidPattern(string pattern)
+    {
+        System.ArgumentNullException.ThrowIfNull(pattern);
+        if (pattern.Length < 2 || pattern.Contains(' ', System.StringComparison.Ordinal) || pattern.Contains('/', System.StringComparison.Ordinal))
+        {
+            return false;
+        }
+        int at = pattern.IndexOf('@', System.StringComparison.Ordinal);
+        if (at < 0 || at != pattern.LastIndexOf('@') || at == pattern.Length - 1)
+        {
+            return false;
+        }
+        return pattern.Substring(at + 1).Contains('.', System.StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Find the rule that applies to a sender. Exact-address rules beat
     /// domain rules; within the same specificity, block beats allow. Both
     /// the envelope sender and the From header address are checked.
