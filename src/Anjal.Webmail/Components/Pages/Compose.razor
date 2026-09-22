@@ -20,6 +20,12 @@
             </div>
         }
         <div class="notice n-err readnotice" data-client-error hidden></div>
+        @if (SavedFlag is not null && Error is null)
+        {
+            <div class="notice n-ok readnotice">
+                <LipiIcon Name="check" Size="16" /><span>Draft saved. It is in Drafts; carry on writing, or send when ready.</span>
+            </div>
+        }
         @if (full)
         {
             <div class="notice n-err readnotice">
@@ -33,8 +39,13 @@
         <div class="sheet">
             <input class="subjectline" name="subject" type="text" value="@subject"
                    placeholder="Subject" aria-label="Subject" />
-            <textarea class="canvas" name="body" aria-label="Message"
+            <FormatBar />
+            @* Plain text box: what is sent when JavaScript is off. With it on,
+               the browser script replaces this with the formatting editor and
+               keeps both this box and bodyHtml filled in. *@
+            <textarea class="canvas" name="body" aria-label="Message" data-rte
                       placeholder="Write your message.">@body</textarea>
+            <input type="hidden" name="bodyHtml" value="@bodyHtml" data-rte-html />
         </div>
     </main>
 
@@ -53,6 +64,21 @@
 
         <section class="railcard">
             <h2 class="railhead">Attachments</h2>
+            @if (carried.Count > 0 && carrySource is Guid src)
+            {
+                @* Files already on the original (forward) or the draft. Ticked by
+                   default and sent with the message; untick one to leave it out
+                   (DEF-006, DEF-029). *@
+                <input type="hidden" name="carryFrom" value="@src" />
+                <p class="railnote">@(Forward is not null ? "From the original message:" : "Already attached:")</p>
+                @foreach (AttachmentView a in carried)
+                {
+                    <label class="carry">
+                        <input type="checkbox" name="carry" value="@a.Index" checked />
+                        <span>@a.FileName</span> <span class="catmeta">@MainLayout.Size(a.SizeBytes)</span>
+                    </label>
+                }
+            }
             <input class="railfile" id="attachments" name="attachments" type="file" multiple aria-label="Attach files" />
         </section>
 
@@ -63,16 +89,18 @@
             </button>
             <button type="submit" class="btn btn-s railbtn" formaction="/draft">Save draft</button>
             <a class="btn btn-q railbtn" href="/folder/INBOX">Cancel</a>
-            <p class="draftstate" data-draft-state>Drafts are saved when you press Save draft</p>
-            <p class="railnote">Plain text. Anjal signs and sends from @address.</p>
+            <p class="draftstate" data-draft-state>@(SavedFlag is not null ? "Draft saved" : "Drafts are saved when you press Save draft")</p>
+            @* No longer "Plain text": with the editor, mail goes formatted, with a plain-text copy for mail programs that want one. *@
+            <p class="railnote">Anjal signs and sends from @address.</p>
         </section>
     </aside>
 </form>
 
 @code {
     [Parameter] public Guid? DraftId { get; set; }
+    [SupplyParameterFromQuery(Name = "saved")] private string? SavedFlag { get; set; }
     // Read as text and parsed here: a malformed id in a hand-edited link
-    // opens a blank compose instead of failing the request (DEF-005).
+    // opens a blank compose instead of failing the request (DEF-019).
     [SupplyParameterFromQuery(Name = "reply")] private string? ReplyText { get; set; }
     [SupplyParameterFromQuery(Name = "replyall")] private string? ReplyAllText { get; set; }
     [SupplyParameterFromQuery(Name = "forward")] private string? ForwardText { get; set; }
@@ -93,9 +121,12 @@
     private string bcc = string.Empty;
     private string subject = string.Empty;
     private string body = string.Empty;
+    private string bodyHtml = string.Empty;
     private string inReplyTo = string.Empty;
     private string draftIdFromPrefill = string.Empty;
     private bool full;
+    private Guid? carrySource;
+    private IReadOnlyList<AttachmentView> carried = System.Array.Empty<AttachmentView>();
     private string address = string.Empty;
     private long used;
     private long quota;
@@ -107,8 +138,11 @@
         bcc = string.Empty;
         subject = SubjectQuery ?? string.Empty;
         body = BodyQuery ?? string.Empty;
+        bodyHtml = string.Empty;
         inReplyTo = string.Empty;
         draftIdFromPrefill = string.Empty;
+        carrySource = null;
+        carried = System.Array.Empty<AttachmentView>();
 
         if (AuthState is null)
         {
@@ -140,7 +174,10 @@
                 bcc = loaded.Bcc;
                 subject = loaded.Subject;
                 body = loaded.Body;
+                bodyHtml = loaded.BodyHtml;
                 inReplyTo = loaded.InReplyTo;
+                carrySource = draft;
+                carried = await Mail.ListAttachmentsAsync(mailboxId.Value, draft) ?? System.Array.Empty<AttachmentView>();
             }
             return;
         }
@@ -148,6 +185,12 @@
         Guid? source = Reply ?? ReplyAll ?? Forward;
         if (source is null)
         {
+            // A new message starts with the signature - unless this is a
+            // send error bringing back text already typed.
+            if (BodyQuery is null)
+            {
+                (body, bodyHtml) = await Mail.StartBodyAsync(mailboxId.Value, string.Empty);
+            }
             return;
         }
         MailboxService.PrefillKind kind = Reply is not null ? MailboxService.PrefillKind.Reply
@@ -159,8 +202,13 @@
             to = prefill.To;
             cc = prefill.Cc;
             subject = prefill.Subject;
-            body = prefill.Body;
+            (body, bodyHtml) = await Mail.StartBodyAsync(mailboxId.Value, prefill.Body);
             inReplyTo = prefill.InReplyTo;
+        }
+        if (Forward is Guid original)
+        {
+            carrySource = original;
+            carried = await Mail.ListAttachmentsAsync(mailboxId.Value, original) ?? System.Array.Empty<AttachmentView>();
         }
     }
 }

@@ -196,20 +196,7 @@ public sealed class TenantsHandler
 
     /// <summary>A pattern is <c>local@domain</c> or <c>@domain</c>, with no whitespace.</summary>
     /// <param name="pattern">Lowercased pattern.</param>
-    public static bool IsValidSenderPattern(string pattern)
-    {
-        System.ArgumentNullException.ThrowIfNull(pattern);
-        if (pattern.Length < 2 || pattern.Contains(' ', System.StringComparison.Ordinal) || pattern.Contains('/', System.StringComparison.Ordinal))
-        {
-            return false;
-        }
-        int at = pattern.IndexOf('@', System.StringComparison.Ordinal);
-        if (at < 0 || at != pattern.LastIndexOf('@') || at == pattern.Length - 1)
-        {
-            return false;
-        }
-        return pattern.Substring(at + 1).Contains('.', System.StringComparison.Ordinal);
-    }
+    public static bool IsValidSenderPattern(string pattern) => Anjal.Spam.SenderRules.IsValidPattern(pattern);
 
     /// <summary><c>GET /api/tenants</c> - list.</summary>
     /// <param name="ctx">Request context.</param>

@@ -1,4 +1,4 @@
--- Anjal PostgreSQL schema (v0.16.0)
+-- Anjal PostgreSQL schema (v0.17.0)
 --
 -- The store layer keeps three concerns separated:
 --   routing_rules   - maps a local-part to a webhook URL + signing secret
@@ -338,5 +338,29 @@ CREATE TABLE IF NOT EXISTS webhook_jobs (
 
 CREATE INDEX IF NOT EXISTS webhook_jobs_due_idx ON webhook_jobs (next_attempt_at) WHERE status = 0;
 CREATE INDEX IF NOT EXISTS webhook_jobs_stale_idx ON webhook_jobs (lease_expires_at) WHERE status = 1;
+
+-- Personal sender rules (v0.17.0). Report spam and Not spam in the webmail
+-- affect only the mailbox that chose them. Until now they wrote tenant-wide
+-- rules, so one person's "Not spam" allowed a sender for everyone (DEF-028).
+-- Tenant-wide rules remain, set only by administrators through the API.
+CREATE TABLE IF NOT EXISTS mailbox_sender_rules (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mailbox_id  UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    pattern     CITEXT NOT NULL,
+    action      TEXT NOT NULL CHECK (action IN ('allow', 'block')),
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT mailbox_sender_rules_unique UNIQUE (mailbox_id, pattern)
+);
+
+-- Body search (v0.17.0). The readable text of each message is stored at
+-- delivery so search can match inside bodies, not only subjects and
+-- addresses (DEF-015). Indexed with trigrams, like the other search columns.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS body_text TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS messages_body_trgm_idx ON messages USING gin (body_text gin_trgm_ops);
+
+-- Signatures (v0.17.0), formatted and plain. Set only through their own
+-- statement, so a general mailbox update cannot wipe them.
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS signature_html TEXT NOT NULL DEFAULT '';
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS signature_text TEXT NOT NULL DEFAULT '';
 
 COMMIT;

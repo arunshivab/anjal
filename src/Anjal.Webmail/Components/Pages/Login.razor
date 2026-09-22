@@ -24,6 +24,13 @@
                 <span>Too many unsuccessful attempts. Wait fifteen minutes and try again.</span>
             </div>
         }
+        @if (Unsaved is not null)
+        {
+            <div class="note">
+                <LipiIcon Name="info" Size="16" />
+                <span>Your session had ended, so that change was not saved. Sign in and make it again.</span>
+            </div>
+        }
         @if (Expired is not null)
         {
             <div class="note">
@@ -56,6 +63,7 @@
     [SupplyParameterFromQuery] private string? Error { get; set; }
     [SupplyParameterFromQuery] private string? Expired { get; set; }
     [SupplyParameterFromQuery] private string? Throttled { get; set; }
+    [SupplyParameterFromQuery] private string? Unsaved { get; set; }
     [Inject] private Anjal.Webmail.Services.HostInfo Host { get; set; } = default!;
 
     private string HostName => Host.Name;

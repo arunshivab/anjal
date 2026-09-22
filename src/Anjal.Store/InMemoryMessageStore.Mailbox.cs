@@ -488,6 +488,7 @@ public sealed partial class InMemoryMessageStore
             if (q.Length == 0 ||
                 m.Subject.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
                 m.FromHeader.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
+                m.BodyText.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
                 m.ToHeader.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
                 m.EnvelopeFrom.Contains(q, System.StringComparison.OrdinalIgnoreCase))
             {
@@ -546,6 +547,76 @@ public sealed partial class InMemoryMessageStore
         lock (this.gate)
         {
             return Task.FromResult(this.mailboxMessages.RemoveAll(m => m.Id == id) > 0);
+        }
+    }
+
+    private readonly List<SenderRuleRow> mailboxSenderRules = new();
+    private readonly Dictionary<System.Guid, (string Html, string Text)> signatures = new();
+
+    /// <inheritdoc/>
+    public Task<(string Html, string Text)> GetSignatureAsync(System.Guid mailboxId, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            return Task.FromResult(this.signatures.TryGetValue(mailboxId, out (string Html, string Text) sig) ? sig : (string.Empty, string.Empty));
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task SetSignatureAsync(System.Guid mailboxId, string html, string text, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(html);
+        System.ArgumentNullException.ThrowIfNull(text);
+        lock (this.gate)
+        {
+            this.signatures[mailboxId] = (html, text);
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<SenderRuleRow> UpsertMailboxSenderRuleAsync(System.Guid mailboxId, string pattern, SenderRuleAction action, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(pattern);
+        lock (this.gate)
+        {
+            string p = pattern.Trim().ToLowerInvariant();
+            SenderRuleRow? existing = this.mailboxSenderRules.Find(r => r.MailboxId == mailboxId && r.Pattern == p);
+            if (existing is not null)
+            {
+                existing.Action = action;
+                return Task.FromResult(Clone(existing));
+            }
+            var row = new SenderRuleRow
+            {
+                Id = System.Guid.NewGuid(),
+                MailboxId = mailboxId,
+                Pattern = p,
+                Action = action,
+                CreatedAt = System.DateTimeOffset.UtcNow,
+            };
+            this.mailboxSenderRules.Add(row);
+            return Task.FromResult(Clone(row));
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<SenderRuleRow>> ListMailboxSenderRulesAsync(System.Guid mailboxId, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            List<SenderRuleRow> result = this.mailboxSenderRules.FindAll(r => r.MailboxId == mailboxId).ConvertAll(Clone);
+            result.Sort((a, b) => string.CompareOrdinal(a.Pattern, b.Pattern));
+            return Task.FromResult<IReadOnlyList<SenderRuleRow>>(result);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> DeleteMailboxSenderRuleAsync(System.Guid mailboxId, System.Guid ruleId, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            return Task.FromResult(this.mailboxSenderRules.RemoveAll(r => r.MailboxId == mailboxId && r.Id == ruleId) > 0);
         }
     }
 
@@ -610,6 +681,7 @@ public sealed partial class InMemoryMessageStore
     {
         Id = r.Id,
         TenantId = r.TenantId,
+        MailboxId = r.MailboxId,
         Pattern = r.Pattern,
         Action = r.Action,
         CreatedAt = r.CreatedAt,
@@ -695,6 +767,7 @@ public sealed partial class InMemoryMessageStore
         ReceivedAt = m.ReceivedAt,
         CategoryId = m.CategoryId,
         HasAttachments = m.HasAttachments,
+        BodyText = m.BodyText,
     };
 
     // ================= Categories (v0.15.0) =================

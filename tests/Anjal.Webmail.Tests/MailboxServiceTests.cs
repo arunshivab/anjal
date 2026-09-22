@@ -190,7 +190,9 @@ public sealed class MailboxServiceTests : System.IDisposable
         MessageRow? junked = await this.svc.ReportSpamAsync(this.mailbox.Id, row.Id);
         FolderRow? junk = await this.svc.GetFolderAsync(this.mailbox.Id, MailboxSink.JunkFolder);
         Assert.Equal(junk!.Id, junked!.FolderId);
-        var rules = await this.store.ListSenderRulesAsync(this.tenant.Id);
+        // Personal to this mailbox; nothing is written for the whole tenant (DEF-028).
+        Assert.Empty(await this.store.ListSenderRulesAsync(this.tenant.Id));
+        var rules = await this.store.ListMailboxSenderRulesAsync(this.mailbox.Id);
         SenderRuleRow block = Assert.Single(rules);
         Assert.Equal("news@spammer.test", block.Pattern);
         Assert.Equal(SenderRuleAction.Block, block.Action);
@@ -198,7 +200,8 @@ public sealed class MailboxServiceTests : System.IDisposable
         MessageRow? restored = await this.svc.MarkNotSpamAsync(this.mailbox.Id, row.Id);
         FolderRow? inbox = await this.svc.GetFolderAsync(this.mailbox.Id, FolderRow.Inbox);
         Assert.Equal(inbox!.Id, restored!.FolderId);
-        SenderRuleRow allow = Assert.Single(await this.store.ListSenderRulesAsync(this.tenant.Id));
+        SenderRuleRow allow = Assert.Single(await this.store.ListMailboxSenderRulesAsync(this.mailbox.Id));
+        Assert.Empty(await this.store.ListSenderRulesAsync(this.tenant.Id));
         Assert.Equal(SenderRuleAction.Allow, allow.Action);
 
         Assert.Null(await this.svc.ReportSpamAsync(System.Guid.NewGuid(), row.Id));

@@ -75,22 +75,29 @@ public sealed class OutboundWorker
     /// <returns>A task that completes when the loop exits.</returns>
     public async System.Threading.Tasks.Task RunAsync(System.Threading.CancellationToken ct = default)
     {
+        var backoff = new FailureBackoff("outbound worker", this.options.PollInterval, System.TimeSpan.FromSeconds(60), this.log);
         while (!ct.IsCancellationRequested)
         {
+            System.TimeSpan wait;
             try
             {
                 await this.DrainOnceAsync(ct).ConfigureAwait(false);
+                wait = backoff.Succeeded();
             }
-#pragma warning disable CA1031 // Intentional: never let a worker crash; log and continue.
+            catch (System.OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+#pragma warning disable CA1031 // Intentional: never let a worker crash; log once and back off.
             catch (System.Exception ex)
             {
-                this.log?.Invoke($"outbound worker error: {ex.GetType().Name}: {ex.Message}");
+                wait = backoff.Failed(ex);
             }
 #pragma warning restore CA1031
 
             try
             {
-                await System.Threading.Tasks.Task.Delay(this.options.PollInterval, ct).ConfigureAwait(false);
+                await System.Threading.Tasks.Task.Delay(wait, ct).ConfigureAwait(false);
             }
             catch (System.OperationCanceledException)
             {

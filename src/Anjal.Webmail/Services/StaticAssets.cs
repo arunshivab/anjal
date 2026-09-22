@@ -28,6 +28,39 @@ public static class StaticAssets
         ?? Assembly.GetName().Version?.ToString()
         ?? "dev";
 
+    private static readonly Dictionary<string, string> Fingerprints = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// A short fingerprint of an asset's contents (the first 12 hex digits of
+    /// its SHA-256), or null when there is no such asset. Used in links
+    /// (<c>/app.css?v=...</c>) and as the ETag, so a changed file always has a
+    /// new address and a new tag - never "unchanged" because the build number
+    /// happened to be the same (DEF-033).
+    /// </summary>
+    /// <param name="relativePath">The wwwroot-relative path.</param>
+    public static string? Fingerprint(string relativePath)
+    {
+        ArgumentNullException.ThrowIfNull(relativePath);
+        lock (Gate)
+        {
+            if (Fingerprints.TryGetValue(relativePath, out string? known))
+            {
+                return known;
+            }
+        }
+        byte[]? bytes = Load(relativePath);
+        if (bytes is null)
+        {
+            return null;
+        }
+        string fp = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).Substring(0, 12).ToLowerInvariant();
+        lock (Gate)
+        {
+            Fingerprints[relativePath] = fp;
+        }
+        return fp;
+    }
+
     /// <summary>
     /// Load an embedded asset by its wwwroot-relative path (e.g.
     /// <c>fonts/LiPi-Sans-Tamil.woff2</c>). Returns null when unknown.

@@ -10,7 +10,25 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.16.1** - **fixes from manual QA**. Running Anjal against PostgreSQL
+**v0.17.0** - **formatted mail, signatures, and the fixes from QA phase A1
+and the owner's review**; every change reproduced by a test first and checked
+on PostgreSQL. Compose, reply and forward gain a formatting toolbar (bold,
+italic, underline, lists, links, quotes); mail goes out as HTML with a
+plain-text part derived on the server from the sanitised HTML, and falls back
+to plain text without JavaScript. Signatures, formatted, are added once to new
+messages, replies and forwards. Settings is in two panes with a section each
+for profile, appearance, categories, senders, signature and password; sender
+rules can be created there directly. Two sanitizer faults are fixed: HTML
+mail whose head held a meta or link element rendered blank (Outlook sends
+one in every message), and a doctype appeared as text. Report spam and Not
+spam are personal, no longer tenant-wide. Search matches message bodies.
+Forward and reopened drafts keep their attachments. Trash can restore, delete
+permanently and be emptied. Lists mark attachments, align their columns, and
+show recipients in Sent and Drafts; the message view puts attachments first
+and the category under the subject. Missing pages are 404s with their page;
+mark-all-read requires the antiforgery token; workers log an outage once.
+
+Previously: **v0.16.1** - **fixes from manual QA**. Running Anjal against PostgreSQL
 for the first time, while writing the QA plan, found defects the automated
 suite could not see; all are fixed and covered by new tests. A database
 outage now makes the MTA defer (451) instead of refusing mail permanently.

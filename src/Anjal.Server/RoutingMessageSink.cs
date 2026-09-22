@@ -80,7 +80,14 @@ public sealed class RoutingMessageSink : Anjal.Smtp.IMessageSink
             Anjal.Routing.RoutingDecision decision = await this.routing.ResolveAsync(rcpt, ct).ConfigureAwait(false);
             if (decision.Outcome != Anjal.Routing.RoutingOutcome.Accepted || decision.Rule is null)
             {
-                this.log?.Invoke($"Reject {rcpt}: {decision.Outcome}");
+                // Most recipients have no webhook rule: they are mailboxes, and
+                // the mailbox stage delivers them. Saying "Reject" here, next to
+                // a successful delivery, sent readers down the wrong path
+                // (DEF-025). Only a refusal that means something is logged.
+                if (decision.Outcome != Anjal.Routing.RoutingOutcome.NoSuchMailbox)
+                {
+                    this.log?.Invoke($"Webhook routing: {rcpt} not routed ({decision.Outcome})");
+                }
                 continue;
             }
 

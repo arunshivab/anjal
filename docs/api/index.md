@@ -127,6 +127,7 @@
 - [Anjal.Mailbox.MailboxSink](Anjal.Mailbox/MailboxSink.md)
 - [Anjal.Mailbox.MaildirStore](Anjal.Mailbox/MaildirStore.md)
 - [Anjal.Mailbox.MaildirWriteResult](Anjal.Mailbox/MaildirWriteResult.md)
+- [Anjal.Mailbox.MessageText](Anjal.Mailbox/MessageText.md)
 - [Anjal.Mailbox.ModuleInfo](Anjal.Mailbox/ModuleInfo.md)
 - [Anjal.Mailbox.QuotaPolicy](Anjal.Mailbox/QuotaPolicy.md)
 - [Anjal.Mailbox.TenantStatePolicy](Anjal.Mailbox/TenantStatePolicy.md)
@@ -171,6 +172,7 @@
 ## Anjal.Server
 
 - [Anjal.Server.BounceNotice](Anjal.Server/BounceNotice.md)
+- [Anjal.Server.FailureBackoff](Anjal.Server/FailureBackoff.md)
 - [Anjal.Server.OutboundWorker](Anjal.Server/OutboundWorker.md)
 - [Anjal.Server.OutboundWorkerOptions](Anjal.Server/OutboundWorkerOptions.md)
 - [Anjal.Server.Program](Anjal.Server/Program.md)

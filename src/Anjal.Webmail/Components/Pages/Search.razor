@@ -23,9 +23,10 @@ else
             <tr>
                 <th class="c-fld">Folder</th>
                 <th class="c-from">From</th>
+                <th class="c-att"><span class="sr-only">Attachments</span></th>
                 <th>Subject</th>
-                <th class="c-time">Received</th>
-                <th class="c-size">Size</th>
+                <th class="c-time right">Received</th>
+                <th class="c-size right">Size</th>
             </tr>
         </thead>
         <tbody>
@@ -34,10 +35,18 @@ else
                 <tr class="@(m.Seen ? "" : "unread")">
                     <td class="c-fld"><span class="mono">@FolderName(m)</span></td>
                     <td class="c-from"><span class="from">@Sender(m)</span></td>
-                    <td class="c-subject">
-                        <span class="subj"><a href="/message/@m.Id">@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a></span>
+<td class="c-att">
+                        @if (m.HasAttachments)
+                        {
+                        <span data-attachment title="Has attachments" aria-label="Has attachments"><LipiIcon Name="attachment" Size="14" /></span>
+                        }
                     </td>
-                    <td class="c-time num">@m.ReceivedAt.ToLocalTime().ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)</td>
+                    <td class="c-subject">
+                        <span class="subj">
+                            <a href="/message/@m.Id">@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a>
+                        </span>
+                    </td>
+                    <td class="c-time num">@MainLayout.When(m.ReceivedAt)</td>
                     <td class="c-size num">@MainLayout.Size(m.SizeBytes)</td>
                 </tr>
             }
@@ -62,7 +71,7 @@ else
     [SupplyParameterFromQuery(Name = "from")] private string? From { get; set; }
     // Read as text and parsed here: a non-numeric or out-of-range value in a
     // hand-edited link falls back to the first page instead of failing the
-    // request while the parameter is bound (DEF-005).
+    // request while the parameter is bound (DEF-019).
     [SupplyParameterFromQuery(Name = "page")] private string? PageText { get; set; }
     private int? PageQuery => int.TryParse(PageText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int page) ? page : null;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }

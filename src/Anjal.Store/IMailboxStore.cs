@@ -215,4 +215,45 @@ public interface IMailboxStore
 
     /// <summary>Remove a sender rule. Returns <see langword="true"/> if a row was removed.</summary>
     System.Threading.Tasks.Task<bool> DeleteSenderRuleAsync(System.Guid tenantId, string pattern, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// A mailbox's signature, formatted and plain. Kept apart from the general
+    /// mailbox update so that an administrator changing, say, a quota cannot
+    /// wipe it. Both empty when none is set.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<(string Html, string Text)> GetSignatureAsync(System.Guid mailboxId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Set a mailbox's signature (already sanitised by the caller).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="html">Formatted form.</param>
+    /// <param name="text">Plain form.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task SetSignatureAsync(System.Guid mailboxId, string html, string text, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Create or update a personal sender rule for one mailbox. Personal rules
+    /// come from that mailbox's own Report spam and Not spam, and affect no
+    /// other mailbox.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="pattern">An address, or "@domain".</param>
+    /// <param name="action">Block (file in Junk) or allow.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<SenderRuleRow> UpsertMailboxSenderRuleAsync(System.Guid mailboxId, string pattern, SenderRuleAction action, System.Threading.CancellationToken ct = default);
+
+    /// <summary>A mailbox's personal sender rules, by pattern.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SenderRuleRow>> ListMailboxSenderRulesAsync(System.Guid mailboxId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Delete a personal sender rule. Matches on both the mailbox and the rule
+    /// id, so a rule can only ever be removed by the mailbox that owns it.
+    /// </summary>
+    /// <param name="mailboxId">The owning mailbox.</param>
+    /// <param name="ruleId">The rule.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<bool> DeleteMailboxSenderRuleAsync(System.Guid mailboxId, System.Guid ruleId, System.Threading.CancellationToken ct = default);
 }

@@ -1,12 +1,20 @@
 @page "/settings"
+@page "/settings/{Section}"
 @attribute [Authorize]
 @inject MailboxService Mail
 
 <PageTitle>Settings — Anjal</PageTitle>
 
-<div class="stack">
+<div class="settings">
+    <nav class="setnav" aria-label="Settings sections">
+        @foreach ((string key, string label) in Sections)
+        {
+            <a href="/settings/@key" class="@(Current == key ? "on" : null)" aria-current="@(Current == key ? "page" : null)">@label</a>
+        }
+    </nav>
+<div class="stack setpane">
     <h1>Settings</h1>
-    <p class="lead">Your display name, the look of the webmail, and your password. Each section saves on its own, so one cannot fail because of another.</p>
+    <p class="lead">Choose a section on the left. Each saves on its own, so one cannot fail because of another.</p>
 
     @if (Saved is not null)
     {
@@ -17,110 +25,196 @@
         <div class="notice n-err" style="margin-bottom:16px"><LipiIcon Name="warning" Size="16" /><span>@Error</span></div>
     }
 
-    <div class="formcard">
-        <h2>Display name</h2>
-        <p class="hint">The name recipients see beside your address.</p>
-        <form method="post" action="/settings/name">
-            <AntiforgeryToken />
-            <div class="row">
-                <label class="lbl" for="displayName">Display name</label>
-                <input class="inp" id="displayName" name="displayName" type="text" value="@displayName" maxlength="100" />
-            </div>
-            <p class="sentas">Sent as: @FromLine</p>
-            <button type="submit" class="btn btn-p" style="margin-top:12px">Save</button>
-        </form>
-    </div>
-
-    <div class="formcard">
-        <h2>Theme</h2>
-        <p class="hint">Stored with your mailbox, so it follows you to any browser you sign in from.</p>
-        <form method="post" action="/settings/theme">
-            <AntiforgeryToken />
-            <div class="themepick">
-                @foreach (string t in MailboxService.Themes)
-                {
-                    <label>
-                        <input type="radio" name="theme" value="@t" checked="@(theme == t)" />
-                        <span>@Title(t)</span>
-                    </label>
-                }
-            </div>
-            <button type="submit" class="btn btn-p">Save</button>
-        </form>
-    </div>
-
-    <div class="formcard">
-        <h2>Categories</h2>
-        <p class="hint">
-            Your organisation sets the shared ones; you can add your own on top.
-            Eight carry a colour — the shared ones take theirs first, yours take what is left,
-            and any beyond eight still work, told apart by name.
-        </p>
-        @foreach (CategoryView c in categories)
-        {
-            <div class="catrow">
-                <span class="chip slot-@c.Row.Slot"><i></i>@c.Row.Name</span>
-                <span class="catmeta">@c.Count message@(c.Count == 1 ? "" : "s")</span>
-                @if (c.Shared)
-                {
-                    <span class="catmeta shared">Shared by @tenantName</span>
-                }
-                else
-                {
-                    <form method="post" action="/settings/categories/delete" class="inline catdel">
-                        <AntiforgeryToken />
-                        <input type="hidden" name="categoryId" value="@c.Row.Id" />
-                        <button type="submit" class="btn btn-q btn-sm">Remove</button>
-                    </form>
-                }
-            </div>
-        }
-        <form method="post" action="/settings/categories" class="catadd">
-            <AntiforgeryToken />
-            <input class="inp" name="name" type="text" maxlength="40" placeholder="Add a category of your own" aria-label="New category" />
-            <button type="submit" class="btn btn-p">Add</button>
-        </form>
-        @if (rules.Count > 0)
-        {
-            <h3 class="subhead">Senders filed automatically</h3>
-            @foreach (CategoryRuleRow r in rules)
+    @if (Current == "profile")
+    {
+        <div class="formcard">
+            <h2>Display name</h2>
+            <p class="hint">The name recipients see beside your address.</p>
+            <form method="post" action="/settings/name">
+                <AntiforgeryToken />
+                <div class="row">
+                    <label class="lbl" for="displayName">Display name</label>
+                    <input class="inp" id="displayName" name="displayName" type="text" value="@displayName" maxlength="100" />
+                </div>
+                <p class="sentas">Sent as: @FromLine</p>
+                <button type="submit" class="btn btn-p" style="margin-top:12px">Save</button>
+            </form>
+        </div>
+    }
+    @if (Current == "appearance")
+    {
+        <div class="formcard">
+            <h2>Theme</h2>
+            <p class="hint">Stored with your mailbox, so it follows you to any browser you sign in from.</p>
+            <form method="post" action="/settings/theme">
+                <AntiforgeryToken />
+                <div class="themepick">
+                    @foreach (string t in MailboxService.Themes)
+                    {
+                        <label>
+                            <input type="radio" name="theme" value="@t" checked="@(theme == t)" />
+                            <span>@Title(t)</span>
+                        </label>
+                    }
+                </div>
+                <button type="submit" class="btn btn-p">Save</button>
+            </form>
+        </div>
+    }
+    @if (Current == "categories")
+    {
+        <div class="formcard">
+            <h2>Categories</h2>
+            <p class="hint">
+                Your organisation sets the shared ones; you can add your own on top.
+                Eight carry a colour — the shared ones take theirs first, yours take what is left,
+                and any beyond eight still work, told apart by name.
+            </p>
+            @foreach (CategoryView c in categories)
             {
                 <div class="catrow">
-                    <span class="mono">@r.Pattern</span>
-                    <span class="catmeta">@(NameOf(r.CategoryId))</span>
-                    <form method="post" action="/settings/categories/rules/delete" class="inline catdel">
-                        <AntiforgeryToken />
-                        <input type="hidden" name="ruleId" value="@r.Id" />
-                        <button type="submit" class="btn btn-q btn-sm">Forget</button>
-                    </form>
+                    <span class="chip slot-@c.Row.Slot"><i></i>@c.Row.Name</span>
+                    <span class="catmeta">@c.Count message@(c.Count == 1 ? "" : "s")</span>
+                    @if (c.Shared)
+                    {
+                        <span class="catmeta shared">Shared by @tenantName</span>
+                    }
+                    else
+                    {
+                        <form method="post" action="/settings/categories/delete" class="inline catdel">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="categoryId" value="@c.Row.Id" />
+                            <button type="submit" class="btn btn-q btn-sm">Remove</button>
+                        </form>
+                    }
                 </div>
             }
-        }
-    </div>
+            <form method="post" action="/settings/categories" class="catadd">
+                <AntiforgeryToken />
+                <input class="inp" name="name" type="text" maxlength="40" placeholder="Add a category of your own" aria-label="New category" />
+                <button type="submit" class="btn btn-p">Add</button>
+            </form>
+        </div>
 
-    <div class="formcard">
-        <h2>Password</h2>
-        <p class="hint">At least @MailboxService.MinimumPasswordLength characters. Anjal does not expire passwords. Changing it keeps this session signed in.</p>
-        <form method="post" action="/settings/password">
-            <AntiforgeryToken />
-            <div class="row">
-                <label class="lbl" for="current">Current password</label>
-                <input class="inp" id="current" name="current" type="password" autocomplete="current-password" required />
-            </div>
-            <div class="row">
-                <label class="lbl" for="next">New password</label>
-                <input class="inp" id="next" name="next" type="password" autocomplete="new-password" required minlength="@MailboxService.MinimumPasswordLength" />
-            </div>
-            <div class="row">
-                <label class="lbl" for="confirm">Confirm new password</label>
-                <input class="inp" id="confirm" name="confirm" type="password" autocomplete="new-password" required />
-            </div>
-            <button type="submit" class="btn btn-p">Change password</button>
-        </form>
-    </div>
+        @* Everything this mailbox has decided about particular senders, in one
+           place, and all of it reversible (DEF-008). These rules are personal:
+           they affect this mailbox only (DEF-028). *@
+    }
+    @if (Current == "senders")
+    {
+        <div class="formcard" id="senders">
+            <h2>Senders</h2>
+            <p class="hint">
+                Report spam and Not spam decide where a sender's mail goes in <b>your</b> mailbox only.
+                Remove a rule here and that sender's mail is judged afresh.
+            </p>
+            <form method="post" action="/settings/senders/add" class="ruleadd">
+                <AntiforgeryToken />
+                <input class="inp" name="pattern" placeholder="name@@hospital.example or @@hospital.example" aria-label="Sender address or domain" required />
+                <select class="inp" name="rule" aria-label="What to do with their mail">
+                    <option value="block">Always to Junk</option>
+                    <option value="allow">Never to Junk</option>
+                    @foreach (CategoryView c in categories)
+                    {
+                        <option value="cat:@c.Row.Id">File in @c.Row.Name</option>
+                    }
+                </select>
+                <button type="submit" class="btn btn-s btn-sm">Add rule</button>
+            </form>
+            @if (senderRules.Count == 0 && rules.Count == 0)
+            {
+                <p class="catmeta">No sender rules yet. They appear here when you use Report spam or Not spam,
+                   or file a sender's mail in a category automatically.</p>
+            }
+            @if (senderRules.Count > 0)
+            {
+                <h3 class="subhead">Blocked and allowed</h3>
+                @foreach (SenderRuleRow r in senderRules)
+                {
+                    <div class="catrow">
+                        <span class="mono">@r.Pattern</span>
+                        <span class="catmeta">@(r.Action == SenderRuleAction.Block ? "Always to Junk" : "Never to Junk")</span>
+                        <form method="post" action="/settings/senders/delete" class="inline catdel">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="ruleId" value="@r.Id" />
+                            <button type="submit" class="btn btn-q btn-sm">Remove</button>
+                        </form>
+                    </div>
+                }
+            }
+            @if (rules.Count > 0)
+            {
+                <h3 class="subhead">Filed in a category automatically</h3>
+                @foreach (CategoryRuleRow r in rules)
+                {
+                    <div class="catrow">
+                        <span class="mono">@r.Pattern</span>
+                        <span class="catmeta">@(NameOf(r.CategoryId))</span>
+                        <form method="post" action="/settings/categories/rules/delete" class="inline catdel">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="ruleId" value="@r.Id" />
+                            <button type="submit" class="btn btn-q btn-sm">Forget</button>
+                        </form>
+                    </div>
+                }
+            }
+        </div>
+    }
+    @if (Current == "signature")
+    {
+        <div class="formcard">
+            <h2>Signature</h2>
+            <p class="hint">Added below your message when you start a new message, reply or forward. You can still edit or remove it before sending.</p>
+            <form method="post" action="/settings/signature">
+                <AntiforgeryToken />
+                <FormatBar />
+                <textarea class="inp sigbox" name="signatureText" rows="5" aria-label="Signature" data-rte>@signatureText</textarea>
+                <input type="hidden" name="signatureHtml" value="@signatureHtml" data-rte-html />
+                <div class="setactions"><button type="submit" class="btn btn-p btn-sm">Save signature</button></div>
+            </form>
+        </div>
+    }
+    @if (Current == "password")
+    {
+        <div class="formcard">
+            <h2>Password</h2>
+            <p class="hint">At least @MailboxService.MinimumPasswordLength characters. Anjal does not expire passwords. Changing it keeps this session signed in.</p>
+            <form method="post" action="/settings/password">
+                <AntiforgeryToken />
+                <div class="row">
+                    <label class="lbl" for="current">Current password</label>
+                    <input class="inp" id="current" name="current" type="password" autocomplete="current-password" required />
+                </div>
+                <div class="row">
+                    <label class="lbl" for="next">New password</label>
+                    <input class="inp" id="next" name="next" type="password" autocomplete="new-password" required minlength="@MailboxService.MinimumPasswordLength" />
+                </div>
+                <div class="row">
+                    <label class="lbl" for="confirm">Confirm new password</label>
+                    <input class="inp" id="confirm" name="confirm" type="password" autocomplete="new-password" required />
+                </div>
+                <button type="submit" class="btn btn-p">Change password</button>
+            </form>
+        </div>
+    }
+</div>
 </div>
 
 @code {
+    /// <summary>The section in the address, e.g. /settings/senders; Profile when absent.</summary>
+    [Parameter] public string? Section { get; set; }
+
+    private static readonly (string Key, string Label)[] Sections =
+    {
+        ("profile", "Profile"), ("appearance", "Appearance"), ("categories", "Categories"),
+        ("senders", "Senders"), ("signature", "Signature"), ("password", "Password"),
+    };
+
+    private string Current => Sections.Any(x => x.Key == Section) ? Section! : "profile";
+
+    private string signatureHtml = string.Empty;
+    private string signatureText = string.Empty;
+
     [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
     [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
@@ -131,6 +225,7 @@
     private string tenantName = string.Empty;
     private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
     private IReadOnlyList<CategoryRuleRow> rules = System.Array.Empty<CategoryRuleRow>();
+    private IReadOnlyList<SenderRuleRow> senderRules = System.Array.Empty<SenderRuleRow>();
 
     private string NameOf(Guid categoryId)
     {
@@ -154,6 +249,9 @@
         "category" => "Category added.",
         "categoryremoved" => "Category removed. Messages that carried it are now uncategorised.",
         "ruleremoved" => "That sender will no longer be filed automatically.",
+        "senderremoved" => "Rule removed. That sender's mail will be judged afresh.",
+        "senderadded" => "Rule added. It applies to mail arriving from now on.",
+        "signature" => "Signature saved. It will appear in new messages, replies and forwards.",
         _ => "Saved.",
     };
 
@@ -182,5 +280,7 @@
         }
         categories = await Mail.ListCategoriesAsync(mailboxId.Value);
         rules = await Mail.ListCategoryRulesAsync(mailboxId.Value);
+        senderRules = await Mail.ListSenderRulesAsync(mailboxId.Value);
+        (signatureHtml, signatureText) = await Mail.GetSignatureAsync(mailboxId.Value);
     }
 }

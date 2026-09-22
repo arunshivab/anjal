@@ -107,6 +107,23 @@ public sealed class ComposeRequest
 
     /// <summary>Attachments as (file name, content type, bytes).</summary>
     public IList<(string FileName, string ContentType, byte[] Bytes)> Attachments { get; } = new List<(string, string, byte[])>();
+
+    /// <summary>
+    /// A message whose attachments this one carries: the original of a
+    /// forward, or the draft being edited. Its files are copied by index
+    /// (<see cref="CarryIndexes"/>), so nothing is lost silently (DEF-006, DEF-029).
+    /// </summary>
+    public Guid? CarryFrom { get; set; }
+
+    /// <summary>
+    /// The formatted body from the editor, when JavaScript is on. Sanitised
+    /// before use; when present the message is sent as HTML with a plain-text
+    /// version derived from it. Empty means plain text only.
+    /// </summary>
+    public string BodyHtml { get; set; } = string.Empty;
+
+    /// <summary>Which of <see cref="CarryFrom"/>'s attachments to include, by index.</summary>
+    public IList<int> CarryIndexes { get; } = new List<int>();
 }
 
 /// <summary>
@@ -466,12 +483,9 @@ public sealed partial class MailboxService
         {
             return;
         }
-        await this.store.UpsertSenderRuleAsync(new SenderRuleRow
-        {
-            TenantId = context.Value.tenant.Id,
-            Pattern = sender,
-            Action = action,
-        }, ct).ConfigureAwait(false);
+        // Personal to this mailbox. It used to be written tenant-wide, so one
+        // person's Not spam let a sender past the filter for everyone (DEF-028).
+        await this.store.UpsertMailboxSenderRuleAsync(mailboxId, sender, action, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -571,6 +585,9 @@ public sealed partial class MailboxService
         {
             MailboxId = mailbox.Id,
             FolderId = sent.Id,
+            // Recorded so the list can mark it and the dashboard can count it (DEF-005, DEF-016).
+            HasAttachments = request.Attachments.Count > 0,
+            BodyText = Anjal.Mailbox.MessageText.Extract(TryParse(raw)),
             MaildirFile = seenPath ?? written.RelativePath,
             EnvelopeFrom = mailbox.Address,
             MessageId = MessageIdOf(raw),
@@ -628,17 +645,37 @@ public sealed partial class MailboxService
         {
             body += "\r\n";
         }
+        // Formatted mail carries both forms: the plain text is derived from the
+        // sanitised HTML, never taken on trust from the browser.
+        string cleanHtml = request.BodyHtml.Trim().Length == 0 ? string.Empty : HtmlSanitizer.Sanitize(request.BodyHtml);
+        if (cleanHtml.Length > 0)
+        {
+            body = HtmlText.ToPlain(cleanHtml).Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n";
+        }
         textPart.SetBodyAsText(body);
+
+        MimeEntity content = textPart;
+        if (cleanHtml.Length > 0)
+        {
+            var htmlPart = new MimePart();
+            htmlPart.Headers.Add("Content-Type", "text/html; charset=utf-8");
+            htmlPart.Headers.Add("Content-Transfer-Encoding", "quoted-printable");
+            htmlPart.SetBodyAsText("<!DOCTYPE html><html><head><meta charset=\"utf-8\"></head><body>" + cleanHtml + "</body></html>\r\n");
+            MimeMultipart alternative = MultipartFactory.Create("alternative");
+            alternative.Parts.Add(textPart);
+            alternative.Parts.Add(htmlPart);
+            content = alternative;
+        }
 
         MimeEntity root;
         if (request.Attachments.Count == 0)
         {
-            root = textPart;
+            root = content;
         }
         else
         {
             MimeMultipart mixed = MultipartFactory.Create("mixed");
-            mixed.Parts.Add(textPart);
+            mixed.Parts.Add(content);
             foreach ((string fileName, string contentType, byte[] bytes) in request.Attachments)
             {
                 string safeName = SafeFileName(fileName);
