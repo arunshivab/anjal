@@ -172,6 +172,29 @@ else
                 {
                     <p class="railnote"><LipiIcon Name="check" Size="14" /> Nothing suspicious. Spam score 0.</p>
                 }
+                @* The sender checks this server made on arrival - never a sender's own claim (DEF-038). *@
+                @if (view.Auth is AuthVerdicts av)
+                {
+                    <p class="authline">
+                        <span class="av av-@AuthVerdicts.Tone(av.Spf)" title="Sender Policy Framework">SPF @av.Spf</span>
+                        <span class="av av-@AuthVerdicts.Tone(av.Dkim)" title="DomainKeys Identified Mail">DKIM @av.Dkim</span>
+                        <span class="av av-@AuthVerdicts.Tone(av.Dmarc)" title="Domain-based Message Authentication">DMARC @av.Dmarc</span>
+                    </p>
+                    @if (AuthVerdicts.DmarcMeaning(av.Dmarc) is string meaning && meaning.Length > 0)
+                    {
+                        <p class="railnote @(av.Dmarc == "fail" ? "avwarn" : null)">
+                            @if (av.Dmarc == "fail")
+                            {
+                                <LipiIcon Name="warning" Size="14" />
+                            }
+                            @meaning
+                        </p>
+                    }
+                }
+                else
+                {
+                    <p class="railnote">Sender checks: not recorded for this message.</p>
+                }
                 <p class="railnote"><LipiIcon Name="security" Size="14" /> Shown in a sandbox; scripts cannot run.</p>
             </section>
 

@@ -679,6 +679,87 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task DEF037_MailToALocalMailbox_IsDeliveredDirectly_NotQueuedOutbound()
+    {
+        MailboxRow colleague = await this.store.UpsertMailboxAsync(new MailboxRow { TenantId = this.mailbox.TenantId, LocalPart = "colleague", Domain = "anjal.co.in" });
+        await this.SignInAsync();
+        await this.ComposeAsync("colleague@anjal.co.in, doctor@hospital.example, nobody@anjal.co.in", "Ward round");
+
+        MessageRow arrived = this.store.MailboxMessages.Single(m => m.MailboxId == colleague.Id && m.Subject == "Ward round");
+        FolderRow inbox = (await this.store.ListFoldersAsync(colleague.Id)).Single(f => f.Id == arrived.FolderId);
+        Assert.Equal(FolderRow.Inbox, inbox.Name);
+        IReadOnlyList<OutboundMessage> queued = await this.store.LeaseOutboundBatchAsync(100, DateTimeOffset.UtcNow.AddMinutes(1));
+        Assert.DoesNotContain(queued, q => q.EnvelopeTo == "colleague@anjal.co.in");
+        Assert.Contains(queued, q => q.EnvelopeTo == "doctor@hospital.example");
+        Assert.Contains(queued, q => q.EnvelopeTo == "nobody@anjal.co.in"); // not a mailbox: left to the MTA, which may route it to a webhook
+        Assert.Contains("Ward round", string.Join("", this.store.MailboxMessages.Where(m => m.MailboxId == this.mailbox.Id).Select(m => m.Subject)), StringComparison.Ordinal); // Sent copy
+    }
+
+    [Fact]
+    public async Task DEF038_TheRailShowsThisServersVerdicts_NeverASendersClaim()
+    {
+        await this.SignInAsync();
+        MessageRow trusted = await this.DeliverAsync(
+            "Received: from out.example ([192.0.2.1])\r\n\tby mx.anjal.test with ESMTPS id 1;\r\n\tMon, 21 Sep 2026 10:00:00 +0000\r\n" +
+            "Authentication-Results: mx.anjal.test; spf=pass smtp.mailfrom=bank.example; dkim=none; dmarc=fail header.from=bank.example\r\n" +
+            "From: Bank <alerts@bank.example>\r\nSubject: Verify your account\r\n\r\nclick\r\n");
+        string html = await this.client.GetStringAsync($"message/{trusted.Id}");
+        Assert.Contains("SPF pass", html, StringComparison.Ordinal);
+        Assert.Contains("DKIM none", html, StringComparison.Ordinal);
+        Assert.Contains("DMARC fail", html, StringComparison.Ordinal);
+        Assert.Contains("may be an impersonation", html, StringComparison.Ordinal);
+
+        // Only a claim under another name (the sender's own): ignored.
+        MessageRow forged = await this.DeliverAsync(
+            "Received: from out.example ([192.0.2.1])\r\n\tby mx.anjal.test with ESMTPS id 2;\r\n\tMon, 21 Sep 2026 10:00:00 +0000\r\n" +
+            "Authentication-Results: attacker.example; spf=pass; dkim=pass; dmarc=pass\r\n" +
+            "From: Boss <boss@hospital.example>\r\nSubject: Pay this invoice\r\n\r\nnow\r\n");
+        string forgedHtml = await this.client.GetStringAsync($"message/{forged.Id}");
+        Assert.DoesNotContain("DMARC pass", forgedHtml, StringComparison.Ordinal);
+        Assert.Contains("Sender checks: not recorded", forgedHtml, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DEF040_WhenTheStoreIsDown_ThePageExplains_AndGivesAReference()
+    {
+        // The webmail's own store, made to fail the way a database outage does.
+        using var broken = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false }) { BaseAddress = this.client.BaseAddress };
+        IFullStore down = System.Reflection.DispatchProxy.Create<IFullStore, ThrowingStore>();
+        WebApplication app = Program.CreateApp(Array.Empty<string>(), down, this.maildir, "anjal.localhost", "http://127.0.0.1:0");
+        await app.StartAsync();
+        try
+        {
+            string address = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.First();
+            using var client = new HttpClient { BaseAddress = new Uri(address + "/") };
+            // Signing in reads the store; the sign-in page alone does not.
+            string form = await client.GetStringAsync("sign-in");
+            string token = TokenRegex.Match(form).Groups[1].Value;
+            HttpResponseMessage res = await client.PostAsync("auth/login", new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["__RequestVerificationToken"] = token,
+                ["address"] = "arun@anjal.co.in",
+                ["password"] = "correct horse battery",
+            }));
+            Assert.Equal(HttpStatusCode.InternalServerError, res.StatusCode);
+            string html = await res.Content.ReadAsStringAsync();
+            Assert.Contains("Anjal is briefly unavailable", html, StringComparison.Ordinal);
+            Assert.Contains("quote this reference", html, StringComparison.Ordinal);
+            Assert.Matches("<b>[0-9a-f]{12}</b>", html);
+            foreach (string leak in new[] { "Npgsql", "connection refused", "at Anjal.", "C:\\", "/home/", "Exception" })
+            {
+                Assert.DoesNotContain(leak, html, StringComparison.OrdinalIgnoreCase);
+            }
+            Assert.Equal("text/html", res.Content.Headers.ContentType!.MediaType);
+            Assert.True(res.Headers.Contains("Content-Security-Policy"), "the error page keeps the security headers");
+        }
+        finally
+        {
+            await app.StopAsync();
+            await app.DisposeAsync();
+        }
+    }
+
+    [Fact]
     public async Task DEF010_AnUploadWellOverTheLimit_GetsTheMessage_NotACutConnection()
     {
         await this.SignInAsync();
@@ -821,3 +902,9 @@ public class RealWorldHtmlTests
     }
 }
 
+/// <summary>A store whose every call fails, as during a database outage.</summary>
+public class ThrowingStore : System.Reflection.DispatchProxy
+{
+    protected override object? Invoke(System.Reflection.MethodInfo? targetMethod, object?[]? args) =>
+        throw new InvalidOperationException("connection refused: 127.0.0.1:5432");
+}

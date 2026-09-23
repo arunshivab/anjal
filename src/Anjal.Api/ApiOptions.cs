@@ -7,6 +7,12 @@ namespace Anjal.Api;
 /// </summary>
 public sealed class ApiOptions
 {
+    /// <summary>
+    /// Where to record detail that must not be returned to callers - the
+    /// cause of a failed health probe, for instance (DEF-040 observation).
+    /// </summary>
+    public System.Action<string>? Log { get; init; }
+
     /// <summary>The IP address to bind. Loopback by default for local dev.</summary>
     public IPAddress BindAddress { get; init; } = IPAddress.Loopback;
 

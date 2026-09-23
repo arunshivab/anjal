@@ -8,5 +8,6 @@ Header names written by and read by the mailbox sink. They are prepended to the 
 
 - **Reasons** *(field)* - Comma-separated CODE(points) list.
 - **Score** *(field)* - Integer score.
+- **EndOfLeadingReceived** *(method)* - The offset just past a leading "Received:" field (with its folded continuation lines), or 0 when the message does not start with one.
 - **Prepend** *(method)* - Prepend the score and reasons headers to raw message bytes. Existing headers of the same name (which a sender could forge) are not removed, but ours come first and reads the first occurrence.
 - **ScoreOf** *(method)* - Read the score header from a parsed message. Returns 0 when absent or unparsable.

@@ -19,7 +19,15 @@ public static partial class HtmlText
     public static string ToPlain(string html)
     {
         ArgumentNullException.ThrowIfNull(html);
-        string s = BlockTagRegex().Replace(html, "\n");
+        // Numbered lists keep their numbers in the plain part: in a hospital
+        // the order often carries the meaning - dosage steps, procedures
+        // (DEF-034). Bulleted lists become "• ".
+        string s = OrderedListRegex().Replace(html, m =>
+        {
+            int n = 0;
+            return ListItemRegex().Replace(m.Groups[1].Value, _ => "\n" + (++n).ToString(System.Globalization.CultureInfo.InvariantCulture) + ". ");
+        });
+        s = BlockTagRegex().Replace(s, "\n");
         s = LineBreakRegex().Replace(s, "\n");
         s = ListItemRegex().Replace(s, "\n• ");
         s = QuoteRegex().Replace(s, m =>
@@ -71,6 +79,9 @@ public static partial class HtmlText
 
     [GeneratedRegex(@"<br\s*/?>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex LineBreakRegex();
+
+    [GeneratedRegex(@"<ol[^>]*>(.*?)</ol\s*>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    private static partial Regex OrderedListRegex();
 
     [GeneratedRegex(@"<li[^>]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex ListItemRegex();

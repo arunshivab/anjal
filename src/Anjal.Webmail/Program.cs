@@ -226,6 +226,33 @@ public static class Program
 
         WebApplication app = builder.Build();
 
+        // Any unhandled fault - a database outage, most likely - gets a page
+        // that says so, with a reference that matches one line in the log
+        // (DEF-040). Without this the webmail sent an empty 500 and the
+        // reader saw only the browser's own "This page isn't working".
+        app.Use(async (http, next) =>
+        {
+            try
+            {
+                await next().ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Any fault becomes the same page; nothing about it is returned.
+            catch (Exception ex)
+            {
+                string reference = Guid.NewGuid().ToString("N").Substring(0, 12);
+                Console.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] 500 [{reference}] {http.Request.Method} {http.Request.Path}: {ex.GetType().Name}: {ex.Message}");
+                if (!http.Response.HasStarted)
+                {
+                    http.Response.Clear();
+                    http.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    http.Response.ContentType = "text/html; charset=utf-8";
+                    ApplySecurityHeaders(http.Response.Headers);
+                    await http.Response.WriteAsync(UnavailablePage(reference)).ConfigureAwait(false);
+                }
+            }
+#pragma warning restore CA1031
+        });
+
         // ACME HTTP-01 challenges are answered before anything else, on any listener.
         app.Use(async (http, next) =>
         {
@@ -954,6 +981,25 @@ public static class Program
     /// and remote images are rewritten away by the sanitizer until the
     /// reader asks for them.
     /// </summary>
+    /// <summary>
+    /// The page shown when the webmail cannot serve a request - it names no
+    /// component, driver or path, only a reference that appears in the log.
+    /// </summary>
+    /// <param name="reference">The reference recorded in the log.</param>
+    private static string UnavailablePage(string reference) =>
+        "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
+        "<title>Anjal is briefly unavailable</title>" +
+        "<link rel=\"stylesheet\" href=\"/tokens.css?v=" + (StaticAssets.Fingerprint("tokens.css") ?? string.Empty) + "\">" +
+        "<link rel=\"stylesheet\" href=\"/app.css?v=" + (StaticAssets.Fingerprint("app.css") ?? string.Empty) + "\">" +
+        "</head><body class=\"errpage\"><main class=\"errcard\">" +
+        "<h1>Anjal is briefly unavailable</h1>" +
+        "<p>Your mail is safe and nothing you have sent has been lost. This is the mail service itself, not your connection or your sign-in.</p>" +
+        "<p>Please try again in a minute.</p>" +
+        "<p class=\"errref\">If it keeps happening, quote this reference: <b>" + System.Net.WebUtility.HtmlEncode(reference) + "</b></p>" +
+        "<p><a class=\"btn btn-p\" href=\"/folder/INBOX\">Try again</a></p>" +
+        "</main></body></html>";
+
     internal static void ApplySecurityHeaders(IHeaderDictionary headers)
     {
         headers.XContentTypeOptions = "nosniff";

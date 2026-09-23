@@ -10,7 +10,26 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.17.0** - **formatted mail, signatures, and the fixes from QA phase A1
+**v0.17.1** - **fixes from QA phases A1, A2 and A3 of v0.17.0**. Subjects
+written in Tamil, Hindi, Malayalam, Arabic, Japanese and other scripts
+without capital letters are no longer scored as though they were shouting:
+the check now counts only cased letters, so it penalised ordinary mail in
+the languages Anjal is built for. When the database is unreachable the
+webmail now shows a page saying the service is briefly unavailable, with a
+reference that matches one line in the log, instead of an empty 500; and
+/healthz, which needs no token, reports "unreachable" rather than naming the
+driver, host and port. Mail from the
+webmail to a mailbox on the same server is now delivered directly; it was
+queued outbound to loop back through the server's own MX, which never
+arrived on a server without one. The message view shows the SPF, DKIM and
+DMARC verdicts this server recorded on arrival - and only those: the MTA now
+removes any incoming Authentication-Results header claiming this server's
+name, so a sender cannot plant a "dmarc=pass". Numbered lists keep their
+numbers in the plain-text part; malformed sender-rule domains such as "@."
+are refused (in the webmail and the admin API alike); the bulk action bar
+wraps at any width; the Received trace line is the first line of stored mail.
+
+Previously: **v0.17.0** - **formatted mail, signatures, and the fixes from QA phase A1
 and the owner's review**; every change reproduced by a test first and checked
 on PostgreSQL. Compose, reply and forward gain a formatting toolbar (bold,
 italic, underline, lists, links, quotes); mail goes out as HTML with a
