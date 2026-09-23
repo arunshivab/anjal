@@ -187,6 +187,7 @@
 ## Anjal.Smtp
 
 - [Anjal.Smtp.AuthFailureLimiter](Anjal.Smtp/AuthFailureLimiter.md)
+- [Anjal.Smtp.AuthResultsHeader](Anjal.Smtp/AuthResultsHeader.md)
 - [Anjal.Smtp.AuthenticatedUser](Anjal.Smtp/AuthenticatedUser.md)
 - [Anjal.Smtp.CompositeMessageSink](Anjal.Smtp/CompositeMessageSink.md)
 - [Anjal.Smtp.Counters](Anjal.Smtp/Counters.md)

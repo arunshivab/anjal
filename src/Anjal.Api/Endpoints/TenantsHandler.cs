@@ -68,7 +68,7 @@ public sealed class TenantsHandler
         string slug = req.Slug.Trim().ToLowerInvariant();
         if (!IsValidSlug(slug))
         {
-            await ctx.WriteErrorAsync(400, "invalid_request", "slug must be 1-63 lowercase letters, digits or hyphens.").ConfigureAwait(false);
+            await ctx.WriteErrorAsync(400, "invalid_request", "slug must be 1-63 letters, digits or hyphens (stored lowercase).").ConfigureAwait(false);
             return;
         }
 

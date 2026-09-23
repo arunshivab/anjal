@@ -766,7 +766,11 @@ public sealed class SmtpSession
         // authenticator was supplied. Failures here MUST NOT crash the
         // session; the authenticator returns TempError/PermError verdicts.
         InboundAuthResult? authResult = null;
-        byte[] bodyToDeliver = body;
+        // A sender's Authentication-Results claiming to be from this server
+        // is removed (RFC 8601 5); only the one added below may bear our name
+        // (DEF-038). DKIM is verified on the message as it arrived.
+        byte[] cleaned = AuthResultsHeader.RemoveClaimsBy(body, this.options.AdvertisedHostName);
+        byte[] bodyToDeliver = cleaned;
         if (this.authenticator is not null)
         {
             try
@@ -790,9 +794,9 @@ public sealed class SmtpSession
                 {
                     string hdrLine = "Authentication-Results: " + authResult.HeaderValue + "\r\n";
                     byte[] hdrBytes = System.Text.Encoding.UTF8.GetBytes(hdrLine);
-                    byte[] combined = new byte[hdrBytes.Length + body.Length];
+                    byte[] combined = new byte[hdrBytes.Length + cleaned.Length];
                     System.Buffer.BlockCopy(hdrBytes, 0, combined, 0, hdrBytes.Length);
-                    System.Buffer.BlockCopy(body, 0, combined, hdrBytes.Length, body.Length);
+                    System.Buffer.BlockCopy(cleaned, 0, combined, hdrBytes.Length, cleaned.Length);
                     bodyToDeliver = combined;
                 }
             }
@@ -805,7 +809,7 @@ public sealed class SmtpSession
                 Counters.Increment("anjal_inbound_auth_errors_total");
                 this.options.Log?.Invoke($"Inbound authentication failed for mail from {this.remoteAddress}: {ex.GetType().Name}: {ex.Message}");
                 authResult = null;
-                bodyToDeliver = body;
+                bodyToDeliver = cleaned;
             }
 #pragma warning restore CA1031
         }

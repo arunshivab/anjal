@@ -3,7 +3,7 @@ namespace Anjal.Api.Dto;
 /// <summary>Request body for creating or updating a tenant.</summary>
 public sealed class TenantRequest
 {
-    /// <summary>Unique slug: lowercase letters, digits and hyphens, 1-63 characters.</summary>
+    /// <summary>Unique slug: letters, digits and hyphens, 1-63 characters; stored lowercase.</summary>
     public string Slug { get; set; } = string.Empty;
 
     /// <summary>Human-readable name.</summary>

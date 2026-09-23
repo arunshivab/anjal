@@ -90,7 +90,11 @@ public sealed class HealthHandler
 #pragma warning disable CA1031 // Any failure means the store is down.
         catch (System.Exception ex)
         {
-            return new HealthComponent { Name = "store", Status = "down", Detail = ex.GetType().Name + ": " + ex.Message };
+            // /healthz needs no token, so it says only that the store is
+            // unreachable: the driver, host and port stay in the log, where
+            // the full exception is already recorded.
+            this.options.Log?.Invoke($"healthz: store unreachable: {ex.GetType().Name}: {ex.Message}");
+            return new HealthComponent { Name = "store", Status = "down", Detail = "unreachable" };
         }
 #pragma warning restore CA1031
     }
@@ -107,15 +111,17 @@ public sealed class HealthHandler
             string probe = System.IO.Path.Combine(this.options.MaildirRoot, ".healthz-" + System.Guid.NewGuid().ToString("N"));
             System.IO.File.WriteAllText(probe, "ok");
             System.IO.File.Delete(probe);
-            return new HealthComponent { Name = "maildir", Status = "ok", Detail = this.options.MaildirRoot };
+            return new HealthComponent { Name = "maildir", Status = "ok", Detail = "writable" };
         }
         catch (System.IO.IOException ex)
         {
-            return new HealthComponent { Name = "maildir", Status = "down", Detail = ex.Message };
+            this.options.Log?.Invoke($"healthz: maildir unusable: {ex.GetType().Name}: {ex.Message}");
+            return new HealthComponent { Name = "maildir", Status = "down", Detail = "unusable" };
         }
         catch (System.UnauthorizedAccessException ex)
         {
-            return new HealthComponent { Name = "maildir", Status = "down", Detail = ex.Message };
+            this.options.Log?.Invoke($"healthz: maildir unusable: {ex.GetType().Name}: {ex.Message}");
+            return new HealthComponent { Name = "maildir", Status = "down", Detail = "unusable" };
         }
     }
 

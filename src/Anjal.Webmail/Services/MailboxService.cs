@@ -74,6 +74,13 @@ public sealed class MessageView
     /// <summary>The <c>X-Anjal-Spam-Reasons</c> header, or empty.</summary>
     public string SpamReasons { get; init; } = string.Empty;
 
+    /// <summary>
+    /// SPF, DKIM and DMARC as this server recorded them on arrival; null when
+    /// no trusted record exists (mail delivered within the server, or from
+    /// before v0.17.1). See <see cref="AuthVerdicts.FromHeaders"/>.
+    /// </summary>
+    public AuthVerdicts? Auth { get; init; }
+
     /// <summary>Attachments in order.</summary>
     public IReadOnlyList<AttachmentView> Attachments { get; init; } = Array.Empty<AttachmentView>();
 }
@@ -332,6 +339,7 @@ public sealed partial class MailboxService
             IsHtml = isHtml,
             HasBlockedImages = blocked,
             SpamReasons = parsed?.Headers.Get(Anjal.Spam.SpamHeaders.Reasons) ?? string.Empty,
+            Auth = parsed is null ? null : AuthVerdicts.FromHeaders(parsed.Headers),
             Attachments = views,
         };
     }
@@ -564,7 +572,47 @@ public sealed partial class MailboxService
         var recipients = new List<MailAddress>(to);
         recipients.AddRange(cc);
         recipients.AddRange(bcc);
+
+        // A recipient who is a mailbox on this server is delivered directly -
+        // not queued outbound to loop back in through our own MX, which never
+        // arrives where the domain has no MX (the QA stack) and would meet our
+        // own greylisting in production (DEF-037). Anything else, including a
+        // local address routed to a webhook, still goes out through the queue.
+        // Local first: if it fails, nothing has been queued, so a retry cannot
+        // send the outside copies twice.
+        var sink = new Anjal.Mailbox.MailboxSink(this.store, this.maildir);
+        var local = new List<string>();
+        var external = new List<MailAddress>();
         foreach (MailAddress rcpt in recipients)
+        {
+            if (await sink.ResolveAsync(rcpt.Address, ct).ConfigureAwait(false) is not null)
+            {
+                if (!local.Contains(rcpt.Address, StringComparer.OrdinalIgnoreCase))
+                {
+                    local.Add(rcpt.Address);
+                }
+            }
+            else
+            {
+                external.Add(rcpt);
+            }
+        }
+        if (local.Count > 0)
+        {
+            string trace = $"Received: by {this.hostName} (Anjal webmail) with HTTPS for local delivery;\r\n\t{FormatDate(now)}\r\n";
+            Anjal.Smtp.DeliveryResult delivered = await sink.DeliverAsync(new Anjal.Smtp.DeliveryContext
+            {
+                EnvelopeFrom = mailbox.Address,
+                EnvelopeTo = local.ToArray(),
+                RawBytes = System.Text.Encoding.ASCII.GetBytes(trace).Concat(raw).ToArray(),
+                AuthenticatedUser = mailbox.Address,
+            }, ct).ConfigureAwait(false);
+            if (delivered.Outcome != Anjal.Smtp.DeliveryOutcome.Accepted)
+            {
+                return $"Could not deliver to {string.Join(", ", local)}: {delivered.ReplyText}";
+            }
+        }
+        foreach (MailAddress rcpt in external)
         {
             await this.messageStore.EnqueueOutboundAsync(new OutboundMessage
             {

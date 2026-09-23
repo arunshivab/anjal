@@ -396,6 +396,7 @@ public static class Program
                 BearerToken = token,
                 AcmeDirectory = acme.Configured ? acme.Directory : null,
                 MaildirRoot = maildir.Root,
+                Log = Log,
             }, store, Log, mailboxStore, maildir);
             Anjal.Smtp.Counters.RegisterGauge("anjal_outbound_pending", "Outbound messages waiting to be sent.", () => store.CountOutboundAsync(Anjal.Store.OutboundStatus.Pending).GetAwaiter().GetResult());
             Anjal.Smtp.Counters.RegisterGauge("anjal_outbound_sending", "Outbound messages currently leased by the worker.", () => store.CountOutboundAsync(Anjal.Store.OutboundStatus.Sending).GetAwaiter().GetResult());

@@ -23,4 +23,13 @@ public class HtmlTextTests
         string html = HtmlText.FromQuotedPlain("On Monday, Lab wrote:\n> Hb 13.2\n> <script>");
         Assert.Equal("<div>On Monday, Lab wrote:</div><blockquote>Hb 13.2<br>&lt;script&gt;</blockquote>", html);
     }
+
+    [Fact]
+    public void DEF034_NumberedListsKeepTheirNumbers_BulletsStayBullets()
+    {
+        string plain = HtmlText.ToPlain("<ol><li>Take 5 ml</li><li>Wait one hour</li><li>Repeat</li></ol><ul><li>Note</li></ul><ol><li>Again</li></ol>");
+        Assert.Contains("1. Take 5 ml\n2. Wait one hour\n3. Repeat", plain, StringComparison.Ordinal);
+        Assert.Contains("• Note", plain, StringComparison.Ordinal);
+        Assert.Contains("1. Again", plain, StringComparison.Ordinal);
+    }
 }

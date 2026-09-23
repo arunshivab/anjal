@@ -873,3 +873,23 @@ table.ml td.c-att svg { vertical-align: -2px; }
   transition: background 160ms var(--ease), border-color 160ms var(--ease);
 }
 .railfile::file-selector-button:hover { border-color: var(--line-strong); background: var(--surface-100); }
+
+/* The bulk bar wraps whenever it runs out of room, not only on phones: at a
+   tablet or split-screen width it used to scroll sideways and hide its last
+   actions (DEF-036). */
+.bulk { flex-wrap: wrap; row-gap: 6px; }
+
+/* Sender checks (DEF-038): three small labelled results. */
+.authline { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.av { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--line); color: var(--ink-muted); }
+.av-ok { color: #1e6b3a; border-color: color-mix(in srgb, #1e6b3a 35%, transparent); background: color-mix(in srgb, #1e6b3a 8%, transparent); }
+.av-bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.avwarn { color: var(--danger); }
+
+/* The page shown when the service itself is unavailable (DEF-040). */
+.errpage { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: var(--surface-200); }
+.errcard { max-width: 520px; margin: 24px; padding: 28px 32px; background: var(--surface-100); border: 1px solid var(--line);
+           border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+.errcard h1 { margin: 0 0 12px; font-size: 22px; }
+.errcard p { margin: 0 0 12px; color: var(--ink-muted); }
+.errref { font-size: 13px; }

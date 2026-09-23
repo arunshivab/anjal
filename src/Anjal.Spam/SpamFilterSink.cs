@@ -56,10 +56,48 @@ public static class SpamHeaders
         string lines = Score + ": " + verdict.Score.ToString(CultureInfo.InvariantCulture) + "\r\n" +
                        Reasons + ": " + (verdict.Reasons.Count == 0 ? "none" : verdict.ReasonsHeaderValue) + "\r\n";
         byte[] head = Encoding.ASCII.GetBytes(lines);
+
+        // Trace information belongs at the very top (RFC 5321 4.4), so when
+        // the message starts with the Received line our session just added,
+        // the spam headers go directly beneath it rather than above it.
+        int at = EndOfLeadingReceived(raw);
         byte[] combined = new byte[head.Length + raw.Length];
-        Buffer.BlockCopy(head, 0, combined, 0, head.Length);
-        Buffer.BlockCopy(raw, 0, combined, head.Length, raw.Length);
+        Buffer.BlockCopy(raw, 0, combined, 0, at);
+        Buffer.BlockCopy(head, 0, combined, at, head.Length);
+        Buffer.BlockCopy(raw, at, combined, at + head.Length, raw.Length - at);
         return combined;
+    }
+
+    /// <summary>
+    /// The offset just past a leading "Received:" field (with its folded
+    /// continuation lines), or 0 when the message does not start with one.
+    /// </summary>
+    private static int EndOfLeadingReceived(byte[] raw)
+    {
+        byte[] name = Encoding.ASCII.GetBytes("Received:");
+        if (raw.Length < name.Length)
+        {
+            return 0;
+        }
+        for (int k = 0; k < name.Length; k++)
+        {
+            if (char.ToLowerInvariant((char)raw[k]) != char.ToLowerInvariant((char)name[k]))
+            {
+                return 0;
+            }
+        }
+        for (int i = name.Length; i < raw.Length - 1; i++)
+        {
+            if (raw[i] == '\r' && raw[i + 1] == '\n')
+            {
+                int next = i + 2;
+                if (next >= raw.Length || (raw[next] != ' ' && raw[next] != '\t'))
+                {
+                    return next;
+                }
+            }
+        }
+        return 0;
     }
 }
 
@@ -85,7 +123,29 @@ public static class SenderRules
         {
             return false;
         }
-        return pattern.Substring(at + 1).Contains('.', System.StringComparison.Ordinal);
+        // The domain must be real-shaped: at least two labels, none empty,
+        // each letters, digits and inner hyphens. "@." used to pass (DEF-035),
+        // as would "@.com" or "@example." - rules that can never match.
+        string[] labels = pattern.Substring(at + 1).Split('.');
+        if (labels.Length < 2)
+        {
+            return false;
+        }
+        foreach (string label in labels)
+        {
+            if (label.Length == 0 || label.Length > 63 || label[0] == '-' || label[^1] == '-')
+            {
+                return false;
+            }
+            foreach (char ch in label)
+            {
+                if (!char.IsAsciiLetterOrDigit(ch) && ch != '-')
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /// <summary>

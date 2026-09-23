@@ -342,21 +342,35 @@ public sealed class SpamScorer
         domain.EndsWith("." + parent, StringComparison.OrdinalIgnoreCase) ||
         parent.EndsWith("." + domain, StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Whether a subject is shouting in capitals. Only CASED letters count:
+    /// Tamil, Devanagari, Malayalam, Arabic, Hebrew, Thai, Chinese, Japanese
+    /// and Korean have no capitals at all, and counting their letters as
+    /// "not lowercase" charged a spam point to every ordinary subject in the
+    /// languages this product is built for (DEF-039).
+    /// </summary>
+    /// <param name="s">The subject.</param>
     private static bool IsAllCaps(string s)
     {
-        int letters = 0;
+        int cased = 0;
         foreach (char c in s)
         {
-            if (char.IsLetter(c))
+            if (!char.IsLetter(c))
             {
-                if (char.IsLower(c))
-                {
-                    return false;
-                }
-                letters++;
+                continue;
+            }
+            bool upper = char.IsUpper(c);
+            bool lower = char.IsLower(c);
+            if (lower)
+            {
+                return false;
+            }
+            if (upper)
+            {
+                cased++;
             }
         }
-        return letters >= 8;
+        return cased >= 8;
     }
 
     private static bool IsLoopbackOrPrivate(string address)
