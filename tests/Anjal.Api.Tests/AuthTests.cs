@@ -143,6 +143,8 @@ public class AuthTests
 public class TokenRotationTests
 {
     [Theory]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]   // what a zeroed buffer produces
+    [InlineData("abababababababababababababab")]               // long, but almost no variety
     [InlineData("CHANGE-ME-long-random-string")]     // our own deployment template
     [InlineData("change_me_change_me_change")]
     [InlineData("anjal-admin-token-value-here")]
@@ -171,6 +173,11 @@ public class TokenRotationTests
             {
                 sb.Append(char.ToLowerInvariant(c));
             }
+        }
+        var distinct = new System.Collections.Generic.HashSet<char>(token);
+        if (distinct.Count < 8)
+        {
+            return true;
         }
         string lowered = sb.ToString();
         foreach (string bad in new[] { "changeme", "password", "secret", "token", "anjal", "test", "example", "placeholder", "xxxx", "0000", "1234" })
