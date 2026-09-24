@@ -25,7 +25,9 @@ public static partial class HtmlText
         string s = OrderedListRegex().Replace(html, m =>
         {
             int n = 0;
-            return ListItemRegex().Replace(m.Groups[1].Value, _ => "\n" + (++n).ToString(System.Globalization.CultureInfo.InvariantCulture) + ". ");
+            // The trailing newline stands in for the </ol> this match consumed,
+            // so the next paragraph starts on its own line.
+            return ListItemRegex().Replace(m.Groups[1].Value, _ => "\n" + (++n).ToString(System.Globalization.CultureInfo.InvariantCulture) + ". ") + "\n";
         });
         s = BlockTagRegex().Replace(s, "\n");
         s = LineBreakRegex().Replace(s, "\n");

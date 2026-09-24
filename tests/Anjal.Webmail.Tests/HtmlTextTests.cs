@@ -32,4 +32,12 @@ public class HtmlTextTests
         Assert.Contains("• Note", plain, StringComparison.Ordinal);
         Assert.Contains("1. Again", plain, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void DEF034_AParagraphAfterAListStartsOnItsOwnLine()
+    {
+        string plain = HtmlText.ToPlain("<ol><li>Take 5 ml</li><li>Repeat once</li></ol><p>Notes: bring the card.</p>");
+        Assert.Contains("2. Repeat once\nNotes: bring the card.", plain, StringComparison.Ordinal);
+        Assert.DoesNotContain("Repeat onceNotes", plain, StringComparison.Ordinal);
+    }
 }

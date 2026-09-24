@@ -60,10 +60,13 @@ public sealed class MailboxesHandler
             await ctx.WriteErrorAsync(400, "invalid_request", "tenantSlug is required.").ConfigureAwait(false);
             return;
         }
-        if (!MailboxSink.TrySplitAddress(req.Address, out string local, out string domain) ||
+        // Checked before anything is written: the local part becomes a
+        // directory name, and a hostile one used to commit the row and then
+        // fail on the maildir (DEF-043).
+        if (!MailboxAddressRules.TryValidate(req.Address, out string local, out string domain) ||
             req.Address.Contains('+', System.StringComparison.Ordinal))
         {
-            await ctx.WriteErrorAsync(400, "invalid_request", "address must be local@domain without a +tag.").ConfigureAwait(false);
+            await ctx.WriteErrorAsync(400, "invalid_request", "address must be local@domain without a +tag; the local part may use letters, digits and . _ % - (no spaces or slashes) and the domain must be a real domain name.").ConfigureAwait(false);
             return;
         }
         if (req.Password.Length > 0 && req.Password.Length < 8)
@@ -93,6 +96,22 @@ public sealed class MailboxesHandler
         string hash = req.Password.Length > 0 ? Anjal.Smtp.Pbkdf2Hasher.Hash(req.Password) : string.Empty;
         long quota = req.QuotaBytes is long qb && qb > 0 ? qb : MailboxRow.DefaultQuotaBytes;
 
+        // Storage first, then the row: if the filesystem refuses the name
+        // there is no mailbox left behind with nowhere to put mail (DEF-043).
+        string address = local + "@" + domain;
+        try
+        {
+            foreach (string folder in DefaultFolders)
+            {
+                this.maildir.EnsureFolder(tenant.Slug, address, folder);
+            }
+        }
+        catch (System.Exception ex) when (ex is System.IO.IOException or System.ArgumentException or System.NotSupportedException or System.UnauthorizedAccessException)
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", $"'{address}' cannot be used as a mailbox name on this server.").ConfigureAwait(false);
+            return;
+        }
+
         MailboxRow saved = await this.store.UpsertMailboxAsync(new MailboxRow
         {
             TenantId = tenant.Id,
@@ -107,7 +126,6 @@ public sealed class MailboxesHandler
         foreach (string folder in DefaultFolders)
         {
             await this.store.EnsureFolderAsync(saved.Id, folder).ConfigureAwait(false);
-            this.maildir.EnsureFolder(tenant.Slug, saved.Address, folder);
         }
 
         await ctx.WriteJsonAsync(200, ToResponse(saved)).ConfigureAwait(false);

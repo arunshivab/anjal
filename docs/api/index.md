@@ -124,6 +124,7 @@
 ## Anjal.Mailbox
 
 - [Anjal.Mailbox.IMaildirStore](Anjal.Mailbox/IMaildirStore.md)
+- [Anjal.Mailbox.MailboxAddressRules](Anjal.Mailbox/MailboxAddressRules.md)
 - [Anjal.Mailbox.MailboxSink](Anjal.Mailbox/MailboxSink.md)
 - [Anjal.Mailbox.MaildirStore](Anjal.Mailbox/MaildirStore.md)
 - [Anjal.Mailbox.MaildirWriteResult](Anjal.Mailbox/MaildirWriteResult.md)

@@ -10,7 +10,16 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.17.1** - **fixes from QA phases A1, A2 and A3 of v0.17.0**. Subjects
+**v0.17.2** - **two findings from the v0.17.1 retest**. The admin API now
+checks a mailbox address before it writes anything: the local part becomes a
+directory name, and one that the filesystem rejects used to commit the
+database row first and then fail, leaving an enabled mailbox with nowhere to
+put mail. Malformed addresses are refused with 400, storage is created before
+the row, and ordinary addresses are unaffected. In the plain-text copy of a
+formatted message, a paragraph after a numbered list starts on its own line
+again.
+
+Previously: **v0.17.1** - **fixes from QA phases A1, A2 and A3 of v0.17.0**. Subjects
 written in Tamil, Hindi, Malayalam, Arabic, Japanese and other scripts
 without capital letters are no longer scored as though they were shouting:
 the check now counts only cased letters, so it penalised ordinary mail in
