@@ -90,6 +90,35 @@ public class MailboxApiTests : System.IDisposable
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
     }
 
+    /// <summary>
+    /// DEF-043: a malformed address is refused before anything is written -
+    /// no database row, no directories, and a 400 rather than a 500.
+    /// </summary>
+    [Theory]
+    [InlineData("../evil@anjal.co.in")]
+    [InlineData("a/../b@anjal.co.in")]
+    [InlineData("<script>@anjal.co.in")]
+    [InlineData("a b@anjal.co.in")]
+    [InlineData("two..dots@anjal.co.in")]
+    [InlineData("arun@nodot")]
+    [InlineData("arun@.")]
+    public async System.Threading.Tasks.Task MalformedAddress_IsRefusedBeforeAnythingIsWritten(string address)
+    {
+        HttpResponseMessage res = await this.client.PostAsJsonAsync("api/mailboxes", new MailboxRequest
+        {
+            TenantSlug = "imagiqa",
+            Address = address,
+            Password = "correct horse battery",
+        }, ApiJson.Options);
+
+        Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
+        Assert.Empty(await this.store.ListMailboxesAsync(null));
+        string[] leftovers = System.IO.Directory.Exists(this.root)
+            ? System.IO.Directory.GetDirectories(this.root, "*", System.IO.SearchOption.AllDirectories)
+            : System.Array.Empty<string>();
+        Assert.DoesNotContain(leftovers, d => d.Contains("evil", System.StringComparison.OrdinalIgnoreCase) || d.Contains("script", System.StringComparison.OrdinalIgnoreCase));
+    }
+
     private async System.Threading.Tasks.Task<MailboxResponse> CreateMailboxAsync(string address, string password = "correct horse battery")
     {
         HttpResponseMessage res = await this.client.PostAsJsonAsync("api/mailboxes", new MailboxRequest
