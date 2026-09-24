@@ -40,7 +40,11 @@ jobs:
           fetch-depth: 0
       - name: No private keys or credentials committed
         run: |
-          if git grep -nE "BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY" -- . ':!*.md' ':!*/Dto/*' ':!tests/*' ':!docs/*'; then
+          # Key MATERIAL: a PEM header alone on its own line. Prose that
+          # mentions the format - documentation comments, test literals - is
+          # not a key, and excluding whole folders instead would have left
+          # those folders unscanned.
+          if git grep -nE "^-{5}BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-{5}$" -- .; then
             echo "::error::a private key appears in the tree"; exit 1
           fi
           if git grep -nIE "(password|secret|api[_-]?key|token)\s*=\s*[\"'][A-Za-z0-9+/=_-]{16,}[\"']" -- 'src/**' 'deploy/**' | grep -viE "example|placeholder|CHANGE-ME"; then
