@@ -10,7 +10,12 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.18.0** - **security work from the v0.17.1 review and an in-house audit
+**v0.18.1** - the admin token must have some variety, not merely length: a
+value of forty identical characters passed the v0.18.0 checks. Our own QA
+helper produced exactly that on Windows PowerShell 5.1, where the .NET Core
+API it used left its buffer zeroed and the failure was easy to miss.
+
+Previously: **v0.18.0** - **security work from the v0.17.1 review and an in-house audit
 pass**. Unknown recipients on our own domains are refused at RCPT TO instead
 of after the whole message is transferred, so a misaddressed 20 MB report
 costs one line and the sender is told at once (set

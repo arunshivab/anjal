@@ -803,6 +803,15 @@ public static class Program
     /// </summary>
     private static bool IsObviousToken(string token)
     {
+        // Variety, not just length: a token of 40 identical characters is as
+        // guessable as a short one. Our own QA helper produced exactly that
+        // when a .NET Core-only API silently left its buffer zeroed on
+        // Windows PowerShell 5.1, and the length check happily passed it.
+        var distinct = new System.Collections.Generic.HashSet<char>(token);
+        if (distinct.Count < 8)
+        {
+            return true;
+        }
         // Letters and digits only, lower-cased: "CHANGE-ME-long-random-string"
         // is the placeholder in our own deployment template, and a hyphen
         // must not be enough to get past this.
