@@ -22,6 +22,7 @@ Configuration for an instance.
 - **MaxSessionsPerAddress** *(property)* - Concurrent sessions from one client address. Large senders open a few connections in parallel; ten leaves room for that. Default 10.
 - **Policy** *(property)* - Optional connection/transaction policy (rate limiting, greylisting). Null means every connection and command is allowed.
 - **Port** *(property)* - TCP port to listen on. Default 2525 to avoid needing admin on dev machines.
+- **Recipients** *(property)* - Optional check for whether a recipient on one of our own domains exists, so an unknown one is refused at RCPT TO instead of after the message is transferred (DEF-042). Null leaves the decision to delivery.
 - **RequireTlsForMail** *(property)* - When true, the server refuses MAIL FROM, RCPT TO, and DATA on plaintext connections after EHLO - clients must STARTTLS first. Has no effect if is null. Defaults to false (TLS opportunistic on receiver side).
 - **Role** *(property)* - The role this listener plays. Determines which commands are accepted and which authorization checks apply. Defaults to which is correct for a public port 25 listener.
 - **TlsCertificate** *(property)* - X.509 certificate (with private key) used for STARTTLS. When set, the server advertises STARTTLS in EHLO and accepts upgrades. When null, STARTTLS is not advertised and the server runs plaintext only.

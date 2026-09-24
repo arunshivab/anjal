@@ -69,9 +69,9 @@ public sealed class MailboxesHandler
             await ctx.WriteErrorAsync(400, "invalid_request", "address must be local@domain without a +tag; the local part may use letters, digits and . _ % - (no spaces or slashes) and the domain must be a real domain name.").ConfigureAwait(false);
             return;
         }
-        if (req.Password.Length > 0 && req.Password.Length < 8)
+        if (req.Password.Length > 0 && Anjal.Smtp.PasswordPolicy.Check(req.Password, req.Address, req.DisplayName) is string weak)
         {
-            await ctx.WriteErrorAsync(400, "invalid_request", "password must be at least 8 characters.").ConfigureAwait(false);
+            await ctx.WriteErrorAsync(400, "invalid_request", weak).ConfigureAwait(false);
             return;
         }
         if (req.QuotaBytes is long q && q < 0)

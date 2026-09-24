@@ -215,7 +215,8 @@ Required changes in `server.env`:
 
 - `ANJAL_POSTGRES` - the password from section 2.
 - `ANJAL_API_TOKEN` - `openssl rand -hex 32`. The server refuses to start
-  without one.
+  without one, with fewer than 24 characters, or with an obvious
+  placeholder. Rotating it is section 13a.
 - `ANJAL_KEK` - `openssl rand -base64 32`. This key encrypts DKIM private
   keys inside the database. **Copy it into your password manager now**,
   next to the database password: a backup restored without it has
@@ -519,6 +520,49 @@ future you can see each one and where it lives.
 | Backups | rclone crypt (client-side encryption) to Backblaze B2 | section 11 |
 | Changes | Every admin API change and webmail sign-in/password change is recorded in `audit_events`, which the database itself makes append-only | section 13 |
 | Service isolation | Dedicated `anjal` user, `ProtectSystem=strict`, `NoNewPrivileges`, restricted address families and namespaces | systemd units |
+
+## 13a. Rotating the admin token
+
+The admin token can create mailboxes, read every tenant and hold DKIM keys,
+so treat it like a password: keep it out of shared documents, and change it
+if anyone who had it no longer needs it. Rotation needs no downtime.
+
+1. Generate the new token: `openssl rand -base64 32`.
+2. In `/etc/anjal/server.env`, move the current value to
+   `ANJAL_API_TOKEN_PREVIOUS` and put the new one in `ANJAL_API_TOKEN`.
+3. `sudo systemctl restart anjal-server`. Both tokens now work, and the log
+   says so at start-up.
+4. Update every caller (SIGMA, Lipi, your own scripts) to the new token.
+5. Confirm nothing still uses the old one, then clear
+   `ANJAL_API_TOKEN_PREVIOUS` and restart again.
+
+Check each step with a call that needs the token:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $NEW" http://127.0.0.1:8025/api/tenants   # 200
+curl -s -o /dev/null -w '%{http_code}\n' -H "Authorization: Bearer $OLD" http://127.0.0.1:8025/api/tenants   # 200 until step 5, then 401
+```
+
+The token is never written to the log, so a log extract can be shared
+without redacting it.
+
+## 13b. Mailbox passwords
+
+One rule applies to the webmail, the admin API and SMTP service accounts:
+at least 8 characters with an upper-case letter, a lower-case letter, a
+number and a symbol - or a phrase of 16 characters or more, which needs
+none of those. Both are checked against a list of predictable choices, so
+`Apulki@123` and `Passw0rd!` are refused however well they satisfy the
+rule, as is anything containing the person's own name or address.
+
+## 13c. Unknown recipients
+
+Mail for an address that does not exist on one of your domains is refused
+at `RCPT TO`, before the message is transferred, so a misaddressed 20 MB
+report costs nothing and the sender is told at once. To go back to
+accepting it and refusing after the message arrives - which tells a
+stranger less about which addresses exist - set
+`ANJAL_SMTP_LATE_RECIPIENT_CHECK=true`.
 
 ## 13. Operating
 

@@ -57,3 +57,12 @@ secrets.json
 # tag, and never committed: keeping them out also stops a stray "git add -A"
 # from pulling ~200 MB of publish output into the history.
 artifacts/
+
+# Secrets: never commit keys, certificates or environment files (SEC-R3).
+*.pem
+*.key
+*.pfx
+*.p12
+.env
+*.env
+!deploy/server.env.example

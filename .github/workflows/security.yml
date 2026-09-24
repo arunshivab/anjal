@@ -1,0 +1,53 @@
+name: security
+
+# An auditor's first checks, run on every change: known-vulnerable or
+# deprecated dependencies, and no secrets committed by accident.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * 1"   # Mondays: a package becomes vulnerable without us touching it
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore
+        run: dotnet restore
+      - name: Vulnerable packages
+        run: |
+          dotnet list package --vulnerable --include-transitive 2>&1 | tee /tmp/vuln.txt
+          if grep -qiE "has the following vulnerable packages" /tmp/vuln.txt; then
+            echo "::error::vulnerable packages found"; exit 1
+          fi
+      - name: Deprecated packages
+        run: |
+          dotnet list package --deprecated 2>&1 | tee /tmp/dep.txt
+          if grep -qiE "has the following deprecated packages" /tmp/dep.txt; then
+            echo "::warning::deprecated packages found"
+          fi
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: No private keys or credentials committed
+        run: |
+          # Key MATERIAL: a PEM header alone on its own line. Prose that
+          # mentions the format - documentation comments, test literals - is
+          # not a key, and excluding whole folders instead would have left
+          # those folders unscanned.
+          if git grep -nE "^-{5}BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-{5}$" -- .; then
+            echo "::error::a private key appears in the tree"; exit 1
+          fi
+          if git grep -nIE "(password|secret|api[_-]?key|token)\s*=\s*[\"'][A-Za-z0-9+/=_-]{16,}[\"']" -- 'src/**' 'deploy/**' | grep -viE "example|placeholder|CHANGE-ME"; then
+            echo "::error::a credential-shaped literal appears in the source"; exit 1
+          fi
+          echo "no secrets found"

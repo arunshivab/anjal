@@ -48,6 +48,25 @@ public sealed class AuthenticatedUser
 /// (typically 25) uses this to refuse relaying mail for non-local
 /// destinations - i.e., the open-relay guard.
 /// </summary>
+/// <summary>
+/// Optional: whether this server has somewhere to put mail for a recipient
+/// on one of its own domains - a mailbox, or a rule that routes it onward.
+/// Used to refuse an unknown recipient at RCPT TO, before the message is
+/// transferred, rather than after (DEF-042).
+/// </summary>
+public interface IRecipientResolver
+{
+    /// <summary>
+    /// True when mail for this address can be delivered, false when it
+    /// certainly cannot. Returns null when it cannot be determined - the
+    /// caller then accepts the recipient, so no uncertainty ever becomes a
+    /// refusal.
+    /// </summary>
+    /// <param name="address">The full recipient address.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<bool?> ExistsAsync(string address, System.Threading.CancellationToken ct = default);
+}
+
 public interface ILocalDomainResolver
 {
     /// <summary>

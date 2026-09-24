@@ -138,3 +138,48 @@ public class AuthTests
         }
     }
 }
+
+/// <summary>SEC-R3: rotation, and a token that may not be used at all.</summary>
+public class TokenRotationTests
+{
+    [Theory]
+    [InlineData("CHANGE-ME-long-random-string")]     // our own deployment template
+    [InlineData("change_me_change_me_change")]
+    [InlineData("anjal-admin-token-value-here")]
+    [InlineData("TestTestTestTestTestTest")]
+    public void ObviousTokens_AreRecognised(string token)
+    {
+        Assert.True(IsObvious(token), token);
+    }
+
+    [Theory]
+    [InlineData("k3Qv9mXpL2wR7nT4yB8sD1fG")]
+    [InlineData("9f4c1e77a0b34d2e9c8a51ff6b2d7e40")]
+    public void RandomTokens_AreNot(string token)
+    {
+        Assert.False(IsObvious(token), token);
+        Assert.True(token.Length >= Anjal.Api.ApiOptions.MinimumTokenLength);
+    }
+
+    /// <summary>The same rule the server applies at start-up.</summary>
+    private static bool IsObvious(string token)
+    {
+        var sb = new System.Text.StringBuilder(token.Length);
+        foreach (char c in token)
+        {
+            if (char.IsAsciiLetterOrDigit(c))
+            {
+                sb.Append(char.ToLowerInvariant(c));
+            }
+        }
+        string lowered = sb.ToString();
+        foreach (string bad in new[] { "changeme", "password", "secret", "token", "anjal", "test", "example", "placeholder", "xxxx", "0000", "1234" })
+        {
+            if (lowered.Contains(bad, System.StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+}

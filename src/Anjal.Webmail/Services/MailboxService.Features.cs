@@ -54,7 +54,8 @@ public sealed partial class MailboxService
     public static readonly IReadOnlyList<string> Themes = new[] { "paper", "ink", "postcard", "midnight" };
 
     /// <summary>Minimum length of a new password.</summary>
-    public const int MinimumPasswordLength = 12;
+    /// <summary>Kept for callers; the rule itself lives in <see cref="Anjal.Smtp.PasswordPolicy"/>.</summary>
+    public const int MinimumPasswordLength = Anjal.Smtp.PasswordPolicy.MinimumLength;
 
     // ---------------- Search ----------------
 
@@ -783,9 +784,9 @@ public sealed partial class MailboxService
         {
             return "The current password is not correct.";
         }
-        if (newPassword.Length < MinimumPasswordLength)
+        if (Anjal.Smtp.PasswordPolicy.Check(newPassword, mailbox.Address, mailbox.DisplayName) is string rejected)
         {
-            return $"The new password must be at least {MinimumPasswordLength} characters.";
+            return rejected;
         }
         if (!string.Equals(newPassword, confirmPassword, StringComparison.Ordinal))
         {

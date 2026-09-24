@@ -195,6 +195,10 @@ else
                 {
                     <p class="railnote">Sender checks: not recorded for this message.</p>
                 }
+                @if (view.BodyShortened)
+                {
+                    <p class="railnote avwarn"><LipiIcon Name="warning" Size="14" /> This message was too large to show in full, so what you see has been cut short. Download the original to read all of it.</p>
+                }
                 <p class="railnote"><LipiIcon Name="security" Size="14" /> Shown in a sandbox; scripts cannot run.</p>
             </section>
 

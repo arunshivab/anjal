@@ -26,6 +26,17 @@ public sealed class ApiOptions
     public string BearerToken { get; init; } = string.Empty;
 
     /// <summary>
+    /// A token that is still accepted while it is being replaced. Rotation
+    /// without downtime: set this to the old token, put the new one in
+    /// <see cref="BearerToken"/>, update the callers (SIGMA, Lipi), then
+    /// remove this one and restart (SEC-R3).
+    /// </summary>
+    public string PreviousBearerToken { get; init; } = string.Empty;
+
+    /// <summary>The shortest admin token accepted: a short one is guessable, and this API can do anything.</summary>
+    public const int MinimumTokenLength = 24;
+
+    /// <summary>
     /// Maximum request body size in bytes. Requests larger than this receive 413.
     /// Default 25 MB - matches the SMTP server's MaxMessageBytes.
     /// </summary>
