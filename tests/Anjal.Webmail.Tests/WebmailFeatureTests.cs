@@ -338,14 +338,14 @@ public sealed class WebmailFeatureTests : System.IDisposable
         // The password survives a display-name change.
         Assert.True(Pbkdf2Hasher.Verify("correct horse battery", (await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.PasswordPbkdf2));
 
-        Assert.NotNull(await this.svc.ChangePasswordAsync(this.mailbox.Id, "wrong", "a-long-enough-password", "a-long-enough-password"));
+        Assert.NotNull(await this.svc.ChangePasswordAsync(this.mailbox.Id, "wrong", "a-long-enough-phrase-here", "a-long-enough-phrase-here"));
         Assert.NotNull(await this.svc.ChangePasswordAsync(this.mailbox.Id, "correct horse battery", "short", "short"));
-        Assert.NotNull(await this.svc.ChangePasswordAsync(this.mailbox.Id, "correct horse battery", "a-long-enough-password", "different-password"));
+        Assert.NotNull(await this.svc.ChangePasswordAsync(this.mailbox.Id, "correct horse battery", "a-long-enough-phrase-here", "a-different-phrase-here"));
         Assert.NotNull(await this.svc.ChangePasswordAsync(this.mailbox.Id, "correct horse battery", "correct horse battery", "correct horse battery"));
 
-        Assert.Null(await this.svc.ChangePasswordAsync(this.mailbox.Id, "correct horse battery", "a-long-enough-password", "a-long-enough-password"));
+        Assert.Null(await this.svc.ChangePasswordAsync(this.mailbox.Id, "correct horse battery", "a-long-enough-phrase-here", "a-long-enough-phrase-here"));
         var auth = new WebmailAuthService(this.store);
-        Assert.NotNull(await auth.AuthenticateAsync("arun@anjal.co.in", "a-long-enough-password"));
+        Assert.NotNull(await auth.AuthenticateAsync("arun@anjal.co.in", "a-long-enough-phrase-here"));
         Assert.Null(await auth.AuthenticateAsync("arun@anjal.co.in", "correct horse battery"));
     }
 

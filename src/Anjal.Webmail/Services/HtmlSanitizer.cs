@@ -45,23 +45,32 @@ public static partial class HtmlSanitizer
         "datetime", "open",
     };
 
-    [GeneratedRegex(@"<![A-Za-z\[][^>]*>|<\?[^>]*>", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"<![A-Za-z\[][^>]*>|<\?[^>]*>", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, MatchTimeoutMs)]
     private static partial Regex DeclarationRegex();
 
-    [GeneratedRegex(@"<!--.*?-->", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"<!--.*?-->", RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, MatchTimeoutMs)]
     private static partial Regex CommentRegex();
 
     // Parsed the way browsers parse: "<" must be followed immediately by
     // a letter (or "/" and a letter) to start a tag - "a < b" is text, not
     // markup. Attributes may be separated by whitespace or "/": browsers
     // read <script/src=x> as a script tag with a src attribute.
-    [GeneratedRegex(@"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[\s/]+[^\s=>/]+(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?)*)[\s/]*?(/?)\s*>", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    // Matched with the NON-BACKTRACKING engine, which is linear in the
+    // length of the input whatever its shape. With the ordinary engine,
+    // "<a" followed by a long run of spaces and no ">" cost time
+    // proportional to the SQUARE of the run: 2 s for 40,000 spaces, over
+    // 30 s for 200,000, minutes for a megabyte - and one 25 MB message can
+    // carry many (SEC-R1). Measured on this pattern: 2,000,000 spaces in
+    // 0.01 s, with identical matches on ordinary markup. An atomic group
+    // was tried first and did not help, because the backtracking happens
+    // inside the group before it completes.
+    [GeneratedRegex(@"<(/?)([a-zA-Z][a-zA-Z0-9:-]*)((?:[\s/]+[^\s=>/]+(?:\s*=\s*(?:""[^""]*""|'[^']*'|[^\s>]+))?)*)[\s/]*?(/?)\s*>", RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, MatchTimeoutMs)]
     private static partial Regex TagRegex();
 
-    [GeneratedRegex(@"([^\s=]+)(?:\s*=\s*(?:""([^""]*)""|'([^']*)'|([^\s>]+)))?", RegexOptions.Singleline | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"([^\s=]+)(?:\s*=\s*(?:""([^""]*)""|'([^']*)'|([^\s>]+)))?", RegexOptions.Singleline | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, MatchTimeoutMs)]
     private static partial Regex AttributeRegex();
 
-    [GeneratedRegex(@"(expression\s*\(|url\s*\(|javascript:|@import|behavior\s*:)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"(expression\s*\(|url\s*\(|javascript:|@import|behavior\s*:)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, MatchTimeoutMs)]
     private static partial Regex DangerousCssRegex();
 
     /// <summary>
@@ -70,9 +79,71 @@ public static partial class HtmlSanitizer
     /// <param name="html">Untrusted HTML.</param>
     /// <param name="allowRemoteImages">When false, <c>http(s)</c> image sources are replaced with a placeholder attribute.</param>
     /// <returns>Sanitised HTML.</returns>
-    public static string Sanitize(string html, bool allowRemoteImages = false)
+    /// <summary>How long any one pattern may run before it gives up (SEC-R1).</summary>
+    private const int MatchTimeoutMs = 2000;
+
+    /// <summary>
+    /// The most HTML that is examined. A body larger than this is cut here
+    /// and the reader is told; messages this large are display problems
+    /// regardless, and the cap keeps the work bounded whatever the shape of
+    /// the input.
+    /// </summary>
+    public const int MaxHtmlChars = 512 * 1024;
+
+    /// <summary>
+    /// Clean HTML for display. Never throws: if a pattern takes too long, or
+    /// anything else goes wrong, the message is shown as plain text instead -
+    /// markup is dropped rather than passed through unchecked.
+    /// </summary>
+    /// <param name="html">The message body.</param>
+    /// <param name="allowRemoteImages">Whether remote images may load.</param>
+    /// <param name="shortened">True when the body was longer than <see cref="MaxHtmlChars"/>.</param>
+    public static string Sanitize(string html, bool allowRemoteImages, out bool shortened)
     {
         ArgumentNullException.ThrowIfNull(html);
+        shortened = html.Length > MaxHtmlChars;
+        string input = shortened ? html.Substring(0, MaxHtmlChars) : html;
+        try
+        {
+            return SanitizeCore(input, allowRemoteImages);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            // Fail closed: the text of the message, with no markup at all.
+            return System.Net.WebUtility.HtmlEncode(TagRegexFallback(input));
+        }
+    }
+
+    /// <summary>Strip anything tag-shaped without a pattern that can backtrack.</summary>
+    private static string TagRegexFallback(string html)
+    {
+        var plain = new StringBuilder(html.Length);
+        bool inside = false;
+        foreach (char c in html)
+        {
+            if (c == '<')
+            {
+                inside = true;
+            }
+            else if (c == '>')
+            {
+                inside = false;
+            }
+            else if (!inside)
+            {
+                plain.Append(c);
+            }
+        }
+        return plain.ToString();
+    }
+
+    /// <summary>Clean HTML for display.</summary>
+    /// <param name="html">The message body.</param>
+    /// <param name="allowRemoteImages">Whether remote images may load.</param>
+    public static string Sanitize(string html, bool allowRemoteImages = false) => Sanitize(html, allowRemoteImages, out _);
+
+    private static string SanitizeCore(string html, bool allowRemoteImages)
+    {
 
         // Comments, and declarations such as <!DOCTYPE html> or <?xml ...?>,
         // are removed first. Left in, a doctype was escaped as text and shown

@@ -10,7 +10,36 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.17.2** - **two findings from the v0.17.1 retest**. The admin API now
+**v0.18.0** - **security work from the v0.17.1 review and an in-house audit
+pass**. Unknown recipients on our own domains are refused at RCPT TO instead
+of after the whole message is transferred, so a misaddressed 20 MB report
+costs one line and the sender is told at once (set
+ANJAL_SMTP_LATE_RECIPIENT_CHECK=true for the old behaviour). One password
+rule now covers the webmail, the admin API and SMTP accounts, where three
+different rules applied before: eight characters with upper case, lower
+case, a number and a symbol, or a phrase of sixteen or more; both checked
+against predictable choices, so "Apulki@123" is refused however well it
+satisfies the rule. The admin token may be rotated without downtime through
+ANJAL_API_TOKEN_PREVIOUS, and the server refuses to start with a token under
+24 characters or an obvious placeholder - including the one in our own
+deployment template. Also: dependency and secret scanning on every build, a
+swept inventory of every regular expression in the product, and 40,000
+fuzzed messages through the MIME parser.
+
+Previously: **v0.17.3** - **SEC-R1: a denial of service in the HTML sanitiser**, found
+by a security review of v0.17.1. A message body containing a tag start
+followed by a long run of whitespace and no ">" cost time proportional to
+the square of that run - two seconds for 40,000 spaces, over thirty for
+200,000 - and it ran when the reader opened the message, so anyone able to
+send mail could peg a CPU core and, with a few such messages, take the
+webmail down. The sanitiser's patterns now use .NET's non-backtracking
+engine, which is linear whatever the input: two million spaces in a
+hundredth of a second, with identical results on ordinary markup. Bodies
+are also capped at 512 KB (the reader is told when one is shortened), every
+pattern has a two-second timeout, and if one ever fires the message is shown
+as plain text rather than passed through unchecked.
+
+Previously: **v0.17.2** - **two findings from the v0.17.1 retest**. The admin API now
 checks a mailbox address before it writes anything: the local part becomes a
 directory name, and one that the filesystem rejects used to commit the
 database row first and then fail, leaving an enabled mailbox with nowhere to

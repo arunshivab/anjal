@@ -17,6 +17,13 @@ public sealed class SmtpServerOptions
     /// <summary>The hostname this server announces in 220 banners and EHLO responses.</summary>
     public string AdvertisedHostName { get; init; } = "anjal.localhost";
 
+    /// <summary>
+    /// Optional check for whether a recipient on one of our own domains
+    /// exists, so an unknown one is refused at RCPT TO instead of after the
+    /// message is transferred (DEF-042). Null leaves the decision to delivery.
+    /// </summary>
+    public IRecipientResolver? Recipients { get; init; }
+
     /// <summary>Maximum number of RCPT TO recipients per transaction. RFC 5321 minimum is 100.</summary>
     public int MaxRecipients { get; init; } = 100;
 

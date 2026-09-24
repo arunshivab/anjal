@@ -265,7 +265,13 @@ public sealed class ApiServer : System.IDisposable
             return false;
         }
         string presented = header.Substring(prefix.Length);
-        return ConstantTimeEquals(presented, this.options.BearerToken);
+
+        // Both comparisons always run: returning early on the first match
+        // would leak, by timing, which of the two tokens was presented.
+        bool current = ConstantTimeEquals(presented, this.options.BearerToken);
+        bool previous = this.options.PreviousBearerToken.Length > 0
+            && ConstantTimeEquals(presented, this.options.PreviousBearerToken);
+        return current || previous;
     }
 
     private static bool ConstantTimeEquals(string a, string b)

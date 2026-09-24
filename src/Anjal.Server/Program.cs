@@ -16,7 +16,9 @@ namespace Anjal.Server;
 ///   ANJAL_RELAY_HOST        - upstream host for relay mode.
 ///   ANJAL_RELAY_PORT        - upstream port for relay mode, default 587.
 ///   ANJAL_API_PORT          - HTTP API port. If unset or 0, the API is disabled.
-///   ANJAL_API_TOKEN         - bearer token clients must present.
+///   ANJAL_API_TOKEN         - bearer token clients must present (24 characters or more).
+///   ANJAL_API_TOKEN_PREVIOUS - optional: the token being replaced, accepted
+///                             until callers have moved to the new one (rotation).
 ///   ANJAL_API_BIND          - HTTP API bind address. Defaults to 127.0.0.1 (never ANJAL_BIND).
 ///   ANJAL_API_ALLOW_NO_AUTH - "true" allows the API to run without ANJAL_API_TOKEN (development only).
 ///   ANJAL_API_ALLOW_PUBLIC  - "true" allows a non-loopback ANJAL_API_BIND (only behind a TLS proxy).
@@ -48,6 +50,8 @@ namespace Anjal.Server;
 ///   ANJAL_RATE_CONN_PER_MIN - connections per IP per minute, default 60 (0 disables).
 ///   ANJAL_RATE_MSG_PER_HOUR - unauthenticated messages per IP per hour, default 200.
 ///   ANJAL_RATE_USER_MSG_PER_HOUR - messages per authenticated user per hour, default 100.
+///   ANJAL_SMTP_LATE_RECIPIENT_CHECK - "true" accepts unknown local recipients at
+///                             RCPT TO and refuses them after DATA instead. Default false.
 ///   ANJAL_GREYLIST          - "false" disables greylisting on the MTA port. Default true.
 ///   ANJAL_GREYLIST_DELAY_SECONDS - greylist delay, default 300.
 ///   ANJAL_ACME_*            - see <see cref="Anjal.Acme.AcmeEnvironment"/>. When
@@ -173,6 +177,13 @@ public static class Program
             MaxConcurrentSessions = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS", 200),
             MaxSessionsPerAddress = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS_PER_IP", 10),
             Log = Log,
+            // Refuse an unknown recipient at RCPT TO rather than after the
+            // message has been transferred (DEF-042). Set
+            // ANJAL_SMTP_LATE_RECIPIENT_CHECK=true to go back to deciding at
+            // delivery, which tells a stranger less about which addresses exist.
+            Recipients = string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_SMTP_LATE_RECIPIENT_CHECK"), "true", System.StringComparison.OrdinalIgnoreCase)
+                ? null
+                : new ServerRecipientResolver(mailboxSink, routing),
         };
         Log($"SMTP limits: idle {smtpOptions.CommandTimeout.TotalSeconds:0}s, session {smtpOptions.MaxSessionDuration.TotalMinutes:0} min, " +
             $"{smtpOptions.MaxConcurrentSessions} connections ({smtpOptions.MaxSessionsPerAddress} per address).");
@@ -373,6 +384,7 @@ public static class Program
                 return 1;
             }
             string token = System.Environment.GetEnvironmentVariable("ANJAL_API_TOKEN") ?? string.Empty;
+            string previousToken = System.Environment.GetEnvironmentVariable("ANJAL_API_TOKEN_PREVIOUS") ?? string.Empty;
 
             // Fail closed: an API with no token would hand tenant, mailbox and
             // DKIM management to anyone who can reach the port. Running
@@ -383,6 +395,24 @@ public static class Program
             {
                 Log("ANJAL_API_TOKEN is not set; refusing to start. Set a token, or ANJAL_API_ALLOW_NO_AUTH=true for local development only.");
                 return 1;
+            }
+
+            // A short or obvious token is as good as none: this API can create
+            // mailboxes, read every tenant and hold DKIM keys (SEC-R3). The
+            // token itself is never logged, here or anywhere.
+            if (token.Length > 0 && token.Length < Anjal.Api.ApiOptions.MinimumTokenLength)
+            {
+                Log($"ANJAL_API_TOKEN is too short ({token.Length} characters); refusing to start. Use at least {Anjal.Api.ApiOptions.MinimumTokenLength} random characters, e.g. openssl rand -base64 32.");
+                return 1;
+            }
+            if (token.Length > 0 && IsObviousToken(token))
+            {
+                Log("ANJAL_API_TOKEN looks like a placeholder; refusing to start. Use a random value, e.g. openssl rand -base64 32.");
+                return 1;
+            }
+            if (previousToken.Length > 0)
+            {
+                Log("ANJAL_API_TOKEN_PREVIOUS is set: the old token is still accepted. Remove it once every caller uses the new one.");
             }
             if (token.Length == 0)
             {
@@ -396,6 +426,7 @@ public static class Program
                 BearerToken = token,
                 AcmeDirectory = acme.Configured ? acme.Directory : null,
                 MaildirRoot = maildir.Root,
+                PreviousBearerToken = previousToken,
                 Log = Log,
             }, store, Log, mailboxStore, maildir);
             Anjal.Smtp.Counters.RegisterGauge("anjal_outbound_pending", "Outbound messages waiting to be sent.", () => store.CountOutboundAsync(Anjal.Store.OutboundStatus.Pending).GetAwaiter().GetResult());
@@ -763,6 +794,35 @@ public static class Program
             MessagesPerHourPerIp = 0,
             MessagesPerHourPerUser = ParseIntEnv("ANJAL_RATE_USER_MSG_PER_HOUR", 100),
         });
+    }
+
+    /// <summary>
+    /// Whether a token is one of the obvious placeholders people leave in
+    /// configuration files. Not a strength meter - just a refusal to start
+    /// with "changeme" in production (SEC-R3).
+    /// </summary>
+    private static bool IsObviousToken(string token)
+    {
+        // Letters and digits only, lower-cased: "CHANGE-ME-long-random-string"
+        // is the placeholder in our own deployment template, and a hyphen
+        // must not be enough to get past this.
+        var sb = new System.Text.StringBuilder(token.Length);
+        foreach (char c in token)
+        {
+            if (char.IsAsciiLetterOrDigit(c))
+            {
+                sb.Append(char.ToLowerInvariant(c));
+            }
+        }
+        string lowered = sb.ToString();
+        foreach (string bad in new[] { "changeme", "password", "secret", "token", "anjal", "test", "example", "placeholder", "xxxx", "0000", "1234" })
+        {
+            if (lowered.Contains(bad, System.StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static int ParseIntEnv(string name, int fallback)

@@ -51,9 +51,9 @@ public sealed class SmtpUsersHandler
             await ctx.WriteErrorAsync(400, "invalid_request", "password is required.").ConfigureAwait(false);
             return;
         }
-        if (req.Password.Length < 8)
+        if (Anjal.Smtp.PasswordPolicy.Check(req.Password, req.Username) is string weak)
         {
-            await ctx.WriteErrorAsync(400, "invalid_request", "password must be at least 8 characters.").ConfigureAwait(false);
+            await ctx.WriteErrorAsync(400, "invalid_request", weak).ConfigureAwait(false);
             return;
         }
 

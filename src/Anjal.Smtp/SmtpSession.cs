@@ -702,6 +702,38 @@ public sealed class SmtpSession
                 await this.WriteLineAsync("550 5.7.1 Relaying denied", ct).ConfigureAwait(false);
                 return true;
             }
+
+            // The domain is ours: refuse now if the address certainly does not
+            // exist, rather than after the whole message has been transferred
+            // (DEF-042). A megabyte of attachments addressed to a typo is
+            // refused in one line, and the sender is told at once. Anything
+            // uncertain - including a store that cannot answer - is accepted
+            // here and decided at delivery, so an outage never bounces mail.
+            if (this.options.Recipients is not null)
+            {
+                bool? exists;
+                try
+                {
+                    exists = await this.options.Recipients.ExistsAsync(addr, ct).ConfigureAwait(false);
+                }
+                catch (System.OperationCanceledException)
+                {
+                    throw;
+                }
+#pragma warning disable CA1031 // Cannot tell: accept, and decide at delivery.
+                catch (System.Exception ex)
+                {
+                    this.options.Log?.Invoke($"Recipient check for {addr} failed ({ex.GetType().Name}); accepting and deciding at delivery.");
+                    exists = null;
+                }
+#pragma warning restore CA1031
+                if (exists == false)
+                {
+                    Counters.Increment("anjal_smtp_unknown_recipient_total");
+                    await this.WriteLineAsync("550 5.1.1 No such mailbox here", ct).ConfigureAwait(false);
+                    return true;
+                }
+            }
         }
 
         PolicyDecision rcptPolicy = await this.ConsultAsync(p => p.OnRcptToAsync(this.remoteAddress, this.authenticatedUser?.Username, this.envelopeFrom, addr, ct)).ConfigureAwait(false);

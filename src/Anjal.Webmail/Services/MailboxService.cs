@@ -75,6 +75,13 @@ public sealed class MessageView
     public string SpamReasons { get; init; } = string.Empty;
 
     /// <summary>
+    /// True when the body was too large to show in full and was cut
+    /// (see <see cref="HtmlSanitizer.MaxHtmlChars"/>). The whole message is
+    /// still in the .eml download.
+    /// </summary>
+    public bool BodyShortened { get; init; }
+
+    /// <summary>
     /// SPF, DKIM and DMARC as this server recorded them on arrival; null when
     /// no trusted record exists (mail delivered within the server, or from
     /// before v0.17.1). See <see cref="AuthVerdicts.FromHeaders"/>.
@@ -296,11 +303,12 @@ public sealed partial class MailboxService
 
         string bodyHtml;
         bool isHtml;
+        bool shortened = false;
         bool blocked = false;
         if (htmlPart is not null)
         {
             string html = htmlPart.GetBodyAsText();
-            bodyHtml = HtmlSanitizer.Sanitize(html, allowRemoteImages);
+            bodyHtml = HtmlSanitizer.Sanitize(html, allowRemoteImages, out shortened);
             isHtml = true;
             blocked = !allowRemoteImages && bodyHtml.Contains("data-blocked-src=", StringComparison.Ordinal);
         }
@@ -339,6 +347,7 @@ public sealed partial class MailboxService
             IsHtml = isHtml,
             HasBlockedImages = blocked,
             SpamReasons = parsed?.Headers.Get(Anjal.Spam.SpamHeaders.Reasons) ?? string.Empty,
+            BodyShortened = shortened,
             Auth = parsed is null ? null : AuthVerdicts.FromHeaders(parsed.Headers),
             Attachments = views,
         };

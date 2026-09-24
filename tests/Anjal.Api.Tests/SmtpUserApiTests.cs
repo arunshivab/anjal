@@ -65,7 +65,7 @@ public class SmtpUserApiTests : System.IDisposable
         HttpResponseMessage res = await this.client.PostAsJsonAsync("api/smtp-users", new SmtpUserRequest
         {
             Username = "alice",
-            Password = "Sekret12345",
+            Password = "Sekret#12345",
             AllowedFromDomains = new System.Collections.Generic.List<string> { "hospital-a.test" },
         }, ApiJson.Options);
 
@@ -82,12 +82,12 @@ public class SmtpUserApiTests : System.IDisposable
         HttpResponseMessage res = await this.client.PostAsJsonAsync("api/smtp-users", new SmtpUserRequest
         {
             Username = "alice",
-            Password = "Sekret12345",
+            Password = "Sekret#12345",
         }, ApiJson.Options);
 
         string raw = await res.Content.ReadAsStringAsync();
         Assert.DoesNotContain("pbkdf2", raw, System.StringComparison.Ordinal);
-        Assert.DoesNotContain("Sekret12345", raw, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Sekret#12345", raw, System.StringComparison.Ordinal);
         Assert.DoesNotContain("password", raw, System.StringComparison.OrdinalIgnoreCase);
     }
 
@@ -97,14 +97,14 @@ public class SmtpUserApiTests : System.IDisposable
         await this.client.PostAsJsonAsync("api/smtp-users", new SmtpUserRequest
         {
             Username = "alice",
-            Password = "Sekret12345",
+            Password = "Sekret#12345",
         }, ApiJson.Options);
 
         var row = await this.store.GetSmtpUserAsync("alice");
         Assert.NotNull(row);
         Assert.StartsWith("pbkdf2$", row!.PasswordPbkdf2, System.StringComparison.Ordinal);
         // Should NOT contain plaintext.
-        Assert.DoesNotContain("Sekret12345", row.PasswordPbkdf2, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("Sekret#12345", row.PasswordPbkdf2, System.StringComparison.Ordinal);
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public class SmtpUserApiTests : System.IDisposable
     {
         HttpResponseMessage res = await this.client.PostAsJsonAsync("api/smtp-users", new SmtpUserRequest
         {
-            Password = "Sekret12345",
+            Password = "Sekret#12345",
         }, ApiJson.Options);
         Assert.Equal(HttpStatusCode.BadRequest, res.StatusCode);
     }
@@ -144,12 +144,12 @@ public class SmtpUserApiTests : System.IDisposable
         await this.client.PostAsJsonAsync("api/smtp-users", new SmtpUserRequest
         {
             Username = "alice",
-            Password = "Sekret12345",
+            Password = "Sekret#12345",
         }, ApiJson.Options);
         await this.client.PostAsJsonAsync("api/smtp-users", new SmtpUserRequest
         {
             Username = "bob",
-            Password = "Another12345",
+            Password = "Another#12345",
         }, ApiJson.Options);
 
         HttpResponseMessage res = await this.client.GetAsync(new System.Uri("api/smtp-users", System.UriKind.Relative));
@@ -169,7 +169,7 @@ public class SmtpUserApiTests : System.IDisposable
         await this.client.PostAsJsonAsync("api/smtp-users", new SmtpUserRequest
         {
             Username = "doomed",
-            Password = "Sekret12345",
+            Password = "Sekret#12345",
         }, ApiJson.Options);
 
         HttpResponseMessage del = await this.client.DeleteAsync(new System.Uri("api/smtp-users/doomed", System.UriKind.Relative));
@@ -186,7 +186,7 @@ public class SmtpUserApiTests : System.IDisposable
         await this.client.PostAsJsonAsync("api/smtp-users", new SmtpUserRequest
         {
             Username = "alice",
-            Password = "Sekret12345",
+            Password = "Sekret#12345",
             AllowedFromDomains = new System.Collections.Generic.List<string>
             {
                 "  Hospital-A.TEST  ",
