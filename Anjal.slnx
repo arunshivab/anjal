@@ -33,6 +33,7 @@
     <Project Path="tests/Anjal.Api.Tests/Anjal.Api.Tests.csproj" />
     <Project Path="tests/Anjal.Auth.Tests/Anjal.Auth.Tests.csproj" />
     <Project Path="tests/Anjal.Dkim.Tests/Anjal.Dkim.Tests.csproj" />
+    <Project Path="tests/Anjal.Dns.Tests/Anjal.Dns.Tests.csproj" />
     <Project Path="tests/Anjal.Mailbox.Tests/Anjal.Mailbox.Tests.csproj" />
     <Project Path="tests/Anjal.Mime.Tests/Anjal.Mime.Tests.csproj" />
     <Project Path="tests/Anjal.Routing.Tests/Anjal.Routing.Tests.csproj" />

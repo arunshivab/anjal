@@ -3,7 +3,10 @@
 # after unpacking a new release tarball. Does NOT start the services -
 # DEPLOY.md walks through configuration and first start.
 #
-#   sudo ./install.sh /path/to/anjal-release   # directory with server/, webmail/, bin/
+#   sudo bash ./install.sh /path/to/anjal-release   # directory with server/, webmail/, bin/
+#
+# Run it through bash: a release built on Windows arrives without executable
+# bits (measured on the production VM, 26 Sep 2026), this script included.
 set -euo pipefail
 
 RELEASE=${1:?usage: install.sh <release-dir>}
@@ -19,7 +22,7 @@ fi
 install -d -o root  -g root  -m 755 /opt/anjal /opt/anjal/bin
 install -d -o root  -g anjal -m 750 /etc/anjal
 install -d -o anjal -g anjal -m 750 /var/lib/anjal
-install -d -o anjal -g anjal -m 700 /var/lib/anjal/acme /var/lib/anjal/backup
+install -d -o anjal -g anjal -m 700 /var/lib/anjal/acme /var/lib/anjal/backup /var/lib/anjal/webmail-keys
 install -d -o anjal -g anjal -m 700 /var/mail/anjal
 
 # ---- binaries (self-contained publish output) ----

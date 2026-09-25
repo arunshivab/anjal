@@ -19,3 +19,18 @@ jobs:
 
       - name: Verify formatting
         run: dotnet format --verify-no-changes --verbosity diagnostic
+
+      # DEF-051: tests/Anjal.Dns.Tests sat outside Anjal.slnx from May to
+      # September 2026, so neither CI nor a local "dotnet test" ever built or
+      # ran it, and it stopped compiling unnoticed. A project that exists on
+      # disk but not in the solution now fails this check.
+      - name: Every project is in the solution
+        run: |
+          missing=0
+          for p in $(git ls-files '*.csproj'); do
+            if ! grep -qF "Path=\"$p\"" Anjal.slnx; then
+              echo "::error::$p is not in Anjal.slnx - CI will never build or test it"
+              missing=1
+            fi
+          done
+          exit $missing

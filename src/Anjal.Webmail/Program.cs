@@ -8,6 +8,7 @@ using Anjal.Webmail.Services;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Anjal.Webmail;
@@ -216,6 +217,7 @@ public static class Program
         builder.Services.AddCascadingAuthenticationState();
         builder.Services.AddRazorComponents();
         builder.Services.AddAntiforgery();
+        ConfigureDataProtection(builder.Services, Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_KEYS_DIR"));
         builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(forms =>
         {
             forms.MultipartBodyLengthLimit = MaxRequestBytes;
@@ -240,7 +242,7 @@ public static class Program
             catch (Exception ex)
             {
                 string reference = Guid.NewGuid().ToString("N").Substring(0, 12);
-                Console.WriteLine($"[{DateTimeOffset.Now:HH:mm:ss}] 500 [{reference}] {http.Request.Method} {http.Request.Path}: {ex.GetType().Name}: {ex.Message}");
+                Console.WriteLine($"[{DateTimeOffset.UtcNow:HH:mm:ss}] 500 [{reference}] {http.Request.Method} {http.Request.Path}: {ex.GetType().Name}: {ex.Message}");
                 if (!http.Response.HasStarted)
                 {
                     http.Response.Clear();
@@ -1030,6 +1032,26 @@ public static class Program
         "<p class=\"errref\">If it keeps happening, quote this reference: <b>" + System.Net.WebUtility.HtmlEncode(reference) + "</b></p>" +
         "<p><a class=\"btn btn-p\" href=\"/folder/INBOX\">Try again</a></p>" +
         "</main></body></html>";
+
+    /// <summary>
+    /// DEF-050: store the keys that sign the session cookie and the antiforgery
+    /// tokens in an explicit folder. Without this, ASP.NET chose one silently
+    /// from the service user's home directory, and no document said the keys
+    /// existed. The keys stay unencrypted in that folder, which is private to
+    /// the service user on an encrypted disk: encrypting them would need a
+    /// secret in webmail.env, which deliberately holds none.
+    /// </summary>
+    /// <param name="services">The application's service collection.</param>
+    /// <param name="keysDirectory">Folder for the key ring (<c>ANJAL_WEBMAIL_KEYS_DIR</c>), or null or empty to keep ASP.NET's default.</param>
+    public static void ConfigureDataProtection(IServiceCollection services, string? keysDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        IDataProtectionBuilder dataProtection = services.AddDataProtection().SetApplicationName("anjal-webmail");
+        if (!string.IsNullOrWhiteSpace(keysDirectory))
+        {
+            dataProtection.PersistKeysToFileSystem(new System.IO.DirectoryInfo(keysDirectory));
+        }
+    }
 
     internal static void ApplySecurityHeaders(IHeaderDictionary headers)
     {

@@ -43,10 +43,10 @@ public class DnsMessageTests
 
         Assert.NotNull(msg.Answers[0].MxRecord);
         Assert.Equal(10, msg.Answers[0].MxRecord!.Priority);
-        Assert.Equal("mx1.example.com", msg.Answers[0].MxRecord.Exchange);
+        Assert.Equal("mx1.example.com", msg.Answers[0].MxRecord!.Exchange);
 
         Assert.Equal(20, msg.Answers[1].MxRecord!.Priority);
-        Assert.Equal("mx2.example.com", msg.Answers[1].MxRecord.Exchange);
+        Assert.Equal("mx2.example.com", msg.Answers[1].MxRecord!.Exchange);
     }
 
     [Fact]
