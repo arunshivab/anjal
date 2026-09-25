@@ -1,0 +1,48 @@
+name: codeql
+
+# GitHub's own analysis engine. Unlike the per-file .NET analysers already
+# enforced at build time, CodeQL follows values across methods and projects,
+# which is where injection, unsafe deserialisation and inefficient regular
+# expressions tend to hide.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 4 * * 1"   # Mondays: new queries arrive without our code changing
+
+jobs:
+  analyse:
+    name: analyse C#
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write      # to publish findings to the Security tab
+      contents: read
+      actions: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Initialise CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: csharp
+          config-file: ./.github/codeql-config.yml
+          # security-extended adds the lower-severity security queries, which
+          # include the inefficient-regular-expression checks. That class of
+          # bug is not theoretical here: DEF-044 was one.
+          queries: security-extended
+
+      - name: Build
+        run: dotnet build -c Release --no-incremental
+
+      - name: Analyse
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:csharp"
