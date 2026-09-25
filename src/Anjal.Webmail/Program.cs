@@ -278,10 +278,10 @@ public static class Program
                     // The Host header is whatever the client sent; redirecting
                     // to it would make this an open redirect. Only a name this
                     // server answers to is used, otherwise the configured one.
-                    string requested = http.Request.Host.Host;
-                    string host = IsOwnHost(requested, hostName, tls!.Acme) ? requested : hostName;
-                    string portPart = tls!.HttpsPort == 443 ? string.Empty : ":" + tls.HttpsPort.ToString(CultureInfo.InvariantCulture);
-                    http.Response.Redirect("https://" + host + portPart + http.Request.PathBase + http.Request.Path + http.Request.QueryString, permanent: true);
+                    http.Response.Redirect(
+                        BuildHttpsRedirect(http.Request.Host.Host, hostName, tls!.Acme, tls.HttpsPort,
+                            http.Request.PathBase.Value, http.Request.Path.Value, http.Request.QueryString.Value),
+                        permanent: true);
                     return;
                 }
                 if (http.Request.IsHttps)
@@ -947,6 +947,37 @@ public static class Program
     /// <param name="requested">The Host header value.</param>
     /// <param name="hostName">The configured host name.</param>
     /// <param name="acme">ACME settings, whose domains are also this server's names.</param>
+    /// <summary>
+    /// Where a plain HTTP request should be sent on HTTPS. The scheme, host
+    /// and port are decided here and never taken from the request: the Host
+    /// header is used only if this server answers to that name, otherwise the
+    /// configured one. The path and query are appended afterwards, so
+    /// whatever they contain they cannot change the destination - the address
+    /// always begins "https://&lt;our host&gt;/".
+    /// </summary>
+    /// <param name="requestedHost">The Host header, which the client controls.</param>
+    /// <param name="hostName">This server's configured name.</param>
+    /// <param name="acme">ACME settings, whose names also belong to this server.</param>
+    /// <param name="httpsPort">The HTTPS port.</param>
+    /// <param name="pathBase">The request path base.</param>
+    /// <param name="path">The request path.</param>
+    /// <param name="query">The query string, including its leading '?'.</param>
+    public static string BuildHttpsRedirect(string? requestedHost, string hostName, AcmeEnvironment? acme, int httpsPort, string? pathBase, string? path, string? query)
+    {
+        string host = IsOwnHost(requestedHost ?? string.Empty, hostName, acme) ? requestedHost! : hostName;
+        string portPart = httpsPort == 443 ? string.Empty : ":" + httpsPort.ToString(CultureInfo.InvariantCulture);
+        string tail = (pathBase ?? string.Empty) + (path ?? string.Empty);
+        if (!tail.StartsWith('/'))
+        {
+            tail = "/" + tail;      // a path is always rooted: "//evil.example" must not read as a host
+        }
+        while (tail.StartsWith("//", StringComparison.Ordinal))
+        {
+            tail = tail.Substring(1);
+        }
+        return "https://" + host + portPart + tail + (query ?? string.Empty);
+    }
+
     public static bool IsOwnHost(string requested, string hostName, AcmeEnvironment? acme)
     {
         ArgumentNullException.ThrowIfNull(hostName);

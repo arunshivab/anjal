@@ -318,3 +318,34 @@ public class SanitizerHardeningTests
         Assert.False(MailboxService.IsValidMessageId(new string('a', 251) + "@x"));
     }
 }
+
+/// <summary>
+/// The HTTPS redirect builds its own destination. CodeQL flags the query
+/// string flowing into it; these are the inputs that would matter if it were
+/// right.
+/// </summary>
+public class HttpsRedirectTests
+{
+    private const string Own = "mail.anjal.co.in";
+
+    [Theory]
+    [InlineData("evil.example", "/inbox", "")]                       // a forged Host header
+    [InlineData("mail.anjal.co.in.evil.example", "/inbox", "")]      // a lookalike
+    [InlineData(null, "/inbox", "")]
+    [InlineData("evil.example", "//evil.example", "")]               // a path that could read as a host
+    [InlineData("evil.example", "/x", "?next=//evil.example")]       // a hostile query
+    [InlineData("evil.example", "/x", "?u=https://evil.example")]
+    [InlineData("evil.example", "\\\\evil.example", "")]
+    public void TheDestinationIsAlwaysThisServer(string? host, string path, string query)
+    {
+        string url = Anjal.Webmail.Program.BuildHttpsRedirect(host, Own, null, 443, string.Empty, path, query);
+        Assert.StartsWith("https://" + Own + "/", url, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ANameThisServerAnswersTo_IsKept_AndThePathAndQuerySurvive()
+    {
+        string url = Anjal.Webmail.Program.BuildHttpsRedirect(Own, Own, null, 8443, string.Empty, "/folder/INBOX", "?page=2");
+        Assert.Equal("https://mail.anjal.co.in:8443/folder/INBOX?page=2", url);
+    }
+}

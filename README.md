@@ -10,7 +10,19 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.18.1** - the admin token must have some variety, not merely length: a
+**v0.18.2** - **CodeQL and Dependabot**. GitHub's analysis engine now runs on
+every change with the security-extended queries, which include the
+inefficient-regular-expression checks that DEF-044 belonged to; test code is
+excluded, since the fakes there behave carelessly on purpose. Dependabot
+proposes dependency updates weekly, with major versions left as a deliberate
+decision. Running CodeQL over v0.18.1 produced one finding in product code -
+the query string flowing into the HTTPS redirect. It was a false positive,
+the host having been validated since v0.16.0, but the URL construction is now
+a named function with eight tests covering forged Host headers, lookalike
+domains, "//host" paths and hostile query strings, and it collapses a leading
+"//" so a path can never be read as a host.
+
+Previously: **v0.18.1** - the admin token must have some variety, not merely length: a
 value of forty identical characters passed the v0.18.0 checks. Our own QA
 helper produced exactly that on Windows PowerShell 5.1, where the .NET Core
 API it used left its buffer zeroed and the failure was easy to miss.

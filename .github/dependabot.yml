@@ -1,0 +1,35 @@
+# Dependency updates as pull requests. The security workflow reports a
+# vulnerable package; this proposes the upgrade, so a fix does not wait for
+# somebody to notice the report.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      # One pull request for the test tooling rather than five: these move
+      # together and are not shipped to anyone.
+      test-tooling:
+        patterns:
+          - "xunit*"
+          - "Microsoft.NET.Test.Sdk"
+          - "coverlet*"
+    ignore:
+      # Major versions are a deliberate decision, not a drive-by upgrade:
+      # Npgsql 9 to 10 changes behaviour and needs the PostgreSQL suite re-run.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
