@@ -653,7 +653,11 @@ public sealed class ApiServer : System.IDisposable
         {
             string rest = path.Substring(mailboxesPrefix.Length);
             int slash = rest.IndexOf('/', System.StringComparison.Ordinal);
-            string address = slash < 0 ? rest : rest.Substring(0, slash);
+            // DEF-047: Url.AbsolutePath keeps reserved characters encoded, so an
+            // address sent as arun%40anjal.co.in arrives with %40 instead of @.
+            // Decode the segment only after splitting on '/', so an encoded slash
+            // stays inside the address and cannot reach another route.
+            string address = System.Uri.UnescapeDataString(slash < 0 ? rest : rest.Substring(0, slash));
             string sub = slash < 0 ? string.Empty : rest.Substring(slash + 1).TrimEnd('/');
             if (address.Length > 0)
             {
