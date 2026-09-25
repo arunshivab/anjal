@@ -29,11 +29,18 @@ Placeholders used throughout - substitute your real values everywhere:
    80 GB disk is comfortable; mail is I/O-light. Pick a plan with a
    **static public IPv4** - reputation is tied to the IP, and a changing
    IP means re-doing SPF and PTR.
-2. **Port 25 outbound.** Most cloud providers block it by default to
-   stop spam. Before ordering, confirm with E2E support (ticket) that
-   outbound TCP 25 is open on the plan, or can be opened on request. If
-   it cannot be opened at all, outbound mail must go through a relay
-   (`ANJAL_OUTBOUND_MODE=relay`) - decide that before you start.
+2. **Port 25 outbound - test it, do not ask about it.** Most cloud
+   providers block it by default to stop spam. E2E documents the command
+   to allow it through firewalld, which suggests they expect customers to
+   send mail, but their documentation says nothing about their own
+   network. Settle it empirically: take the smallest VM, open the two
+   firewalls (section 1a and 1b), and run
+   `nc -vz gmail-smtp-in.l.google.com 25`. That single command answers
+   what no document does, for a few hundred rupees, in under an hour. If
+   it fails, raise a ticket quoting the output. If it cannot be opened at
+   all, outbound mail must go through a relay
+   (`ANJAL_OUTBOUND_MODE=relay`) - an owner's decision, since a relay
+   reintroduces the dependency this project exists to remove.
 3. **PTR (reverse DNS).** Ask E2E how PTR records are set for the IP
    (panel or ticket). You will set it to `mail.anjal.co.in` in section 5.
 4. **IP reputation.** Once you have the IP, check it is not on common
@@ -103,8 +110,12 @@ vm$ sudo firewall-cmd --add-port=587/tcp --permanent
 vm$ sudo firewall-cmd --add-port=465/tcp --permanent
 ```
 
-Outbound port 25 explicitly, per E2E's instructions (they confirmed it can
-be opened on request - do that before this step):
+Outbound port 25 explicitly. This command is E2E's own, from their
+documentation "Open/Close ports on Firewalld - Linux". Note what that
+documentation does and does not tell you: it covers the two firewalls YOU
+control - the Security Group and firewalld - and says nothing about whether
+E2E's network itself permits outbound SMTP. That is settled by the `nc` test
+below, not by any document:
 
 ```
 vm$ sudo firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 0 -p tcp -m tcp --dport=25 -j ACCEPT
@@ -123,11 +134,21 @@ vm$ nc -vz 1.1.1.1 53                       # DNS reachable
 vm$ timedatectl                             # UTC, "System clock synchronized: yes"
 ```
 
-If `nc` to port 25 hangs or is refused, outbound 25 is still blocked -
-either the Security Group or E2E's network. Resolve that with E2E before
-going further; everything downstream assumes it works. If it cannot be
-opened at all, set `ANJAL_OUTBOUND_MODE=relay` in `server.env` and use a
-relay: receiving still works normally.
+**The `nc` test is the moment of truth for this whole project.** If it
+connects, outbound 25 works and everything downstream is on solid ground.
+If it hangs or is refused, check the Security Group's outbound rule first,
+then raise a ticket with E2E quoting the exact command and its output - a
+concrete test result gets a far better answer than a policy question.
+
+Do this test on the smallest, cheapest VM before building anything on it.
+A few hundred rupees answers a question no document has answered, and the
+machine can be destroyed afterwards.
+
+If outbound 25 cannot be opened at all, the options are: another provider,
+or `ANJAL_OUTBOUND_MODE=relay` in `server.env`. Receiving mail works
+normally either way - but a relay reintroduces exactly the external
+dependency this project exists to remove, so it is a decision for the
+owner, not a workaround to adopt quietly.
 
 From the laptop, after the Security Group is attached:
 
