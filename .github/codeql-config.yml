@@ -1,13 +1,11 @@
 name: Anjal CodeQL configuration
 
-# Product code and the example programs are scanned. Test code is not: the
-# fakes in tests/Anjal.Acme.Tests deliberately behave like a careless server
-# so the real client can be tested against one, and seven alerts about that
-# would bury the one alert that matters. Nothing under tests/ is shipped or
-# reachable from a running Anjal.
-paths-ignore:
-  - tests/**
-
-# security-extended is selected in the workflow: it adds the lower-severity
-# security queries, including inefficient regular expressions. DEF-044 was
-# exactly that, so the extra queries earn their run time here.
+# Deliberately minimal. Two things are worth knowing about C# here:
+#
+#  * paths-ignore does NOT exclude code in a compiled language. CodeQL
+#    analyses whatever the build compiles, so test code is excluded by the
+#    workflow building only src/ and examples/, never tests/.
+#
+#  * The query suite is chosen in the workflow: security-extended, which adds
+#    the lower-severity security queries including inefficient regular
+#    expressions. DEF-044 was one of those, so they earn their run time.

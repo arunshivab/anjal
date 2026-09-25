@@ -10,7 +10,16 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.18.2** - **CodeQL and Dependabot**. GitHub's analysis engine now runs on
+**v0.18.3** - CodeQL now analyses only the code that ships. A paths-ignore
+filter does not exclude anything in a compiled language - CodeQL sees
+whatever the build compiles - so seven alerts about a deliberately careless
+ACME test fake appeared on the first run. The workflow builds src and
+examples only. Also: the line endings of eight test project files are
+normalised; they were stored with CRLF by an automated dependency update,
+against this repository's convention, which left them showing as modified in
+every clone.
+
+Previously: **v0.18.2** - **CodeQL and Dependabot**. GitHub's analysis engine now runs on
 every change with the security-extended queries, which include the
 inefficient-regular-expression checks that DEF-044 belonged to; test code is
 excluded, since the fakes there behave carelessly on purpose. Dependabot
