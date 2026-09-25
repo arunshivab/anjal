@@ -142,6 +142,28 @@ jobs:
           fi
           sudo journalctl -u anjal-webmail --no-pager | grep "ACME account:"
 
+      - name: A bodyless admin POST is refused and changes nothing
+        run: |
+          set -euo pipefail
+          # DEF-053: curl -X POST without -d sends no Content-Length. The
+          # listener answers 411 - and up to rc.2 the request was carried out
+          # anyway. The webmail is stopped so that a wrongly written renewal
+          # marker cannot be consumed before it is looked for.
+          sudo systemctl stop anjal-webmail
+          token=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+          echo "::add-mask::$token"
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $token" http://127.0.0.1:8025/api/acme/renew)
+          echo "without a body: $code"
+          test "$code" = 411
+          sleep 2
+          if sudo test -e /var/lib/anjal/acme/renew.request; then
+            echo "::error::a request answered 411 still requested a renewal"; exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST -d '' -H "Authorization: Bearer $token" http://127.0.0.1:8025/api/acme/renew)
+          echo "with -d '': $code"
+          test "$code" = 202
+          sudo test -e /var/lib/anjal/acme/renew.request
+
       - name: Service logs on failure
         if: failure()
         run: sudo journalctl -u anjal-server -u anjal-webmail -u postgresql --no-pager | tail -200

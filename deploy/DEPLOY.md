@@ -26,7 +26,7 @@ Placeholders used throughout - substitute your real values everywhere:
 | `2001:db8::10` | the VM's public IPv6, if E2E assigns one (the first VM had none) |
 | `mail.anjal.co.in` | the mail host name (SMTP banner, webmail, certificate) |
 | `anjal.co.in` | the mail domain (addresses are `user@anjal.co.in`) |
-| `API_TOKEN` | the value of `ANJAL_API_TOKEN` in `/etc/anjal/server.env` |
+| `$TOKEN` | the admin API token, read once per session with `TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env \| cut -d= -f2-)` and cleared with `unset TOKEN`. Never type or paste it: that puts it on screen and in shell history |
 | `1.0.0-rc.2` | the release being deployed; always a tag, never an untagged build |
 
 ---
@@ -598,7 +598,7 @@ api$ curl -s http://127.0.0.1:8025/healthz | jq .
 `store`, `maildir`, `tls` all `ok`. And:
 
 ```
-api$ curl -s -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/api/acme | jq .
+api$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/acme | jq .
 ```
 
 shows `hasCertificate: true`, `daysRemaining` around 89, and
@@ -614,39 +614,73 @@ redirect to HTTPS.
 ## 7. ACME rehearsal, then production
 
 The point of staging is to prove the whole issue-renew-reload path with
-no rate-limit risk. Force a renewal and watch it complete:
+no rate-limit risk. Read the admin token into the shell once (see the
+conventions table), note the current certificate, force a renewal and wait
+for it:
 
 ```
-api$ curl -s -X POST -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/api/acme/renew
-vm$ sudo journalctl -u anjal-webmail -f     # expect "renew-now request found" then "certificate issued"
-api$ curl -s -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/api/acme | jq .issuedAt
+vm$ start=$(date '+%Y-%m-%d %H:%M:%S')
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+api$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/acme | jq '{issuedAt, notBefore, acmeDirectoryUrl}'
+api$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/acme/renew     # 202 {"requested":true,...}
+vm$ for i in $(seq 1 24); do sleep 5; sudo journalctl -u anjal-webmail --since "$start" --no-pager | grep -q "certificate issued" && break; done
+vm$ sudo journalctl -u anjal-webmail --since "$start" --no-pager | grep ACME     # "renew-now request found" ... "certificate issued"
+api$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/acme | jq '{issuedAt, notBefore, acmeDirectoryUrl}'
 ```
 
-`issuedAt` must have changed. Then confirm both processes picked up the
-new certificate without a restart:
+`issuedAt` must have changed. **Always send `-d ''` with a bodyless
+POST**: without it curl sends no `Content-Length`, and the answer is `411
+Length Required`. Up to v1.0.0-rc.2 the request was then carried out anyway
+(DEF-053) - an operator who retried would request a certificate each time
+and exhaust Let's Encrypt's limit of five duplicates a week. Since rc.3 a
+411 changes nothing.
+
+Then confirm both processes picked up the new certificate without a
+restart. The mail server checks for a new certificate at most every 30
+seconds, and only when a connection asks for one, so wait first:
 
 ```
-vm$ openssl s_client -connect 127.0.0.1:587 -starttls smtp -servername mail.anjal.co.in </dev/null 2>/dev/null | openssl x509 -noout -dates
-vm$ openssl s_client -connect 127.0.0.1:443 -servername mail.anjal.co.in </dev/null 2>/dev/null | openssl x509 -noout -dates
+vm$ sleep 31
+vm$ openssl s_client -connect 127.0.0.1:587 -starttls smtp -servername mail.anjal.co.in </dev/null 2>/dev/null | openssl x509 -noout -startdate -issuer
+vm$ openssl s_client -connect 127.0.0.1:443 -servername mail.anjal.co.in </dev/null 2>/dev/null | openssl x509 -noout -startdate -issuer
+vm$ sudo journalctl -u anjal-server --since "$start" --no-pager | grep "TLS:"      # "certificate reloaded"
 ```
 
-Both show the new `notBefore`. **Now switch to production:**
+Both show the same new `notBefore`. `/healthz` reads the certificate file,
+so its `tls: ok` alone does not prove the SMTP listeners have it - these
+connections do.
+
+**Now switch to production.** The staging account and certificate are not
+valid in production, so the ACME folder is emptied first. Let root expand
+the path: `/var/lib/anjal` is private to the `anjal` user, so in `sudo rm
+-rf /var/lib/anjal/acme/*` your own shell cannot expand the `*`, and the
+command silently removes nothing (DEF-052).
 
 ```
+vm$ start=$(date '+%Y-%m-%d %H:%M:%S')
 vm$ sudo systemctl stop anjal-webmail anjal-server
-vm$ sudo rm -rf /var/lib/anjal/acme/*         # staging account and certificate are not valid in production
+vm$ sudo find /var/lib/anjal/acme -mindepth 1 -delete
+vm$ sudo ls -la /var/lib/anjal/acme                                    # only . and ..
 vm$ sudo sed -i 's/^ANJAL_ACME_STAGING=true/# ANJAL_ACME_STAGING=true/' /etc/anjal/webmail.env
 vm$ sudo systemctl start anjal-server anjal-webmail
-vm$ sudo journalctl -u anjal-webmail -f       # wait for "certificate issued" from acme-v02.api.letsencrypt.org
+vm$ for i in $(seq 1 24); do sleep 5; sudo journalctl -u anjal-webmail --since "$start" --no-pager | grep -q "certificate issued" && break; done
+vm$ sudo journalctl -u anjal-webmail --since "$start" --no-pager | grep ACME     # acme-v02, no "staging"
+vm$ echo | openssl s_client -connect 127.0.0.1:443 -servername mail.anjal.co.in 2>/dev/null | grep -E "^issuer=|Verify return code"
 ```
 
-Force **one** more renewal exactly as above to prove production
+The issuer is Let's Encrypt without "(STAGING)" and the verify code is
+`0 (ok)`. Measured on the first server: account, order, validation and
+issue in eight seconds.
+
+Force **one** more renewal exactly as in the rehearsal to prove production
 renewal works, then leave it alone. Let's Encrypt allows 5 duplicate
-certificates per week - do not loop this.
+certificates per week - do not loop this. The first server used two:
+the first production certificate and this one.
 
 **Check:** the browser shows a valid padlock on `https://mail.anjal.co.in/`;
 `/api/acme` shows `acmeDirectoryUrl` without `staging`;
 https://www.ssllabs.com/ssltest/analyze.html?d=mail.anjal.co.in grades A.
+Then `unset TOKEN`.
 
 Renewal is now automatic: the service checks hourly and renews at 30
 days remaining. Mark the calendar for **60 days from today** and confirm
@@ -658,10 +692,10 @@ Until that has happened once, keep the tenant count at three or fewer.
 ## 8. First tenant, domain, DKIM and mailbox
 
 ```
-api$ H='-H "Authorization: Bearer API_TOKEN" -H "Content-Type: application/json"'
-api$ curl -s -X POST -H "Authorization: Bearer API_TOKEN" -H "Content-Type: application/json" \
+api$ H='-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json"'
+api$ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
        http://127.0.0.1:8025/api/tenants -d '{"slug":"imagiqa","displayName":"imagiQa"}' | jq .
-api$ curl -s -X POST -H "Authorization: Bearer API_TOKEN" -H "Content-Type: application/json" \
+api$ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
        http://127.0.0.1:8025/api/tenant-domains -d '{"tenantSlug":"imagiqa","domain":"anjal.co.in"}' | jq .
 ```
 
@@ -672,7 +706,7 @@ publish the public key.
 vm$ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/dkim.pem
 vm$ openssl pkey -in /tmp/dkim.pem -pubout -outform DER | base64 -w0 > /tmp/dkim.pub.b64
 vm$ jq -n --arg pem "$(cat /tmp/dkim.pem)" '{domain:"anjal.co.in",selector:"default",privateKeyPem:$pem}' > /tmp/dkim.json
-api$ curl -s -X POST -H "Authorization: Bearer API_TOKEN" -H "Content-Type: application/json" \
+api$ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
        http://127.0.0.1:8025/api/dkim-keys -d @/tmp/dkim.json | jq .
 vm$ echo "v=DKIM1; k=rsa; p=$(cat /tmp/dkim.pub.b64)"      # the DNS TXT value
 vm$ shred -u /tmp/dkim.pem /tmp/dkim.json
@@ -682,7 +716,7 @@ The mailbox (password is hashed server-side; it is the webmail and
 submission password):
 
 ```
-api$ curl -s -X POST -H "Authorization: Bearer API_TOKEN" -H "Content-Type: application/json" \
+api$ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
        http://127.0.0.1:8025/api/mailboxes \
        -d '{"tenantSlug":"imagiqa","address":"arun@anjal.co.in","password":"CHOOSE-A-STRONG-PASSWORD","displayName":"Arun Shiva B"}' | jq .
 ```
@@ -830,14 +864,20 @@ The admin token can create mailboxes, read every tenant and hold DKIM keys,
 so treat it like a password: keep it out of shared documents, and change it
 if anyone who had it no longer needs it. Rotation needs no downtime.
 
-1. Generate the new token: `openssl rand -base64 32`.
-2. In `/etc/anjal/server.env`, move the current value to
-   `ANJAL_API_TOKEN_PREVIOUS` and put the new one in `ANJAL_API_TOKEN`.
+1. Generate the new token on the VM and write it on **new** custody forms,
+   version increased by one (the form's "When a secret changes" section):
+   `NEW=$(openssl rand -hex 24); echo "$NEW"`.
+2. Move the current value to `ANJAL_API_TOKEN_PREVIOUS` and put the new one
+   in `ANJAL_API_TOKEN`, from the shell variables - never retyped:
+   `OLD=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)`, then
+   `sudo sed -i "s|^ANJAL_API_TOKEN_PREVIOUS=.*|ANJAL_API_TOKEN_PREVIOUS=$OLD|; s|^ANJAL_API_TOKEN=.*|ANJAL_API_TOKEN=$NEW|" /etc/anjal/server.env; clear`.
+   Prove the new paper copies with `prove ANJAL_API_TOKEN` (section 4).
 3. `sudo systemctl restart anjal-server`. Both tokens now work, and the log
    says so at start-up.
 4. Update every caller (SIGMA, Lipi, your own scripts) to the new token.
 5. Confirm nothing still uses the old one, then clear
-   `ANJAL_API_TOKEN_PREVIOUS` and restart again.
+   `ANJAL_API_TOKEN_PREVIOUS` and restart again. Replace all three paper
+   copies and destroy the old sheets; `unset OLD NEW`.
 
 Check each step with a call that needs the token:
 
@@ -903,15 +943,15 @@ setting to the templates, add it by hand; the release note says which.
 |---|---|
 | Logs | `journalctl -u anjal-server -f`, `journalctl -u anjal-webmail -f` |
 | Health | `curl -s http://127.0.0.1:8025/healthz \| jq .` |
-| Metrics | `curl -s -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/metrics` |
-| Certificate status | `curl -s -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/api/acme \| jq .` |
-| Force renewal | `curl -s -X POST -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/api/acme/renew` |
+| Metrics | `curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/metrics` |
+| Certificate status | `curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/acme \| jq .` |
+| Force renewal | `curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/acme/renew` (the `-d ''` matters - section 7) |
 | Upgrade | section 13d |
 | Roll back | `sudo mv /opt/anjal/server.old /opt/anjal/server` (same for webmail) → restart |
 | Add a mailbox | `POST /api/mailboxes` (section 8) |
 | Block a sender for a tenant | `POST /api/tenants/imagiqa/sender-rules -d '{"pattern":"@spammer.example","action":"block"}'` |
 | Spam threshold | `POST /api/tenants -d '{"slug":"imagiqa","displayName":"imagiQa","spamThreshold":5}'` |
-| Audit trail | `curl -s -H "Authorization: Bearer API_TOKEN" "http://127.0.0.1:8025/api/audit?limit=50" \| jq .` |
+| Audit trail | `curl -s -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/audit?limit=50" \| jq .` |
 | Webhook queue | `/metrics` → `anjal_webhook_pending`; `anjal_webhook_failed_total` should stay at 0 |
 
 Things to watch in the first weeks:
@@ -941,5 +981,7 @@ Things to watch in the first weeks:
 | `452 4.2.2 Mailbox full` in logs | webmail sidebar usage | quota reached; delete mail or raise `quotaBytes` via `POST /api/mailboxes` |
 | Server stops at once: `NetworkInformationException (97): Address family not supported by protocol` | `journalctl -u anjal-server` | release older than rc.2 (DEF-048). Upgrade; the rc.1 workaround was a drop-in adding `RestrictAddressFamilies=AF_NETLINK` |
 | ACME: `newAccount failed: 400 ... Invalid Content-Type header on POST` | `journalctl -u anjal-webmail \| grep ACME` | release older than rc.2 (DEF-049); no configuration works around it - upgrade |
+| API answers `411 Length Required` | the `curl` command | a POST without a body needs `-d ''`; since rc.3 nothing was changed - run it again with `-d ''` (up to rc.2 the change was made anyway, DEF-053) |
+| Production still uses the staging account after the switch | `sudo ls -la /var/lib/anjal/acme` | the folder was not emptied; `sudo rm -rf .../acme/*` expands nothing as your own user - use `sudo find /var/lib/anjal/acme -mindepth 1 -delete` (DEF-052) |
 | `scp` logs in, then only `Connection closed` | `sudo sshd -T \| grep subsystem`, `journalctl -u ssh` | SFTP helper path wrong on E2E images; section 1b `Subsystem` line |
 | Backup fails | `journalctl -u anjal-backup` | rclone config unreadable by `anjal` (mode 640, group anjal), wrong B2 key, or `pg_dump` cannot connect (`ANJAL_POSTGRES` in `server.env`) |
