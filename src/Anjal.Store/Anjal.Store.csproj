@@ -13,7 +13,7 @@
       relative to the rule's purpose, which is owning the mail protocols
       themselves (MIME, SMTP, DNS). The protocol layers stay zero-NuGet.
     -->
-    <PackageReference Include="Npgsql" Version="9.0.3" />
+    <PackageReference Include="Npgsql" Version="9.0.5" />
   </ItemGroup>
 
 </Project>
