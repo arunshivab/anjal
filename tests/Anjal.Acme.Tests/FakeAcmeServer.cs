@@ -148,7 +148,11 @@ internal sealed class FakeAcmeServer : IDisposable
         {
             body = await sr.ReadToEndAsync().ConfigureAwait(false);
         }
-        if (ctx.Request.ContentType?.StartsWith("application/jose+json", StringComparison.OrdinalIgnoreCase) != true)
+        // DEF-049: Let's Encrypt (Boulder) compares the header exactly - a
+        // "; charset=utf-8" parameter is refused with 400 malformed. The fake
+        // used to accept any value that merely started with the media type,
+        // which is how the client's wrong header passed every test.
+        if (!string.Equals(ctx.Request.ContentType, "application/jose+json", StringComparison.Ordinal))
         {
             Problem(ctx, 415, "urn:ietf:params:acme:error:malformed", "Content-Type must be application/jose+json");
             return;

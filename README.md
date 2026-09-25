@@ -10,7 +10,28 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v1.0.0-rc.1** - the first release candidate for 1.0, and the build that
+**v1.0.0-rc.2** - fixes everything the first real start found on the
+production server (phase B), and closes the gaps that let it through.
+DEF-048: the mail server aborted at startup because finding the system DNS
+server enumerated network interfaces over netlink, which the systemd unit's
+sandbox forbids; the server list is now read from `/etc/resolv.conf` and the
+lookup can no longer throw. DEF-049: Let's Encrypt refused every request
+because the ACME client sent `application/jose+json; charset=utf-8`; the
+header is now exact, and the test fake compares it as strictly as Let's
+Encrypt does. DEF-050: the keys that sign webmail sessions are kept in an
+explicit folder (`ANJAL_WEBMAIL_KEYS_DIR`) instead of wherever ASP.NET
+chose. DEF-051: the DNS test project had been outside the solution since
+May, so it never ran and had stopped compiling; it runs again, and CI now
+fails if any project is left out. A new `deploy-smoke` workflow installs
+the Linux release with `install.sh` and starts both services under the real
+systemd units on every change, including a real Let's Encrypt staging
+account - the conditions under which DEF-048 and DEF-049 appeared. Also:
+startup messages no longer ask for `ANJAL_TLS_CERT_PATH` while an ACME
+certificate is awaited; the runbook adds the SFTP `Subsystem` fix for E2E
+images, fail2ban's aggressive mode, `bash install.sh`, and an upgrade
+section.
+
+Previously: **v1.0.0-rc.1** - the first release candidate for 1.0, and the build that
 goes onto the production server for phase B testing. 1.0.0 itself is tagged
 only after phase B and a restore drill pass on this code. Fixes DEF-047: a
 mailbox address sent percent-encoded in the URL (`arun%40anjal.co.in`, as

@@ -1,0 +1,147 @@
+name: deploy-smoke
+
+# Why this exists (DEF-048, DEF-049 - found on the production server,
+# 26 September 2026): 874 tests and two manual QA phases passed, yet the
+# mail server aborted at its first start and the webmail could not obtain a
+# certificate. Nothing had ever run Anjal the way production runs it: the
+# Linux build, installed by install.sh, started by the real systemd units
+# with their sandboxing, talking to the real Let's Encrypt. This job does
+# exactly that on every change.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  deploy-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build the release exactly as publish.ps1 lays it out
+        run: |
+          set -euo pipefail
+          rel="$RUNNER_TEMP/anjal-release"
+          for app in Server Webmail; do
+            dotnet publish "src/Anjal.$app/Anjal.$app.csproj" -c Release -r linux-x64 --self-contained true \
+              -p:PublishSingleFile=false -p:DebugType=none -o "$rel/${app,,}"
+          done
+          mkdir -p "$rel/bin"
+          cp deploy/backup.sh deploy/restore.sh deploy/install.sh deploy/*.service deploy/*.timer deploy/*.example tools/sql/schema.sql "$rel/bin/"
+          sed -i 's/\r$//' "$rel"/bin/*.sh "$rel"/bin/*.service "$rel"/bin/*.timer "$rel"/bin/*.example
+          # A release built on Windows arrives without executable bits
+          # (measured on the production VM); install.sh must cope.
+          chmod -x "$rel/server/Anjal.Server" "$rel/webmail/Anjal.Webmail" "$rel/bin/install.sh"
+          echo "REL=$rel" >> "$GITHUB_ENV"
+
+      - name: Install with the real install.sh and the real units
+        run: |
+          set -euo pipefail
+          sudo bash "$REL/bin/install.sh" "$REL"
+          test -x /opt/anjal/server/Anjal.Server
+          test -x /opt/anjal/webmail/Anjal.Webmail
+          sudo test -d /var/lib/anjal/webmail-keys
+          # The units under test are the shipped ones, with no local override.
+          test ! -e /etc/systemd/system/anjal-server.service.d
+          test ! -e /etc/systemd/system/anjal-webmail.service.d
+          systemctl show anjal-server -p RestrictAddressFamilies
+
+      - name: PostgreSQL, role, database and the shipped schema
+        run: |
+          set -euo pipefail
+          if ! command -v pg_ctlcluster >/dev/null; then
+            sudo apt-get update -q && sudo apt-get install -y -q postgresql
+          fi
+          sudo systemctl start postgresql
+          pw=$(openssl rand -hex 24)
+          echo "::add-mask::$pw"
+          echo "PGPW=$pw" >> "$GITHUB_ENV"
+          (cd /tmp && sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE anjal LOGIN PASSWORD '$pw';" -c "CREATE DATABASE anjal OWNER anjal;")
+          PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -q -f "$REL/bin/schema.sql"
+          tables=$(PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'")
+          echo "tables: $tables"
+          test "$tables" -eq 20
+
+      - name: Fill the shipped env templates as DEPLOY.md section 4 does
+        run: |
+          set -euo pipefail
+          token=$(openssl rand -hex 24); kek=$(openssl rand -base64 32)
+          echo "::add-mask::$token"; echo "::add-mask::$kek"
+          sudo sed -i "s|Password=CHANGE-ME|Password=$PGPW|" /etc/anjal/server.env /etc/anjal/webmail.env
+          sudo sed -i "s|^ANJAL_API_TOKEN=.*|ANJAL_API_TOKEN=$token|; s|^ANJAL_KEK=.*|ANJAL_KEK=$kek|" /etc/anjal/server.env
+          # A name Let's Encrypt refuses to issue for: the account is still
+          # created (that is the step DEF-049 broke), then the order is refused.
+          sudo sed -i "s|^ANJAL_ACME_DOMAINS=.*|ANJAL_ACME_DOMAINS=anjal-ci.invalid|" /etc/anjal/server.env /etc/anjal/webmail.env
+          sudo sed -i 's|^# ANJAL_ACME_STAGING=true.*|ANJAL_ACME_STAGING=true|' /etc/anjal/webmail.env
+          test "$(sudo grep -c CHANGE-ME /etc/anjal/server.env /etc/anjal/webmail.env | awk -F: '{s+=$2} END {print s}')" -eq 0
+
+      - name: Start both services under their systemd units
+        run: |
+          set -euo pipefail
+          sudo systemctl start anjal-server anjal-webmail
+          # Long enough for a crash loop (RestartSec=5) to show, and for the
+          # ACME client to reach Let's Encrypt staging.
+          for i in $(seq 1 12); do
+            sleep 5
+            if sudo journalctl -u anjal-webmail --no-pager | grep -q "ACME account:"; then break; fi
+          done
+
+      - name: Both stay up, with no restarts and no unhandled exception
+        run: |
+          set -euo pipefail
+          sudo journalctl -u anjal-server -u anjal-webmail --no-pager > "$RUNNER_TEMP/services.log"
+          cat "$RUNNER_TEMP/services.log"
+          for s in anjal-server anjal-webmail; do
+            state=$(systemctl is-active "$s" || true)
+            restarts=$(systemctl show "$s" -p NRestarts --value)
+            echo "$s: $state, restarts=$restarts"
+            test "$state" = active
+            test "$restarts" -eq 0
+          done
+          if grep -q "Unhandled exception" "$RUNNER_TEMP/services.log"; then
+            echo "::error::a service logged an unhandled exception"; exit 1
+          fi
+          # DEF-048: the spam filter swallowed the same failure; it must not recur.
+          if grep -q "no system DNS resolver" "$RUNNER_TEMP/services.log"; then
+            echo "::error::the DNS resolver could not be created under the unit's sandbox"; exit 1
+          fi
+
+      - name: Health, and the network exposure of DEPLOY.md section 1c
+        run: |
+          set -euo pipefail
+          curl -fsS http://127.0.0.1:8025/healthz | tee "$RUNNER_TEMP/health.json"; echo
+          jq -e '.components[] | select(.name=="store") | .status=="ok"' "$RUNNER_TEMP/health.json"
+          jq -e '.components[] | select(.name=="maildir") | .status=="ok"' "$RUNNER_TEMP/health.json"
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/ || true)
+          echo "webmail http status: $code"
+          test "$code" != "000"
+          test "${code:0:1}" != "5"
+          sudo ss -tlnp | tee "$RUNNER_TEMP/listen.txt"
+          grep -qE '127\.0\.0\.1:8025\b' "$RUNNER_TEMP/listen.txt"
+          if grep -E '(0\.0\.0\.0|\*|\[::\]):8025\b' "$RUNNER_TEMP/listen.txt"; then
+            echo "::error::the admin API is reachable from outside"; exit 1
+          fi
+          for p in 25 587 465 80 443; do grep -qE "0\.0\.0\.0:$p\b" "$RUNNER_TEMP/listen.txt"; done
+
+      - name: The ACME client speaks to the real Let's Encrypt (staging)
+        run: |
+          set -euo pipefail
+          # DEF-049: the fake ACME server in the unit tests accepted a header
+          # that Let's Encrypt refuses. An account is created only if every
+          # request so far - nonce, JWS, Content-Type - was acceptable.
+          if sudo journalctl -u anjal-webmail --no-pager | grep -q "Invalid Content-Type"; then
+            echo "::error::Let's Encrypt refused the Content-Type header"; exit 1
+          fi
+          sudo journalctl -u anjal-webmail --no-pager | grep "ACME account:"
+
+      - name: Service logs on failure
+        if: failure()
+        run: sudo journalctl -u anjal-server -u anjal-webmail -u postgresql --no-pager | tail -200

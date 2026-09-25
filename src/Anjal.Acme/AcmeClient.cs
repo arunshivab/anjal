@@ -391,7 +391,12 @@ public sealed class AcmeClient : IDisposable
         {
             string n = await this.TakeNonceAsync(ct).ConfigureAwait(false);
             string jws = Jws.Sign(this.key, url, n, payload, useJwk ? null : this.AccountUrl);
-            using var content = new StringContent(jws, Encoding.UTF8, "application/jose+json");
+            // DEF-049: StringContent(text, encoding, "type") sends
+            // "application/jose+json; charset=utf-8", and Let's Encrypt refuses
+            // any parameter (RFC 8555 section 6.2 names the bare media type).
+            // Set the header as a MediaTypeHeaderValue so it is sent exactly.
+            using var content = new ByteArrayContent(Encoding.UTF8.GetBytes(jws));
+            content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/jose+json");
             using var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
             req.Headers.Accept.ParseAdd(accept);
             using HttpResponseMessage res = await this.http.SendAsync(req, ct).ConfigureAwait(false);

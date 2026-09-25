@@ -8,9 +8,10 @@ restore drill. Every step has a check; do not move on until the check
 passes. Expect two to three hours end to end, most of it waiting for DNS.
 
 Sections 0 to 5 were rewritten for v1.0.0-rc.1 from the first real
-provisioning (E2E Chennai, 25-26 September 2026). Where this runbook
-earlier described what the provider was expected to do, it now records
-what the provider was measured to do.
+provisioning (E2E Chennai, 25-26 September 2026), and sections 1 to 6 again
+for v1.0.0-rc.2 after the first real start found DEF-048 and DEF-049.
+Where this runbook earlier described what the provider was expected to do,
+it now records what the provider was measured to do.
 
 Conventions: commands prefixed `vm$` run on the VM over SSH as your own
 named admin account (`arun` in the examples; section 1b creates it) and
@@ -26,7 +27,7 @@ Placeholders used throughout - substitute your real values everywhere:
 | `mail.anjal.co.in` | the mail host name (SMTP banner, webmail, certificate) |
 | `anjal.co.in` | the mail domain (addresses are `user@anjal.co.in`) |
 | `API_TOKEN` | the value of `ANJAL_API_TOKEN` in `/etc/anjal/server.env` |
-| `1.0.0-rc.1` | the release being deployed; always a tag, never an untagged build |
+| `1.0.0-rc.2` | the release being deployed; always a tag, never an untagged build |
 
 ---
 
@@ -114,6 +115,24 @@ fail2ban on Ubuntu 24.04 reads the systemd journal and bans through
 nftables (`/etc/fail2ban/jail.d/defaults-debian.conf`). Expect it to report
 failed logins within minutes of the node going live: bots try every
 address on port 22. With key-only login they cannot succeed.
+
+Its default `normal` mode does not count the commonest bot pattern against a
+key-only server - `Connection closed by authenticating user root ...
+[preauth]`. Measured with fail2ban 1.0.2 against this server's own journal:
+`normal` matched 0 of 4 such lines, `aggressive` matched all 4 and still
+ignored the admin's accepted login. Count them, and ban for an hour:
+
+```
+vm$ sudo tee /etc/fail2ban/jail.d/anjal-sshd.local >/dev/null <<'CONF'
+[sshd]
+mode = aggressive
+bantime = 1h
+findtime = 10m
+maxretry = 5
+CONF
+vm$ sudo systemctl restart fail2ban
+vm$ sudo fail2ban-client get sshd bantime       # 3600
+```
 
 ### 1a. Firewall: the Security Group, and nothing on the VM
 
@@ -205,15 +224,23 @@ KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 GSSAPIAuthentication no
 X11Forwarding no
+# E2E's sshd_config names Red Hat's sftp-server path, which does not exist
+# on Ubuntu; without this line scp and sftp log in and are then closed.
+Subsystem sftp /usr/lib/openssh/sftp-server
 CONF
 vm$ sudo chmod 644 /etc/ssh/sshd_config.d/01-anjal-hardening.conf
 vm$ sudo sshd -t && echo "sshd config OK"
-vm$ sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|gssapiauthentication|x11forwarding|usepam)'
+vm$ sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|gssapiauthentication|x11forwarding|usepam|subsystem)'
 ```
 
 The last command must print `permitrootlogin no`, `passwordauthentication
 no`, `kbdinteractiveauthentication no`, `pubkeyauthentication yes`,
-`gssapiauthentication no`, `x11forwarding no`, `usepam yes`. If `sshd -t`
+`gssapiauthentication no`, `x11forwarding no`, `usepam yes` and
+`subsystem sftp /usr/lib/openssh/sftp-server`. The `Subsystem` line is
+needed because line 123 of E2E's main `sshd_config` names
+`/usr/libexec/openssh/sftp-server`, Red Hat's path, which does not exist on
+Ubuntu. OpenSSH 9.6 takes the first definition it reads (measured), so the
+drop-in wins without editing E2E's file. If `sshd -t`
 complains `Missing privilege separation directory: /run/sshd`, run
 `sudo mkdir -p /run/sshd` and repeat - on 24.04 SSH is socket-activated and
 that directory exists only while the service runs.
@@ -321,26 +348,34 @@ The schema is applied in section 3, from the release itself.
 On the laptop, from the repo root at the tagged release:
 
 ```
-pc> git checkout v1.0.0-rc.1
-pc> .\deploy\publish.ps1 -Version 1.0.0-rc.1
-pc> scp -i $env:USERPROFILE\.ssh\anjal_e2e .\artifacts\anjal-1.0.0-rc.1.tar.gz arun@203.0.113.10:~/
+pc> git checkout v1.0.0-rc.2
+pc> .\deploy\publish.ps1 -Version 1.0.0-rc.2
+pc> (Get-FileHash .\artifacts\anjal-1.0.0-rc.2.tar.gz -Algorithm SHA256).Hash.Substring(0,16)
+pc> scp -i $env:USERPROFILE\.ssh\anjal_e2e .\artifacts\anjal-1.0.0-rc.2.tar.gz arun@203.0.113.10:~/
 ```
 
 `publish.ps1` produces self-contained linux-x64 builds of both
 processes (no .NET runtime to install on the VM), plus `bin/` with the
-scripts, units, env templates and `schema.sql`.
+scripts, units, env templates and `schema.sql`. Note the 16-character
+hash: the VM must show the same value.
 
-On the VM:
+If `scp` logs in and then says only `Connection closed`, the VM's SSH
+server cannot start its SFTP helper - section 1b's `Subsystem` line is
+missing (current Windows `scp` transfers over SFTP).
+
+On the VM - always through `bash`, because a release built on Windows
+arrives with no executable bits, `install.sh` included:
 
 ```
-vm$ tar -xzf anjal-1.0.0-rc.1.tar.gz
-vm$ sudo ./anjal-1.0.0-rc.1/bin/install.sh ~/anjal-1.0.0-rc.1
+vm$ sha256sum anjal-1.0.0-rc.2.tar.gz | cut -c1-16      # the laptop's value, in lower case
+vm$ tar -xzf anjal-1.0.0-rc.2.tar.gz
+vm$ sudo bash ./anjal-1.0.0-rc.2/bin/install.sh ~/anjal-1.0.0-rc.2
 ```
 
 `install.sh` creates the `anjal` system user, the directory layout below,
-installs the binaries under `/opt/anjal`, writes config **templates** to
-`/etc/anjal` (it never overwrites an existing config) and installs and
-enables the systemd units without starting them.
+installs the binaries under `/opt/anjal` and marks them executable, writes
+config **templates** to `/etc/anjal` (it never overwrites an existing
+config) and installs and enables the systemd units without starting them.
 
 | Path | Owner / mode | Purpose |
 |---|---|---|
@@ -350,13 +385,24 @@ enables the systemd units without starting them.
 | `/var/mail/anjal` | anjal 700 | Maildirs, one per mailbox |
 | `/var/lib/anjal/acme` | anjal 700 | ACME account key, certificate, key, status |
 | `/var/lib/anjal/backup` | anjal 700 | scratch for `pg_dump` |
+| `/var/lib/anjal/webmail-keys` | anjal 700 | keys signing webmail sessions and form tokens |
 
-**Check:** `vm$ /opt/anjal/server/Anjal.Server --acme-renew-now` prints "Renewal requested" (proves the binary runs; harmless before configuration - delete the marker: `sudo rm -f /var/lib/anjal/acme/renew.request`).
+`/etc/anjal` is private to root and the `anjal` group: as your own account,
+read it with `sudo`.
 
-Apply the schema from the release (it asks for the database password):
+**Check** - the Linux binary runs on this machine. It must run as `anjal`,
+the only user that can write the ACME folder:
 
 ```
-vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -f ~/anjal-1.0.0-rc.1/bin/schema.sql
+vm$ sudo -u anjal /opt/anjal/server/Anjal.Server --acme-renew-now     # "Renewal requested; marker written ..."
+vm$ sudo rm -f /var/lib/anjal/acme/renew.request
+```
+
+Apply the schema from the release (it asks for the database password; type
+it from a paper copy - that proves the copy too):
+
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -f ~/anjal-1.0.0-rc.2/bin/schema.sql
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -c '\dt'
 ```
 
@@ -365,62 +411,106 @@ exist, skipping` is expected; on a re-run, `already exists, skipping`
 notices are expected. The script is safe to apply again, which is how an
 upgrade applies it. **Check:** `\dt` lists **20 tables**, all owned by
 `anjal`, including `tenants`, `mailboxes`, `messages`, `sender_rules` and
-`audit_events` (measured on PostgreSQL 18.6).
+`audit_events` (measured on PostgreSQL 18.6, with the file's CRLF line
+endings exactly as shipped).
 
 ---
 
 ## 4. Configure
 
-Edit both files; each line is explained in `README.md`.
+Three secrets go into the env files. Each is **generated on the VM** -
+never on the laptop: Windows PowerShell 5.1 once produced an admin token of
+forty identical characters from a .NET Core-only API - and kept on the
+handwritten custody forms (ANJAL-SEC-03, three copies), not in a password
+manager. The method below never makes you retype a secret into a file:
+each is generated into a shell variable, shown once for the forms, written
+into the file from the variable, and cleared from the screen. **Never paste
+a secret into a chat or a ticket.** Run each box on its own.
+
+**The database password** (created in section 2) - typed silently from
+paper, proven against the database, then written into both files:
 
 ```
-vm$ sudo nano /etc/anjal/server.env
-vm$ sudo nano /etc/anjal/webmail.env
+vm$ read -rs -p "Database password (from paper): " PGPW; echo
+vm$ PGPASSWORD="$PGPW" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc 'select current_user;'   # must print anjal
+vm$ sudo sed -i "s|Password=CHANGE-ME|Password=$PGPW|" /etc/anjal/server.env /etc/anjal/webmail.env
+vm$ unset PGPW
 ```
 
-Required changes in `server.env`:
-
-- `ANJAL_POSTGRES` - the password from section 2.
-- `ANJAL_API_TOKEN` - `openssl rand -hex 32`, generated **on the VM**.
-  The server refuses to start without one, with fewer than 24 characters,
-  with an obvious placeholder, or with too little variety. Rotating it is
-  section 13a.
-- `ANJAL_KEK` - `openssl rand -base64 32`, generated **on the VM**. This key
-  encrypts DKIM private keys inside the database. **Write it on the
-  custody forms now**, next to the database password: a backup restored
-  without it has unreadable DKIM keys (recoverable only by generating new
-  keys and republishing DNS). It is the only secret that cannot be reset.
-  The placeholder in the template is deliberately invalid, so the server
-  will not start until you replace it.
-
-Generate secrets on the VM, never on the laptop: Windows PowerShell 5.1
-once produced an admin token of forty identical characters from a .NET
-Core-only API. The secrets are kept on handwritten paper forms
-(ANJAL-SEC-03, three copies), not in a password manager. Base64 mixes
-`O`/`0` and `l`/`1`/`I`, so **prove each paper copy** before relying on
-it: type the value back from the paper and compare fingerprints, which
-shows nothing secret on screen.
+**The admin API token** - 48 characters, 0-9 and a-f only, so a written
+copy has no O/0 or l/1 to misread. The server refuses a token that is short,
+lacks variety or looks like a placeholder. Rotating it is section 13a.
 
 ```
-vm$ printf '%s' 'VALUE-TYPED-FROM-PAPER' | sha256sum | cut -c1-16
-vm$ sudo grep '^ANJAL_KEK=' /etc/anjal/server.env | cut -d= -f2- | tr -d '\n' | sha256sum | cut -c1-16
+vm$ TOKEN=$(openssl rand -hex 24); echo "$TOKEN"
 ```
 
-The two fingerprints must match; the same pair of commands, with the
-variable name changed, proves the database password and the admin token.
-Start the first command with a **space**: Ubuntu's default
-`HISTCONTROL=ignoreboth` then keeps it out of shell history.
-- Leave `ANJAL_ACME_STAGING` **commented out for now** - section 7 explains the rehearsal.
+Write it on all three forms (row "Administration API token"), then:
 
-Required changes in `webmail.env`:
+```
+vm$ sudo sed -i "s|^ANJAL_API_TOKEN=.*|ANJAL_API_TOKEN=$TOKEN|" /etc/anjal/server.env; unset TOKEN; clear
+```
 
-- `ANJAL_POSTGRES` - the same connection string.
-- `ANJAL_ACME_STAGING=true` - **uncomment it** for the rehearsal.
+**The key-encryption key** - seals the DKIM private keys in the database,
+and is the **only secret that cannot be reset**: a backup restored without
+it has unreadable DKIM keys, recoverable only by generating new keys and
+republishing DNS. It must be base64 of exactly 32 bytes: 44 characters,
+case-sensitive, may contain `+` and `/`, ends with `=`.
 
-Both files must agree on `ANJAL_POSTGRES`, `ANJAL_MAILDIR_ROOT`,
-`ANJAL_ACME_DIR` and `ANJAL_ACME_DOMAINS`.
+```
+vm$ KEK=$(openssl rand -base64 32); echo "$KEK"
+```
 
-**Check:** `vm$ sudo -u anjal cat /etc/anjal/server.env >/dev/null && echo readable` (the service user can read it); `vm$ ls -l /etc/anjal` shows `-rw-r-----  root anjal` on all three.
+Write it in the first row of all three forms, marking the look-alikes
+(`0`/`O`, `1`/`l`/`I`), then:
+
+```
+vm$ sudo sed -i "s|^ANJAL_KEK=.*|ANJAL_KEK=$KEK|" /etc/anjal/server.env; unset KEK; clear
+```
+
+**The certificate rehearsal** - staging on in `webmail.env` only (section 7
+turns it off again):
+
+```
+vm$ sudo sed -i 's|^# ANJAL_ACME_STAGING=true.*|ANJAL_ACME_STAGING=true|' /etc/anjal/webmail.env
+```
+
+**Prove every paper copy.** Type each secret from copies 1, 2 and 3 in
+turn; nothing shows, nothing is stored in history, and only a fingerprint
+is compared:
+
+```
+vm$ prove() { local want got c
+      want=$(sudo grep "^$1=" /etc/anjal/server.env | cut -d= -f2- | tr -d '\n' | sha256sum | cut -c1-16)
+      for c in 1 2 3; do
+        read -rs -p "$1 from paper copy $c: " got; echo
+        if [ "$(printf '%s' "$got" | sha256sum | cut -c1-16)" = "$want" ]; then echo "copy $c: MATCH"; else echo "copy $c: NO MATCH - check this copy"; fi
+      done; }
+vm$ prove ANJAL_KEK
+vm$ prove ANJAL_API_TOKEN
+```
+
+For the database password, the proof is a login: run the `psql ... select
+current_user;` line three times, typing from each copy.
+
+**Check** (nothing below shows a secret):
+
+```
+vm$ sudo awk '/^ANJAL_(API_TOKEN|KEK)=/{i=index($0,"="); print substr($0,1,i-1), "length", length(substr($0,i+1))}' /etc/anjal/server.env   # 48 and 44
+vm$ sudo grep '^ANJAL_KEK=' /etc/anjal/server.env | cut -d= -f2- | base64 -d | wc -c          # 32
+vm$ sudo grep -c 'CHANGE-ME' /etc/anjal/server.env /etc/anjal/webmail.env                      # 0 and 0
+vm$ sudo grep -E '^ANJAL_(ACME_STAGING|WEBMAIL_KEYS_DIR)' /etc/anjal/server.env /etc/anjal/webmail.env
+vm$ for f in server webmail; do
+      sudo bash -c "pw=\$(grep '^ANJAL_POSTGRES=' /etc/anjal/$f.env | sed -E 's/.*Password=([^;]*).*/\1/'); PGPASSWORD=\"\$pw\" psql 'host=127.0.0.1 dbname=anjal user=anjal' -Atc 'select current_user'" && echo "$f.env: database login OK"
+    done
+vm$ sudo -u anjal cat /etc/anjal/server.env >/dev/null && echo readable
+vm$ sudo ls -l /etc/anjal                                                                       # root anjal, -rw-r----- on all three
+```
+
+Expect `ANJAL_ACME_STAGING=true` in `webmail.env` only, and
+`ANJAL_WEBMAIL_KEYS_DIR=/var/lib/anjal/webmail-keys` in `webmail.env`. Both
+files must agree on `ANJAL_POSTGRES`, `ANJAL_MAILDIR_ROOT`, `ANJAL_ACME_DIR`
+and `ANJAL_ACME_DOMAINS`; every variable is explained in `README.md`.
 
 ---
 
@@ -471,10 +561,18 @@ vm$ sudo systemctl start anjal-server
 vm$ sudo journalctl -u anjal-server -n 40 --no-pager
 ```
 
-Expected lines: `Using PostgreSQL store.`, `Anjal SMTP (MTA, port 25)`,
-`Anjal SMTP (Submission, port 587) listening`, `TLS: ACME configured for
-mail.anjal.co.in but no certificate ... yet`, `API listening on
-http://127.0.0.1:8025`, `Health at ...`.
+Expected lines: `Inbound authentication: SPF+DKIM+DMARC enabled, DMARC
+p=reject ENFORCED.`, `Anjal SMTP (MTA, port 25)`, `Using PostgreSQL store.`,
+`STARTTLS waiting for the ACME certificate; it is picked up automatically
+when issued, no restart needed.`, `Anjal SMTP (Submission, port 587)
+listening`, `API listening on http://127.0.0.1:8025`, `Health at ...`.
+`systemctl is-active anjal-server` must still say `active` ten seconds
+later. The bracketed times in Anjal's own lines are UTC; the journal's own
+column is the server's zone.
+
+If the server stops at once with `NetworkInformationException (97):
+Address family not supported by protocol`, the release is older than
+v1.0.0-rc.2 (DEF-048); section 13d describes the rc.1 workaround.
 
 ```
 vm$ sudo systemctl start anjal-webmail
@@ -722,7 +820,9 @@ future you can see each one and where it lives.
 | Everything else at rest | Mail, database, and certificates on the VM's disk, which E2E encrypts at rest (chosen when the node was created, no passphrase so it boots unattended) | section 0 |
 | Backups | rclone crypt (client-side encryption) to Backblaze B2 | section 11 |
 | Changes | Every admin API change and webmail sign-in/password change is recorded in `audit_events`, which the database itself makes append-only | section 13 |
-| Service isolation | Dedicated `anjal` user, `ProtectSystem=strict`, `NoNewPrivileges`, restricted address families and namespaces | systemd units |
+| Service isolation | Dedicated `anjal` user, `ProtectSystem=strict`, `NoNewPrivileges`, restricted address families (`AF_INET`, `AF_INET6`, `AF_UNIX` - no netlink since rc.2) and namespaces | systemd units |
+| Webmail session keys | ASP.NET key ring in `/var/lib/anjal/webmail-keys` (anjal 700), unencrypted on the encrypted disk. Encrypting it would need a secret in `webmail.env`, which deliberately holds none; losing it only signs everyone out | `ANJAL_WEBMAIL_KEYS_DIR`, DEF-050 |
+| Proven by CI | Every change installs the Linux release with `install.sh`, starts both services under the real units, checks exposure and a real Let's Encrypt staging account | `.github/workflows/deploy-smoke.yml` |
 
 ## 13a. Rotating the admin token
 
@@ -767,6 +867,36 @@ accepting it and refusing after the message arrives - which tells a
 stranger less about which addresses exist - set
 `ANJAL_SMTP_LATE_RECIPIENT_CHECK=true`.
 
+## 13d. Upgrading to a new release
+
+```
+pc> git checkout vX.Y.Z; .\deploy\publish.ps1 -Version X.Y.Z; scp ... arun@203.0.113.10:~/
+vm$ sha256sum anjal-X.Y.Z.tar.gz | cut -c1-16                 # the laptop's value
+vm$ tar -xzf anjal-X.Y.Z.tar.gz
+vm$ sudo bash ./anjal-X.Y.Z/bin/install.sh ~/anjal-X.Y.Z       # keeps the previous binaries as *.old
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -f ~/anjal-X.Y.Z/bin/schema.sql
+vm$ sudo systemctl restart anjal-server anjal-webmail
+vm$ sleep 10; systemctl is-active anjal-server anjal-webmail; curl -s http://127.0.0.1:8025/healthz | jq .
+```
+
+`install.sh` never overwrites `/etc/anjal/*.env`. When a release adds a
+setting to the templates, add it by hand; the release note says which.
+
+**rc.1 to rc.2 on the first server** (26 September 2026), in addition:
+
+1. Remove the DEF-048 workaround, so the unit's sandbox is back to what it
+   ships as: `sudo rm -r /etc/systemd/system/anjal-server.service.d && sudo systemctl daemon-reload`,
+   then `systemctl show anjal-server -p RestrictAddressFamilies` must list
+   `AF_INET AF_INET6 AF_UNIX` only.
+2. Add the new webmail setting (DEF-050):
+   `echo 'ANJAL_WEBMAIL_KEYS_DIR=/var/lib/anjal/webmail-keys' | sudo tee -a /etc/anjal/webmail.env`.
+   Keys previously kept in `/var/lib/anjal/.aspnet` are no longer used;
+   anyone signed in signs in once more.
+3. Add the fail2ban tuning (section 1) and the `Subsystem` line (section 1b)
+   if they are not already present.
+
+---
+
 ## 13. Operating
 
 | Task | Command |
@@ -776,7 +906,7 @@ stranger less about which addresses exist - set
 | Metrics | `curl -s -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/metrics` |
 | Certificate status | `curl -s -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/api/acme \| jq .` |
 | Force renewal | `curl -s -X POST -H "Authorization: Bearer API_TOKEN" http://127.0.0.1:8025/api/acme/renew` |
-| Upgrade | `publish.ps1` → `scp` → `tar -xzf` → `sudo ./bin/install.sh` → `sudo systemctl restart anjal-server anjal-webmail` |
+| Upgrade | section 13d |
 | Roll back | `sudo mv /opt/anjal/server.old /opt/anjal/server` (same for webmail) → restart |
 | Add a mailbox | `POST /api/mailboxes` (section 8) |
 | Block a sender for a tenant | `POST /api/tenants/imagiqa/sender-rules -d '{"pattern":"@spammer.example","action":"block"}'` |
@@ -809,4 +939,7 @@ Things to watch in the first weeks:
 | Outbound stuck | `/metrics` `anjal_outbound_pending`, then `nc -vz gmail-smtp-in.l.google.com 25` from the VM | outbound 25 blocked in the Security Group or by E2E (sections 0, 1a), or recipient greylisting you (normal, retries) |
 | Gmail shows `DKIM: FAIL` | section 9 TXT record | public key mismatch, selector typo, or TXT split into wrong chunks by the DNS panel |
 | `452 4.2.2 Mailbox full` in logs | webmail sidebar usage | quota reached; delete mail or raise `quotaBytes` via `POST /api/mailboxes` |
+| Server stops at once: `NetworkInformationException (97): Address family not supported by protocol` | `journalctl -u anjal-server` | release older than rc.2 (DEF-048). Upgrade; the rc.1 workaround was a drop-in adding `RestrictAddressFamilies=AF_NETLINK` |
+| ACME: `newAccount failed: 400 ... Invalid Content-Type header on POST` | `journalctl -u anjal-webmail \| grep ACME` | release older than rc.2 (DEF-049); no configuration works around it - upgrade |
+| `scp` logs in, then only `Connection closed` | `sudo sshd -T \| grep subsystem`, `journalctl -u ssh` | SFTP helper path wrong on E2E images; section 1b `Subsystem` line |
 | Backup fails | `journalctl -u anjal-backup` | rclone config unreadable by `anjal` (mode 640, group anjal), wrong B2 key, or `pg_dump` cannot connect (`ANJAL_POSTGRES` in `server.env`) |

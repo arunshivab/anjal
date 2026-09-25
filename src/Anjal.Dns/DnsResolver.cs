@@ -32,26 +32,118 @@ public sealed class DnsResolver
 
     /// <summary>
     /// Construct a resolver pointing at the first IPv4 system DNS server,
-    /// falling back to 1.1.1.1 if none can be determined.
+    /// falling back to 1.1.1.1 if none can be determined. Never throws.
     /// </summary>
+    /// <remarks>
+    /// DEF-048: on Linux the server list is read from <c>/etc/resolv.conf</c>
+    /// directly. Enumerating network interfaces needs a netlink socket, which
+    /// the production systemd unit does not allow (RestrictAddressFamilies);
+    /// the enumeration threw and the mail server aborted at startup. Interface
+    /// enumeration remains the source on Windows, and a failure of either
+    /// source falls back instead of throwing.
+    /// </remarks>
     /// <returns>A resolver ready to use.</returns>
     public static DnsResolver CreateFromSystem()
     {
-        foreach (var nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+        IPAddress server = FindSystemDnsServer(ReadResolvConf, EnumerateInterfaceDnsServers)
+            ?? IPAddress.Parse("1.1.1.1");
+        return new DnsResolver(new IPEndPoint(server, DnsPort));
+    }
+
+    /// <summary>
+    /// The first IPv4 DNS server from <paramref name="readResolvConf"/>, else
+    /// from <paramref name="enumerateInterfaces"/>, else null. A source that
+    /// fails is skipped rather than allowed to throw.
+    /// </summary>
+    internal static IPAddress? FindSystemDnsServer(
+        System.Func<string?> readResolvConf,
+        System.Func<System.Collections.Generic.IEnumerable<IPAddress>> enumerateInterfaces)
+    {
+        try
+        {
+            string? text = readResolvConf();
+            IPAddress? fromFile = text is null ? null : ParseResolvConf(text);
+            if (fromFile is not null)
+            {
+                return fromFile;
+            }
+        }
+        catch (System.IO.IOException)
+        {
+        }
+        catch (System.UnauthorizedAccessException)
+        {
+        }
+
+        try
+        {
+            foreach (IPAddress addr in enumerateInterfaces())
+            {
+                if (addr.AddressFamily == AddressFamily.InterNetwork)
+                {
+                    return addr;
+                }
+            }
+        }
+        catch (System.Net.NetworkInformation.NetworkInformationException)
+        {
+        }
+        catch (System.PlatformNotSupportedException)
+        {
+        }
+        catch (System.UnauthorizedAccessException)
+        {
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The first IPv4 <c>nameserver</c> in resolv.conf text, or null. Comment
+    /// lines (<c>#</c> or <c>;</c>) and IPv6 servers are skipped.
+    /// </summary>
+    internal static IPAddress? ParseResolvConf(string text)
+    {
+        System.ArgumentNullException.ThrowIfNull(text);
+        foreach (string raw in text.Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line[0] == '#' || line[0] == ';')
+            {
+                continue;
+            }
+            string[] parts = line.Split((char[]?)null, System.StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length >= 2
+                && string.Equals(parts[0], "nameserver", System.StringComparison.Ordinal)
+                && IPAddress.TryParse(parts[1], out IPAddress? addr)
+                && addr.AddressFamily == AddressFamily.InterNetwork)
+            {
+                return addr;
+            }
+        }
+        return null;
+    }
+
+    private static string? ReadResolvConf()
+    {
+        const string path = "/etc/resolv.conf";
+        return System.OperatingSystem.IsWindows() || !System.IO.File.Exists(path)
+            ? null
+            : System.IO.File.ReadAllText(path);
+    }
+
+    private static System.Collections.Generic.IEnumerable<IPAddress> EnumerateInterfaceDnsServers()
+    {
+        var found = new System.Collections.Generic.List<IPAddress>();
+        foreach (System.Net.NetworkInformation.NetworkInterface nic in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
         {
             if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up)
             {
                 continue;
             }
-            foreach (var addr in nic.GetIPProperties().DnsAddresses)
-            {
-                if (addr.AddressFamily == AddressFamily.InterNetwork)
-                {
-                    return new DnsResolver(new IPEndPoint(addr, DnsPort));
-                }
-            }
+            found.AddRange(nic.GetIPProperties().DnsAddresses);
         }
-        return new DnsResolver(new IPEndPoint(IPAddress.Parse("1.1.1.1"), DnsPort));
+        return found;
     }
 
     /// <summary>

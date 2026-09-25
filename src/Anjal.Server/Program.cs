@@ -216,9 +216,13 @@ public static class Program
             Log($"STARTTLS enabled (cert subject: {tlsCert.Subject}, expires {tlsCert.NotAfter:yyyy-MM-dd}).");
             if (requireTls) Log("Receiver requires TLS before MAIL FROM.");
         }
+        else if (certWatcher is not null)
+        {
+            Log("STARTTLS waiting for the ACME certificate; it is picked up automatically when issued, no restart needed.");
+        }
         else
         {
-            Log("STARTTLS disabled (set ANJAL_TLS_CERT_PATH to enable).");
+            Log("STARTTLS disabled (set ANJAL_TLS_CERT_PATH, or ANJAL_ACME_DOMAINS, to enable).");
         }
 
         // Optional submission listener (typically port 587). Requires
@@ -303,6 +307,10 @@ public static class Program
             if (allowPlaintextAuth)
             {
                 Log("WARNING: ANJAL_AUTH_ALLOW_PLAINTEXT=true - AUTH accepted on plaintext channels.");
+            }
+            else if (tlsCert is null && certWatcher is not null)
+            {
+                Log("Submission AUTH waits for the ACME certificate (plaintext AUTH is disabled); it starts working as soon as the certificate is issued.");
             }
             else if (tlsCert is null)
             {
