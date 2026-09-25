@@ -39,8 +39,17 @@ jobs:
           # bug is not theoretical here: DEF-044 was one.
           queries: security-extended
 
-      - name: Build
-        run: dotnet build -c Release --no-incremental
+      # Only the code that ships. For a compiled language CodeQL analyses
+      # whatever the build produces, so test code is excluded by NOT building
+      # it - a paths-ignore filter does not do this (the first attempt used
+      # one, and seven alerts about a deliberately careless test fake appeared
+      # anyway). Building each project keeps the test projects out.
+      - name: Build product code only
+        run: |
+          for project in src/*/*.csproj examples/*/*.csproj; do
+            echo "building $project"
+            dotnet build "$project" -c Release --no-incremental
+          done
 
       - name: Analyse
         uses: github/codeql-action/analyze@v3
