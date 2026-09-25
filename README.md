@@ -10,7 +10,21 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v1.0.0-rc.2** - fixes everything the first real start found on the
+**v1.0.0-rc.3** - two defects found while taking the production
+certificate. DEF-053: an admin POST sent without a body (`curl -X POST`
+with no `-d`) was answered `411 Length Required` by the HTTP listener, which
+then passed the request to the API anyway - the change was made while the
+caller was told it had failed, and a caller who retried would request a
+new certificate each time. Such a request is now refused before anything
+runs, and deploy-smoke proves it under the real unit. DEF-052: the
+runbook's `sudo rm -rf /var/lib/anjal/acme/*` removed nothing, because the
+caller's own shell cannot expand a path inside the service's private
+folder; section 7 now uses `find ... -delete`. The runbook reads the admin
+token into `$TOKEN` from `server.env` instead of asking for it to be pasted,
+rotates it by the custody-form method, and records the certificate
+procedure exactly as measured on the first server.
+
+Previously: **v1.0.0-rc.2** - fixes everything the first real start found on the
 production server (phase B), and closes the gaps that let it through.
 DEF-048: the mail server aborted at startup because finding the system DNS
 server enumerated network interfaces over netlink, which the systemd unit's

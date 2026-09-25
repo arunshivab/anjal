@@ -12,10 +12,12 @@ public sealed class AcmeApiTests : System.IDisposable
     private readonly System.Threading.CancellationTokenSource cts = new();
     private readonly System.Threading.Tasks.Task serverTask;
     private readonly HttpClient client;
+    private readonly int port;
 
     public AcmeApiTests()
     {
         int port = FreePort.Next();
+        this.port = port;
         this.server = new ApiServer(new ApiOptions
         {
             BindAddress = IPAddress.Loopback,
@@ -66,6 +68,37 @@ public sealed class AcmeApiTests : System.IDisposable
 
         AcmeStatusResponse? status = await this.client.GetFromJsonAsync<AcmeStatusResponse>("api/acme", ApiJson.Options);
         Assert.True(status!.RenewalPending);
+    }
+
+    /// <summary>
+    /// DEF-053: <c>curl -X POST</c> with no body sends neither Content-Length
+    /// nor chunked encoding. The listener answers 411 Length Required - and
+    /// then handed the request to the API anyway, so the renewal was requested
+    /// while the caller was told it had failed (measured on the production
+    /// server, 26 Sep 2026). A caller who retries burns Let's Encrypt's limit
+    /// of five duplicate certificates a week. A request answered 411 must
+    /// change nothing.
+    /// </summary>
+    [Fact]
+    public async System.Threading.Tasks.Task PostWithoutContentLength_Gets411_AndChangesNothing()
+    {
+        string statusLine;
+        using (var tcp = new System.Net.Sockets.TcpClient())
+        {
+            await tcp.ConnectAsync(IPAddress.Loopback, this.port);
+            using System.Net.Sockets.NetworkStream stream = tcp.GetStream();
+            byte[] request = System.Text.Encoding.ASCII.GetBytes(
+                "POST /api/acme/renew HTTP/1.1\r\nHost: 127.0.0.1\r\nUser-Agent: curl/8.5.0\r\nAccept: */*\r\n\r\n");
+            await stream.WriteAsync(request);
+            using var reader = new System.IO.StreamReader(stream, System.Text.Encoding.ASCII);
+            statusLine = await reader.ReadLineAsync() ?? string.Empty;
+        }
+
+        Assert.Contains("411", statusLine, System.StringComparison.Ordinal);
+
+        // The handler ran after the 411 had been sent; give it every chance.
+        await System.Threading.Tasks.Task.Delay(1500);
+        Assert.False(System.IO.File.Exists(System.IO.Path.Combine(this.dir, "renew.request")));
     }
 
     [Fact]

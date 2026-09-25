@@ -196,6 +196,18 @@ public sealed class ApiServer : System.IDisposable
         {
             this.log?.Invoke($"{ctx.Method} {ctx.Path}");
 
+            // DEF-053: a POST or PUT with neither Content-Length nor chunked
+            // encoding (curl -X POST with no body) is answered 411 Length
+            // Required by the listener itself - which then still hands the
+            // request over. Acting on it would make the change while the
+            // caller is told it failed. Refuse it here, before anything runs.
+            if (IsBodylessWrite(httpContext.Request))
+            {
+                this.log?.Invoke($"  411 - {ctx.Method} {ctx.Path} refused: no Content-Length (send -d '' with curl). Nothing was changed.");
+                await TrySafeErrorAsync(ctx, 411, "length_required", "POST and PUT need a Content-Length header; nothing was changed.").ConfigureAwait(false);
+                return;
+            }
+
             // /healthz is unauthenticated so external monitors can probe it;
             // it reveals only component up/down states.
             if (ctx.Path.Equals("/healthz", System.StringComparison.OrdinalIgnoreCase))
@@ -234,6 +246,27 @@ public sealed class ApiServer : System.IDisposable
             await TrySafeErrorAsync(ctx, 500, "internal_error", $"Internal error. Reference {reference}.").ConfigureAwait(false);
         }
 #pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// True for a POST or PUT that declares neither a Content-Length header
+    /// nor chunked transfer encoding - the requests the listener answers with
+    /// 411 before Anjal sees them (DEF-053). The header itself is tested:
+    /// measured on .NET 10 on Linux, such a request reports ContentLength64 = 0,
+    /// exactly like a legitimate empty body, so the number cannot tell them apart.
+    /// </summary>
+    internal static bool IsBodylessWrite(HttpListenerRequest request)
+    {
+        System.ArgumentNullException.ThrowIfNull(request);
+        bool write = string.Equals(request.HttpMethod, "POST", System.StringComparison.OrdinalIgnoreCase)
+            || string.Equals(request.HttpMethod, "PUT", System.StringComparison.OrdinalIgnoreCase);
+        if (!write || request.Headers["Content-Length"] is not null)
+        {
+            return false;
+        }
+        string? transferEncoding = request.Headers["Transfer-Encoding"];
+        return transferEncoding is null
+            || transferEncoding.IndexOf("chunked", System.StringComparison.OrdinalIgnoreCase) < 0;
     }
 
     private static async System.Threading.Tasks.Task TrySafeErrorAsync(RequestContext ctx, int code, string error, string message)
