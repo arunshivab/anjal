@@ -7,42 +7,53 @@ tenant and mailbox, first inbound and outbound mail, backups, and a
 restore drill. Every step has a check; do not move on until the check
 passes. Expect two to three hours end to end, most of it waiting for DNS.
 
-Conventions: commands prefixed `vm$` run on the VM over SSH as the
-`ubuntu` user (they use `sudo` where needed); `pc>` runs on the laptop in
-PowerShell; `api$` is a `curl` against the admin API on the VM.
+Sections 0 to 5 were rewritten for v1.0.0-rc.1 from the first real
+provisioning (E2E Chennai, 25-26 September 2026). Where this runbook
+earlier described what the provider was expected to do, it now records
+what the provider was measured to do.
+
+Conventions: commands prefixed `vm$` run on the VM over SSH as your own
+named admin account (`arun` in the examples; section 1b creates it) and
+use `sudo` where needed; `pc>` runs on the laptop in PowerShell; `api$`
+is a `curl` against the admin API on the VM.
 
 Placeholders used throughout - substitute your real values everywhere:
 
 | Placeholder | Meaning |
 |---|---|
 | `203.0.113.10` | the VM's public IPv4 |
-| `2001:db8::10` | the VM's public IPv6, if E2E assigns one |
+| `2001:db8::10` | the VM's public IPv6, if E2E assigns one (the first VM had none) |
 | `mail.anjal.co.in` | the mail host name (SMTP banner, webmail, certificate) |
 | `anjal.co.in` | the mail domain (addresses are `user@anjal.co.in`) |
 | `API_TOKEN` | the value of `ANJAL_API_TOKEN` in `/etc/anjal/server.env` |
+| `1.0.0-rc.1` | the release being deployed; always a tag, never an untagged build |
 
 ---
 
 ## 0. Before ordering the VM
 
-1. **Decide the size.** For one to three tenants: 2 vCPU, 4 GB RAM,
-   80 GB disk is comfortable; mail is I/O-light. Pick a plan with a
-   **static public IPv4** - reputation is tied to the IP, and a changing
-   IP means re-doing SPF and PTR.
+1. **Decide the size.** For one to three tenants: 2 vCPU, 4-6 GB RAM,
+   75-80 GB disk is comfortable; mail is I/O-light. Pick a plan with a
+   **static (reserved) public IPv4** - reputation is tied to the IP, and a
+   changing IP means re-doing SPF and PTR. Enable **encryption at rest**
+   when creating the node, without a passphrase, so it boots unattended.
+   Decline E2E's own backup (CDP): Anjal backs up to Backblaze B2 itself
+   (section 11).
 2. **Port 25 outbound - test it, do not ask about it.** Most cloud
-   providers block it by default to stop spam. E2E documents the command
-   to allow it through firewalld, which suggests they expect customers to
-   send mail, but their documentation says nothing about their own
-   network. Settle it empirically: take the smallest VM, open the two
-   firewalls (section 1a and 1b), and run
-   `nc -vz gmail-smtp-in.l.google.com 25`. That single command answers
-   what no document does, for a few hundred rupees, in under an hour. If
-   it fails, raise a ticket quoting the output. If it cannot be opened at
-   all, outbound mail must go through a relay
-   (`ANJAL_OUTBOUND_MODE=relay`) - an owner's decision, since a relay
-   reintroduces the dependency this project exists to remove.
-3. **PTR (reverse DNS).** Ask E2E how PTR records are set for the IP
-   (panel or ticket). You will set it to `mail.anjal.co.in` in section 5.
+   providers block it by default to stop spam, and no document answers the
+   question for your account. Take the node, attach a Security Group whose
+   outbound rule is ALL (section 1a), and run
+   `nc -vz gmail-smtp-in.l.google.com 25`. On E2E Chennai in September 2026
+   this connected first time, and `nc gmail-smtp-in.l.google.com 25`
+   returned Gmail's `220` greeting - no ticket was needed. If it fails,
+   raise a ticket quoting the output. If it cannot be opened at all,
+   outbound mail must go through a relay (`ANJAL_OUTBOUND_MODE=relay`) - an
+   owner's decision, since a relay reintroduces the dependency this
+   project exists to remove.
+3. **PTR (reverse DNS).** On E2E this is self-service: MyAccount →
+   Network → DNS → **Add Reverse DNS**. The node's IP already has a PTR
+   row pointing at E2E's own name; you **Edit** it in section 5, after the
+   A record exists. No ticket.
 4. **IP reputation.** Once you have the IP, check it is not on common
    blocklists before building anything on it:
    https://mxtoolbox.com/blacklists.aspx (enter the IP). If it is listed
@@ -51,38 +62,77 @@ Placeholders used throughout - substitute your real values everywhere:
 5. **Backblaze B2.** Create a bucket named `anjal-backup` (private,
    default encryption off - rclone encrypts client-side) and an
    application key restricted to that bucket with read/write/delete.
-   Keep the key ID and application key for section 9.
+   Keep the key ID and application key for section 11. This can wait
+   until section 11; nothing before it needs B2.
 
 ---
 
 ## 1. Base OS
 
+E2E's Ubuntu 24.04 image logs in as `root` with the SSH key you gave at
+creation; it has no `ubuntu` user. The first session is therefore as root,
+and ends with root's SSH login switched off (section 1b).
+
 ```
-vm$ sudo apt update && sudo apt full-upgrade -y
-vm$ sudo hostnamectl set-hostname mail.anjal.co.in
-vm$ sudo timedatectl set-timezone UTC          # logs and Maildir names in UTC; the webmail shows local time
-vm$ sudo apt install -y unattended-upgrades fail2ban postgresql postgresql-client rclone curl jq netcat-openbsd
-vm$ sudo dpkg-reconfigure -plow unattended-upgrades   # choose Yes
+vm$ apt update && apt full-upgrade -y
 ```
 
-### 1a. Two firewalls, not one
+During the upgrade, `openssh-server` asks what to do about a modified
+`/etc/ssh/sshd_config`. Choose **keep the local version currently
+installed** - E2E's version is the one that already refuses passwords.
+If `needrestart` then reports a pending kernel upgrade, accept its
+defaults and reboot (below).
 
-On E2E there are **two** layers between the internet and Anjal, and a port
-must be open in **both** or it is dead:
+```
+vm$ ls /var/run/reboot-required && reboot    # if a new kernel was installed
+vm$ uname -r                                 # after reconnecting: the new kernel
+vm$ systemctl is-system-running              # "running"
+vm$ timedatectl                              # "System clock synchronized: yes"
+```
 
-1. **The Security Group** - E2E's own virtual firewall, configured in the
-   MyAccount portal, outside the VM. Nothing reaches the machine unless
-   the Security Group allows it.
-2. **firewalld** - on the VM itself. E2E's own documentation uses
-   firewalld, so this runbook does too. **Do not also install ufw.**
-   Two firewalls disagreeing is the most common way to lock yourself out
-   of SSH.
+**Time zone: leave it as provisioned** (Asia/Kolkata on E2E India). Anjal
+stores and computes every time in UTC internally - all timestamps are
+`TIMESTAMPTZ` and the code uses `UtcNow` - so the zone only changes how
+logs read, and India has no daylight saving to make local logs ambiguous.
+The backup timer names UTC explicitly, so it is unaffected.
 
-**Security Group** (portal → Network → Security Groups → Create):
+**Host name: leave it as provisioned.** Anjal does not use the machine's
+host name: the SMTP banner, EHLO and Message-IDs all come from
+`ANJAL_HOSTNAME` in `server.env`. E2E images are managed by OpenNebula's
+one-context (`/etc/one-context.d/net-15-hostname`), which sets the host
+name at every boot, so a manual change would not survive anyway.
+
+Tools used later (PostgreSQL is section 2):
+
+```
+vm$ apt install -y unattended-upgrades fail2ban rclone curl jq netcat-openbsd
+vm$ cat /etc/apt/apt.conf.d/20auto-upgrades     # both lines "1": security updates are automatic
+vm$ fail2ban-client status sshd                 # the jail is running
+```
+
+fail2ban on Ubuntu 24.04 reads the systemd journal and bans through
+nftables (`/etc/fail2ban/jail.d/defaults-debian.conf`). Expect it to report
+failed logins within minutes of the node going live: bots try every
+address on port 22. With key-only login they cannot succeed.
+
+### 1a. Firewall: the Security Group, and nothing on the VM
+
+E2E's portal advises using **Security Groups alone** and stopping host
+firewalls on the VM. This runbook follows that advice: there is **no
+firewalld and no ufw** on the VM. One firewall means one place to change a
+port and no way for two layers to disagree and lock you out.
+
+What makes a host firewall unnecessary here is that nothing internal
+listens on a public address: the admin API is bound to `127.0.0.1:8025`
+and PostgreSQL to `127.0.0.1:5432`. Section 1c measures this rather than
+assuming it.
+
+**Security Group** (portal → Network → Security Group → Create), attached
+to the node **instead of** the default group:
 
 | Direction | Protocol | Ports | Source / destination | Why |
 | --- | --- | --- | --- | --- |
-| Inbound | Custom TCP | 22 | My IP (or your office range) | SSH. Leave it open to Any only if your address changes constantly |
+| Inbound | Custom TCP | 22 | Any (see below) | SSH, for administration only - mail never uses it |
 | Inbound | Custom TCP | 25 | Any | every mail server on the internet delivers here |
 | Inbound | Custom TCP | 80 | Any | ACME HTTP-01 challenge, and the redirect to HTTPS |
 | Inbound | Custom TCP | 443 | Any | webmail |
@@ -93,94 +143,176 @@ must be open in **both** or it is dead:
 **Leave outbound permissive.** Anjal must reach port 25 on other mail
 servers, 53 for DNS, and 443 for Let's Encrypt. A tightened outbound rule
 that forgets DNS produces a server that looks healthy and silently fails
-every delivery and every certificate renewal - a genuinely confusing
-afternoon. If you must restrict it, allow at least TCP 25, 53, 80, 443
-and UDP 53.
+every delivery and every certificate renewal. If you must restrict it,
+allow at least TCP 25, 53, 80, 443 and UDP 53.
 
-### 1b. firewalld on the VM
-
-```
-vm$ sudo apt install -y firewalld
-vm$ sudo systemctl enable --now firewalld
-vm$ sudo firewall-cmd --add-port=22/tcp --permanent
-vm$ sudo firewall-cmd --add-port=25/tcp --permanent
-vm$ sudo firewall-cmd --add-port=80/tcp --permanent
-vm$ sudo firewall-cmd --add-port=443/tcp --permanent
-vm$ sudo firewall-cmd --add-port=587/tcp --permanent
-vm$ sudo firewall-cmd --add-port=465/tcp --permanent
-```
-
-Outbound port 25 explicitly. This command is E2E's own, from their
-documentation "Open/Close ports on Firewalld - Linux". Note what that
-documentation does and does not tell you: it covers the two firewalls YOU
-control - the Security Group and firewalld - and says nothing about whether
-E2E's network itself permits outbound SMTP. That is settled by the `nc` test
-below, not by any document:
-
-```
-vm$ sudo firewall-cmd --permanent --direct --add-rule ipv4 filter OUTPUT 0 -p tcp -m tcp --dport=25 -j ACCEPT
-vm$ sudo firewall-cmd --reload
-vm$ sudo firewall-cmd --list-all
-```
-
-fail2ban protects SSH out of the box; leave the default jail on.
-
-**Check - and do this now, not after installing Anjal:**
-
-```
-vm$ sudo firewall-cmd --list-ports          # the six ports above
-vm$ nc -vz gmail-smtp-in.l.google.com 25    # must connect
-vm$ nc -vz 1.1.1.1 53                       # DNS reachable
-vm$ timedatectl                             # UTC, "System clock synchronized: yes"
-```
-
-**The `nc` test is the moment of truth for this whole project.** If it
-connects, outbound 25 works and everything downstream is on solid ground.
-If it hangs or is refused, check the Security Group's outbound rule first,
-then raise a ticket with E2E quoting the exact command and its output - a
-concrete test result gets a far better answer than a policy question.
-
-Do this test on the smallest, cheapest VM before building anything on it.
-A few hundred rupees answers a question no document has answered, and the
-machine can be destroyed afterwards.
-
-If outbound 25 cannot be opened at all, the options are: another provider,
-or `ANJAL_OUTBOUND_MODE=relay` in `server.env`. Receiving mail works
-normally either way - but a relay reintroduces exactly the external
-dependency this project exists to remove, so it is a decision for the
-owner, not a workaround to adopt quietly.
+**Port 22 policy.** Through deployment and phase B testing, port 22 stays
+open to Any: the admin's own IP changes, so restricting it to one address
+means lock-outs. Key-only login, root login off (section 1b), fail2ban and
+automatic security updates make that safe against the bots. The residual
+risk is a future pre-authentication flaw in OpenSSH itself (as in 2024).
+**Before real mail flows**, SSH moves behind a WireGuard tunnel and port 22
+is removed from the Security Group entirely; that change gets its own
+section when it is made.
 
 From the laptop, after the Security Group is attached:
 
 ```
-pc> Test-NetConnection -ComputerName 203.0.113.10 -Port 25
-pc> Test-NetConnection -ComputerName 203.0.113.10 -Port 443
+pc> Test-NetConnection -ComputerName 203.0.113.10 -Port 22
+pc> Test-NetConnection -ComputerName 203.0.113.10 -Port 443     # fails until section 6 - nothing listens yet
 ```
+
+### 1b. Your own admin account, and root's SSH login switched off
+
+Admin accounts are **one per person, never shared**. `sudo` gives control
+of the whole machine, so an account per application (`anjaladmin`,
+`sangamadmin`) would look separated without being so; the separation
+between applications is their service users (`anjal`, and so on).
+
+Still as root, check which keys root accepts, then create the account:
+
+```
+vm$ awk '{print NR": "$1" ... "$NF}' /root/.ssh/authorized_keys   # expect only your own key
+vm$ adduser --gecos "Your Name" arun            # the password asked for is your sudo password
+vm$ usermod -aG sudo arun
+vm$ install -d -m 700 -o arun -g arun /home/arun/.ssh
+vm$ install -m 600 -o arun -g arun /root/.ssh/authorized_keys /home/arun/.ssh/authorized_keys
+vm$ id arun                                     # includes 27(sudo)
+```
+
+Write the sudo password on the custody forms (ANJAL-SEC-03). **Keep the
+root session open** and prove the new account from a second window:
+
+```
+pc> ssh -i $env:USERPROFILE\.ssh\anjal_e2e arun@203.0.113.10
+vm$ sudo whoami                                 # asks for the sudo password, prints root
+```
+
+Only then, as `arun`, write the SSH policy. E2E's image carries a
+Red Hat file, `/etc/ssh/sshd_config.d/50-redhat.conf`, that turns on
+GSSAPI (Kerberos) and X11 forwarding. Leave that file alone - an image
+update may restore it - and override it: `sshd` reads `sshd_config.d`
+before the main file (the `Include` is on line 15), in name order, and
+the first value read for a setting wins, so `01-` beats both.
+
+```
+vm$ sudo tee /etc/ssh/sshd_config.d/01-anjal-hardening.conf >/dev/null <<'CONF'
+# Anjal server SSH policy. Read before 50-redhat.conf and the main
+# sshd_config; for each setting the first value read wins.
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+GSSAPIAuthentication no
+X11Forwarding no
+CONF
+vm$ sudo chmod 644 /etc/ssh/sshd_config.d/01-anjal-hardening.conf
+vm$ sudo sshd -t && echo "sshd config OK"
+vm$ sudo sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication|pubkeyauthentication|gssapiauthentication|x11forwarding|usepam)'
+```
+
+The last command must print `permitrootlogin no`, `passwordauthentication
+no`, `kbdinteractiveauthentication no`, `pubkeyauthentication yes`,
+`gssapiauthentication no`, `x11forwarding no`, `usepam yes`. If `sshd -t`
+complains `Missing privilege separation directory: /run/sshd`, run
+`sudo mkdir -p /run/sshd` and repeat - on 24.04 SSH is socket-activated and
+that directory exists only while the service runs.
+
+```
+vm$ sudo systemctl restart ssh
+```
+
+**Check**, from two new windows while the old ones stay open:
+`ssh ... root@203.0.113.10` must answer `Permission denied (publickey)`,
+and `ssh ... arun@203.0.113.10` must log in. Only then close the root
+session. From here on every `vm$` command runs as `arun`. If SSH ever
+breaks, E2E's web console still logs in as root with the console password
+(also on the custody forms); the console does not use SSH.
+
+### 1c. What else is on the image, and what faces the internet
+
+E2E's image ships agents of its own. Measure them:
+
+```
+vm$ systemctl list-units --type=service --all --no-pager | grep -Ei 'cdp|sbm|zabbix|one-context'
+vm$ ip -6 addr show scope global                # empty: no public IPv6, nothing to guard there
+vm$ sudo ss -tlnp
+```
+
+- **R1Soft CDP backup agent** (`sbm-agent`, `cdp-agent`, port 1167) - the
+  E2E backup you declined, installed and running anyway, with read access
+  to the whole disk. Switch it off:
+  `sudo systemctl disable --now sbm-agent.service cdp-agent.service`.
+  Its apt source (`repo.r1soft.com`) can stay; updates do not re-enable a
+  disabled service.
+- **Zabbix agent** (`zabbix-agent`, port 10050) - feeds the graphs and
+  alerts in the E2E portal and answers only E2E's monitoring server
+  (`Server=` in `/etc/zabbix/zabbix_agentd.conf`, a 10.x address). Keep it.
+
+**Check:** after section 6, `sudo ss -tlnp` shows exactly: 22, 25, 80,
+443, 465 and 587 on all addresses; 5432 and 8025 on `127.0.0.1` only; 10050
+(Zabbix, blocked by the Security Group). Anything else listening publicly
+is a finding.
 
 ---
 
 ## 2. PostgreSQL
 
-Create the database and a dedicated role. The password goes into both env
-files in section 6.
+Install **PostgreSQL 18** from the PostgreSQL project's own repository,
+not Ubuntu's archive. Ubuntu freezes one major version per LTS release and
+24.04's is 16; Anjal's manual QA ran on 18, and upstream supports 18 about
+two years longer than 16. A major-version change is free now, on an empty
+database, and a migration later.
 
 ```
-vm$ sudo -u postgres psql
-postgres=# CREATE ROLE anjal LOGIN PASSWORD 'CHOOSE-A-LONG-RANDOM-PASSWORD';
-postgres=# CREATE DATABASE anjal OWNER anjal;
-postgres=# \q
+vm$ sudo apt install -y postgresql-common
+vm$ sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh     # press Enter when asked
+vm$ apt-cache policy postgresql-18                                  # candidate from apt.postgresql.org
+vm$ sudo apt install -y postgresql-18
 ```
 
-Apply the schema (the tarball in section 3 contains `bin/schema.sql`;
-until then, copy `tools/sql/schema.sql` from the repo):
+Install `postgresql-18` **by name**, never the bare `postgresql` package:
+from this repository that would follow the newest major version, and a
+PostgreSQL 19 would arrive without anyone deciding it should.
+
+If Ubuntu's 16 was installed first, remove it before installing 18 (18
+then takes port 5432): `sudo pg_dropcluster --stop 16 main` and
+`sudo apt purge -y postgresql postgresql-16 postgresql-client-16`. Do not
+run `apt autoremove` before `postgresql-common` has been installed by name
+- it removes the package that holds the repository script.
+
+Automatic security updates cover only Ubuntu's own sources by default.
+Add this repository, or 18 is never patched unattended:
 
 ```
-vm$ psql "host=127.0.0.1 dbname=anjal user=anjal password=..." -v ON_ERROR_STOP=1 -f schema.sql
+vm$ echo 'Unattended-Upgrade::Origins-Pattern { "site=apt.postgresql.org"; };' | sudo tee /etc/apt/apt.conf.d/52unattended-upgrades-pgdg
+vm$ sudo unattended-upgrade --dry-run --debug 2>&1 | grep -i 'allowed origins'     # ends with site=apt.postgresql.org
 ```
 
-**Check:** `vm$ psql "host=127.0.0.1 dbname=anjal user=anjal password=..." -c '\dt'` lists 15 tables including `tenants`, `mailboxes`, `messages`, `sender_rules`.
+**Check:**
 
-PostgreSQL listens on 127.0.0.1 only by default; leave it that way.
+```
+vm$ sudo pg_lsclusters                          # 18  main  5432  online
+vm$ cd /tmp && sudo -u postgres psql -Atc "show listen_addresses;" -c "show data_checksums;"; cd ~
+```
+
+`localhost` and `on`. PostgreSQL listens on 127.0.0.1 only by default;
+leave it that way. Data checksums are on by default in 18: corruption on
+disk is reported instead of silently returned.
+
+Create the role and the database. The password is the **first of the
+secrets**: generate it on the VM, write it on the custody forms as it
+appears, and never type it on a command line (command lines are kept in
+shell history).
+
+```
+vm$ openssl rand -hex 24                        # 48 characters, 0-9 and a-f only: no O/0 or l/1 to misread
+vm$ cd /tmp && sudo -u postgres createuser --login --pwprompt anjal; cd ~     # paste it twice
+vm$ cd /tmp && sudo -u postgres createdb --owner anjal anjal; cd ~
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -c 'select current_user;'   # asks for it; prints anjal
+```
+
+The schema is applied in section 3, from the release itself.
 
 ---
 
@@ -189,9 +321,9 @@ PostgreSQL listens on 127.0.0.1 only by default; leave it that way.
 On the laptop, from the repo root at the tagged release:
 
 ```
-pc> git checkout v0.13.0
-pc> .\deploy\publish.ps1 -Version 0.13.0
-pc> scp .\artifacts\anjal-0.13.0.tar.gz ubuntu@203.0.113.10:~/
+pc> git checkout v1.0.0-rc.1
+pc> .\deploy\publish.ps1 -Version 1.0.0-rc.1
+pc> scp -i $env:USERPROFILE\.ssh\anjal_e2e .\artifacts\anjal-1.0.0-rc.1.tar.gz arun@203.0.113.10:~/
 ```
 
 `publish.ps1` produces self-contained linux-x64 builds of both
@@ -201,8 +333,8 @@ scripts, units, env templates and `schema.sql`.
 On the VM:
 
 ```
-vm$ tar -xzf anjal-0.13.0.tar.gz
-vm$ sudo ./anjal-0.13.0/bin/install.sh ~/anjal-0.13.0
+vm$ tar -xzf anjal-1.0.0-rc.1.tar.gz
+vm$ sudo ./anjal-1.0.0-rc.1/bin/install.sh ~/anjal-1.0.0-rc.1
 ```
 
 `install.sh` creates the `anjal` system user, the directory layout below,
@@ -221,6 +353,20 @@ enables the systemd units without starting them.
 
 **Check:** `vm$ /opt/anjal/server/Anjal.Server --acme-renew-now` prints "Renewal requested" (proves the binary runs; harmless before configuration - delete the marker: `sudo rm -f /var/lib/anjal/acme/renew.request`).
 
+Apply the schema from the release (it asks for the database password):
+
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -f ~/anjal-1.0.0-rc.1/bin/schema.sql
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -c '\dt'
+```
+
+On a first run one `NOTICE: trigger "audit_events_no_change" ... does not
+exist, skipping` is expected; on a re-run, `already exists, skipping`
+notices are expected. The script is safe to apply again, which is how an
+upgrade applies it. **Check:** `\dt` lists **20 tables**, all owned by
+`anjal`, including `tenants`, `mailboxes`, `messages`, `sender_rules` and
+`audit_events` (measured on PostgreSQL 18.6).
+
 ---
 
 ## 4. Configure
@@ -235,15 +381,35 @@ vm$ sudo nano /etc/anjal/webmail.env
 Required changes in `server.env`:
 
 - `ANJAL_POSTGRES` - the password from section 2.
-- `ANJAL_API_TOKEN` - `openssl rand -hex 32`. The server refuses to start
-  without one, with fewer than 24 characters, or with an obvious
-  placeholder. Rotating it is section 13a.
-- `ANJAL_KEK` - `openssl rand -base64 32`. This key encrypts DKIM private
-  keys inside the database. **Copy it into your password manager now**,
-  next to the database password: a backup restored without it has
-  unreadable DKIM keys (recoverable only by generating new keys and
-  republishing DNS). The placeholder in the template is deliberately
-  invalid, so the server will not start until you replace it.
+- `ANJAL_API_TOKEN` - `openssl rand -hex 32`, generated **on the VM**.
+  The server refuses to start without one, with fewer than 24 characters,
+  with an obvious placeholder, or with too little variety. Rotating it is
+  section 13a.
+- `ANJAL_KEK` - `openssl rand -base64 32`, generated **on the VM**. This key
+  encrypts DKIM private keys inside the database. **Write it on the
+  custody forms now**, next to the database password: a backup restored
+  without it has unreadable DKIM keys (recoverable only by generating new
+  keys and republishing DNS). It is the only secret that cannot be reset.
+  The placeholder in the template is deliberately invalid, so the server
+  will not start until you replace it.
+
+Generate secrets on the VM, never on the laptop: Windows PowerShell 5.1
+once produced an admin token of forty identical characters from a .NET
+Core-only API. The secrets are kept on handwritten paper forms
+(ANJAL-SEC-03, three copies), not in a password manager. Base64 mixes
+`O`/`0` and `l`/`1`/`I`, so **prove each paper copy** before relying on
+it: type the value back from the paper and compare fingerprints, which
+shows nothing secret on screen.
+
+```
+vm$ printf '%s' 'VALUE-TYPED-FROM-PAPER' | sha256sum | cut -c1-16
+vm$ sudo grep '^ANJAL_KEK=' /etc/anjal/server.env | cut -d= -f2- | tr -d '\n' | sha256sum | cut -c1-16
+```
+
+The two fingerprints must match; the same pair of commands, with the
+variable name changed, proves the database password and the admin token.
+Start the first command with a **space**: Ubuntu's default
+`HISTCONTROL=ignoreboth` then keeps it out of shell history.
 - Leave `ANJAL_ACME_STAGING` **commented out for now** - section 7 explains the rehearsal.
 
 Required changes in `webmail.env`:
@@ -270,15 +436,27 @@ At GoDaddy, for `anjal.co.in`:
 
 Leave SPF as `v=spf1 -all` and DMARC as it is for now (nothing sends yet).
 
-At E2E: set the **PTR** of `203.0.113.10` to `mail.anjal.co.in`.
+At E2E, after the A record answers: MyAccount → Network → DNS → **Add
+Reverse DNS**. The IP's existing PTR row points at E2E's own name; open its
+**⋯** menu → **Edit**, set **Target** to `mail.anjal.co.in.` (with the
+trailing dot - it marks the name as complete), leave TTL, and Submit. Edit
+the row rather than adding another: two PTRs for one IP confuse receivers.
+E2E warns that changes can take seven days; the first one answered from
+E2E, Google and Cloudflare within minutes.
 
 Wait for propagation, then check from the laptop:
 
 ```
-pc> nslookup -type=A mail.anjal.co.in 8.8.8.8
-pc> nslookup -type=MX anjal.co.in 8.8.8.8
+pc> nslookup -type=A mail.anjal.co.in. 8.8.8.8
+pc> nslookup -type=MX anjal.co.in. 8.8.8.8
 pc> nslookup 203.0.113.10 8.8.8.8          # PTR must answer mail.anjal.co.in
 ```
+
+Keep the **trailing dot** on names. Without it, Windows retries a name
+that does not exist yet with the network's search suffix appended; on a
+home router that hands out `domain.name`, that returns ten unrelated
+`185.38.109.x` addresses for `mail.anjal.co.in.domain.name`, which looks
+like a wrong A record but is only "not there yet".
 
 **Check:** all three answer correctly from a public resolver. The PTR is
 the one people forget; several large providers refuse mail from IPs
@@ -484,12 +662,14 @@ vm$ sudo nano /etc/anjal/rclone.conf
 vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsd b2crypt:   # empty listing, no error
 ```
 
-**Copy `/etc/anjal/rclone.conf` to a password manager now** (alongside
-`ANJAL_KEK` from section 4). The crypt
+**Write the two crypt passwords on the custody forms now** (alongside
+`ANJAL_KEK` from section 4), and prove the paper copies as section 4
+describes. The crypt
 passwords are the only way to read the backup; losing them makes the
 backup worthless.
 
-First run by hand, then let the timer take over (nightly 21:00 UTC):
+First run by hand, then let the timer take over (nightly 21:00 UTC,
+02:30 IST - the timer names UTC, whatever the server's zone):
 
 ```
 vm$ sudo systemctl start anjal-backup
@@ -531,13 +711,15 @@ future you can see each one and where it lives.
 
 | Concern | Control | Where |
 | --- | --- | --- |
-| Network exposure | Security Group plus firewalld; only 22, 25, 80, 443, 465, 587 open | sections 1a, 1b |
+| Network exposure | E2E Security Group only (no host firewall, per E2E's advice); only 22, 25, 80, 443, 465, 587 open; internal services bound to 127.0.0.1 and measured with `ss -tlnp` | sections 1a, 1c |
+| Administrative access | Named account per person with sudo; root SSH login, passwords, keyboard-interactive, GSSAPI and X11 off; fail2ban; port 22 to move behind WireGuard before real mail | section 1b, `01-anjal-hardening.conf` |
+| Software updates | unattended-upgrades for Ubuntu security and the PostgreSQL repository | sections 1, 2 |
 | Admin API | Loopback only, bearer token required, refuses to start otherwise; reached over SSH | `server.env`, section 13 |
 | Password storage | PBKDF2-HMAC-SHA256, 600,000 rounds, upgraded on sign-in | application |
 | Brute force | SMTP AUTH: 3 per session, 10 per address per 15 min. Webmail: 5 per address+account, 50 per account | application |
 | Connection floods | 120 s idle timeout, 15 min session limit, 200 connections, 10 per address | `server.env` |
-| DKIM private keys | AES-256-GCM in the database under `ANJAL_KEK`, which lives only in `server.env` and your password manager | section 4 |
-| Everything else at rest | Mail, database, and certificates on the VM's disk. **Confirm with E2E that the volume is encrypted at rest**; if it is not, ask for an encrypted volume before going live | E2E ticket |
+| DKIM private keys | AES-256-GCM in the database under `ANJAL_KEK`, which lives only in `server.env` and on the handwritten custody forms | section 4 |
+| Everything else at rest | Mail, database, and certificates on the VM's disk, which E2E encrypts at rest (chosen when the node was created, no passphrase so it boots unattended) | section 0 |
 | Backups | rclone crypt (client-side encryption) to Backblaze B2 | section 11 |
 | Changes | Every admin API change and webmail sign-in/password change is recorded in `audit_events`, which the database itself makes append-only | section 13 |
 | Service isolation | Dedicated `anjal` user, `ProtectSystem=strict`, `NoNewPrivileges`, restricted address families and namespaces | systemd units |
@@ -620,11 +802,11 @@ Things to watch in the first weeks:
 
 | Symptom | Look at | Likely cause |
 |---|---|---|
-| Webmail unreachable | Security Group rules, `firewall-cmd --list-ports`, `journalctl -u anjal-webmail` | port 443 closed in **either** firewall, or service failed to bind (must run with `CAP_NET_BIND_SERVICE` - the unit sets it) |
+| Webmail unreachable | Security Group rules, `sudo ss -tlnp \| grep ':443'`, `journalctl -u anjal-webmail` | port 443 missing from the Security Group, or service failed to bind (must run with `CAP_NET_BIND_SERVICE` - the unit sets it) |
 | `/healthz` `tls` degraded, "no certificate" | `journalctl -u anjal-webmail \| grep ACME` | challenge failed: DNS, port 80, or PTR; fix and restart webmail |
 | Inbound mail never arrives | `journalctl -u anjal-server \| grep -i "rcpt\|relaying"` | MX not pointing here, or domain not registered to a tenant (`GET /api/tenant-domains`) |
 | Inbound lands in Junk | message page → spam reasons | see section 13; `SPF_NONE`/`DKIM_NONE` from a big provider means your DNS resolver on the VM is failing - check `resolvectl status` |
-| Outbound stuck | `/metrics` `anjal_outbound_pending`, then `nc -vz gmail-smtp-in.l.google.com 25` from the VM | outbound 25 blocked in the Security Group or by E2E (sections 1a/1b), or recipient greylisting you (normal, retries) |
+| Outbound stuck | `/metrics` `anjal_outbound_pending`, then `nc -vz gmail-smtp-in.l.google.com 25` from the VM | outbound 25 blocked in the Security Group or by E2E (sections 0, 1a), or recipient greylisting you (normal, retries) |
 | Gmail shows `DKIM: FAIL` | section 9 TXT record | public key mismatch, selector typo, or TXT split into wrong chunks by the DNS panel |
 | `452 4.2.2 Mailbox full` in logs | webmail sidebar usage | quota reached; delete mail or raise `quotaBytes` via `POST /api/mailboxes` |
 | Backup fails | `journalctl -u anjal-backup` | rclone config unreadable by `anjal` (mode 640, group anjal), wrong B2 key, or `pg_dump` cannot connect (`ANJAL_POSTGRES` in `server.env`) |

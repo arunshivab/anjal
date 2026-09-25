@@ -369,6 +369,59 @@ public class MailboxApiTests : System.IDisposable
         Assert.Equal(HttpStatusCode.NotFound, del2.StatusCode);
     }
 
+    /// <summary>
+    /// DEF-047: an address in the URL may arrive percent-encoded
+    /// (<c>arun%40anjal.co.in</c>), as PowerShell's EscapeDataString and most
+    /// HTTP clients produce it. Every mailbox route must decode it exactly as
+    /// the sender-rules route already did, instead of answering 400.
+    /// </summary>
+    [Fact]
+    public async System.Threading.Tasks.Task Mailboxes_PercentEncodedAddress_ResolvesOnEveryRoute()
+    {
+        await this.CreateTenantAsync();
+        await this.CreateDomainAsync("imagiqa", "anjal.co.in");
+        await this.CreateMailboxAsync("arun@anjal.co.in");
+
+        HttpResponseMessage get = await this.client.GetAsync("api/mailboxes/arun%40anjal.co.in");
+        Assert.Equal(HttpStatusCode.OK, get.StatusCode);
+
+        HttpResponseMessage folders = await this.client.GetAsync("api/mailboxes/arun%40anjal.co.in/folders");
+        Assert.Equal(HttpStatusCode.OK, folders.StatusCode);
+
+        HttpResponseMessage messages = await this.client.GetAsync("api/mailboxes/arun%40anjal.co.in/messages");
+        Assert.Equal(HttpStatusCode.OK, messages.StatusCode);
+
+        HttpResponseMessage del = await this.client.DeleteAsync("api/mailboxes/arun%40anjal.co.in");
+        Assert.Equal(HttpStatusCode.NoContent, del.StatusCode);
+
+        HttpResponseMessage gone = await this.client.GetAsync("api/mailboxes/arun@anjal.co.in");
+        Assert.Equal(HttpStatusCode.NotFound, gone.StatusCode);
+    }
+
+    /// <summary>
+    /// DEF-047 guard: decoding happens after the path is split, so an encoded
+    /// slash cannot reach another route or another mailbox. It is an unknown
+    /// or malformed address - never a 5xx, and the real mailbox is untouched.
+    /// </summary>
+    [Theory]
+    [InlineData("a%2F..%2Farun%40anjal.co.in")]
+    [InlineData("arun%40anjal.co.in%2Ffolders")]
+    [InlineData("%2E%2E%2Farun%40anjal.co.in")]
+    public async System.Threading.Tasks.Task Mailboxes_EncodedSlash_DoesNotEscapeTheAddressSegment(string encoded)
+    {
+        await this.CreateTenantAsync();
+        await this.CreateDomainAsync("imagiqa", "anjal.co.in");
+        await this.CreateMailboxAsync("arun@anjal.co.in");
+
+        HttpResponseMessage del = await this.client.DeleteAsync("api/mailboxes/" + encoded);
+        Assert.True(
+            del.StatusCode == HttpStatusCode.BadRequest || del.StatusCode == HttpStatusCode.NotFound,
+            $"expected 400 or 404, got {(int)del.StatusCode}");
+
+        HttpResponseMessage still = await this.client.GetAsync("api/mailboxes/arun@anjal.co.in");
+        Assert.Equal(HttpStatusCode.OK, still.StatusCode);
+    }
+
     // -------- Messages --------
 
     [Fact]

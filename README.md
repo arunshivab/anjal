@@ -10,7 +10,20 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v0.18.3** - CodeQL now analyses only the code that ships. A paths-ignore
+**v1.0.0-rc.1** - the first release candidate for 1.0, and the build that
+goes onto the production server for phase B testing. 1.0.0 itself is tagged
+only after phase B and a restore drill pass on this code. Fixes DEF-047: a
+mailbox address sent percent-encoded in the URL (`arun%40anjal.co.in`, as
+PowerShell and most HTTP clients encode it) was refused with 400 on every
+mailbox route; the address segment is now decoded after the path is split,
+so an encoded slash cannot reach another route. The deployment runbook's
+sections 0 to 5 are rewritten from the first real provisioning on E2E: a
+named admin account with root SSH login off, the Security Group as the only
+firewall, PostgreSQL 18 from the PostgreSQL repository, self-service PTR,
+secrets generated on the VM and proven onto handwritten custody forms, and
+20 tables where it said 15.
+
+Previously: **v0.18.3** - CodeQL now analyses only the code that ships. A paths-ignore
 filter does not exclude anything in a compiled language - CodeQL sees
 whatever the build compiles - so seven alerts about a deliberately careless
 ACME test fake appeared on the first run. The workflow builds src and

@@ -1,7 +1,7 @@
 # Build a self-contained linux-x64 release of Anjal on the Windows laptop
 # and pack it as anjal-<version>.tar.gz for scp to the VM.
 #
-#   .\deploy\publish.ps1 -Version 0.13.0
+#   .\deploy\publish.ps1 -Version 1.0.0-rc.1
 param(
     [Parameter(Mandatory = $true)][string]$Version
 )
@@ -47,4 +47,4 @@ foreach ($f in Get-ChildItem "$out\bin\*" -Include *.sh, *.service, *.timer, *.e
 
 tar -czf "$repo\artifacts\anjal-$Version.tar.gz" -C "$repo\artifacts" "anjal-$Version"
 Write-Host "Built $repo\artifacts\anjal-$Version.tar.gz"
-Write-Host "Copy to the VM:  scp .\artifacts\anjal-$Version.tar.gz ubuntu@<vm-ip>:~/"
+Write-Host "Copy to the VM:  scp -i $env:USERPROFILE\.ssh\anjal_e2e .\artifacts\anjal-$Version.tar.gz arun@<vm-ip>:~/"
