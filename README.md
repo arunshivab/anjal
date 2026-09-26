@@ -10,7 +10,26 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v1.0.0-rc.3** - two defects found while taking the production
+**v1.0.0-rc.4** - DKIM made to agree with the rest of the world. The first
+real inbound message, from Gmail, failed DKIM on the production server
+although Gmail's signature was valid. DEF-056: Gmail over-signs - it lists
+From, To, Subject and other headers twice, and names absent ones such as Cc -
+and the verifier added a header again for every listing instead of taking
+instances from the bottom up and contributing nothing once they ran out
+(RFC 6376 section 5.4.2); it also hashed headers under the spelling in h=
+rather than as written, which broke simple canonicalization. DEF-057: only
+the first DKIM-Signature was checked, so a broken or unaligned first
+signature hid a valid aligned one - enough for DMARC to reject legitimate
+mail from a p=reject domain. DEF-058: in simple mode the signer hashed the
+DKIM-Signature header without the space it then wrote after the colon, so
+receivers rejected every simple-mode signature; relaxed mode, which the
+server uses, was unaffected and its signatures are byte-for-byte unchanged.
+Anjal had only ever been tested against itself: the new tests use messages
+signed and judged by dkimpy, an independent implementation. The runbook's
+section 8 no longer writes the DKIM key where other accounts can read it
+(DEF-054) or puts the mailbox password on the command line (DEF-055).
+
+Previously: **v1.0.0-rc.3** - two defects found while taking the production
 certificate. DEF-053: an admin POST sent without a body (`curl -X POST`
 with no `-d`) was answered `411 Length Required` by the HTTP listener, which
 then passed the request to the API anyway - the change was made while the

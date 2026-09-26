@@ -76,15 +76,22 @@ public sealed class DkimSigner
         //    plus the DKIM-Signature header (with b= empty) canonicalized,
         //    NO trailing CRLF after the DKIM-Signature line per RFC 6376
         //    section 3.7 step 4 ("without a trailing CRLF").
+        // DEF-058: each header is hashed as written in the message - its own
+        // name and value, the bottom-most instance (RFC 6376 section 5.4.2) -
+        // and the DKIM-Signature header exactly as it is written below, space
+        // after the colon included. Hashing one text and writing another made
+        // every simple-mode signature fail at the receiver; relaxed mode hid it
+        // because it strips that space before hashing.
+        const string SignatureHeaderName = "DKIM-Signature";
         var signingInput = new StringBuilder();
         foreach (string hdrName in signedHeaders)
         {
-            string? value = parsed.GetHeaderValue(hdrName);
-            if (value is null) continue; // Skip missing headers (signed-but-absent is allowed per RFC).
-            signingInput.Append(DkimCanonicalizer.CanonHeader(hdrName, value, this.options.HeaderCanon));
+            RawHeader? header = BottomMost(parsed, hdrName);
+            if (header is null) continue; // Skip missing headers (signed-but-absent is allowed per RFC).
+            signingInput.Append(DkimCanonicalizer.CanonHeader(header.Name, header.Value, this.options.HeaderCanon));
         }
         // Append the DKIM-Signature line, canonicalized, without trailing CRLF.
-        string dkimSigCanon = DkimCanonicalizer.CanonHeader("DKIM-Signature", sigValueWithoutB, this.options.HeaderCanon);
+        string dkimSigCanon = DkimCanonicalizer.CanonHeader(SignatureHeaderName, " " + sigValueWithoutB, this.options.HeaderCanon);
         if (dkimSigCanon.EndsWith("\r\n", System.StringComparison.Ordinal))
         {
             dkimSigCanon = dkimSigCanon.Substring(0, dkimSigCanon.Length - 2);
@@ -101,9 +108,21 @@ public sealed class DkimSigner
 
         // 6. Build the final DKIM-Signature header and prepend.
         string finalSigValue = sigValueWithoutB + b;
-        string finalHeader = "DKIM-Signature: " + finalSigValue + "\r\n";
+        string finalHeader = SignatureHeaderName + ": " + finalSigValue + "\r\n";
 
         return PrependHeader(rawBytes, finalHeader);
+    }
+
+    private static RawHeader? BottomMost(DkimMessage msg, string name)
+    {
+        for (int i = msg.Headers.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(msg.Headers[i].Name, name, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return msg.Headers[i];
+            }
+        }
+        return null;
     }
 
     private static System.Collections.Generic.List<string> BuildSignedHeaderList(
