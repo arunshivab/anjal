@@ -221,8 +221,35 @@ public sealed class GreylistOptions
     /// <summary>How long a triplet that never retried is remembered before being forgotten. Default 8 hours.</summary>
     public TimeSpan PendingLifetime { get; init; } = TimeSpan.FromHours(8);
 
-    /// <summary>How long a triplet that passed stays whitelisted after its last use. Default 36 hours.</summary>
-    public TimeSpan PassedLifetime { get; init; } = TimeSpan.FromHours(36);
+    /// <summary>
+    /// How long a triplet that passed stays remembered after its last use.
+    /// Default 35 days (decision 2B, 26 Sep 2026): at 36 hours a colleague
+    /// who wrote weekly was delayed every week.
+    /// </summary>
+    public TimeSpan PassedLifetime { get; init; } = TimeSpan.FromDays(35);
+
+    /// <summary>
+    /// File the remembered triplets are kept in, so a restart or upgrade does
+    /// not greylist every sender again; null keeps them in memory only. The
+    /// file is rebuildable: losing it only means senders are greylisted once more.
+    /// </summary>
+    public string? StateFile { get; init; }
+
+    /// <summary>How often, at most, the state file is rewritten. Default one minute.</summary>
+    public TimeSpan SaveInterval { get; init; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Optional check that exempts a sender from greylisting: given the client
+    /// IP and the MAIL FROM address, true lets the message through at once.
+    /// The server uses "the IP passes SPF for the MAIL FROM domain".
+    /// </summary>
+    public Func<string, string, CancellationToken, Task<bool>>? TrustedSender { get; init; }
+
+    /// <summary>
+    /// Where each decision is written (DEF-059: before rc.5 no deferral was
+    /// logged, so a delayed message could not be told from a lost one).
+    /// </summary>
+    public Action<string>? Log { get; init; }
 
     /// <summary>
     /// Most triplets remembered. Past it the table is swept immediately and,
@@ -237,14 +264,21 @@ public sealed class GreylistOptions
 /// recipient) triplet is seen, RCPT is deferred with 451. A retry after
 /// <see cref="GreylistOptions.Delay"/> passes and the triplet is remembered;
 /// legitimate MTAs retry, most spam cannons do not. Authenticated sessions
-/// and loopback/private clients are never greylisted. State is in-memory.
+/// and loopback/private clients are never greylisted, nor is a sender that
+/// <see cref="GreylistOptions.TrustedSender"/> vouches for. State is kept in
+/// memory and, when <see cref="GreylistOptions.StateFile"/> is set, in a file
+/// that survives restarts. Every deferral and every first pass is logged
+/// (decision 2B and DEF-059, 26 Sep 2026).
 /// </summary>
 public sealed class Greylist : ISmtpPolicy
 {
     private readonly GreylistOptions options;
     private readonly Func<DateTimeOffset> clock;
     private readonly ConcurrentDictionary<string, Entry> entries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object saveGate = new();
     private long lastSweepTicks;
+    private long lastSaveTicks;
+    private int dirty;
 
     /// <summary>Construct.</summary>
     /// <param name="options">Timings; null for defaults.</param>
@@ -254,6 +288,8 @@ public sealed class Greylist : ISmtpPolicy
         this.options = options ?? new GreylistOptions();
         this.clock = clock ?? (() => DateTimeOffset.UtcNow);
         this.lastSweepTicks = this.clock().UtcTicks;
+        this.lastSaveTicks = this.lastSweepTicks;
+        this.Load();
     }
 
     /// <summary>Number of triplets currently remembered (pending or passed).</summary>
@@ -266,8 +302,33 @@ public sealed class Greylist : ISmtpPolicy
     public Task<PolicyDecision> OnMailFromAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, CancellationToken ct = default) => Task.FromResult(PolicyDecision.Allow);
 
     /// <inheritdoc/>
-    public Task<PolicyDecision> OnRcptToAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient, CancellationToken ct = default) =>
-        Task.FromResult(this.OnRcptTo(remoteAddress, authenticatedUser, envelopeFrom, recipient));
+    public async Task<PolicyDecision> OnRcptToAsync(string remoteAddress, string? authenticatedUser, string envelopeFrom, string recipient, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(remoteAddress);
+        ArgumentNullException.ThrowIfNull(envelopeFrom);
+        ArgumentNullException.ThrowIfNull(recipient);
+        if (authenticatedUser is null && !IsExempt(remoteAddress) && envelopeFrom.Length > 0 && this.options.TrustedSender is { } trusted)
+        {
+            bool vouched;
+            try
+            {
+                vouched = await trusted(remoteAddress, envelopeFrom, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // A failed check must never lose mail: fall back to ordinary greylisting.
+            catch (Exception ex)
+            {
+                this.options.Log?.Invoke($"Greylist: sender check failed for {remoteAddress} {envelopeFrom} ({ex.GetType().Name}); greylisting as usual.");
+                vouched = false;
+            }
+#pragma warning restore CA1031
+            if (vouched)
+            {
+                this.options.Log?.Invoke($"Greylist: not delayed - {remoteAddress} passes SPF for {envelopeFrom} -> {recipient}.");
+                return PolicyDecision.Allow;
+            }
+        }
+        return this.OnRcptTo(remoteAddress, authenticatedUser, envelopeFrom, recipient);
+    }
 
     /// <summary>Synchronous RCPT TO check.</summary>
     /// <param name="remoteAddress">Client IP.</param>
@@ -292,22 +353,146 @@ public sealed class Greylist : ISmtpPolicy
             this.Shrink(now);
         }
         Entry e = this.entries.GetOrAdd(key, _ => new Entry { FirstSeen = now, LastSeen = now, Passed = false });
+        PolicyDecision decision;
         lock (e)
         {
             e.LastSeen = now;
             if (e.Passed)
             {
-                return PolicyDecision.Allow;
+                decision = PolicyDecision.Allow;
             }
-            if (now - e.FirstSeen >= this.options.Delay)
+            else if (now - e.FirstSeen >= this.options.Delay)
             {
                 e.Passed = true;
-                return PolicyDecision.Allow;
+                int waited = (int)Math.Round((now - e.FirstSeen).TotalMinutes);
+                this.options.Log?.Invoke($"Greylist: passed after {waited} min - {remoteAddress} {envelopeFrom} -> {recipient}; remembered {this.options.PassedLifetime.TotalDays:0} days.");
+                decision = PolicyDecision.Allow;
             }
-            int seconds = (int)Math.Ceiling((this.options.Delay - (now - e.FirstSeen)).TotalSeconds);
-            Counters.Increment("anjal_greylist_deferred_total");
-            return PolicyDecision.Defer($"4.7.1 Greylisted, please retry in {seconds} seconds");
+            else
+            {
+                int seconds = (int)Math.Ceiling((this.options.Delay - (now - e.FirstSeen)).TotalSeconds);
+                Counters.Increment("anjal_greylist_deferred_total");
+                this.options.Log?.Invoke($"Greylist: deferred {remoteAddress} {envelopeFrom} -> {recipient} (451, retry in {seconds}s).");
+                decision = PolicyDecision.Defer($"4.7.1 Greylisted, please retry in {seconds} seconds");
+            }
         }
+        Interlocked.Exchange(ref this.dirty, 1);
+        this.SaveIfDue(now);
+        return decision;
+    }
+
+    /// <summary>
+    /// Write the state file now, if one is configured and anything changed.
+    /// The server calls this on shutdown so an orderly restart loses nothing.
+    /// </summary>
+    public void Flush()
+    {
+        if (this.options.StateFile is null || Interlocked.Exchange(ref this.dirty, 0) == 0)
+        {
+            return;
+        }
+        this.Save();
+    }
+
+    private void SaveIfDue(DateTimeOffset now)
+    {
+        if (this.options.StateFile is null)
+        {
+            return;
+        }
+        long last = Interlocked.Read(ref this.lastSaveTicks);
+        if (now.UtcTicks - last < this.options.SaveInterval.Ticks
+            || Interlocked.CompareExchange(ref this.lastSaveTicks, now.UtcTicks, last) != last)
+        {
+            return;
+        }
+        this.Flush();
+    }
+
+    /// <summary>
+    /// One line per triplet: key, first seen, last seen (UTC ticks), passed.
+    /// Written to a temporary file and moved into place, so a crash mid-write
+    /// leaves the previous file intact.
+    /// </summary>
+    private void Save()
+    {
+        string path = this.options.StateFile!;
+        var sb = new System.Text.StringBuilder();
+        foreach (KeyValuePair<string, Entry> kv in this.entries)
+        {
+            lock (kv.Value)
+            {
+                sb.Append(kv.Key).Append('\t')
+                  .Append(kv.Value.FirstSeen.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('\t')
+                  .Append(kv.Value.LastSeen.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('\t')
+                  .Append(kv.Value.Passed ? '1' : '0').Append('\n');
+            }
+        }
+        lock (this.saveGate)
+        {
+            try
+            {
+                string temp = path + ".tmp";
+                System.IO.File.WriteAllText(temp, sb.ToString());
+                System.IO.File.Move(temp, path, overwrite: true);
+            }
+#pragma warning disable CA1031 // Losing the file only means senders are greylisted once more; never fail mail over it.
+            catch (Exception ex)
+            {
+                Interlocked.Exchange(ref this.dirty, 1);
+                this.options.Log?.Invoke($"Greylist: could not save {path}: {ex.Message}");
+            }
+#pragma warning restore CA1031
+        }
+    }
+
+    private void Load()
+    {
+        string? path = this.options.StateFile;
+        if (path is null || !System.IO.File.Exists(path))
+        {
+            return;
+        }
+        DateTimeOffset now = this.clock();
+        int kept = 0;
+        int skipped = 0;
+        try
+        {
+            foreach (string line in System.IO.File.ReadLines(path))
+            {
+                string[] f = line.Split('\t');
+                if (f.Length != 4
+                    || !long.TryParse(f[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long first)
+                    || !long.TryParse(f[2], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long last)
+                    || (f[3] != "0" && f[3] != "1"))
+                {
+                    skipped++;
+                    continue;
+                }
+                var e = new Entry
+                {
+                    FirstSeen = new DateTimeOffset(first, TimeSpan.Zero),
+                    LastSeen = new DateTimeOffset(last, TimeSpan.Zero),
+                    Passed = f[3] == "1",
+                };
+                TimeSpan idle = now - e.LastSeen;
+                if (idle > (e.Passed ? this.options.PassedLifetime : this.options.PendingLifetime) || this.entries.Count >= this.options.MaxEntries)
+                {
+                    skipped++;
+                    continue;
+                }
+                this.entries[f[0]] = e;
+                kept++;
+            }
+        }
+#pragma warning disable CA1031 // An unreadable file must not stop the server; start fresh instead.
+        catch (Exception ex)
+        {
+            this.options.Log?.Invoke($"Greylist: could not read {path}: {ex.Message}; starting with nothing remembered.");
+            return;
+        }
+#pragma warning restore CA1031
+        this.options.Log?.Invoke($"Greylist: {kept} sender(s) remembered from {path}" + (skipped > 0 ? $" ({skipped} expired or unreadable, dropped)." : "."));
     }
 
     /// <summary>

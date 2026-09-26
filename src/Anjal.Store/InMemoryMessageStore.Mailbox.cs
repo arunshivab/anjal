@@ -764,6 +764,7 @@ public sealed partial class InMemoryMessageStore
         Flagged = m.Flagged,
         Answered = m.Answered,
         SpamScore = m.SpamScore,
+        SpamChecked = m.SpamChecked,
         ReceivedAt = m.ReceivedAt,
         CategoryId = m.CategoryId,
         HasAttachments = m.HasAttachments,

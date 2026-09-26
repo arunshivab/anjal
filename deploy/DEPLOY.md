@@ -792,17 +792,24 @@ Use the name servers your domain actually has (`nslookup -type=NS anjal.co.in. 8
 ## 10. First mail - inbound, outbound, and the deliverability check
 
 **Inbound:** from Gmail or Yahoo, send a message to `arun@anjal.co.in`.
-The first attempt is **greylisted** - the sender's server gets `451` and
-retries within a few minutes; that is expected once per sender. Watch:
+Large providers pass SPF for their own domain, so since rc.5 they are **not
+greylisted** and the message arrives within seconds. A sender that does not
+pass SPF is greylisted once: its server gets `451`, retries on its own
+schedule (measured 25-35 minutes for Gmail and Outlook before rc.5), and is
+then remembered for 35 days, across restarts. Watch:
 
 ```
 vm$ sudo journalctl -u anjal-server -f
 ```
 
-Expect `Greylisted` on the first RCPT, then `Spam: score N ...` and
-`Delivered arun@anjal.co.in -> imagiqa/arun@anjal.co.in/new/...`. Open
-the message in the webmail; the message page shows the spam score and
-reasons (a Gmail message should score 0-1).
+Expect one `Greylist:` line - `not delayed - ... passes SPF for ...`, or
+`deferred ... (451, retry in ...)` followed later by `passed after N min` -
+then `Spam: score N ...` and
+`Delivered arun@anjal.co.in -> imagiqa/arun@anjal.co.in/new/...`. Before
+rc.5 no greylisting decision was logged, so the `Greylisted` line this
+section used to promise never appeared (DEF-059). Open the message in the
+webmail; the message page shows the spam score and reasons (a Gmail
+message should score 0-1).
 
 **Outbound:** from the webmail, compose to your Gmail address and send.
 Then in Gmail open the message → three dots → **Show original**. It must
@@ -969,6 +976,19 @@ setting to the templates, add it by hand; the release note says which.
    anyone signed in signs in once more.
 3. Add the fail2ban tuning (section 1) and the `Subsystem` line (section 1b)
    if they are not already present.
+
+**rc.4 to rc.5**, in addition:
+
+1. The `schema.sql` step above adds one column, `messages.spam_checked`
+   (decision 1B). Messages stored before it are left empty and the webmail
+   decides by folder. **Check:**
+   `psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.columns where table_name='messages' and column_name='spam_checked'"`
+   prints `1`.
+2. Greylisting's new settings (decision 2B) work from their defaults; add
+   them to `/etc/anjal/server.env` only to change them (the template lists
+   all four). **Check:** the server's start-up line reads
+   `Greylisting: on (delay 300s, senders remembered 35 days, kept in /var/lib/anjal/greylist.tsv, senders passing SPF not delayed).`
+   The state file appears after the first greylisting decision.
 
 ---
 

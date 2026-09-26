@@ -158,6 +158,12 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
 #pragma warning restore CA1031
 
         int spamScore = Anjal.Spam.SpamHeaders.ScoreOf(parsed);
+
+        // Decision 1B: the spam filter scores only mail from outside (no
+        // signed-in user) and writes its score header on every message it
+        // scores. A message from a signed-in account is not checked, whatever
+        // headers it carries.
+        bool spamChecked = ctx.AuthenticatedUser is null && parsed?.Headers.Get(Anjal.Spam.SpamHeaders.Score) is not null;
         string fromHeaderAddress = parsed is null ? string.Empty : Anjal.Spam.SpamScorer.FirstAddress(parsed.Headers.Get("From") ?? string.Empty);
         var rulesByTenant = new System.Collections.Generic.Dictionary<System.Guid, System.Collections.Generic.IReadOnlyList<Anjal.Store.SenderRuleRow>>();
 
@@ -217,6 +223,7 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     DateHeader = parsed?.Date ?? string.Empty,
                     SizeBytes = written.SizeBytes,
                     SpamScore = spamScore,
+                    SpamChecked = spamChecked,
                     HasAttachments = HasAttachment(parsed?.Body),
                     BodyText = MessageText.Extract(parsed),
                     CategoryId = await this.CategoryForAsync(mailbox.Id, ctx.EnvelopeFrom, parsed?.Headers.Get("From") ?? string.Empty, ct).ConfigureAwait(false),
@@ -319,6 +326,7 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             DateHeader = parsed?.Date ?? string.Empty,
             SizeBytes = written.SizeBytes,
             Seen = true,
+            SpamChecked = false,
             HasAttachments = HasAttachment(parsed?.Body),
             BodyText = MessageText.Extract(parsed),
         }, ct).ConfigureAwait(false);

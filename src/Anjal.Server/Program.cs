@@ -142,7 +142,10 @@ public static class Program
         // Anti-spam (v0.11.0): score unauthenticated mail before fan-out.
         // Verdict headers ride along; the mailbox sink files Junk.
         Anjal.Spam.SpamFilterSink sink = BuildSpamFilter(fanOut, Log);
-        Anjal.Spam.CompositeSmtpPolicy mtaPolicy = BuildMtaPolicy(mailboxStore, Log);
+        Anjal.Spam.CompositeSmtpPolicy mtaPolicy = BuildMtaPolicy(mailboxStore, Log, out Anjal.Spam.Greylist? greylist);
+        // Remembered senders reach the state file on every exit, including the
+        // SIGTERM that "systemctl stop" sends (decision 2B).
+        System.AppDomain.CurrentDomain.ProcessExit += (_, _) => greylist?.Flush();
         Anjal.Spam.RateLimiter submissionPolicy = BuildSubmissionPolicy();
 
         // TLS cert for SMTP receiver: a static file (ANJAL_TLS_CERT_PATH) or,
@@ -523,6 +526,7 @@ public static class Program
             http01?.Dispose();
         }
         certWatcher?.Dispose();
+        greylist?.Flush();
         return 0;
     }
 
@@ -752,9 +756,62 @@ public static class Program
         return filter;
     }
 
-    /// <summary>MTA-port policy: rate limits plus greylisting.</summary>
-    private static Anjal.Spam.CompositeSmtpPolicy BuildMtaPolicy(Anjal.Store.IMailboxStore mailboxStore, System.Action<string> log)
+    /// <summary>
+    /// Where greylisting keeps remembered senders: ANJAL_GREYLIST_STATE if set
+    /// ("none" keeps them in memory only), otherwise /var/lib/anjal/greylist.tsv
+    /// when that folder exists (the server's own writable folder), otherwise
+    /// memory only.
+    /// </summary>
+    private static string? GreylistStateFile()
     {
+        string? configured = System.Environment.GetEnvironmentVariable("ANJAL_GREYLIST_STATE");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return string.Equals(configured, "none", System.StringComparison.OrdinalIgnoreCase) ? null : configured;
+        }
+        return System.IO.Directory.Exists("/var/lib/anjal") ? "/var/lib/anjal/greylist.tsv" : null;
+    }
+
+    /// <summary>
+    /// Decision 2B: a sender whose connecting IP passes SPF for the MAIL FROM
+    /// domain is not greylisted. Large providers always pass; the crude
+    /// senders greylisting stops usually do not. Verdicts are cached for ten
+    /// minutes per (IP, domain) so a message to several recipients costs one
+    /// lookup.
+    /// </summary>
+    private static System.Func<string, string, System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>> SpfPassExemption(System.Action<string> log)
+    {
+        var spf = new Anjal.Auth.SpfVerifier(Anjal.Dns.DnsResolver.CreateFromSystem());
+        var cache = new System.Collections.Concurrent.ConcurrentDictionary<string, (bool Pass, System.DateTimeOffset Until)>(System.StringComparer.OrdinalIgnoreCase);
+        return async (ip, mailFrom, ct) =>
+        {
+            int at = mailFrom.LastIndexOf('@');
+            if (at < 0 || at == mailFrom.Length - 1 || !System.Net.IPAddress.TryParse(ip, out System.Net.IPAddress? peer))
+            {
+                return false;
+            }
+            string domain = mailFrom[(at + 1)..].ToLowerInvariant();
+            string key = ip + "|" + domain;
+            System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
+            if (cache.TryGetValue(key, out (bool Pass, System.DateTimeOffset Until) hit) && hit.Until > now)
+            {
+                return hit.Pass;
+            }
+            if (cache.Count > 10_000)
+            {
+                cache.Clear();
+            }
+            Anjal.Auth.SpfDetail detail = await spf.CheckAsync(peer, domain, ct).ConfigureAwait(false);
+            bool pass = detail.Result == Anjal.Auth.SpfResult.Pass;
+            cache[key] = (pass, now.AddMinutes(10));
+            return pass;
+        };
+    }
+
+    /// <summary>MTA-port policy: rate limits plus greylisting.</summary>
+    private static Anjal.Spam.CompositeSmtpPolicy BuildMtaPolicy(Anjal.Store.IMailboxStore mailboxStore, System.Action<string> log, out Anjal.Spam.Greylist? greylistPolicy)
+    {
+        greylistPolicy = null;
         var limits = new Anjal.Spam.RateLimitOptions
         {
             ConnectionsPerMinute = ParseIntEnv("ANJAL_RATE_CONN_PER_MIN", 60),
@@ -767,8 +824,21 @@ public static class Program
         if (greylist)
         {
             int delay = ParseIntEnv("ANJAL_GREYLIST_DELAY_SECONDS", 300);
-            policies.Add(new Anjal.Spam.Greylist(new Anjal.Spam.GreylistOptions { Delay = System.TimeSpan.FromSeconds(delay) }));
-            log($"Greylisting: on (delay {delay}s).");
+            int rememberDays = ParseIntEnv("ANJAL_GREYLIST_REMEMBER_DAYS", 35);
+            string? stateFile = GreylistStateFile();
+            bool skipSpfPass = !string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_GREYLIST_SKIP_SPF_PASS"), "false", System.StringComparison.OrdinalIgnoreCase);
+            greylistPolicy = new Anjal.Spam.Greylist(new Anjal.Spam.GreylistOptions
+            {
+                Delay = System.TimeSpan.FromSeconds(delay),
+                PassedLifetime = System.TimeSpan.FromDays(rememberDays),
+                StateFile = stateFile,
+                TrustedSender = skipSpfPass ? SpfPassExemption(log) : null,
+                Log = log,
+            });
+            policies.Add(greylistPolicy);
+            log($"Greylisting: on (delay {delay}s, senders remembered {rememberDays} days, " +
+                (stateFile is null ? "in memory only" : $"kept in {stateFile}") +
+                (skipSpfPass ? ", senders passing SPF not delayed)." : ")."));
         }
         else
         {

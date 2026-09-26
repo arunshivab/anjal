@@ -14,7 +14,7 @@ public sealed partial class PostgresMessageStore
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
     private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
-    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments";
+    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked";
 
     /// <inheritdoc/>
     public async Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
@@ -339,8 +339,8 @@ RETURNING " + FolderColumns + ";";
         System.ArgumentNullException.ThrowIfNull(message);
 
         const string sql = @"
-INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text)
-VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text)
+INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, spam_checked)
+VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @spam_checked)
 RETURNING " + MessageColumns + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -361,6 +361,7 @@ RETURNING " + MessageColumns + ";";
         cmd.Parameters.AddWithValue("flagged", message.Flagged);
         cmd.Parameters.AddWithValue("answered", message.Answered);
         cmd.Parameters.AddWithValue("spam_score", message.SpamScore);
+        cmd.Parameters.Add(new NpgsqlParameter<bool?>("spam_checked", NpgsqlTypes.NpgsqlDbType.Boolean) { TypedValue = message.SpamChecked });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -740,6 +741,7 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         ReceivedAt = r.GetFieldValue<System.DateTimeOffset>(15),
         CategoryId = r.IsDBNull(16) ? null : r.GetGuid(16),
         HasAttachments = r.GetBoolean(17),
+        SpamChecked = r.IsDBNull(18) ? null : r.GetBoolean(18),
     };
 
     // ================= Categories (v0.15.0) =================

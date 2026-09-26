@@ -16,7 +16,7 @@
     <Authors>Arun Shivab</Authors>
     <Product>Anjal</Product>
     <Description>Zero-dependency .NET 10 mail server library.</Description>
-    <Version>1.0.0-rc.4</Version>
+    <Version>1.0.0-rc.5</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">

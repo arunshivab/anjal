@@ -709,9 +709,12 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         Assert.Contains("DMARC fail", html, StringComparison.Ordinal);
         Assert.Contains("may be an impersonation", html, StringComparison.Ordinal);
 
-        // Only a claim under another name (the sender's own): ignored.
+        // Only a claim under another name (the sender's own): ignored. The score
+        // header is the spam filter's, which every message from outside passes
+        // through; since rc.5 the page tells checked mail from unchecked mail.
         MessageRow forged = await this.DeliverAsync(
             "Received: from out.example ([192.0.2.1])\r\n\tby mx.anjal.test with ESMTPS id 2;\r\n\tMon, 21 Sep 2026 10:00:00 +0000\r\n" +
+            "X-Anjal-Spam-Score: 0\r\nX-Anjal-Spam-Reasons: none\r\n" +
             "Authentication-Results: attacker.example; spf=pass; dkim=pass; dmarc=pass\r\n" +
             "From: Boss <boss@hospital.example>\r\nSubject: Pay this invoice\r\n\r\nnow\r\n");
         string forgedHtml = await this.client.GetStringAsync($"message/{forged.Id}");
@@ -766,6 +769,39 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         HttpResponseMessage res = await this.ComposeAsync("rao@hospital.example", "Too big", new byte[40 * 1024 * 1024]);
         Assert.Equal(HttpStatusCode.Redirect, res.StatusCode);
         Assert.Contains("18%20MB", res.Headers.Location!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DEF060_ThePhoneListLayout_IsNotUndoneByALaterRule()
+    {
+        // On phones each message took about four stacked bands because desktop
+        // rules for the list cells came later in the file than the phone
+        // layout and silently won. The rc.5 block must stay the last word.
+        string css = await this.client.GetStringAsync("app.css");
+        int block = css.IndexOf("DEF-060: on phones each message", StringComparison.Ordinal);
+        Assert.True(block > 0, "the DEF-060 block is in the stylesheet");
+        string after = css[block..];
+        Assert.Contains("table.ml tbody tr > td { display: block; padding: 0 !important; border: 0 !important;", after, StringComparison.Ordinal);
+        Assert.DoesNotMatch(new Regex(@"(^|\n)\s*table\.ml td\s*\{", RegexOptions.CultureInvariant), after);
+        Assert.DoesNotMatch(new Regex(@"(^|\n)\s*\.c-(cb|score)\s*\{[^}]*padding", RegexOptions.CultureInvariant), after);
+    }
+
+    [Fact]
+    public async Task Rc5_ReadingFitsTheWindow_WithTheMessageFrameStillSandboxed()
+    {
+        await this.SignInAsync();
+        MessageRow m = await this.DeliverAsync("From: a@x.test\r\nSubject: Fit\r\n\r\nShort.\r\n");
+        string html = await this.client.GetStringAsync($"message/{m.Id}");
+        // The body frame keeps a sandbox that grants nothing: no scripts, no
+        // same-origin access, however the empty attribute is written out.
+        Match frame = Regex.Match(html, "<iframe[^>]*class=\"bodyframe\"[^>]*>", RegexOptions.CultureInvariant);
+        Assert.True(frame.Success, "the message body frame is rendered");
+        Assert.Matches(new Regex(@"\ssandbox(=""\s*"")?[\s>]", RegexOptions.CultureInvariant), frame.Value);
+        Assert.DoesNotContain("allow-", frame.Value, StringComparison.Ordinal);
+        Assert.Contains("font-size:14px", html, StringComparison.Ordinal);
+
+        string css = await this.client.GetStringAsync("app.css");
+        Assert.Contains(".reading { height: calc(100vh - 61px);", css, StringComparison.Ordinal);
     }
 }
 

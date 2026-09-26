@@ -893,3 +893,64 @@ table.ml td.c-att svg { vertical-align: -2px; }
 .errcard h1 { margin: 0 0 12px; font-size: 22px; }
 .errcard p { margin: 0 0 12px; color: var(--ink-muted); }
 .errref { font-size: 13px; }
+
+/* ============================================================
+   v1.0.0-rc.5 (26 Sep 2026). Kept last in this file on purpose: DEF-060
+   happened because a desktop rule further down silently undid the phone
+   layout above it.
+   ============================================================ */
+
+/* ---- Decision 1B: a checked message with nothing suspicious shows a quiet
+        0; a message that was never checked shows a dash. ---- */
+.score.s-zero { color: var(--ink-subtle); background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, transparent); }
+.score.s-none { color: var(--ink-subtle); background: transparent; }
+
+/* ---- DEF-060: on phones each message took about four stacked bands -
+        every cell kept the desktop padding and its own divider (the
+        "table.ml td" rule and the !important paddings on .c-cb and .c-score
+        come after the phone layout), and the score sat alone on a fourth
+        row. Now a compact two-line row, as phone mail apps use:
+          [ ]  Sender ........................ time   fav
+               Subject ....................... score  clip          ---- */
+@media (max-width: 860px) {
+  table.ml tbody tr {
+    display: grid !important;
+    grid-template-columns: 22px minmax(0, 1fr) auto auto;
+    column-gap: 10px; row-gap: 2px; align-items: center;
+    padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  }
+  table.ml tbody tr > td { display: block; padding: 0 !important; border: 0 !important;
+                           width: auto !important; min-width: 0; background: transparent; }
+  table.ml tbody tr:hover > td { background: transparent; }
+  table.ml tbody tr:hover { background: color-mix(in srgb, var(--surface-300) 60%, transparent); }
+  table.ml tbody tr > td.c-cb      { grid-column: 1; grid-row: 1 / span 2; align-self: center; }
+  table.ml tbody tr > td.c-from    { grid-column: 2; grid-row: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  table.ml tbody tr > td.c-subject { grid-column: 2 / span 2; grid-row: 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  table.ml tbody tr > td.c-time    { grid-column: 3; grid-row: 1; text-align: right; font-size: 12px; }
+  table.ml tbody tr > td.c-fl      { grid-column: 4; grid-row: 1; text-align: center; }
+  table.ml tbody tr > td.c-score   { grid-column: 4; grid-row: 2; text-align: right; }
+  table.ml tbody tr > td.c-att     { grid-column: 3; grid-row: 2; text-align: right; }
+  table.ml tbody tr > td.c-att:empty { display: none; }
+  table.ml tbody tr > td.c-size,
+  table.ml tbody tr > td.c-cat     { display: none; }
+  .kb { display: none; }
+}
+
+/* ---- Reading on a computer: the page fits the window. The reading area
+        is exactly the window's height below the top bar; the message box
+        takes whatever height is left and scrolls inside itself, so the page
+        never scrolls. The rail scrolls on its own when it is taller than the
+        window. The message frame's sandbox is unchanged. ---- */
+@media (min-width: 1081px) {
+  .reading { height: calc(100vh - 61px); box-sizing: border-box; padding: 16px 24px 16px;
+             align-items: stretch; overflow: hidden; }
+  .reading > .read { display: flex; flex-direction: column; min-height: 0; }
+  .read .bodypanel { flex: 1 1 auto; min-height: 0; display: flex; }
+  .read .bodyframe { flex: 1 1 auto; height: auto; min-height: 0 !important; }
+  .reading > .rail { position: static; max-height: 100%; overflow-y: auto; gap: 10px;
+                     padding-right: 2px; scrollbar-width: thin; }
+  .reading .railcard { padding: 12px 14px 14px; }
+  .reading .railhead { margin-bottom: 8px; }
+  .readsubj { margin: 10px 0 6px; }
+  .byline { margin-bottom: 12px; }
+}

@@ -160,7 +160,12 @@ else
 
             <section class="railcard">
                 <h2 class="railhead">Checks</h2>
-                @if (view.Row.SpamScore > 0)
+                @* A message carrying this server's own verdicts was checked on arrival, whatever its stored flag says. *@
+                @if (view.Auth is null && !Anjal.Webmail.Services.SpamCheck.WasChecked(view.Row, view.Folder.Name))
+                {
+                    <p class="railnote">@Anjal.Webmail.Services.SpamCheck.NotCheckedNote(view.Folder.Name)</p>
+                }
+                else if (view.Row.SpamScore > 0)
                 {
                     <p class="scoreline @(view.Row.SpamScore >= 5 ? "hi" : "")">score @view.Row.SpamScore</p>
                     @if (view.SpamReasons.Length > 0)
@@ -191,7 +196,7 @@ else
                         </p>
                     }
                 }
-                else
+                else if (Anjal.Webmail.Services.SpamCheck.WasChecked(view.Row, view.Folder.Name))
                 {
                     <p class="railnote">Sender checks: not recorded for this message.</p>
                 }
@@ -322,7 +327,7 @@ else
     private string Srcdoc =>
         "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">" +
         "<meta http-equiv=\"Content-Security-Policy\" content=\"" + FrameCsp + "\">" +
-        "<style>" + FontFaces + "body{font-family:'LiPi Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.5;" +
+        "<style>" + FontFaces + "body{font-family:'LiPi Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;" +
         "margin:18px;color:#1a1a1a;background:#fff;word-wrap:break-word}img{max-width:100%}" +
         "pre{white-space:pre-wrap;font-family:inherit;margin:0}a{color:#0b5d8f}</style></head><body>" +
         (view?.BodyHtml ?? string.Empty) + "</body></html>";

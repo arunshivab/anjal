@@ -212,6 +212,12 @@ CREATE INDEX IF NOT EXISTS messages_message_id_idx
 -- of score. Nothing here rejects mail at SMTP time.
 ALTER TABLE tenants  ADD COLUMN IF NOT EXISTS spam_threshold INTEGER NOT NULL DEFAULT 5;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS spam_score     INTEGER NOT NULL DEFAULT 0;
+-- Whether the message went through the incoming checks (v1.0.0-rc.5,
+-- decision 1B): true for mail from outside that was scored, false for mail
+-- from a signed-in account and for copies of your own mail, NULL for
+-- messages stored before rc.5 (the webmail then decides by folder). Without
+-- it, "checked and scored 0" and "never checked" were the same stored 0.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS spam_checked   BOOLEAN;
 
 CREATE TABLE IF NOT EXISTS sender_rules (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -192,6 +192,7 @@ public sealed partial class MailboxService
             DateHeader = FormatDate(DateTimeOffset.UtcNow),
             SizeBytes = written.SizeBytes,
             Seen = true,
+            SpamChecked = false,
         }, ct).ConfigureAwait(false);
         await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
 

@@ -173,9 +173,18 @@ else
                         <td class="c-time num">@MainLayout.When(m.ReceivedAt)</td>
                         <td class="c-size num">@MainLayout.Size(m.SizeBytes)</td>
                         <td class="c-score">
-                            @if (m.SpamScore > 0)
+                            @* Decision 1B: 0 means checked and clean; a dash means never checked. *@
+                            @if (!Anjal.Webmail.Services.SpamCheck.WasChecked(m, Name))
                             {
-                                <span class="score @(m.SpamScore >= threshold ? "s-hi" : "s-mid")">@m.SpamScore</span>
+                                <span class="score s-none" title="Not checked: your own mail or mail from this server">&ndash;</span>
+                            }
+                            else if (m.SpamScore > 0)
+                            {
+                                <span class="score @(m.SpamScore >= threshold ? "s-hi" : "s-mid")" title="Checked on arrival: spam score @m.SpamScore">@m.SpamScore</span>
+                            }
+                            else
+                            {
+                                <span class="score s-zero" title="Checked on arrival: nothing suspicious">0</span>
                             }
                         </td>
                     </tr>
