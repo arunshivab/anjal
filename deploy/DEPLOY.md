@@ -691,38 +691,63 @@ Until that has happened once, keep the tenant count at three or fewer.
 
 ## 8. First tenant, domain, DKIM and mailbox
 
-```
-api$ H='-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json"'
-api$ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-       http://127.0.0.1:8025/api/tenants -d '{"slug":"imagiqa","displayName":"imagiQa"}' | jq .
-api$ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-       http://127.0.0.1:8025/api/tenant-domains -d '{"tenantSlug":"imagiqa","domain":"anjal.co.in"}' | jq .
-```
-
-DKIM: generate a 2048-bit RSA key on the VM, upload the private key,
-publish the public key.
+Read the admin token into the shell (see the conventions table) and define
+a short helper for the API calls:
 
 ```
-vm$ openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/dkim.pem
-vm$ openssl pkey -in /tmp/dkim.pem -pubout -outform DER | base64 -w0 > /tmp/dkim.pub.b64
-vm$ jq -n --arg pem "$(cat /tmp/dkim.pem)" '{domain:"anjal.co.in",selector:"default",privateKeyPem:$pem}' > /tmp/dkim.json
-api$ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-       http://127.0.0.1:8025/api/dkim-keys -d @/tmp/dkim.json | jq .
-vm$ echo "v=DKIM1; k=rsa; p=$(cat /tmp/dkim.pub.b64)"      # the DNS TXT value
-vm$ shred -u /tmp/dkim.pem /tmp/dkim.json
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ api() { curl -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$@"; }
+api$ api -X POST http://127.0.0.1:8025/api/tenants -d '{"slug":"imagiqa","displayName":"imagiQa"}' | jq .
+api$ api -X POST http://127.0.0.1:8025/api/tenant-domains -d '{"tenantSlug":"imagiqa","domain":"anjal.co.in"}' | jq .
 ```
 
-The mailbox (password is hashed server-side; it is the webmail and
-submission password):
+Each answers with the record it created; the domain shows `verified: true`
+(set on creation; nothing else checks it).
+
+**DKIM.** Generate a 2048-bit key on the VM in a folder only you can open,
+upload it straight from the file, keep only the public half for DNS, and
+destroy the private file. The server stores the key sealed under
+`ANJAL_KEK`, so no other copy is needed. Your account's default
+permissions make new files readable by every account on the server
+(`-rw-rw-r--`, measured), which is why the key is never written to plain
+`/tmp` (DEF-054).
 
 ```
-api$ curl -s -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-       http://127.0.0.1:8025/api/mailboxes \
-       -d '{"tenantSlug":"imagiqa","address":"arun@anjal.co.in","password":"CHOOSE-A-STRONG-PASSWORD","displayName":"Arun Shiva B"}' | jq .
+vm$ D=$(mktemp -d); ls -ld "$D"                                          # drwx------
+vm$ (umask 077; openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$D/dkim.pem")
+vm$ ls -l "$D/dkim.pem"                                                  # -rw-------
+api$ jq -n --rawfile pem "$D/dkim.pem" '{domain:"anjal.co.in",selector:"default",privateKeyPem:$pem}' | api -X POST http://127.0.0.1:8025/api/dkim-keys -d @- | jq .
+vm$ echo "v=DKIM1; k=rsa; p=$(openssl pkey -in "$D/dkim.pem" -pubout -outform DER | base64 -w0)" > ~/dkim-dns-record.txt
+vm$ shred -u "$D/dkim.pem"; rmdir "$D"
 ```
 
-**Check:** `https://mail.anjal.co.in/` login works with that address and
-password; the sidebar shows INBOX, Sent, Drafts, Junk, Trash and `0 KB of 2 GB`.
+The API answers with `domain` and `selector` and never echoes the key.
+`~/dkim-dns-record.txt` (about 410 characters) is the **public** TXT value
+for section 9. **Check** that the key is sealed, not stored in plain text
+(asks for the database password; prints nothing secret):
+
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select selector, left(private_key_pem,7), length(private_key_pem), private_key_pem like '%BEGIN%' from dkim_keys"
+```
+
+Expect `default|enc:v1:|...|f`: sealed under the KEK, and no `BEGIN` in it.
+
+**The mailbox.** The password is the webmail and submission password. It
+is typed twice, silently, and handed to the API through the environment -
+never on a command line, which would put it on screen and in shell history
+(DEF-055). The rule: 8+ characters with upper case, lower case, a number
+and a symbol, or a phrase of 16+; not predictable; not containing the
+person's name or address. A refusal answers 400 and creates nothing.
+
+```
+vm$ read -rs -p "Password for arun@anjal.co.in: " P1; echo; read -rs -p "Again: " P2; echo
+api$ if [ "$P1" = "$P2" ]; then P1="$P1" jq -n '{tenantSlug:"imagiqa",address:"arun@anjal.co.in",password:env.P1,displayName:"Arun Shiva B"}' | api -X POST http://127.0.0.1:8025/api/mailboxes -d @- | jq .; else echo "The two entries differ - nothing was sent"; fi
+vm$ unset P1 P2 TOKEN
+```
+
+**Check:** `https://mail.anjal.co.in/` shows the sign-in page with no
+certificate warning; signing in shows INBOX, Drafts, Junk, Sent and Trash
+and `0 B of 2 GB`.
 
 ---
 
@@ -739,18 +764,28 @@ Now relax the lockdown you set up months ago. At GoDaddy:
 Keep `p=reject` and strict alignment in DMARC - Anjal signs with the
 same domain it sends from, so alignment passes.
 
+Send the DMARC reports to an address **in the same domain**. A report
+address in another domain (such as a personal Yahoo address) is honoured
+only if that domain publishes a record authorising it (RFC 7489 section
+7.1); Yahoo does not, so the reports sent there during the lockdown were
+most likely never delivered.
+
 `anjalmail.com` stays locked (`v=spf1 -all`, `p=reject`) until it is
 used for hosted customers.
 
-**Check** (after propagation):
+**Check** against GoDaddy's own name server (no caching delay). The last
+line proves the published DKIM value is byte for byte the key the server
+holds - a 2048-bit key is longer than one DNS string, so GoDaddy splits it,
+and the check joins the pieces before comparing:
 
 ```
-pc> nslookup -type=TXT anjal.co.in 8.8.8.8
-pc> nslookup -type=TXT default._domainkey.anjal.co.in 8.8.8.8
-pc> nslookup -type=TXT _dmarc.anjal.co.in 8.8.8.8
+vm$ command -v dig >/dev/null || sudo apt install -y bind9-dnsutils
+vm$ dig +short TXT anjal.co.in @ns59.domaincontrol.com
+vm$ dig +short TXT _dmarc.anjal.co.in @ns59.domaincontrol.com
+vm$ diff <(dig +short TXT default._domainkey.anjal.co.in @ns59.domaincontrol.com | tr -d '" \n') <(tr -d ' \n' < ~/dkim-dns-record.txt) && echo "DKIM record MATCHES the server's key"
 ```
 
-and https://mxtoolbox.com/SuperTool.aspx → "dkim:anjal.co.in:default" reports a valid record.
+Use the name servers your domain actually has (`nslookup -type=NS anjal.co.in. 8.8.8.8`).
 
 ---
 

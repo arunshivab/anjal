@@ -24,9 +24,18 @@ public sealed class DkimVerifier
         this.dns = dns;
     }
 
+    /// <summary>The most signatures checked on one message. RFC 6376 section
+    /// 6.1 lets a verifier limit this so a message cannot make it do
+    /// unbounded work.</summary>
+    public const int MaxSignaturesChecked = 5;
+
     /// <summary>
-    /// Verify the first DKIM-Signature header on a message. If multiple
-    /// signatures are present, only the first is checked.
+    /// Verify a message's DKIM-Signature headers, top first, up to
+    /// <see cref="MaxSignaturesChecked"/>. The result reported is a passing
+    /// signature whose domain matches the From domain (the one DMARC can use);
+    /// failing that, any passing signature; failing that, the first signature's
+    /// result. DEF-057: only the first signature used to be checked, so a
+    /// broken or unaligned first signature hid a valid aligned second one.
     /// </summary>
     /// <param name="messageBytes">Full RFC 5322 message bytes.</param>
     /// <param name="ct">Cancellation.</param>
@@ -51,17 +60,19 @@ public sealed class DkimVerifier
             };
         }
 
-        // Find the first DKIM-Signature header.
-        string? rawSig = null;
-        for (int i = 0; i < parsed.Headers.Count; i++)
+        var signatures = new System.Collections.Generic.List<Anjal.Dkim.RawHeader>();
+        foreach (Anjal.Dkim.RawHeader header in parsed.Headers)
         {
-            if (string.Equals(parsed.Headers[i].Name, "DKIM-Signature", System.StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(header.Name, "DKIM-Signature", System.StringComparison.OrdinalIgnoreCase))
             {
-                rawSig = parsed.Headers[i].Value;
-                break;
+                signatures.Add(header);
+                if (signatures.Count == MaxSignaturesChecked)
+                {
+                    break;
+                }
             }
         }
-        if (rawSig is null)
+        if (signatures.Count == 0)
         {
             return new DkimDetail
             {
@@ -69,6 +80,61 @@ public sealed class DkimVerifier
                 Explanation = "No DKIM-Signature header found.",
             };
         }
+
+        string fromDomain = FromDomainOf(parsed);
+        DkimDetail? first = null;
+        DkimDetail? firstPass = null;
+        foreach (Anjal.Dkim.RawHeader signature in signatures)
+        {
+            DkimDetail detail = await this.VerifyOneAsync(parsed, signature, ct).ConfigureAwait(false);
+            first ??= detail;
+            if (detail.Result == DkimResult.Pass)
+            {
+                if (IsAligned(detail.Domain, fromDomain))
+                {
+                    return detail;
+                }
+                firstPass ??= detail;
+            }
+        }
+        return firstPass ?? first!;
+    }
+
+    /// <summary>True when the signing domain and the From domain are the same
+    /// or one is a subdomain of the other - the relaxed alignment DMARC checks.</summary>
+    internal static bool IsAligned(string? signingDomain, string fromDomain)
+    {
+        if (string.IsNullOrEmpty(signingDomain) || string.IsNullOrEmpty(fromDomain))
+        {
+            return false;
+        }
+        string d = signingDomain.TrimEnd('.').ToLowerInvariant();
+        string f = fromDomain.TrimEnd('.').ToLowerInvariant();
+        return d == f
+            || f.EndsWith("." + d, System.StringComparison.Ordinal)
+            || d.EndsWith("." + f, System.StringComparison.Ordinal);
+    }
+
+    private static string FromDomainOf(Anjal.Dkim.DkimMessage parsed)
+    {
+        string? from = parsed.GetHeaderValue("From");
+        if (from is null)
+        {
+            return string.Empty;
+        }
+        int lt = from.IndexOf('<', System.StringComparison.Ordinal);
+        int gt = from.IndexOf('>', System.StringComparison.Ordinal);
+        string address = (lt >= 0 && gt > lt) ? from.Substring(lt + 1, gt - lt - 1) : from.Trim();
+        int at = address.LastIndexOf('@');
+        return at < 0 ? string.Empty : address.Substring(at + 1).Trim().ToLowerInvariant();
+    }
+
+    private async System.Threading.Tasks.Task<DkimDetail> VerifyOneAsync(
+        Anjal.Dkim.DkimMessage parsed,
+        Anjal.Dkim.RawHeader signatureHeader,
+        System.Threading.CancellationToken ct)
+    {
+        string rawSig = signatureHeader.Value;
 
         // Parse the tag-list.
         System.Collections.Generic.Dictionary<string, string> tags = ParseTags(rawSig);
@@ -209,18 +275,31 @@ public sealed class DkimVerifier
 
         // Build the signing input: canonicalized signed headers + canonicalized
         // DKIM-Signature header with b= empty, NO trailing CRLF.
+        // DEF-056, RFC 6376 section 5.4.2: each listing of a name takes the
+        // next unused instance of that header from the bottom of the message;
+        // a name listed more times than it occurs contributes nothing after its
+        // last instance (Gmail lists from, to, subject and more twice, and names
+        // absent headers such as cc, to stop them being added later). The
+        // header is hashed as written in the message - its own name, not the
+        // spelling in h= - which simple canonicalization depends on.
         string[] signedHeaders = signedHeaderList.Split(':', System.StringSplitOptions.RemoveEmptyEntries);
         var signingInput = new StringBuilder();
+        var instancesUsed = new System.Collections.Generic.Dictionary<string, int>(System.StringComparer.OrdinalIgnoreCase);
         foreach (string h in signedHeaders)
         {
             string headerName = h.Trim();
-            string? value = parsed.GetHeaderValue(headerName);
-            if (value is null) continue;
-            signingInput.Append(Anjal.Dkim.DkimCanonicalizer.CanonHeader(headerName, value, headerCanon));
+            instancesUsed.TryGetValue(headerName, out int alreadyUsed);
+            instancesUsed[headerName] = alreadyUsed + 1;
+            Anjal.Dkim.RawHeader? header = NthFromBottom(parsed, headerName, alreadyUsed);
+            if (header is null)
+            {
+                continue;
+            }
+            signingInput.Append(Anjal.Dkim.DkimCanonicalizer.CanonHeader(header.Name, header.Value, headerCanon));
         }
         // The DKIM-Signature header itself with b= replaced by empty string.
         string sigValueEmptyB = RemoveBTagValue(rawSig);
-        string dkimCanon = Anjal.Dkim.DkimCanonicalizer.CanonHeader("DKIM-Signature", sigValueEmptyB, headerCanon);
+        string dkimCanon = Anjal.Dkim.DkimCanonicalizer.CanonHeader(signatureHeader.Name, sigValueEmptyB, headerCanon);
         if (dkimCanon.EndsWith("\r\n", System.StringComparison.Ordinal))
         {
             dkimCanon = dkimCanon.Substring(0, dkimCanon.Length - 2);
@@ -246,6 +325,25 @@ public sealed class DkimVerifier
         }
 
         return CheckSignature(publicKeyBase64, signedBytes, signature, hashAlg, domain, selector, algorithm);
+    }
+
+    /// <summary>The <paramref name="skip"/>-th instance (0 = bottom-most) of a
+    /// header, counting upwards, or null when there are not that many.</summary>
+    private static Anjal.Dkim.RawHeader? NthFromBottom(Anjal.Dkim.DkimMessage parsed, string name, int skip)
+    {
+        int seen = 0;
+        for (int i = parsed.Headers.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(parsed.Headers[i].Name, name, System.StringComparison.OrdinalIgnoreCase))
+            {
+                if (seen == skip)
+                {
+                    return parsed.Headers[i];
+                }
+                seen++;
+            }
+        }
+        return null;
     }
 
     /// <summary>
