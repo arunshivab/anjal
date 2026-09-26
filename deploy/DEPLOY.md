@@ -827,50 +827,148 @@ The usual point losses are a missing PTR (section 5) or a missing
 
 ## 11. Backups
 
-Put the B2 credentials and two fresh crypt passwords into
-`/etc/anjal/rclone.conf` (template already installed):
+Backups are encrypted on the server by rclone's crypt layer before they
+leave it, and go to a private cloud bucket. This section was executed on
+26 September 2026 and is written from that execution.
+
+> **Data residency (owner's decision, 26 September 2026).** Patient data
+> must stay in India. Backblaze B2 has no Indian region, so it is used
+> **only while Anjal holds no patient data** - test mail and the operator's
+> own mail. **Before HIS goes live, or before any mail naming a patient
+> reaches Anjal, whichever is first**, backups move to Indian storage (E2E
+> Networks' EOS object storage is the planned choice) and the Backblaze
+> bucket is deleted. See section 12a.
+
+### 11.1 The Backblaze account
+
+Sign up for B2 Cloud Storage with an email address that does **not**
+depend on Anjal (a Gmail or Yahoo address, never one served by this
+server): that email is how the backup account is recovered, and it must
+work when the server does not. The storage region is chosen at sign-up
+and is fixed for the account; none is in India. Turn on two-factor
+authentication at once. The account email, its password and any
+two-factor recovery codes go on the custody forms (ANJAL-SEC-03).
+
+### 11.2 The bucket
+
+Buckets → Create a Bucket:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Name | `anjal-backup` (names are global; add a suffix if taken, and use it in `rclone.conf`) | |
+| Files in bucket | Private | Never public |
+| Default encryption | Enable (SSE-B2) | A second layer; the files are already encrypted by rclone |
+| Object Lock | Disable - **decision recorded in section 12a** | It would stop the script pruning dumps older than 30 days; to be revisited before go-live as ransomware protection |
+
+Then **Lifecycle Settings → Keep prior versions for this number of days:
+`30`**. With `hard_delete = false` in `rclone.conf` (below), a file deleted
+or overwritten stays recoverable for 30 days and is then removed by
+Backblaze. "Keep all versions" (the default) would keep everything
+forever; "Keep only the last version" would give no way back. A key that
+can write can still delete old versions deliberately: this protects
+against mistakes, not a determined attacker - that is what Object Lock is
+for.
+
+### 11.3 The application key
+
+Application Keys → Add a New Application Key: name `anjal-server-backup`,
+**access to the bucket `anjal-backup` only** (not "All"), **Read and
+Write**, no file-name prefix, no duration. Never use the master key on
+the server, and never press "Generate New Master Application Key" (it
+cancels the current one). The applicationKey is shown once: keep the page
+open until step 11.5 has written it. It does not go on paper - a new key
+can always be made from the account.
+
+### 11.4 The two encryption passwords, onto paper
+
+These two passwords are the only way to read the backup. Generate them,
+write both on each custody form, then prove every paper copy by typing it
+back (nothing is shown while typing). Stay in the same SSH session until
+11.5 is done: the passwords exist only in its memory.
 
 ```
-vm$ rclone obscure "$(openssl rand -base64 32)"     # run twice; paste as password and password2
-vm$ sudo nano /etc/anjal/rclone.conf
-vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsd b2crypt:   # empty listing, no error
+vm$ P1=$(openssl rand -base64 18); P2=$(openssl rand -base64 18)
+vm$ echo "Backup crypt password 1: $P1"; echo "Backup crypt password 2: $P2"
+vm$ clear
+vm$ provevar() { local want got c; want=$(printf '%s' "$2" | sha256sum | cut -c1-16); for c in 1 2 3; do read -rs -p "$1 from paper copy $c: " got; echo; if [ "$(printf '%s' "$got" | sha256sum | cut -c1-16)" = "$want" ]; then echo "copy $c: MATCH"; else echo "copy $c: NO MATCH - check this copy"; fi; done; }
+vm$ provevar "Crypt password 1" "$P1"; provevar "Crypt password 2" "$P2"
 ```
 
-**Write the two crypt passwords on the custody forms now** (alongside
-`ANJAL_KEK` from section 4), and prove the paper copies as section 4
-describes. The crypt
-passwords are the only way to read the backup; losing them makes the
-backup worthless.
+Six `MATCH` lines are needed. On 26 September copy 3 of password 2 did
+not match; it was corrected against copies 1 and 2 and `provevar` re-run
+for that password. Write zero as `Ø` and keep letters clearly apart
+(`0`/`O`, `1`/`l`/`I`, upper and lower case, `+` and `/`).
 
-First run by hand, then let the timer take over (nightly 21:00 UTC,
-02:30 IST - the timer names UTC, whatever the server's zone):
+Before rc.7 this section generated each password with
+`rclone obscure "$(openssl rand -base64 32)"`, which never shows the
+password - only an 80-character scrambled form - while telling the
+operator to write the password on paper (DEF-063).
+
+### 11.5 The configuration
+
+The keyID and applicationKey are pasted when asked (the key is not shown):
 
 ```
-vm$ sudo systemctl start anjal-backup
-vm$ sudo journalctl -u anjal-backup --no-pager | tail -20
+vm$ read -r -p "keyID: " KID; read -rs -p "applicationKey: " AKEY; echo
+vm$ O1=$(rclone obscure "$P1"); O2=$(rclone obscure "$P2")
+vm$ sudo tee /etc/anjal/rclone.conf >/dev/null <<EOF2
+[b2]
+type = b2
+account = $KID
+key = $AKEY
+hard_delete = false
+
+[b2crypt]
+type = crypt
+remote = b2:anjal-backup
+filename_encryption = standard
+directory_name_encryption = true
+password = $O1
+password2 = $O2
+EOF2
+vm$ sudo chown root:anjal /etc/anjal/rclone.conf; sudo chmod 640 /etc/anjal/rclone.conf
+vm$ unset P1 P2 O1 O2 KID AKEY
+vm$ sudo ls -l /etc/anjal/rclone.conf
+vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsd b2crypt: && echo "B2 CONNECTION OK"
+```
+
+**Check:** `-rw-r----- 1 root anjal`, then `B2 CONNECTION OK`.
+
+### 11.6 The first run, then the nightly timer
+
+Run once under the real unit; the timer is switched on only if the run
+succeeds (`install.sh` leaves it off, and `enable` without `--now` only
+arms it for the next boot - DEF-062):
+
+```
+vm$ if sudo systemctl start anjal-backup; then echo "BACKUP RUN OK"; OK=1; else echo "BACKUP RUN FAILED - timer left off"; OK=0; fi
+vm$ sudo journalctl -u anjal-backup --since "-10min" --no-pager | tail -20
 vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/
 vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf size b2crypt:mail/
-vm$ systemctl list-timers anjal-backup.timer
+vm$ echo "files left in scratch: $(sudo ls -A /var/lib/anjal/backup | wc -l)"
+vm$ if [ "$OK" = 1 ]; then sudo systemctl enable --now anjal-backup.timer; fi
+vm$ systemctl list-timers anjal-backup.timer --no-pager
 ```
 
-**Check:** the log shows `dump uploaded and verified`, then `verify ok`
-and `done`; `db/` lists one `anjal-*.sql.gz`; `/var/lib/anjal/backup` is
-empty (`sudo ls -la /var/lib/anjal/backup`).
+**Check:** `BACKUP RUN OK`; the log shows `dump uploaded and verified`,
+`verify ok` and `done`; one `anjal-*.sql.gz` in `db/`; `files left in
+scratch: 0`; the timer shows tonight's run (21:00 UTC, 02:30 IST, with up
+to 20 minutes of random delay). Measured on 26 September 19:24 IST: 27
+seconds, a 12 KB dump, 11 objects (36 KiB) of mail.
 
-Only then switch the nightly timer on - `install.sh` leaves it off, and
-`enable` without `--now` only arms it for the next boot (DEF-062):
+The next morning, confirm the first nightly run on its own:
 
 ```
-vm$ sudo systemctl enable --now anjal-backup.timer
-vm$ systemctl list-timers anjal-backup.timer --no-pager      # NEXT shows tonight's run
+vm$ sudo journalctl -u anjal-backup --since yesterday --no-pager | grep -E "verify ok|done|FAIL|ERROR|not configured"
+vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/      # one more dump
 ```
 
-What the run guarantees since rc.6: it refuses to start - before dumping
-anything - while `/etc/anjal/rclone.conf` is missing or still holds
-`CHANGE-ME`; it deletes the unencrypted local dump however it ends; and it
-verifies the dump, the mail and the certificate store with
-`rclone cryptcheck`, which compares real checksums through the encryption.
-Any difference fails the run (`systemctl --failed` lists
+What every run guarantees since rc.6: it refuses to start - before
+dumping anything - while `/etc/anjal/rclone.conf` is missing or still
+holds `CHANGE-ME`; it deletes the unencrypted local dump however it ends;
+and it verifies the dump, the mail and the certificate store with
+`rclone cryptcheck`, which compares real checksums through the
+encryption. Any difference fails the run (`systemctl --failed` lists
 `anjal-backup.service`). Before rc.6 the check compared sizes only and a
 detected difference still ended in `done` (DEF-061), and a failed upload
 left the unencrypted dump on disk (DEF-062).
@@ -885,21 +983,180 @@ more).
 
 ## 12. Restore drill
 
-A backup nobody has restored is a hope, not a backup. Do this once now,
-on a **second, temporary VM** (smallest plan, one hour):
+A backup nobody has restored is a hope, not a backup. The drill answers
+one question: **if this server were lost tonight, could Anjal be rebuilt,
+with all its mail, from what survives?** In a disaster only three things
+survive, and the drill uses only those:
 
-1. Sections 1-4 on the new VM (same env files; copy `rclone.conf`).
-2. Do **not** start the services. Run:
-   ```
-   vm$ sudo /opt/anjal/bin/restore.sh
-   ```
-3. Start the services, log in to the webmail on the new VM's IP (use
-   `https://<new-ip>/` and accept the name mismatch, or temporarily
-   point `mail` at it), and confirm the messages from section 10 are
-   there with the same folders and flags.
-4. Destroy the temporary VM.
+1. the encrypted backup in the bucket (database, mail, certificates);
+2. the **paper custody forms** (database password, admin token, KEK, the
+   two backup encryption passwords, the backup account);
+3. the release on GitHub and this runbook.
 
-Repeat the drill after any change to `backup.sh`, and at least twice a year.
+Nothing is copied from the production server. Typing the secrets from
+paper takes about 15 minutes of a two-to-three-hour rebuild; the time
+goes on building the machine and moving the data.
+
+**When:** a few days after section 11, so several nightly backups exist;
+after any change to `backup.sh` or `restore.sh`; before go-live; and at
+least twice a year.
+
+**What it proves:** the backup is complete and readable; the paper forms
+are complete and correct; the runbook rebuilds a server from nothing; and
+the KEK on paper unseals the restored DKIM key. It is also the check for
+what CI cannot see - E2E's own image, found only on a real VM.
+
+### 12.1 On production, before the drill
+
+Record what the restored copy must match, and check that nothing is
+waiting to be sent (both only read):
+
+```
+vm$ date
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select t.slug, m.local_part||'@'||m.domain, f.name, count(x.id), count(x.id) filter (where x.seen), count(x.id) filter (where x.flagged) from tenants t join mailboxes m on m.tenant_id=t.id join folders f on f.mailbox_id=m.id left join messages x on x.folder_id=f.id group by 1,2,3 order by 1,2,3" | tee ~/drill-counts-production.txt | sha256sum | cut -c1-16
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from outbound_messages where status in (0,1)"
+vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/ | tail -1
+vm$ sudo journalctl -u anjal-backup --since "-1day" --no-pager | grep -E "verify ok|done"
+vm$ curl -s http://127.0.0.1:8025/healthz | jq -r .version
+```
+
+Keep the counts file and its 16-character hash; note the newest dump's
+name and the release version. **Then run a backup by hand**
+(`sudo systemctl start anjal-backup`) so the counts and the newest dump
+describe the same moment - mail arriving between them changes the counts.
+
+### 12.2 A drill machine that cannot touch the world
+
+- **E2E:** a node on **hourly** billing (the plan of ANJAL-OPS-08; on
+  26 September on-demand was ₹4.48 an hour), Ubuntu 24.04, with a reserved
+  IP - E1 nodes have none otherwise, and SSH needs one.
+- **A drill-only security group, `anjal-drill`:** inbound **22 only**,
+  outbound ALL. No 25, 80, 443, 465 or 587: the drill VM can neither
+  receive mail nor be mistaken for the mail server.
+- **Sections 1 and 2** as written (hardening, admin account, fail2ban,
+  PostgreSQL 18). **Section 3** with the **same release** as production
+  (the version recorded in 12.1).
+
+### 12.3 Rebuild from paper
+
+**Section 4, typing every secret from a custody form** - the database
+password, the admin token and the KEK - and proving each with `prove` as
+section 4 describes. Nothing is copied from production.
+
+Then isolate the drill machine. These settings exist in the product and
+are checked against its code; they are the only differences from
+production:
+
+```
+vm$ S=/etc/anjal/server.env; W=/etc/anjal/webmail.env
+vm$ sudo sed -i 's|^ANJAL_BIND=.*|ANJAL_BIND=127.0.0.1|; s|^ANJAL_OUTBOUND_MODE=.*|ANJAL_OUTBOUND_MODE=relay|; s|^ANJAL_ACME_DOMAINS=.*|ANJAL_ACME_DOMAINS=|' $S
+vm$ printf 'ANJAL_RELAY_HOST=127.0.0.1\nANJAL_RELAY_PORT=2525\n' | sudo tee -a $S >/dev/null
+vm$ sudo sed -i 's|^ANJAL_WEBMAIL_BIND=.*|ANJAL_WEBMAIL_BIND=127.0.0.1|; s|^ANJAL_WEBMAIL_PORT=.*|ANJAL_WEBMAIL_PORT=8080|; s|^ANJAL_WEBMAIL_HTTPS_PORT=.*|ANJAL_WEBMAIL_HTTPS_PORT=0|; s|^ANJAL_ACME_DOMAINS=.*|ANJAL_ACME_DOMAINS=|' $W
+vm$ sudo grep -E '^ANJAL_(BIND|OUTBOUND_MODE|RELAY_HOST|RELAY_PORT|ACME_DOMAINS|WEBMAIL_BIND|WEBMAIL_PORT|WEBMAIL_HTTPS_PORT)=' $S $W
+```
+
+| Isolation | Setting |
+| --- | --- |
+| Cannot receive mail | `ANJAL_BIND=127.0.0.1`, and the security group opens 22 only |
+| Cannot send mail | `ANJAL_OUTBOUND_MODE=relay` to `127.0.0.1:2525`, where a capture program keeps every message on the machine - including anything left in the restored queue |
+| No certificate requests | `ANJAL_ACME_DOMAINS` empty (ACME off) in both files; `ANJAL_WEBMAIL_HTTPS_PORT=0` |
+| Webmail not public | `ANJAL_WEBMAIL_BIND=127.0.0.1`, port 8080, reached through an SSH tunnel |
+
+**The backup configuration, from paper.** In the backup account make a
+**drill key**: bucket `anjal-backup` only, **Read Only** - a restore needs
+nothing more, and the drill then cannot alter a backup. Then write
+`rclone.conf` as in 11.5, typing the two encryption passwords from paper
+instead of generating them:
+
+```
+vm$ read -rs -p "Crypt password 1 (paper): " P1; echo; read -rs -p "Crypt password 2 (paper): " P2; echo
+```
+
+followed by the `read ... KID/AKEY`, `rclone obscure`, `tee`, `chown`,
+`chmod`, `unset` and `lsd` lines of 11.5. **Check:** `B2 CONNECTION OK`.
+
+### 12.4 Restore, and prove it
+
+With the services stopped (as section 3 leaves them), restore the files
+first and then the newest database dump:
+
+```
+vm$ sudo /opt/anjal/bin/restore.sh
+vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/ | tail -1      # the dump it used
+```
+
+Start the capture program - it holds every outgoing message on this
+machine - then the services:
+
+```
+vm$ sudo apt install -y python3-aiosmtpd python3-dkim
+vm$ nohup python3 -m aiosmtpd -n -l 127.0.0.1:2525 -c aiosmtpd.handlers.Mailbox ~/drill-capture >/dev/null 2>&1 &
+vm$ sudo systemctl start anjal-server anjal-webmail
+vm$ sleep 10; systemctl is-active anjal-server anjal-webmail; curl -s http://127.0.0.1:8025/healthz | jq '{status, version}'
+vm$ sudo journalctl -u anjal-server --since "-2min" --no-pager | grep -E "Outbound worker started|Outbound disabled|STARTTLS"
+```
+
+Let the capture program create `~/drill-capture` itself: a folder made
+beforehand makes it refuse every message, and each refusal would put a
+bounce notice into the restored mailbox (measured while writing this
+section). **Check:** `active` twice; the release version recorded in
+12.1; `Outbound worker started (mode=relay, ...)`.
+
+**1. The counts match** - the same query as 12.1, before anything else
+touches the mailbox:
+
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select t.slug, m.local_part||'@'||m.domain, f.name, count(x.id), count(x.id) filter (where x.seen), count(x.id) filter (where x.flagged) from tenants t join mailboxes m on m.tenant_id=t.id join folders f on f.mailbox_id=m.id left join messages x on x.folder_id=f.id group by 1,2,3 order by 1,2,3" | tee ~/drill-counts-restored.txt | sha256sum | cut -c1-16
+```
+
+The hash must equal production's from 12.1. If not, compare the two
+files line by line: each line is tenant, mailbox, folder, messages, read,
+flagged.
+
+**2. The mail is readable.** From the laptop, open a tunnel and sign in
+with the real mailbox password:
+
+```
+pc> ssh -i $env:USERPROFILE\.ssh\anjal_e2e -L 8080:127.0.0.1:8080 arun@<drill-ip>
+```
+
+Browse to `http://127.0.0.1:8080/`. Open messages from each folder -
+the first Gmail message, the Outlook one, the mail-tester report, the
+Sent items - and check their read and flagged state.
+
+**3. The KEK from paper unseals the DKIM key.** In the drill webmail,
+compose a short message to `drill-check@example.com` and send it. The
+server signs it with the restored key and hands it to the capture
+program; nothing leaves the machine. Then:
+
+```
+vm$ ls ~/drill-capture/new/ | wc -l
+vm$ dkimverify < "$(ls -t ~/drill-capture/new/* | head -1)"
+```
+
+**Check:** `signature ok`. The key is looked up in public DNS
+(`default._domainkey.anjal.co.in`), so a pass proves that the key sealed
+in the backup, unsealed with the KEK typed from paper, is the domain's
+real key. The whole chain - relay to a capture program, signing,
+independent verification - was run and passed on 26 September while
+writing this section.
+
+**4. The certificates came back:**
+
+```
+vm$ sudo openssl x509 -in /var/lib/anjal/acme/fullchain.pem -noout -subject -enddate
+```
+
+Expected not to come back, by design: webmail sessions (sign in again)
+and the greylisting memory (senders greylisted once more).
+
+### 12.5 Record, and destroy
+
+Write down the times, the two hashes, the dump used, the release, and
+anything that failed or differed from this section. Then **destroy the
+drill node and release its reserved IP** - it holds a full copy of the
+mail and the certificate's private key - and **delete the drill key** in
+the backup account.
 
 ---
 
@@ -919,7 +1176,10 @@ future you can see each one and where it lives.
 | Connection floods | 120 s idle timeout, 15 min session limit, 200 connections, 10 per address | `server.env` |
 | DKIM private keys | AES-256-GCM in the database under `ANJAL_KEK`, which lives only in `server.env` and on the handwritten custody forms | section 4 |
 | Everything else at rest | Mail, database, and certificates on the VM's disk, which E2E encrypts at rest (chosen when the node was created, no passphrase so it boots unattended) | section 0 |
-| Backups | rclone crypt (client-side encryption) to Backblaze B2 | section 11 |
+| Backups | Nightly, encrypted on the server by rclone crypt before upload, verified by checksum (`cryptcheck`) every run; bucket private, key limited to that bucket, deleted files recoverable for 30 days; encryption passwords proven on three paper copies | section 11 |
+| Restore | Proven by a drill on a separate machine using only the backup, the paper forms and the release; isolated so it cannot send, receive or request certificates | section 12 |
+| Data residency | **Patient data stays in India** (owner's decision, 26 Sep 2026). The server is in E2E's Chennai region. Backblaze B2 (EU Central) holds only encrypted backups of test and operator mail; **before HIS goes live or any mail naming a patient reaches Anjal, whichever is first, backups move to Indian storage (E2E EOS planned) and the Backblaze bucket is deleted** | section 11 |
+| Backup immutability | Object Lock **off** (decision of 26 Sep 2026): it would stop the script pruning dumps older than 30 days, and the 30-day version history covers mistakes. It does not stop a determined attacker holding the key; to be revisited before go-live | section 11.2 |
 | Changes | Every admin API change and webmail sign-in/password change is recorded in `audit_events`, which the database itself makes append-only | section 13 |
 | Service isolation | Dedicated `anjal` user, `ProtectSystem=strict`, `NoNewPrivileges`, restricted address families (`AF_INET`, `AF_INET6`, `AF_UNIX` - no netlink since rc.2) and namespaces | systemd units |
 | Webmail session keys | ASP.NET key ring in `/var/lib/anjal/webmail-keys` (anjal 700), unencrypted on the encrypted disk. Encrypting it would need a secret in `webmail.env`, which deliberately holds none; losing it only signs everyone out | `ANJAL_WEBMAIL_KEYS_DIR`, DEF-050 |

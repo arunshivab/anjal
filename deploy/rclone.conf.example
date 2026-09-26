@@ -2,15 +2,23 @@
 # Two remotes: "b2" is the raw Backblaze bucket, "b2crypt" wraps it with
 # client-side encryption. backup.sh and restore.sh only ever use b2crypt.
 #
-# Generate the two crypt passwords with:  rclone obscure "$(openssl rand -base64 32)"
-# Keep a copy of this file somewhere safe OFF the VM: without the crypt
-# passwords the backup cannot be decrypted.
+# Write this file with the commands in DEPLOY.md section 11.5, not by hand:
+# the two crypt passwords are generated, written on the custody forms and
+# proven there first (section 11.4), then scrambled into this file with
+# rclone obscure. The paper forms are the only other copy - do not keep
+# copies of this file elsewhere: it holds the bucket key and passwords that
+# rclone obscure only scrambles, and anyone can unscramble them.
+#
+# backup.sh refuses to run while any CHANGE-ME below remains (DEF-062).
+# hard_delete = false: a deleted or replaced file is hidden, not destroyed,
+# and the bucket's lifecycle rule (keep prior versions 30 days) removes it
+# later - so a mistake can be undone for 30 days (section 11.2).
 
 [b2]
 type = b2
 account = CHANGE-ME-keyID
 key = CHANGE-ME-applicationKey
-hard_delete = true
+hard_delete = false
 
 [b2crypt]
 type = crypt

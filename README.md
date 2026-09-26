@@ -10,6 +10,18 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**Runbook update after v1.0.0-rc.6** (documentation only; production
+stays on rc.6). Section 11 rewritten from the first real backup setup on
+26 September 2026: the backup account, bucket, lifecycle and bucket-limited
+key; the two encryption passwords shown once, written on the custody
+forms and proven before use (DEF-063: the old commands never showed them);
+`hard_delete = false` with a 30-day version history. Section 12 is now the
+full restore drill - rebuilt only from the backup, the paper forms and the
+release, on a machine isolated from mail and certificates, with a count
+comparison and a DKIM proof that the KEK on paper unseals the restored key.
+Section 12a records the data-residency rule (patient data stays in India;
+Backblaze only until HIS or patient mail) and the Object Lock decision.
+
 **v1.0.0-rc.6** - backups that can be trusted, found by reviewing section 11
 before first use. DEF-061: the nightly verification compared file sizes
 only - through rclone's encryption `rclone check` has no checksum in
