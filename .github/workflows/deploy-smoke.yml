@@ -109,6 +109,9 @@ jobs:
           if grep -q "Unhandled exception" "$RUNNER_TEMP/services.log"; then
             echo "::error::a service logged an unhandled exception"; exit 1
           fi
+          # rc.5 (decision 2B): greylisting keeps remembered senders in its state
+          # file under the shipped unit, and does not delay senders passing SPF.
+          grep -q "Greylisting: on (delay 300s, senders remembered 35 days, kept in /var/lib/anjal/greylist.tsv, senders passing SPF not delayed)." "$RUNNER_TEMP/services.log"
           # DEF-048: the spam filter swallowed the same failure; it must not recur.
           if grep -q "no system DNS resolver" "$RUNNER_TEMP/services.log"; then
             echo "::error::the DNS resolver could not be created under the unit's sandbox"; exit 1

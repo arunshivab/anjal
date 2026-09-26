@@ -294,6 +294,15 @@ public sealed class MessageRow
     /// <summary>Spam score assigned at delivery (0 when scoring was not run).</summary>
     public int SpamScore { get; set; }
 
+    /// <summary>
+    /// Whether the message went through the incoming checks: true for mail
+    /// from outside that was scored, false for mail from a signed-in account
+    /// and for copies of the user's own mail, null when not recorded
+    /// (messages stored before v1.0.0-rc.5). Only when this is true does a
+    /// <see cref="SpamScore"/> of 0 mean "checked and clean".
+    /// </summary>
+    public bool? SpamChecked { get; set; }
+
     /// <summary>Time the message was delivered to the folder.</summary>
     public System.DateTimeOffset ReceivedAt { get; set; }
 }

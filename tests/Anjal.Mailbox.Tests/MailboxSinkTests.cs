@@ -293,4 +293,53 @@ public sealed class MailboxSinkTests : System.IDisposable
 
         Assert.Single(this.store.MailboxMessages);
     }
+    // ---- Decision 1B (v1.0.0-rc.5): whether a message went through the incoming checks ----
+
+    private static byte[] Scored(int score) => System.Text.Encoding.ASCII.GetBytes(
+        $"X-Anjal-Spam-Score: {score}\r\nX-Anjal-Spam-Reasons: none\r\n").Concat(Sample).ToArray();
+
+    [Fact]
+    public async System.Threading.Tasks.Task Deliver_ScoredMailFromOutside_IsRecordedAsChecked()
+    {
+        await this.SeedAsync();
+        await this.Sink().DeliverAsync(Ctx(Scored(0), "arun@anjal.co.in"));
+
+        MessageRow row = Assert.Single(this.store.MailboxMessages);
+        Assert.True(row.SpamChecked);
+        Assert.Equal(0, row.SpamScore);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Deliver_FromASignedInAccount_IsNotChecked_EvenWithAScoreHeaderItWroteItself()
+    {
+        await this.SeedAsync();
+        DeliveryContext ctx = new()
+        {
+            EnvelopeFrom = "colleague@anjal.co.in",
+            EnvelopeTo = new[] { "arun@anjal.co.in" },
+            RawBytes = Scored(0),
+            AuthenticatedUser = "colleague@anjal.co.in",
+        };
+        await this.Sink().DeliverAsync(ctx);
+
+        Assert.False(Assert.Single(this.store.MailboxMessages).SpamChecked);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task Deliver_MailTheFilterNeverSaw_IsNotChecked()
+    {
+        await this.SeedAsync();
+        await this.Sink().DeliverAsync(Ctx(Sample, "arun@anjal.co.in"));
+
+        Assert.False(Assert.Single(this.store.MailboxMessages).SpamChecked);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task SentCopy_IsNotChecked()
+    {
+        await this.SeedAsync();
+        Assert.True(await this.Sink().FileSentCopyAsync("arun@anjal.co.in", Sample));
+
+        Assert.False(Assert.Single(this.store.MailboxMessages).SpamChecked);
+    }
 }

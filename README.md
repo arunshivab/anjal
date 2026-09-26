@@ -10,7 +10,23 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v1.0.0-rc.4** - DKIM made to agree with the rest of the world. The first
+**v1.0.0-rc.5** - the owner's decisions after the first real mail, and two
+display defects. Decision 1B: the webmail says whether a message went
+through the incoming checks - a new `messages.spam_checked` column records it
+at delivery, the list shows 0 for checked mail and a dash for unchecked, and
+the user's own sent mail says so instead of "Spam score 0". Decision 2B:
+greylisting no longer delays a sender whose IP passes SPF for its domain,
+remembers senders for 35 days instead of 36 hours, keeps them across
+restarts in `/var/lib/anjal/greylist.tsv`, and logs every decision; the first
+Gmail and Outlook messages had waited 25 and 34 minutes, and no deferral was
+ever logged (DEF-059). DEF-060: on phones every message took about four
+stacked bands, because desktop rules for the list cells came later in the
+stylesheet than the phone layout; now a compact two-line row, measured at
+73px. On a computer the reading page fits the window - the message box
+scrolls inside itself and the page does not - and message text is 14px; the
+message frame's sandbox is unchanged. Upgrade: section 13d, "rc.4 to rc.5".
+
+Previously: **v1.0.0-rc.4** - DKIM made to agree with the rest of the world. The first
 real inbound message, from Gmail, failed DKIM on the production server
 although Gmail's signature was valid. DEF-056: Gmail over-signs - it lists
 From, To, Subject and other headers twice, and names absent ones such as Cc -
