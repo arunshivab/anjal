@@ -853,8 +853,33 @@ vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf size b2crypt:mail/
 vm$ systemctl list-timers anjal-backup.timer
 ```
 
-**Check:** the log ends with `verify ok` and `done`; `db/` lists one
-`anjal-*.sql.gz`; the timer shows a next run.
+**Check:** the log shows `dump uploaded and verified`, then `verify ok`
+and `done`; `db/` lists one `anjal-*.sql.gz`; `/var/lib/anjal/backup` is
+empty (`sudo ls -la /var/lib/anjal/backup`).
+
+Only then switch the nightly timer on - `install.sh` leaves it off, and
+`enable` without `--now` only arms it for the next boot (DEF-062):
+
+```
+vm$ sudo systemctl enable --now anjal-backup.timer
+vm$ systemctl list-timers anjal-backup.timer --no-pager      # NEXT shows tonight's run
+```
+
+What the run guarantees since rc.6: it refuses to start - before dumping
+anything - while `/etc/anjal/rclone.conf` is missing or still holds
+`CHANGE-ME`; it deletes the unencrypted local dump however it ends; and it
+verifies the dump, the mail and the certificate store with
+`rclone cryptcheck`, which compares real checksums through the encryption.
+Any difference fails the run (`systemctl --failed` lists
+`anjal-backup.service`). Before rc.6 the check compared sizes only and a
+detected difference still ended in `done` (DEF-061), and a failed upload
+left the unencrypted dump on disk (DEF-062).
+
+Not in the backup, by design: `/etc/anjal/*.env` and `rclone.conf` (their
+secrets are on the custody forms - without `ANJAL_KEK` a restored database
+cannot unseal the DKIM key), the webmail session keys (everyone signs in
+again) and `/var/lib/anjal/greylist.tsv` (senders are greylisted once
+more).
 
 ---
 
@@ -976,6 +1001,12 @@ setting to the templates, add it by hand; the release note says which.
    anyone signed in signs in once more.
 3. Add the fail2ban tuning (section 1) and the `Subsystem` line (section 1b)
    if they are not already present.
+
+**rc.5 to rc.6**, in addition: the backup timer was enabled by every
+earlier `install.sh` and comes alive at the next boot (DEF-062). Until
+section 11 is done, switch it off:
+`sudo systemctl disable anjal-backup.timer` - `systemctl is-enabled anjal-backup.timer`
+must print `disabled`.
 
 **rc.4 to rc.5**, in addition:
 

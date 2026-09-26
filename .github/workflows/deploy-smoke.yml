@@ -167,6 +167,42 @@ jobs:
           test "$code" = 202
           sudo test -e /var/lib/anjal/acme/renew.request
 
+      - name: A backup under its real unit - refused until configured, verified, never leaves the dump
+        run: |
+          set -euo pipefail
+          # The backup had never run under its own unit - the gap that hid
+          # DEF-048 for the server. Logs are read whole, then searched: under
+          # pipefail "journalctl | grep -q" can fail when grep stops early.
+          blog() { sudo journalctl -u anjal-backup --no-pager; }
+          # DEF-062: install.sh leaves the timer off until section 11.
+          test "$(systemctl is-enabled anjal-backup.timer || true)" = disabled
+          sudo apt-get install -y -q rclone
+          # Not configured yet: refused before anything is dumped.
+          if sudo systemctl start anjal-backup; then echo "::error::an unconfigured backup ran"; exit 1; fi
+          log=$(blog); grep -q "backups are not configured" <<< "$log"
+          test -z "$(sudo ls -A /var/lib/anjal/backup)"
+          # Configured, with an encrypted remote inside the unit's writable path.
+          sudo install -d -o anjal -g anjal -m 700 /var/lib/anjal/smoke-remote
+          p1=$(rclone obscure "$(openssl rand -base64 24)"); p2=$(rclone obscure "$(openssl rand -base64 24)")
+          printf '[loc]\ntype = local\n\n[b2crypt]\ntype = crypt\nremote = loc:/var/lib/anjal/smoke-remote\nfilename_encryption = standard\ndirectory_name_encryption = true\npassword = %s\npassword2 = %s\n' "$p1" "$p2" | sudo tee /etc/anjal/rclone.conf >/dev/null
+          sudo chown root:anjal /etc/anjal/rclone.conf
+          sudo chmod 640 /etc/anjal/rclone.conf
+          sudo -u anjal install -d -m 700 /var/mail/anjal/smoke/ci/cur
+          head -c 4000 /dev/urandom | sudo -u anjal tee /var/mail/anjal/smoke/ci/cur/m1 >/dev/null
+          sudo systemctl start anjal-backup
+          log=$(blog); grep -q "dump uploaded and verified" <<< "$log"; grep -q "verify ok" <<< "$log"
+          test -z "$(sudo ls -A /var/lib/anjal/backup)"
+          # DEF-061: damage the stored mail at rest (size and time unchanged);
+          # the next run must fail, and still leave no dump.
+          f=$(sudo find /var/lib/anjal/smoke-remote -type f -size 4048c | head -n 1)
+          test -n "$f"
+          sudo touch -r "$f" /tmp/stamp
+          printf '\xff' | sudo dd of="$f" bs=1 seek=2000 conv=notrunc status=none
+          sudo touch -r /tmp/stamp "$f"
+          if sudo systemctl start anjal-backup; then echo "::error::a damaged backup verified"; exit 1; fi
+          log=$(blog); grep -q "hashes differ" <<< "$log"
+          test -z "$(sudo ls -A /var/lib/anjal/backup)"
+
       - name: Service logs on failure
         if: failure()
-        run: sudo journalctl -u anjal-server -u anjal-webmail -u postgresql --no-pager | tail -200
+        run: sudo journalctl -u anjal-server -u anjal-webmail -u anjal-backup -u postgresql --no-pager | tail -200

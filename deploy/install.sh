@@ -55,8 +55,11 @@ for u in anjal-server.service anjal-webmail.service anjal-backup.service anjal-b
   install -o root -g root -m 644 "$RELEASE/bin/$u" "/etc/systemd/system/$u"
 done
 systemctl daemon-reload
-systemctl enable anjal-server.service anjal-webmail.service anjal-backup.timer >/dev/null
-log "units installed and enabled (not started)"
+systemctl enable anjal-server.service anjal-webmail.service >/dev/null
+# The backup timer is left off until backups are configured and one run has
+# passed (DEPLOY.md section 11). Enabled here, it came alive at the next boot
+# and ran nightly against the unconfigured template (DEF-062).
+log "units installed; server and webmail enabled (not started); backup timer left off until DEPLOY.md section 11"
 
 # ---- allow the anjal user to run pg_dump/psql via peer auth if local ----
 if command -v psql >/dev/null 2>&1; then
