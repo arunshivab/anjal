@@ -10,7 +10,23 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v1.0.0-rc.5** - the owner's decisions after the first real mail, and two
+**v1.0.0-rc.6** - backups that can be trusted, found by reviewing section 11
+before first use. DEF-061: the nightly verification compared file sizes
+only - through rclone's encryption `rclone check` has no checksum in
+common - so a damaged backup was reported "verify ok"; and it was written
+"check && log", so under set -e even a detected difference ended in "done"
+and success. Now `rclone cryptcheck` verifies the dump, the mail and the
+certificate store, and any difference fails the run. DEF-062: install.sh
+enabled the backup timer at install, so from the next boot it would run
+nightly against the unconfigured template; and whenever an upload failed
+the unencrypted database dump stayed on disk. Now the script refuses to
+start until backups are configured, removes the dump however it ends, and
+the timer is switched on in section 11 after a verified first run.
+deploy-smoke runs a backup under its real unit on every change - refused,
+verified, and failed on a backup damaged at rest. Upgrade: section 13d,
+"rc.5 to rc.6".
+
+Previously: **v1.0.0-rc.5** - the owner's decisions after the first real mail, and two
 display defects. Decision 1B: the webmail says whether a message went
 through the incoming checks - a new `messages.spam_checked` column records it
 at delivery, the list shows 0 for checked mail and a dash for unchecked, and
