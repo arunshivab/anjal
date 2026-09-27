@@ -16,4 +16,5 @@ Composition root for the Anjal mail server host process. Wires Store + Routing +
 - **IsObviousToken** *(method)* - Whether a token is one of the obvious placeholders people leave in configuration files. Not a strength meter - just a refusal to start with "changeme" in production (SEC-R3).
 - **Main** *(method)* - Entry point.
 - **ParsePortOrZero** *(method)* - Parse an integer from an env-var. Returns 0 when null, empty, or unparseable - the caller treats 0 as "feature disabled".
+- **RunEvidenceHousekeepingAsync** *(method)* - The evidence store's housekeeping (v1.0.0-rc.8): a pass shortly after start and then every hour - manifests, purges, clocks, disk space. A failed pass is logged and retried at the next hour; it never stops the server.
 - **SpfPassExemption** *(method)* - Decision 2B: a sender whose connecting IP passes SPF for the MAIL FROM domain is not greylisted. Large providers always pass; the crude senders greylisting stops usually do not. Verdicts are cached for ten minutes per (IP, domain) so a message to several recipients costs one lookup.

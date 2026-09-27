@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 
 namespace Anjal.Server;
@@ -33,7 +32,7 @@ public static class BounceNotice
         System.ArgumentNullException.ThrowIfNull(reason);
 
         string boundary = "anjal-dsn-" + System.Guid.NewGuid().ToString("N");
-        string date = now.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", CultureInfo.InvariantCulture);
+        string date = Anjal.Mime.MessageDate.Format(now);
         string safeReason = OneLine(reason);
         string recipient = OneLine(message.EnvelopeTo);
         string status = permanent ? "5.0.0" : "4.4.7";
@@ -62,7 +61,7 @@ public static class BounceNotice
         sb.Append("--").Append(boundary).Append("\r\n");
         sb.Append("Content-Type: message/delivery-status\r\n\r\n");
         sb.Append("Reporting-MTA: dns; ").Append(hostName).Append("\r\n");
-        sb.Append("Arrival-Date: ").Append(message.CreatedAt.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", CultureInfo.InvariantCulture)).Append("\r\n\r\n");
+        sb.Append("Arrival-Date: ").Append(Anjal.Mime.MessageDate.Format(message.CreatedAt)).Append("\r\n\r\n");
         sb.Append("Final-Recipient: rfc822; ").Append(recipient).Append("\r\n");
         sb.Append("Action: ").Append(action).Append("\r\n");
         sb.Append("Status: ").Append(status).Append("\r\n");

@@ -85,6 +85,18 @@ public sealed class TenantsHandler
             return;
         }
 
+        if (req.EvidenceRetentionDays is int days && (days < 1 || days > 36500))
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", "evidenceRetentionDays must be from 1 to 36500.").ConfigureAwait(false);
+            return;
+        }
+        string? postmaster = req.PostmasterMailbox?.Trim();
+        if (postmaster is { Length: > 0 } && (postmaster.IndexOf('@', System.StringComparison.Ordinal) <= 0 || postmaster.Length > 254))
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", "postmasterMailbox must be an address, like arun@anjal.co.in.").ConfigureAwait(false);
+            return;
+        }
+
         TenantRow? current = await this.store.GetTenantAsync(slug).ConfigureAwait(false);
         TenantRow saved = await this.store.UpsertTenantAsync(new TenantRow
         {
@@ -93,6 +105,9 @@ public sealed class TenantsHandler
             Enabled = req.Enabled,
             SpamThreshold = req.SpamThreshold ?? current?.SpamThreshold ?? TenantRow.DefaultSpamThreshold,
             UnencryptedFolder = folder is null ? current?.UnencryptedFolder : (folder.Length == 0 ? null : folder),
+            // v1.0.0-rc.8: kept unless given - a tenant update must never reset them.
+            EvidenceRetentionDays = req.EvidenceRetentionDays ?? current?.EvidenceRetentionDays ?? 1095,
+            PostmasterMailbox = postmaster is null ? current?.PostmasterMailbox : (postmaster.Length == 0 ? null : postmaster),
         }).ConfigureAwait(false);
         await ctx.WriteJsonAsync(200, ToResponse(saved)).ConfigureAwait(false);
     }
@@ -357,6 +372,8 @@ public sealed class TenantsHandler
         Enabled = t.Enabled,
         SpamThreshold = t.SpamThreshold,
         UnencryptedFolder = t.UnencryptedFolder,
+        EvidenceRetentionDays = t.EvidenceRetentionDays,
+        PostmasterMailbox = t.PostmasterMailbox,
         CreatedAt = t.CreatedAt,
     };
 

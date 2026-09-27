@@ -40,6 +40,15 @@ public sealed class TenantRow
     /// </summary>
     public string? UnencryptedFolder { get; set; }
 
+    /// <summary>Days evidence of deleted mail is kept (v1.0.0-rc.8; PRJ-03b D-11: 3 years by default).</summary>
+    public int EvidenceRetentionDays { get; set; } = 1095;
+
+    /// <summary>
+    /// Where postmaster@ and abuse@ each of the tenant's domains are delivered
+    /// (v1.0.0-rc.8), or null for the tenant's first mailbox.
+    /// </summary>
+    public string? PostmasterMailbox { get; set; }
+
     /// <summary>When the tenant was created.</summary>
     public System.DateTimeOffset CreatedAt { get; set; }
 }
@@ -323,6 +332,9 @@ public sealed class MessageRow
     /// <c>TLSv1.3 TLS_AES_256_GCM_SHA384</c>; null when not encrypted or not recorded.
     /// </summary>
     public string? TransportTls { get; set; }
+
+    /// <summary>The evidence copy this message came from (v1.0.0-rc.8), or null for mail from before rc.8.</summary>
+    public System.Guid? EvidenceId { get; set; }
 
     /// <summary>Time the message was delivered to the folder.</summary>
     public System.DateTimeOffset ReceivedAt { get; set; }

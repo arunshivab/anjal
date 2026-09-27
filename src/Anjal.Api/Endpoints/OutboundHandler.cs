@@ -142,7 +142,7 @@ public sealed class OutboundHandler
         sb.Append("MIME-Version: 1.0\r\n");
         sb.Append("Content-Type: text/plain; charset=utf-8\r\n");
         sb.Append("Date: ");
-        sb.Append(System.DateTimeOffset.UtcNow.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", System.Globalization.CultureInfo.InvariantCulture));
+        sb.Append(Anjal.Mime.MessageDate.Format(System.DateTimeOffset.UtcNow));
         sb.Append("\r\n");
         sb.Append("\r\n");
         sb.Append(req.BodyText ?? string.Empty);

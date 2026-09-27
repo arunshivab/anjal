@@ -40,6 +40,8 @@ public sealed partial class InMemoryMessageStore
                 existing.Enabled = tenant.Enabled;
                 existing.SpamThreshold = tenant.SpamThreshold;
                 existing.UnencryptedFolder = string.IsNullOrWhiteSpace(tenant.UnencryptedFolder) ? null : tenant.UnencryptedFolder.Trim();
+                existing.EvidenceRetentionDays = tenant.EvidenceRetentionDays;
+                existing.PostmasterMailbox = string.IsNullOrWhiteSpace(tenant.PostmasterMailbox) ? null : tenant.PostmasterMailbox.Trim().ToLowerInvariant();
                 return Task.FromResult(Clone(existing));
             }
             var row = new TenantRow
@@ -50,6 +52,8 @@ public sealed partial class InMemoryMessageStore
                 Enabled = tenant.Enabled,
                 SpamThreshold = tenant.SpamThreshold,
                 UnencryptedFolder = string.IsNullOrWhiteSpace(tenant.UnencryptedFolder) ? null : tenant.UnencryptedFolder.Trim(),
+                EvidenceRetentionDays = tenant.EvidenceRetentionDays,
+                PostmasterMailbox = string.IsNullOrWhiteSpace(tenant.PostmasterMailbox) ? null : tenant.PostmasterMailbox.Trim().ToLowerInvariant(),
                 CreatedAt = System.DateTimeOffset.UtcNow,
             };
             this.tenants.Add(row);
@@ -548,7 +552,10 @@ public sealed partial class InMemoryMessageStore
     {
         lock (this.gate)
         {
-            return Task.FromResult(this.mailboxMessages.RemoveAll(m => m.Id == id) > 0);
+            List<MessageRow> gone = this.mailboxMessages.Where(m => m.Id == id).ToList();
+            this.mailboxMessages.RemoveAll(m => m.Id == id);
+            this.StartEvidenceClocks(gone);
+            return Task.FromResult(gone.Count > 0);
         }
     }
 
@@ -691,7 +698,9 @@ public sealed partial class InMemoryMessageStore
 
     private void RemoveMailboxCascade(System.Guid mailboxId)
     {
+        List<MessageRow> gone = this.mailboxMessages.Where(m => m.MailboxId == mailboxId).ToList();
         this.mailboxMessages.RemoveAll(m => m.MailboxId == mailboxId);
+        this.StartEvidenceClocks(gone);
         this.folders.RemoveAll(f => f.MailboxId == mailboxId);
     }
 
@@ -714,6 +723,8 @@ public sealed partial class InMemoryMessageStore
         Enabled = t.Enabled,
         SpamThreshold = t.SpamThreshold,
         UnencryptedFolder = t.UnencryptedFolder,
+        EvidenceRetentionDays = t.EvidenceRetentionDays,
+        PostmasterMailbox = t.PostmasterMailbox,
         CreatedAt = t.CreatedAt,
     };
 
@@ -770,6 +781,7 @@ public sealed partial class InMemoryMessageStore
         SpamChecked = m.SpamChecked,
         TransportEncrypted = m.TransportEncrypted,
         TransportTls = m.TransportTls,
+        EvidenceId = m.EvidenceId,
         ReceivedAt = m.ReceivedAt,
         CategoryId = m.CategoryId,
         HasAttachments = m.HasAttachments,

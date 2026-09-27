@@ -21,6 +21,18 @@ public sealed class TenantRequest
     /// red open lock (the default).
     /// </summary>
     public string? UnencryptedFolder { get; set; }
+
+    /// <summary>
+    /// Days evidence of deleted mail is kept (v1.0.0-rc.8; 1 to 36500).
+    /// Omitted: unchanged (1095 for a new tenant).
+    /// </summary>
+    public int? EvidenceRetentionDays { get; set; }
+
+    /// <summary>
+    /// Mailbox receiving postmaster@ and abuse@ each of the tenant's domains
+    /// (v1.0.0-rc.8). Omitted: unchanged. Empty: cleared - the tenant's first mailbox.
+    /// </summary>
+    public string? PostmasterMailbox { get; set; }
 }
 
 /// <summary>Request body for a sender allow/block rule.</summary>
@@ -69,6 +81,12 @@ public sealed class TenantResponse
 
     /// <summary>Folder for mail that arrives unencrypted, or null to keep it in INBOX with a red lock.</summary>
     public string? UnencryptedFolder { get; set; }
+
+    /// <summary>Days evidence of deleted mail is kept.</summary>
+    public int EvidenceRetentionDays { get; set; }
+
+    /// <summary>Mailbox receiving postmaster@ and abuse@, or null for the tenant's first mailbox.</summary>
+    public string? PostmasterMailbox { get; set; }
 
     /// <summary>When the tenant was created.</summary>
     public System.DateTimeOffset CreatedAt { get; set; }

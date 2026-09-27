@@ -13,6 +13,8 @@
 #   db/anjal-YYYYMMDD-HHMMSS.sql.gz    (last 30 kept)
 #   mail/<tenant>/<mailbox>/...        (mirror of /var/mail/anjal)
 #   acme/...                           (account key, cert, key, meta)
+#   evidence/YYYY/MM/DD/<id>.eml       (rc.8: originals, append-only - never mirrors a deletion)
+#   evidence/manifests/YYYY-MM-DD.txt  (rc.8: the daily manifest chain)
 #   deleted/YYYYMMDD/...               (files removed from the mirror, 30 days)
 #
 # v1.0.0-rc.6: refuses to start until backups are configured, never leaves
@@ -95,6 +97,28 @@ rclone sync "$MAILDIR_ROOT" "${REMOTE}mail/" \
   --exclude 'tmp/**' \
   --transfers 8 --checkers 16 --fast-list --stats=0 --quiet
 
+# ---- 3b. Evidence (v1.0.0-rc.8, ANJAL-DES-01): append-only ----
+# Copy, never sync: the backup keeps every original, even one lost or damaged
+# on the server. A file leaves the backup only when the retention rule purges
+# it: the evidence worker names each purged file in a purge list, and only
+# those files are removed here. A list for a finished day is then marked done.
+EVIDENCE_ROOT=${ANJAL_EVIDENCE_ROOT:-/var/lib/anjal/evidence}
+if [ -d "$EVIDENCE_ROOT" ]; then
+  log "copy $EVIDENCE_ROOT -> ${REMOTE}evidence/ (append-only)"
+  rclone copy "$EVIDENCE_ROOT" "${REMOTE}evidence/" \
+    --exclude 'purge-lists/**' --exclude '*.tmp' \
+    --transfers 8 --checkers 16 --fast-list --stats=0 --quiet
+  TODAY_UTC=$(date -u +%Y-%m-%d)
+  for list in "$EVIDENCE_ROOT"/purge-lists/*.txt; do
+    [ -e "$list" ] || continue
+    log "apply purge list $(basename "$list") to ${REMOTE}evidence/"
+    rclone delete "${REMOTE}evidence/" --files-from "$list" --quiet
+    if [ "$(basename "$list" .txt)" \< "$TODAY_UTC" ]; then
+      mv "$list" "$list.done"
+    fi
+  done
+fi
+
 # ---- 4. ACME store (account key, certificate, key) ----
 if [ -d "$ACME_DIR" ]; then
   log "sync $ACME_DIR -> ${REMOTE}acme/"
@@ -138,5 +162,9 @@ rclone rmdirs "${REMOTE}deleted/" --leave-root --quiet 2>/dev/null || true
 # "done" and success.
 log "verify mail mirror"
 verify "$MAILDIR_ROOT" "${REMOTE}mail/" --exclude 'tmp/**' --fast-list
+if [ -d "$EVIDENCE_ROOT" ]; then
+  log "verify evidence"
+  verify "$EVIDENCE_ROOT" "${REMOTE}evidence/" --exclude 'purge-lists/**' --exclude '*.tmp' --fast-list
+fi
 log "verify ok"
 log "done"

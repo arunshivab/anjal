@@ -419,3 +419,101 @@ CREATE TABLE IF NOT EXISTS settings (
     updated_by TEXT        NOT NULL DEFAULT '',
     PRIMARY KEY (scope, key)
 );
+
+-- ======================= v1.0.0-rc.8 (integrity: evidence store) =======================
+-- ANJAL-DES-01. The original of every message, exactly as received or sent,
+-- fingerprinted (SHA-256) and never changed. The files live under
+-- /var/lib/anjal/evidence; these tables describe them.
+
+-- Days evidence of deleted mail is kept (PRJ-03b D-11: 3 years by default).
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS evidence_retention_days INTEGER NOT NULL DEFAULT 1095
+    CHECK (evidence_retention_days > 0);
+
+CREATE TABLE IF NOT EXISTS evidence (
+    id                    UUID        PRIMARY KEY,
+    direction             TEXT        NOT NULL CHECK (direction IN ('in', 'out')),
+    captured_at           TIMESTAMPTZ NOT NULL,
+    envelope_from         TEXT        NOT NULL,
+    envelope_to           TEXT[]      NOT NULL,
+    remote_address        TEXT        NOT NULL DEFAULT '',
+    client_hostname       TEXT        NOT NULL DEFAULT '',
+    transport_tls         TEXT,
+    authenticated_user    TEXT,
+    size_bytes            BIGINT      NOT NULL,
+    sha256                TEXT        NOT NULL,
+    path                  TEXT        NOT NULL,
+    reconstructed         BOOLEAN     NOT NULL DEFAULT false,
+    -- incoming: pending until the mailboxes accept it; not-accepted copies are purged at once
+    outcome               TEXT        NOT NULL DEFAULT 'pending' CHECK (outcome IN ('pending', 'accepted', 'not-accepted', 'sent')),
+    retention_days        INTEGER     NOT NULL DEFAULT 1095,
+    all_copies_deleted_at TIMESTAMPTZ,
+    purge_after           TIMESTAMPTZ,
+    purged_at             TIMESTAMPTZ,
+    purge_reason          TEXT
+);
+CREATE INDEX IF NOT EXISTS evidence_captured ON evidence (captured_at);
+CREATE INDEX IF NOT EXISTS evidence_due ON evidence (purge_after) WHERE purged_at IS NULL;
+
+-- Which mailbox copy came from which evidence (one evidence per SMTP transaction).
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS evidence_id UUID REFERENCES evidence(id);
+CREATE INDEX IF NOT EXISTS messages_evidence ON messages (evidence_id) WHERE evidence_id IS NOT NULL;
+
+-- Outgoing: every delivery attempt and the receiving server's reply.
+CREATE TABLE IF NOT EXISTS evidence_attempts (
+    id            BIGSERIAL   PRIMARY KEY,
+    evidence_id   UUID        NOT NULL REFERENCES evidence(id),
+    attempted_at  TIMESTAMPTZ NOT NULL,
+    recipient     TEXT        NOT NULL,
+    remote_host   TEXT        NOT NULL DEFAULT '',
+    transport_tls TEXT,
+    reply_code    INTEGER,
+    reply_text    TEXT        NOT NULL DEFAULT '',
+    outcome       TEXT        NOT NULL CHECK (outcome IN ('delivered', 'deferred', 'refused'))
+);
+CREATE INDEX IF NOT EXISTS evidence_attempts_evidence ON evidence_attempts (evidence_id);
+
+-- The daily manifest chain: each day's manifest includes the previous one's hash.
+CREATE TABLE IF NOT EXISTS evidence_manifests (
+    day             DATE        PRIMARY KEY,
+    sha256          TEXT        NOT NULL,
+    previous_sha256 TEXT        NOT NULL,
+    added           INTEGER     NOT NULL,
+    purged          INTEGER     NOT NULL,
+    path            TEXT        NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Outgoing mail: the evidence copy of each queued row, and the Sent copy it
+-- belongs to (set just after the Sent copy is saved). The evidence keeps the
+-- link too, because queued rows may be cleaned up; evidence rows never are.
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS evidence_id UUID REFERENCES evidence(id);
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS sent_message_id UUID;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS sent_message_id UUID;
+CREATE INDEX IF NOT EXISTS evidence_sent_message ON evidence (sent_message_id) WHERE sent_message_id IS NOT NULL;
+
+-- When the last mailbox copy of a message is deleted - by any path, including
+-- a mailbox or tenant removal - its evidence's retention clock starts; so does
+-- the clock of outgoing evidence whose Sent copy it was.
+CREATE OR REPLACE FUNCTION anjal_evidence_copy_deleted() RETURNS trigger AS $$
+BEGIN
+    IF OLD.evidence_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM messages WHERE evidence_id = OLD.evidence_id) THEN
+        UPDATE evidence
+           SET all_copies_deleted_at = now(),
+               purge_after = now() + make_interval(days => retention_days)
+         WHERE id = OLD.evidence_id AND all_copies_deleted_at IS NULL;
+    END IF;
+    UPDATE evidence
+       SET all_copies_deleted_at = now(),
+           purge_after = now() + make_interval(days => retention_days)
+     WHERE sent_message_id = OLD.id AND all_copies_deleted_at IS NULL;
+    RETURN NULL;
+END
+$$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS messages_evidence_deleted ON messages;
+CREATE TRIGGER messages_evidence_deleted AFTER DELETE ON messages
+    FOR EACH ROW EXECUTE FUNCTION anjal_evidence_copy_deleted();
+
+-- v1.0.0-rc.8 (SPEC-08 R-14): postmaster@ and abuse@ each hosted domain (RFC 5321 4.5.1,
+-- RFC 2142) go to this mailbox; when null, to the tenant's first mailbox.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS postmaster_mailbox TEXT;

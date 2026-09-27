@@ -52,6 +52,17 @@ public sealed class RelayMailSender : IMailSender
         System.Threading.CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(delivery);
+        // v1.0.0-rc.8: every result names the relay and the TLS used (see DirectMailSender).
+        var route = new RouteNote();
+        SendResult result = await this.SendCoreAsync(delivery, route, ct).ConfigureAwait(false);
+        return result.WithRoute(this.options.Host, route.Tls);
+    }
+
+    private async System.Threading.Tasks.Task<SendResult> SendCoreAsync(
+        OutboundDelivery delivery,
+        RouteNote route,
+        System.Threading.CancellationToken ct)
+    {
         if (delivery.EnvelopeTo.Count == 0)
         {
             return new SendResult { Outcome = SendOutcome.PermanentFailure, Message = "No recipients" };
@@ -97,6 +108,7 @@ public sealed class RelayMailSender : IMailSender
                         await session.QuitAsync(ct).ConfigureAwait(false);
                         return ClassifyReply(tlsReply, "STARTTLS");
                     }
+                    route.Tls = session.NegotiatedTls;
                     SmtpReply ehlo2 = await session.EhloAsync(this.options.ClientHostName, ct).ConfigureAwait(false);
                     if (ehlo2.Code != 250)
                     {

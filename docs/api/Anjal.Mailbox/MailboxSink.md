@@ -12,7 +12,11 @@ that delivers accepted SMTP messages into tenant mailboxes. For each recipient: 
 - **ChooseFolder** *(method)* - Decide the destination folder: a sender rule wins outright; otherwise the score is compared with the tenant threshold (a threshold of 0 or less disables junk filing for the tenant).
 - **DeliverAsync** *(method)* - _(no description)_
 - **FileSentCopyAsync** *(method)* - File a copy of a message a mailbox itself sent into its Sent folder, already marked read - what the webmail does after sending, for mail that arrives through SMTP submission instead. Returns false when the address is not a local mailbox (a service account, for example).
+- **FileSentCopyWithEvidenceAsync** *(method)* - , also linking the copy to the evidence of the submission as received (v1.0.0-rc.8), and returning the copy's id.
 - **HasAttachment** *(method)* - Whether a parsed message carries an attachment: any part with a filename, or any non-text part inside a multipart body. A plain text or HTML message on its own does not count.
+- **IsRoleAddress** *(method)* - Whether a local part is one every mail domain must accept (postmaster, abuse).
 - **IsTrustedAsync** *(method)* - Whether the mailbox trusts the sender although their mail arrives unencrypted.
 - **ResolveAsync** *(method)* - Resolve a recipient address to an enabled mailbox of an enabled tenant whose domain is registered. Returns when any link in that chain is missing.
 - **TrySplitAddress** *(method)* - Split an address into (local-part without "+tag", domain), both lowercased. Returns if the address has no "@" or an empty side.
+- **OperatorPostmaster** *(property)* - The operator's mailbox for postmaster@ this server; null for postmaster@ its parent domain.
+- **ServerHostName** *(property)* - This server's own name, for postmaster@ it (v1.0.0-rc.8); null to not recognise it.

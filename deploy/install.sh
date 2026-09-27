@@ -24,6 +24,7 @@ install -d -o root  -g anjal -m 750 /etc/anjal
 install -d -o anjal -g anjal -m 750 /var/lib/anjal
 install -d -o anjal -g anjal -m 700 /var/lib/anjal/acme /var/lib/anjal/backup /var/lib/anjal/webmail-keys
 install -d -o anjal -g anjal -m 700 /var/mail/anjal
+install -d -o anjal -g anjal -m 750 /var/lib/anjal/evidence
 
 # ---- binaries (self-contained publish output) ----
 for app in server webmail; do
@@ -41,6 +42,9 @@ for app in server webmail; do
 done
 install -o root -g root -m 755 "$RELEASE/bin/backup.sh"  /opt/anjal/bin/backup.sh
 install -o root -g root -m 755 "$RELEASE/bin/restore.sh" /opt/anjal/bin/restore.sh
+# Outbound firewall (rc.8, INC-01): installed, not applied - see DEPLOY.md 13f.
+install -o root -g root -m 755 "$RELEASE/bin/anjal-firewall.sh"  /opt/anjal/bin/anjal-firewall.sh
+install -o root -g root -m 755 "$RELEASE/bin/anjal-portcheck.sh" /opt/anjal/bin/anjal-portcheck.sh
 
 # ---- config templates (never overwrite a real config) ----
 for f in server.env webmail.env rclone.conf; do

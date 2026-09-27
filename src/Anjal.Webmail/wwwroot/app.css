@@ -580,6 +580,10 @@ textarea.inp { border-radius: var(--r-panel); line-height: 22px; }
 .railnote { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; line-height: 18px;
             color: var(--ink-subtle); margin: 10px 0 0; overflow-wrap: anywhere; }
 .railnote svg { flex: 0 0 14px; margin-top: 2px; }
+/* v1.0.0-rc.8: the kept original and its fingerprint */
+.railnote.evidence { color: var(--ink-muted); }
+.railnote .fingerprint { display: block; font-size: 11px; color: var(--ink-subtle); }
+.railnote .fingerprint code { font-size: 11px; }
 .raillink { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-muted);
             text-decoration: none; padding: 8px 10px; border-radius: var(--r-control);
             transition: background 160ms var(--ease), color 160ms var(--ease); cursor: pointer; }

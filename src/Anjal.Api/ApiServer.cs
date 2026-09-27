@@ -22,6 +22,7 @@ public sealed class ApiServer : System.IDisposable
     private readonly InboundHandler inbound;
     private readonly OutboundTlsPoliciesHandler tlsPolicies;
     private readonly SettingsHandler settings;
+    private readonly EvidenceHandler? evidence;
     private readonly DkimKeysHandler dkimKeys;
     private readonly SmtpUsersHandler smtpUsers;
     private readonly LocalDomainsHandler localDomains;
@@ -78,6 +79,10 @@ public sealed class ApiServer : System.IDisposable
         {
             this.tenants = new TenantsHandler(mbStore);
             this.mailboxes = new MailboxesHandler(mbStore, maildir);
+            if (!string.IsNullOrWhiteSpace(options.EvidenceRoot) && !string.IsNullOrWhiteSpace(options.HostName) && store is IEvidenceStore evidenceStore)
+            {
+                this.evidence = new EvidenceHandler(store, evidenceStore, mbStore, maildir, new Anjal.Mailbox.EvidenceVault(options.EvidenceRoot), options.HostName);
+            }
         }
         if (!string.IsNullOrWhiteSpace(options.AcmeDirectory))
         {
@@ -323,6 +328,65 @@ public sealed class ApiServer : System.IDisposable
     /// private keys and webhook secrets. A failure to record is logged, not
     /// fatal: the change has already been made.
     /// </summary>
+    /// <summary>The v1.0.0-rc.8 evidence and maintenance routes; true when one matched.</summary>
+    private async System.Threading.Tasks.Task<bool> DispatchEvidenceAsync(RequestContext ctx, string path)
+    {
+        EvidenceHandler h = this.evidence!;
+        string m = ctx.Method;
+        if (path.Equals("/api/evidence/verify", System.StringComparison.OrdinalIgnoreCase) && m == "POST")
+        {
+            await h.VerifyChainAsync(ctx).ConfigureAwait(false);
+            return true;
+        }
+        if (path.Equals("/api/maintenance/transport-labels", System.StringComparison.OrdinalIgnoreCase) && m == "POST")
+        {
+            await h.RecoverLabelsAsync(ctx).ConfigureAwait(false);
+            return true;
+        }
+        if (path.Equals("/api/maintenance/reconstruct-evidence", System.StringComparison.OrdinalIgnoreCase) && m == "POST")
+        {
+            await h.ReconstructAsync(ctx).ConfigureAwait(false);
+            return true;
+        }
+        if (path.Equals("/api/maintenance/trusted-senders", System.StringComparison.OrdinalIgnoreCase))
+        {
+            if (m == "GET")
+            {
+                await h.ListTrustedSendersAsync(ctx).ConfigureAwait(false);
+                return true;
+            }
+            if (m == "DELETE")
+            {
+                await h.RemoveTrustedSenderAsync(ctx).ConfigureAwait(false);
+                return true;
+            }
+        }
+        const string prefix = "/api/evidence/";
+        if (m == "GET" && path.StartsWith(prefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string[] parts = path.Substring(prefix.Length).Split('/');
+            if (System.Guid.TryParse(parts[0], out System.Guid id))
+            {
+                if (parts.Length == 1)
+                {
+                    await h.GetAsync(ctx, id).ConfigureAwait(false);
+                    return true;
+                }
+                if (parts.Length == 2 && parts[1].Equals("raw", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    await h.GetRawAsync(ctx, id).ConfigureAwait(false);
+                    return true;
+                }
+                if (parts.Length == 2 && parts[1].Equals("verify", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    await h.VerifyOneAsync(ctx, id).ConfigureAwait(false);
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private async System.Threading.Tasks.Task AuditAsync(RequestContext ctx)
     {
         if (ctx.Method == "GET" || ctx.Method == "HEAD" || ctx.Method == "OPTIONS")
@@ -452,6 +516,11 @@ public sealed class ApiServer : System.IDisposable
                     await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
                     return;
             }
+        }
+
+        if (this.evidence is not null && await this.DispatchEvidenceAsync(ctx, path).ConfigureAwait(false))
+        {
+            return;
         }
 
         if (path.Equals("/api/settings", System.StringComparison.OrdinalIgnoreCase) && ctx.Method == "GET")

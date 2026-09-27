@@ -281,16 +281,9 @@ public sealed class SpamFilterSink : IMessageSink
             };
         }
 
-        var annotated = new DeliveryContext
-        {
-            EnvelopeFrom = ctx.EnvelopeFrom,
-            EnvelopeTo = ctx.EnvelopeTo,
-            RawBytes = SpamHeaders.Prepend(ctx.RawBytes, verdict),
-            RemoteAddress = ctx.RemoteAddress,
-            ClientHostName = ctx.ClientHostName,
-            AuthenticatedUser = ctx.AuthenticatedUser,
-            AuthResults = ctx.AuthResults,
-        };
+        // DEF-065: every property travels on, including how the message
+        // arrived (TransportTls); only the bytes change.
+        DeliveryContext annotated = ctx.WithRawBytes(SpamHeaders.Prepend(ctx.RawBytes, verdict));
         return await this.inner.DeliverAsync(annotated, ct).ConfigureAwait(false);
     }
 }

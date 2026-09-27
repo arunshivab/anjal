@@ -12,6 +12,7 @@ Configuration for an instance.
 - **AuthFailures** *(property)* - Shared per-address AUTH failure counter for this listener. Null disables the cross-session limit (the per-session one still applies).
 - **BindAddress** *(property)* - IP address to bind. Defaults to loopback for local development.
 - **CommandTimeout** *(property)* - Idle-timeout per command. Connections that go this long with no data are closed.
+- **Evidence** *(property)* - Keeps the original of every incoming message (v1.0.0-rc.8). When set, a message whose original cannot be stored is deferred with 451.
 - **ImplicitTls** *(property)* - Implicit TLS (RFC 8314): the TLS handshake happens as soon as the client connects, before the banner, as on port 465. No plaintext is ever exchanged, so there is no STARTTLS to strip. A connection whose handshake fails is closed without a word.
 - **Log** *(property)* - Optional diagnostic log for errors a session recovers from but should not hide.
 - **MaxAuthFailuresPerSession** *(property)* - Failed AUTH attempts allowed in one session before it is closed. Default 3.

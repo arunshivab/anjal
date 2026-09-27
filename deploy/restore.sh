@@ -15,6 +15,7 @@ set -euo pipefail
 RCLONE_CONFIG=${RCLONE_CONFIG:-/etc/anjal/rclone.conf}
 REMOTE=${ANJAL_BACKUP_REMOTE:-b2crypt:}
 MAILDIR_ROOT=${ANJAL_MAILDIR_ROOT:-/var/mail/anjal}
+EVIDENCE_ROOT=${ANJAL_EVIDENCE_ROOT:-/var/lib/anjal/evidence}
 ACME_DIR=${ANJAL_ACME_DIR:-/var/lib/anjal/acme}
 SCRATCH=${ANJAL_BACKUP_SCRATCH:-/var/lib/anjal/backup}
 export RCLONE_CONFIG
@@ -49,6 +50,14 @@ chmod 700 "$ACME_DIR"
 find "$ACME_DIR" -name '*.key.pem' -exec chmod 600 {} +
 find "$MAILDIR_ROOT" -type d -exec chmod 700 {} +
 find "$MAILDIR_ROOT" -type f -exec chmod 600 {} +
+# Evidence (v1.0.0-rc.8): the originals and the manifest chain, read-only again.
+log "restore ${REMOTE}evidence/ -> $EVIDENCE_ROOT"
+mkdir -p "$EVIDENCE_ROOT"
+rclone copy "${REMOTE}evidence/" "$EVIDENCE_ROOT" --transfers 8 --checkers 16 --fast-list --stats=0 --quiet
+chown -R anjal:anjal "$EVIDENCE_ROOT"
+find "$EVIDENCE_ROOT" -type d -exec chmod 750 {} +
+find "$EVIDENCE_ROOT" -type f -name '*.eml' -exec chmod 440 {} +
+find "$EVIDENCE_ROOT/manifests" -type f -exec chmod 440 {} + 2>/dev/null || true
 # Greylist memory back into place, and the settings snapshot beside
 # /etc/anjal for comparison only - never over it: secrets come from paper
 # (v1.0.0-rc.7).
