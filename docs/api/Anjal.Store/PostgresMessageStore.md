@@ -7,6 +7,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 ## Members
 
 - **#ctor** *(method)* - Create the store with a PostgreSQL connection string.
+- **AddEvidenceAttemptAsync** *(method)* - _(no description)_
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
 - **AddTrustedSenderAsync** *(method)* - _(no description)_
 - **AppendAuditAsync** *(method)* - _(no description)_
@@ -38,11 +39,14 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **GetActivityAsync** *(method)* - _(no description)_
 - **GetCategoryAsync** *(method)* - _(no description)_
 - **GetDkimKeyAsync** *(method)* - _(no description)_
+- **GetEvidenceAsync** *(method)* - _(no description)_
 - **GetInboundByIdAsync** *(method)* - _(no description)_
+- **GetLatestEvidenceManifestAsync** *(method)* - _(no description)_
 - **GetMailboxAsync** *(method)* - _(no description)_
 - **GetMailboxByIdAsync** *(method)* - _(no description)_
 - **GetMessageByIdAsync** *(method)* - _(no description)_
 - **GetOutboundByIdAsync** *(method)* - _(no description)_
+- **GetOutboundEvidenceLinkAsync** *(method)* - _(no description)_
 - **GetOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **GetRoutingRuleAsync** *(method)* - _(no description)_
 - **GetSignatureAsync** *(method)* - _(no description)_
@@ -51,13 +55,21 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **GetTenantByIdAsync** *(method)* - _(no description)_
 - **GetTenantDomainAsync** *(method)* - _(no description)_
 - **ImportSettingsAsync** *(method)* - _(no description)_
+- **InsertEvidenceAsync** *(method)* - _(no description)_
+- **InsertEvidenceManifestAsync** *(method)* - _(no description)_
 - **IsLocalDomainAsync** *(method)* - _(no description)_
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
 - **LeaseWebhookJobsAsync** *(method)* - _(no description)_
+- **LinkOutboundToSentCopyAsync** *(method)* - _(no description)_
 - **ListAuditAsync** *(method)* - _(no description)_
 - **ListCategoriesAsync** *(method)* - _(no description)_
 - **ListCategoryRulesAsync** *(method)* - _(no description)_
 - **ListDkimKeysAsync** *(method)* - _(no description)_
+- **ListEvidenceAttemptsAsync** *(method)* - _(no description)_
+- **ListEvidenceCapturedAsync** *(method)* - _(no description)_
+- **ListEvidenceDueAsync** *(method)* - _(no description)_
+- **ListEvidenceManifestsAsync** *(method)* - _(no description)_
+- **ListEvidencePurgedAsync** *(method)* - _(no description)_
 - **ListFoldersAsync** *(method)* - _(no description)_
 - **ListGreylistAsync** *(method)* - _(no description)_
 - **ListLocalDomainsAsync** *(method)* - _(no description)_
@@ -72,17 +84,24 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **ListTenantDomainsAsync** *(method)* - _(no description)_
 - **ListTenantsAsync** *(method)* - _(no description)_
 - **ListTrustedSendersAsync** *(method)* - _(no description)_
+- **MarkEvidencePurgedAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
+- **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveMessageAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SearchMessagesAsync** *(method)* - _(no description)_
+- **SetEvidenceOutcomeAsync** *(method)* - _(no description)_
 - **SetMessageCategoryAsync** *(method)* - _(no description)_
+- **SetMessageEvidenceAsync** *(method)* - _(no description)_
 - **SetMessageFlagsAsync** *(method)* - _(no description)_
+- **SetOutboundEvidenceAsync** *(method)* - _(no description)_
 - **SetSignatureAsync** *(method)* - _(no description)_
+- **StartClocksForOutboundWithoutMailboxCopyAsync** *(method)* - _(no description)_
+- **UpdateMessageTransportAsync** *(method)* - _(no description)_
 - **UpsertCategoryAsync** *(method)* - _(no description)_
 - **UpsertCategoryRuleAsync** *(method)* - _(no description)_
 - **UpsertDkimKeyAsync** *(method)* - _(no description)_

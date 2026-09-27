@@ -93,9 +93,10 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
         }
 
         System.DateTimeOffset now = this.clock();
+        var queued = new System.Collections.Generic.List<System.Guid>();
         foreach (string rcpt in external)
         {
-            await this.outbound.EnqueueOutboundAsync(new Anjal.Store.OutboundMessage
+            Anjal.Store.OutboundMessage row = await this.outbound.EnqueueOutboundAsync(new Anjal.Store.OutboundMessage
             {
                 EnvelopeFrom = ctx.EnvelopeFrom,
                 EnvelopeTo = rcpt,
@@ -104,6 +105,7 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
                 NextAttemptAt = now,
                 GiveUpAt = now.AddHours(24),
             }, ct).ConfigureAwait(false);
+            queued.Add(row.Id);
         }
 
         bool localAccepted = localResult is { Outcome: Anjal.Smtp.DeliveryOutcome.Accepted };
@@ -124,7 +126,13 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
         if (this.mailboxes is not null &&
             string.Equals(ctx.AuthenticatedUser, ctx.EnvelopeFrom, System.StringComparison.OrdinalIgnoreCase))
         {
-            await this.mailboxes.FileSentCopyAsync(ctx.EnvelopeFrom, ctx.RawBytes, ct).ConfigureAwait(false);
+            // v1.0.0-rc.8: the Sent copy points to the evidence of the submission,
+            // and the queued rows (whose outgoing evidence follows) to the Sent copy.
+            System.Guid? sentCopy = await this.mailboxes.FileSentCopyWithEvidenceAsync(ctx.EnvelopeFrom, ctx.RawBytes, ctx.EvidenceId, ct).ConfigureAwait(false);
+            if (sentCopy is System.Guid s && this.outbound is Anjal.Store.IEvidenceStore evidenceStore)
+            {
+                await evidenceStore.LinkOutboundToSentCopyAsync(queued, s, ct).ConfigureAwait(false);
+            }
         }
 
         Anjal.Smtp.Counters.Add("anjal_submission_queued_total", external.Count);

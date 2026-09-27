@@ -665,6 +665,13 @@ public sealed class SmtpSession
             return true;
         }
 
+        // RFC 5321 4.5.1 (v1.0.0-rc.8): "Postmaster" without a domain, in any
+        // case, must be accepted; it means the postmaster of this server.
+        if (addr.Trim().Equals("postmaster", System.StringComparison.OrdinalIgnoreCase))
+        {
+            addr = "postmaster@" + this.options.AdvertisedHostName;
+        }
+
         if (this.envelopeTo.Count >= this.options.MaxRecipients)
         {
             await this.WriteLineAsync("452 Too many recipients", ct).ConfigureAwait(false);
@@ -680,7 +687,9 @@ public sealed class SmtpSession
             bool isLocal;
             try
             {
-                isLocal = await this.localDomains.IsLocalAsync(rcptDomain, ct).ConfigureAwait(false);
+                // postmaster@ and abuse@ this server's own name are always local (v1.0.0-rc.8).
+                isLocal = IsRoleAtThisServer(addr, this.options.AdvertisedHostName)
+                    || await this.localDomains.IsLocalAsync(rcptDomain, ct).ConfigureAwait(false);
             }
             catch (System.OperationCanceledException)
             {
@@ -755,6 +764,18 @@ public sealed class SmtpSession
     /// Extract the domain portion from a "user@domain" address. Returns
     /// empty if not a valid local@domain form.
     /// </summary>
+    private static bool IsRoleAtThisServer(string addr, string hostName)
+    {
+        int at = addr.LastIndexOf('@');
+        if (at <= 0)
+        {
+            return false;
+        }
+        string local = addr[..at];
+        return addr[(at + 1)..].Trim().Equals(hostName, System.StringComparison.OrdinalIgnoreCase)
+            && (local.Equals("postmaster", System.StringComparison.OrdinalIgnoreCase) || local.Equals("abuse", System.StringComparison.OrdinalIgnoreCase));
+    }
+
     private static string ExtractDomain(string addr)
     {
         if (string.IsNullOrEmpty(addr)) return string.Empty;
@@ -854,6 +875,39 @@ public sealed class SmtpSession
         // and it lets loops be detected.
         bodyToDeliver = PrependHeader(bodyToDeliver, this.ReceivedHeader());
 
+        // v1.0.0-rc.8: keep the original exactly as received before anything
+        // is delivered. If it cannot be stored, defer: the sender retries, and
+        // nothing is accepted without its evidence (SPEC-08 R-08).
+        System.Guid? evidenceId = null;
+        IEvidenceRecorder? recorder = this.options.Evidence;
+        if (recorder is not null)
+        {
+            try
+            {
+                evidenceId = await recorder.RecordInboundAsync(new InboundEvidence
+                {
+                    RawBytes = data.Raw ?? body,
+                    EnvelopeFrom = this.envelopeFrom,
+                    EnvelopeTo = this.envelopeTo.ToArray(),
+                    RemoteAddress = this.remoteAddress,
+                    ClientHostName = this.clientHostName,
+                    TransportTls = this.tlsDescription,
+                    AuthenticatedUser = this.authenticatedUser?.Username,
+                    ReceivedAt = System.DateTimeOffset.UtcNow,
+                }, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Any failure to keep the evidence defers the message; the session continues.
+            catch (System.Exception ex) when (ex is not System.OperationCanceledException)
+            {
+                this.options.Log?.Invoke($"Evidence could not be stored for mail from {this.remoteAddress} ({ex.GetType().Name}: {ex.Message}); deferred with 451.");
+                Counters.Increment("anjal_smtp_messages_deferred_total");
+                await this.WriteLineAsync("451 4.3.0 Temporary local problem: the message could not be recorded; please try again later", ct).ConfigureAwait(false);
+                this.ResetTransaction();
+                return true;
+            }
+#pragma warning restore CA1031
+        }
+
         var deliveryCtx = new DeliveryContext
         {
             EnvelopeFrom = this.envelopeFrom,
@@ -864,6 +918,7 @@ public sealed class SmtpSession
             AuthenticatedUser = this.authenticatedUser?.Username,
             AuthResults = authResult?.Detail,
             TransportTls = this.tlsDescription,
+            EvidenceId = evidenceId,
         };
 
         DeliveryResult result;
@@ -881,6 +936,20 @@ public sealed class SmtpSession
             };
         }
 #pragma warning restore CA1031
+
+        if (recorder is not null && evidenceId is System.Guid kept)
+        {
+            try
+            {
+                await recorder.CompleteInboundAsync(kept, result.Outcome == DeliveryOutcome.Accepted, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Recording the outcome must not change the reply already decided.
+            catch (System.Exception ex) when (ex is not System.OperationCanceledException)
+            {
+                this.options.Log?.Invoke($"Evidence {kept}: outcome not recorded ({ex.GetType().Name}: {ex.Message}).");
+            }
+#pragma warning restore CA1031
+        }
 
         string code = result.Outcome switch
         {
@@ -1003,7 +1072,14 @@ public sealed class SmtpSession
                     // A real line end.
                     if (lineBuf.Length == 1 && lineBuf.GetBuffer()[0] == (byte)'.')
                     {
-                        return tooBig ? DataResult.Oversized : DataResult.Of(NormaliseLineEndings(ms.ToArray()));
+                        if (tooBig)
+                        {
+                            return DataResult.Oversized;
+                        }
+                        // The evidence keeps the bytes exactly as received; everything
+                        // else works on the copy with repaired line endings (v1.0.0-rc.8).
+                        byte[] asReceived = ms.ToArray();
+                        return DataResult.Of(asReceived, NormaliseLineEndings(asReceived));
                     }
                     if (!tooBig)
                     {
@@ -1366,9 +1442,10 @@ public sealed class SmtpSession
     /// <summary>The outcome of reading a DATA body.</summary>
     private readonly struct DataResult
     {
-        private DataResult(byte[]? body, bool tooLarge, bool bareDot = false)
+        private DataResult(byte[]? body, bool tooLarge, bool bareDot = false, byte[]? raw = null)
         {
             this.Body = body;
+            this.Raw = raw ?? body;
             this.TooLarge = tooLarge;
             this.IsBareDot = bareDot;
         }
@@ -1386,9 +1463,12 @@ public sealed class SmtpSession
 
         public byte[]? Body { get; }
 
+        /// <summary>The body exactly as received, before line endings were repaired.</summary>
+        public byte[]? Raw { get; }
+
         public bool TooLarge { get; }
 
-        public static DataResult Of(byte[] body) => new(body, false);
+        public static DataResult Of(byte[] raw, byte[] body) => new(body, false, raw: raw);
     }
 
     private async System.Threading.Tasks.Task WriteLineAsync(string line, System.Threading.CancellationToken ct)

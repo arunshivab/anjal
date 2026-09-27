@@ -9,3 +9,4 @@ The outcome of reading a DATA body.
 - **BareDot** *(property)* - A lone "." line with non-CRLF line breaks: refused, and the session closed.
 - **Dropped** *(property)* - The body could not be read: the connection must close.
 - **Oversized** *(property)* - The body was read in full but exceeded the size limit.
+- **Raw** *(property)* - The body exactly as received, before line endings were repaired.

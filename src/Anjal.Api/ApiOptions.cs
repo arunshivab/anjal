@@ -57,6 +57,15 @@ public sealed class ApiOptions
     public string? MaildirRoot { get; init; }
 
     /// <summary>
+    /// The evidence root (v1.0.0-rc.8). When set, with <see cref="HostName"/>,
+    /// the evidence and maintenance endpoints are enabled.
+    /// </summary>
+    public string? EvidenceRoot { get; init; }
+
+    /// <summary>This server's name, as it writes it in its Received lines (for label recovery).</summary>
+    public string? HostName { get; init; }
+
+    /// <summary>
     /// Days of certificate validity below which <c>/healthz</c> reports the
     /// TLS component as degraded. Default 7.
     /// </summary>

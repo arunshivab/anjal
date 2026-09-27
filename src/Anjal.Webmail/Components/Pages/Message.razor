@@ -254,6 +254,17 @@ else
             }
             <section class="railcard">
                 <h2 class="railhead">This message</h2>
+                @if (view.Evidence is { PurgedAt: null } kept)
+                {
+                    @* v1.0.0-rc.8: the original is kept as proof, fingerprinted (ANJAL-DES-01). *@
+                    <p class="railnote evidence" title="SHA-256 @kept.Sha256">
+                        <LipiIcon Name="lock" Size="14" />
+                        <span>
+                            @(kept.Reconstructed ? "Original reconstructed (stored before evidence was kept)" : kept.Direction == Anjal.Store.EvidenceRow.Out ? "Original kept exactly as sent" : "Original kept exactly as received")
+                            <span class="fingerprint">SHA-256 <code>@kept.Sha256[..12]…</code></span>
+                        </span>
+                    </p>
+                }
                 <a class="raillink" href="/message/@Id/raw.eml"><LipiIcon Name="download" Size="15" /> Download .eml</a>
                 @if (view.Folder.Name == "Trash" || view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
                 {
@@ -261,6 +272,10 @@ else
                         <summary class="raillink danger"><LipiIcon Name="trash" Size="15" /> Delete permanently</summary>
                         <span class="inner">
                             This cannot be undone.
+                            @if (view.Evidence is { PurgedAt: null })
+                            {
+                                <text> Its original is kept as evidence for @RetentionText(view.EvidenceRetentionDays).</text>
+                            }
                             <form method="post" action="/message/@Id/delete" class="inline">
                                 <AntiforgeryToken />
                                 <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
@@ -281,6 +296,12 @@ else
     [CascadingParameter] private HttpContext? Http { get; set; }
 
     private MessageView? view;
+
+    /// <summary>"3 years", "18 months", "45 days" - the retention in plain words.</summary>
+    private static string RetentionText(int days) =>
+        days % 365 == 0 ? $"{days / 365} year{(days == 365 ? string.Empty : "s")}"
+        : days % 30 == 0 && days >= 60 ? $"{days / 30} months"
+        : $"{days} day{(days == 1 ? string.Empty : "s")}";
     private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
     private IReadOnlySet<string> trusted = new HashSet<string>();
 

@@ -28,6 +28,7 @@ public sealed class OutboundWorker
     private readonly System.Action<string>? log;
     private readonly Anjal.Dkim.IDkimKeyResolver? dkimResolver;
     private readonly Anjal.Dkim.DkimSigner? dkimSigner;
+    private readonly Anjal.Mailbox.EvidenceRecorder? evidence;
     private readonly bool requireDkim;
 
     /// <summary>
@@ -44,6 +45,7 @@ public sealed class OutboundWorker
     /// <param name="dkimSigner">Optional pre-configured DKIM signer.</param>
     /// <param name="requireDkim">When true, refuse to send messages whose
     /// sender domain has no configured DKIM key.</param>
+    /// <param name="evidence">Keeps the exact outgoing bytes and every attempt (v1.0.0-rc.8); null keeps none.</param>
     public OutboundWorker(
         Anjal.Store.IMessageStore store,
         Anjal.Smtp.IMailSender sender,
@@ -52,7 +54,8 @@ public sealed class OutboundWorker
         System.Action<string>? log = null,
         Anjal.Dkim.IDkimKeyResolver? dkimResolver = null,
         Anjal.Dkim.DkimSigner? dkimSigner = null,
-        bool requireDkim = false)
+        bool requireDkim = false,
+        Anjal.Mailbox.EvidenceRecorder? evidence = null)
     {
         System.ArgumentNullException.ThrowIfNull(store);
         System.ArgumentNullException.ThrowIfNull(sender);
@@ -65,6 +68,7 @@ public sealed class OutboundWorker
         this.dkimResolver = dkimResolver;
         this.dkimSigner = dkimSigner;
         this.requireDkim = requireDkim;
+        this.evidence = evidence;
     }
 
     /// <summary>
@@ -130,10 +134,37 @@ public sealed class OutboundWorker
     {
         byte[] bytesToSend = m.RawBytes;
 
+        // v1.0.0-rc.8: a row is signed once; its evidence copy holds the exact
+        // signed bytes, and every retry sends those same bytes (ANJAL-DES-01).
+        System.Guid? evidenceId = null;
+        System.Guid? sentCopy = null;
+        string? notSentReason = null;
+        if (this.evidence is not null)
+        {
+            try
+            {
+                (evidenceId, sentCopy) = await this.evidence.GetOutboundLinkAsync(m.Id, ct).ConfigureAwait(false);
+                if (evidenceId is System.Guid kept)
+                {
+                    bytesToSend = await this.evidence.ReadVerifiedAsync(kept, ct).ConfigureAwait(false);
+                }
+            }
+#pragma warning disable CA1031 // Unreadable evidence holds the message; the retry schedule decides what happens next.
+            catch (System.Exception ex) when (ex is not System.OperationCanceledException)
+            {
+                notSentReason = $"Not sent: its evidence copy could not be read ({ex.GetType().Name}: {ex.Message})";
+            }
+#pragma warning restore CA1031
+        }
+
         // DKIM signing (RFC 6376): sign before handing to the sender so the
         // wire bytes match the signed canonicalization. If signing is required
         // and no key is found, hard-fail this message permanently.
-        if (this.dkimResolver is not null && this.dkimSigner is not null)
+        if (evidenceId is not null || notSentReason is not null)
+        {
+            // Already signed (a retry of kept evidence), or held: nothing to sign.
+        }
+        else if (this.dkimResolver is not null && this.dkimSigner is not null)
         {
             string? senderDomain = ExtractFromDomain(bytesToSend);
             if (senderDomain is null)
@@ -184,6 +215,23 @@ public sealed class OutboundWorker
             return;
         }
 
+        // v1.0.0-rc.8: keep the exact outgoing bytes before the first attempt.
+        // If they cannot be kept, the message is not sent now; the retry
+        // schedule tries again (SPEC-08 R-08).
+        if (this.evidence is not null && evidenceId is null && notSentReason is null)
+        {
+            try
+            {
+                evidenceId = await this.evidence.RecordOutboundAsync(m, bytesToSend, sentCopy, this.clock(), ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Evidence that cannot be kept holds the message.
+            catch (System.Exception ex) when (ex is not System.OperationCanceledException)
+            {
+                notSentReason = $"Not sent: its outgoing copy could not be kept as evidence ({ex.GetType().Name}: {ex.Message})";
+            }
+#pragma warning restore CA1031
+        }
+
         var delivery = new Anjal.Smtp.OutboundDelivery
         {
             EnvelopeFrom = m.EnvelopeFrom,
@@ -194,7 +242,9 @@ public sealed class OutboundWorker
         Anjal.Smtp.SendResult result;
         try
         {
-            result = await this.sender.SendAsync(delivery, ct).ConfigureAwait(false);
+            result = notSentReason is not null
+                ? new Anjal.Smtp.SendResult { Outcome = Anjal.Smtp.SendOutcome.TransientFailure, Message = notSentReason }
+                : await this.sender.SendAsync(delivery, ct).ConfigureAwait(false);
         }
 #pragma warning disable CA1031
         catch (System.Exception ex)
@@ -208,16 +258,30 @@ public sealed class OutboundWorker
 #pragma warning restore CA1031
 
         System.DateTimeOffset now = this.clock();
+        if (this.evidence is not null && evidenceId is System.Guid attempted && notSentReason is null)
+        {
+            try
+            {
+                await this.evidence.RecordAttemptAsync(attempted, m.EnvelopeTo, result, now, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // The attempt is logged below either way; a lost attempt record must not re-send mail.
+            catch (System.Exception ex) when (ex is not System.OperationCanceledException)
+            {
+                this.log?.Invoke($"evidence {attempted}: attempt not recorded ({ex.GetType().Name}: {ex.Message})");
+            }
+#pragma warning restore CA1031
+        }
+
         switch (result.Outcome)
         {
             case Anjal.Smtp.SendOutcome.Sent:
                 await this.store.MarkOutboundResultAsync(m.Id, Anjal.Store.OutboundStatus.Sent, now, result.Message, ct).ConfigureAwait(false);
-                this.log?.Invoke($"sent {m.Id} -> {m.EnvelopeTo}");
+                this.log?.Invoke($"sent {m.Id} -> {m.EnvelopeTo}{Route(result)}");
                 break;
 
             case Anjal.Smtp.SendOutcome.PermanentFailure:
                 await this.store.MarkOutboundResultAsync(m.Id, Anjal.Store.OutboundStatus.Failed, now, result.Message, ct).ConfigureAwait(false);
-                this.log?.Invoke($"failed (permanent) {m.Id} -> {m.EnvelopeTo}: {result.Message}");
+                this.log?.Invoke($"failed (permanent) {m.Id} -> {m.EnvelopeTo}{Route(result)}: {result.Message}");
                 await this.NotifyFinalFailureAsync(m, result.Message, permanent: true, ct).ConfigureAwait(false);
                 break;
 
@@ -230,16 +294,29 @@ public sealed class OutboundWorker
                 {
                     await this.store.MarkOutboundResultAsync(m.Id, Anjal.Store.OutboundStatus.Failed, now,
                         $"Give-up reached after {m.Attempts + 1} attempts. Last error: {result.Message}", ct).ConfigureAwait(false);
-                    this.log?.Invoke($"failed (give-up) {m.Id} -> {m.EnvelopeTo}");
+                    this.log?.Invoke($"failed (give-up) {m.Id} -> {m.EnvelopeTo}{Route(result)}");
                     await this.NotifyFinalFailureAsync(m, result.Message, permanent: false, ct).ConfigureAwait(false);
                 }
                 else
                 {
                     await this.store.MarkOutboundResultAsync(m.Id, Anjal.Store.OutboundStatus.Pending, nextAttempt, result.Message, ct).ConfigureAwait(false);
-                    this.log?.Invoke($"retry {m.Id} -> {m.EnvelopeTo} in {BackoffSchedule[attemptIndex]} ({result.Message})");
+                    this.log?.Invoke($"retry {m.Id} -> {m.EnvelopeTo}{Route(result)} in {BackoffSchedule[attemptIndex]} ({result.Message})");
                 }
                 break;
         }
+    }
+
+    /// <summary>
+    /// " via host (TLS)" for a log line (v1.0.0-rc.8, INC-01 P-5): which server
+    /// answered and whether the connection was encrypted; empty when no server
+    /// was reached.
+    /// </summary>
+    /// <param name="result">The attempt's result.</param>
+    /// <returns>The route text.</returns>
+    public static string Route(Anjal.Smtp.SendResult result)
+    {
+        System.ArgumentNullException.ThrowIfNull(result);
+        return result.RemoteHost.Length == 0 ? string.Empty : $" via {result.RemoteHost} ({result.TransportTls ?? "unencrypted"})";
     }
 
     /// <summary>Tell the sender, without letting a failure to tell them disturb the queue.</summary>

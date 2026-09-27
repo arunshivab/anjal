@@ -114,6 +114,20 @@ public sealed class DirectMailSender : IMailSender
         OutboundDelivery delivery,
         System.Threading.CancellationToken ct)
     {
+        // v1.0.0-rc.8: every result - success, refusal or network error - names
+        // the server spoken to and the TLS used, for the evidence of the attempt.
+        var route = new RouteNote();
+        SendResult result = await this.TryDeliverToHostCoreAsync(host, domain, delivery, route, ct).ConfigureAwait(false);
+        return result.WithRoute(host, route.Tls);
+    }
+
+    private async System.Threading.Tasks.Task<SendResult> TryDeliverToHostCoreAsync(
+        string host,
+        string domain,
+        OutboundDelivery delivery,
+        RouteNote route,
+        System.Threading.CancellationToken ct)
+    {
         try
         {
             using SmtpClientSession session = await SmtpClientSession
@@ -161,6 +175,7 @@ public sealed class DirectMailSender : IMailSender
                         await session.QuitAsync(ct).ConfigureAwait(false);
                         return RelayMailSender.ClassifyReply(tlsReply, $"STARTTLS at {host}");
                     }
+                    route.Tls = session.NegotiatedTls;
                     SmtpReply ehlo2 = await session.EhloAsync(this.options.ClientHostName, ct).ConfigureAwait(false);
                     if (ehlo2.Code != 250)
                     {

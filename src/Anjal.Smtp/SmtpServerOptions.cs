@@ -75,6 +75,12 @@ public sealed class SmtpServerOptions
     public System.Action<string>? Log { get; init; }
 
     /// <summary>
+    /// Keeps the original of every incoming message (v1.0.0-rc.8). When set, a
+    /// message whose original cannot be stored is deferred with 451.
+    /// </summary>
+    public IEvidenceRecorder? Evidence { get; init; }
+
+    /// <summary>
     /// X.509 certificate (with private key) used for STARTTLS. When set,
     /// the server advertises <c>STARTTLS</c> in EHLO and accepts upgrades.
     /// When null, STARTTLS is not advertised and the server runs plaintext only.

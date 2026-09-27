@@ -44,6 +44,32 @@ public sealed class SendResult
 
     /// <summary>Description of the result. Empty on plain success.</summary>
     public string Message { get; init; } = string.Empty;
+
+    /// <summary>The server this attempt spoke to (v1.0.0-rc.8), or empty when none was reached.</summary>
+    public string RemoteHost { get; init; } = string.Empty;
+
+    /// <summary>TLS version and cipher negotiated with it, or null when the attempt was not encrypted.</summary>
+    public string? TransportTls { get; init; }
+
+    /// <summary>A copy that also names the server spoken to and the TLS used.</summary>
+    /// <param name="remoteHost">The server.</param>
+    /// <param name="transportTls">The TLS, or null.</param>
+    /// <returns>The copy.</returns>
+    public SendResult WithRoute(string remoteHost, string? transportTls) => new()
+    {
+        Outcome = this.Outcome,
+        ReplyCode = this.ReplyCode,
+        Message = this.Message,
+        RemoteHost = remoteHost,
+        TransportTls = transportTls,
+    };
+}
+
+/// <summary>What an attempt learned about its connection, for <see cref="SendResult.WithRoute"/>.</summary>
+internal sealed class RouteNote
+{
+    /// <summary>The TLS negotiated, once STARTTLS succeeded.</summary>
+    public string? Tls { get; set; }
 }
 
 /// <summary>

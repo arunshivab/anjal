@@ -35,7 +35,7 @@ jobs:
               -p:PublishSingleFile=false -p:DebugType=none -o "$rel/${app,,}"
           done
           mkdir -p "$rel/bin"
-          cp deploy/backup.sh deploy/restore.sh deploy/install.sh deploy/*.service deploy/*.timer deploy/*.example tools/sql/schema.sql "$rel/bin/"
+          cp deploy/backup.sh deploy/restore.sh deploy/install.sh deploy/anjal-firewall.sh deploy/anjal-portcheck.sh deploy/*.service deploy/*.timer deploy/*.example tools/sql/schema.sql "$rel/bin/"
           sed -i 's/\r$//' "$rel"/bin/*.sh "$rel"/bin/*.service "$rel"/bin/*.timer "$rel"/bin/*.example
           # A release built on Windows arrives without executable bits
           # (measured on the production VM); install.sh must cope.
@@ -68,9 +68,10 @@ jobs:
           PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -q -f "$REL/bin/schema.sql"
           tables=$(PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'")
           echo "tables: $tables"
-          # 20 up to rc.6; rc.7 adds mailbox_trusted_senders, greylist_entries, settings.
-          test "$tables" -eq 23
-          for t in mailbox_trusted_senders greylist_entries settings; do
+          # 20 up to rc.6; rc.7 adds mailbox_trusted_senders, greylist_entries, settings;
+          # rc.8 adds evidence, evidence_attempts, evidence_manifests.
+          test "$tables" -eq 26
+          for t in mailbox_trusted_senders greylist_entries settings evidence evidence_attempts evidence_manifests; do
             PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select to_regclass('public.$t')" | grep -qx "$t"
           done
 
@@ -193,6 +194,51 @@ jobs:
           code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d '{"value":"x"}' http://127.0.0.1:8025/api/settings/server/ANJAL_KEK)
           test "$code" = 400
 
+      - name: Evidence under the real units (rc.8)
+        run: |
+          set -euo pipefail
+          token=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+          echo "::add-mask::$token"
+          api() { curl -sS -f -H "Authorization: Bearer $token" -H 'Content-Type: application/json' "$@"; }
+          q() { PGPASSWORD="$PGPW" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "$1"; }
+          slog=$(sudo journalctl -u anjal-server --no-pager)
+          grep -q "Evidence: originals kept in /var/lib/anjal/evidence" <<< "$slog"
+          test "$(sudo stat -c '%U %a' /var/lib/anjal/evidence)" = "anjal 750"
+          # A tenant, its domain and a mailbox - through the admin API, as an operator would.
+          api -X POST -d '{"slug":"ci","displayName":"CI","enabled":true,"postmasterMailbox":"ci@anjal.co.in"}' http://127.0.0.1:8025/api/tenants >/dev/null
+          api -X POST -d '{"tenantSlug":"ci","domain":"anjal.co.in"}' http://127.0.0.1:8025/api/tenant-domains >/dev/null
+          api -X POST -d "{\"tenantSlug\":\"ci\",\"address\":\"ci@anjal.co.in\",\"password\":\"$(openssl rand -hex 16)\",\"displayName\":\"CI\"}" http://127.0.0.1:8025/api/mailboxes >/dev/null
+          # A real SMTP delivery, with a bare LF the working copy repairs and the evidence must keep.
+          python3 - <<'EOF'
+          import smtplib
+          msg = (b"From: CI <ci@anjal-ci.invalid>\r\nTo: ci@anjal.co.in\r\nSubject: rc.8 evidence\r\n"
+                 b"Message-ID: <rc8-evidence@anjal-ci.invalid>\r\n\r\nA line ending in a bare LF\nand the end.\r\n")
+          with smtplib.SMTP("127.0.0.1", 25, timeout=30) as s:
+              s.ehlo("ci.anjal-ci.invalid")
+              s.sendmail("ci@anjal-ci.invalid", ["ci@anjal.co.in"], msg)
+              s.rset()
+              s.mail("ci@anjal-ci.invalid")
+              code, reply = s.rcpt("Postmaster")
+              assert code == 250, (code, reply)
+              print("bare <Postmaster> accepted:", code)
+          open("/tmp/sent.eml", "wb").write(msg)
+          EOF
+          sleep 2
+          id=$(q "select id from evidence where direction='in' and envelope_from='ci@anjal-ci.invalid' and outcome='accepted' order by captured_at desc limit 1")
+          test -n "$id"
+          path=$(q "select path from evidence where id='$id'")
+          sha=$(q "select sha256 from evidence where id='$id'")
+          f="/var/lib/anjal/evidence/$path"
+          test "$(sudo stat -c '%U %a' "$f")" = "anjal 440"
+          test "$(sudo sha256sum "$f" | cut -c1-64)" = "$sha"
+          sudo cmp "$f" /tmp/sent.eml                                   # exactly as sent
+          test "$(q "select count(*) from messages where evidence_id='$id'")" -eq 1
+          api "http://127.0.0.1:8025/api/evidence/$id/raw" -o /tmp/raw.eml
+          cmp /tmp/raw.eml /tmp/sent.eml
+          test "$(q "select count(*) from audit_events where action='READ evidence raw' and subject='$id'")" -ge 1
+          api -X POST -d '' http://127.0.0.1:8025/api/evidence/verify | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["intact"], d; print("chain intact")'
+          echo "evidence $id: kept exactly as sent, read-only, hash verified, audited"
+
       - name: A backup under its real unit - refused until configured, verified, never leaves the dump
         run: |
           set -euo pipefail
@@ -217,6 +263,11 @@ jobs:
           head -c 4000 /dev/urandom | sudo -u anjal tee /var/mail/anjal/smoke/ci/cur/m1 >/dev/null
           sudo systemctl start anjal-backup
           log=$(blog); grep -q "dump uploaded and verified" <<< "$log"; grep -q "verify ok" <<< "$log"
+          # rc.8: the evidence reached the encrypted backup, and was verified with it.
+          grep -q "verify evidence" <<< "$log"
+          # Captured, then searched: "cmd | grep -q" can fail under pipefail when grep stops early.
+          ev=$(sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf -R b2crypt:evidence/)
+          grep -q '\.eml$' <<< "$ev"
           test -z "$(sudo ls -A /var/lib/anjal/backup)"
           # rc.7: the settings snapshot is backed up with every secret removed.
           snap=$(sudo -u anjal rclone --config /etc/anjal/rclone.conf cat b2crypt:settings/server.env)

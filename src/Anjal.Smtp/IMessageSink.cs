@@ -42,6 +42,34 @@ public sealed class DeliveryContext
     /// null when the message arrived unencrypted.
     /// </summary>
     public string? TransportTls { get; init; }
+
+    /// <summary>The evidence copy of this message as received (v1.0.0-rc.8), or null when none is kept.</summary>
+    public System.Guid? EvidenceId { get; init; }
+
+    /// <summary>
+    /// A copy with every property kept and only the message bytes replaced -
+    /// for a sink that rewrites the message (for example to add headers)
+    /// before passing it on. Copying property by property elsewhere lost
+    /// <see cref="TransportTls"/> once (DEF-065); a property added here is kept.
+    /// </summary>
+    /// <param name="rawBytes">The new message bytes.</param>
+    /// <returns>The copy.</returns>
+    public DeliveryContext WithRawBytes(byte[] rawBytes)
+    {
+        System.ArgumentNullException.ThrowIfNull(rawBytes);
+        return new DeliveryContext
+        {
+            EnvelopeFrom = this.EnvelopeFrom,
+            EnvelopeTo = this.EnvelopeTo,
+            RawBytes = rawBytes,
+            RemoteAddress = this.RemoteAddress,
+            ClientHostName = this.ClientHostName,
+            AuthenticatedUser = this.AuthenticatedUser,
+            AuthResults = this.AuthResults,
+            TransportTls = this.TransportTls,
+            EvidenceId = this.EvidenceId,
+        };
+    }
 }
 
 /// <summary>

@@ -86,6 +86,76 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             return null;
         }
 
+        // v1.0.0-rc.8 (RFC 5321 4.5.1, RFC 2142): postmaster@ and abuse@ are
+        // always accepted. At this server's own name they reach the operator.
+        if (IsRoleAddress(local) && this.ServerHostName is string host && domain.Equals(host, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string operatorAddress = this.OperatorPostmaster ?? ("postmaster@" + ParentDomain(host));
+            return TrySplitAddress(operatorAddress, out string ol, out string od) && !(IsRoleAddress(ol) && od.Equals(host, System.StringComparison.OrdinalIgnoreCase))
+                ? await this.ResolveAsync(operatorAddress, ct).ConfigureAwait(false)
+                : null;
+        }
+        (Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)? direct = await this.ResolveMailboxAsync(local, domain, ct).ConfigureAwait(false);
+        if (direct is not null || !IsRoleAddress(local))
+        {
+            return direct;
+        }
+        return await this.ResolveRoleAsync(local, domain, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>This server's own name, for postmaster@ it (v1.0.0-rc.8); null to not recognise it.</summary>
+    public string? ServerHostName { get; init; }
+
+    /// <summary>The operator's mailbox for postmaster@ this server; null for postmaster@ its parent domain.</summary>
+    public string? OperatorPostmaster { get; init; }
+
+    /// <summary>Whether a local part is one every mail domain must accept (postmaster, abuse).</summary>
+    /// <param name="local">The local part.</param>
+    /// <returns>True for postmaster and abuse, in any case.</returns>
+    public static bool IsRoleAddress(string local)
+    {
+        System.ArgumentNullException.ThrowIfNull(local);
+        return local.Equals("postmaster", System.StringComparison.OrdinalIgnoreCase) || local.Equals("abuse", System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ParentDomain(string host)
+    {
+        int dot = host.IndexOf('.', System.StringComparison.Ordinal);
+        return dot > 0 && host.IndexOf('.', dot + 1) > 0 ? host[(dot + 1)..] : host;
+    }
+
+    private async System.Threading.Tasks.Task<(Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)?> ResolveRoleAsync(string local, string domain, System.Threading.CancellationToken ct)
+    {
+        Anjal.Store.TenantDomainRow? domainRow = await this.store.GetTenantDomainAsync(domain, ct).ConfigureAwait(false);
+        Anjal.Store.TenantRow? tenant = domainRow is null ? null : await this.store.GetTenantByIdAsync(domainRow.TenantId, ct).ConfigureAwait(false);
+        if (tenant is null || !tenant.Enabled)
+        {
+            return null;
+        }
+        if (tenant.PostmasterMailbox is string designated && TrySplitAddress(designated, out string dl, out string dd))
+        {
+            (Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)? target = await this.ResolveMailboxAsync(dl, dd, ct).ConfigureAwait(false);
+            if (target is not null && target.Value.Tenant.Id == tenant.Id)
+            {
+                return target;
+            }
+            this.log?.Invoke($"Mailbox: {local}@{domain} - designated mailbox {designated} is not an enabled mailbox of tenant {tenant.Slug}; using its first mailbox.");
+        }
+        Anjal.Store.MailboxRow? first = (await this.store.ListMailboxesAsync(tenant.Id, ct).ConfigureAwait(false))
+            .Where(m => m.Enabled).OrderBy(m => m.Address, System.StringComparer.OrdinalIgnoreCase).FirstOrDefault();
+        if (first is null)
+        {
+            return null;
+        }
+        if (tenant.PostmasterMailbox is null)
+        {
+            this.log?.Invoke($"Mailbox: {local}@{domain} delivered to {first.Address}, the tenant's first mailbox - designate one with postmasterMailbox (POST /api/tenants, slug {tenant.Slug}).");
+        }
+        return (tenant, first);
+    }
+
+    private async System.Threading.Tasks.Task<(Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)?> ResolveMailboxAsync(string local, string domain, System.Threading.CancellationToken ct)
+    {
         Anjal.Store.TenantDomainRow? domainRow = await this.store.GetTenantDomainAsync(domain, ct).ConfigureAwait(false);
         if (domainRow is null)
         {
@@ -237,10 +307,17 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     SpamChecked = spamChecked,
                     TransportEncrypted = ctx.AuthenticatedUser is null ? ctx.TransportTls is not null : null,
                     TransportTls = ctx.AuthenticatedUser is null ? ctx.TransportTls : null,
+                    EvidenceId = ctx.EvidenceId,
                     HasAttachments = HasAttachment(parsed?.Body),
                     BodyText = MessageText.Extract(parsed),
                     CategoryId = await this.CategoryForAsync(mailbox.Id, ctx.EnvelopeFrom, parsed?.Headers.Get("From") ?? string.Empty, ct).ConfigureAwait(false),
                 }, ct).ConfigureAwait(false);
+
+                // v1.0.0-rc.8: the evidence is kept at least as long as this tenant requires.
+                if (ctx.EvidenceId is System.Guid evidenceId && this.store is Anjal.Store.IEvidenceStore evidenceStore)
+                {
+                    await evidenceStore.RaiseEvidenceRetentionAsync(evidenceId, tenant.EvidenceRetentionDays, ct).ConfigureAwait(false);
+                }
 
                 long? used = await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
                 if (used is long u && mailbox.QuotaBytes > 0 && u > mailbox.QuotaBytes)
@@ -300,14 +377,27 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
     /// <param name="address">The sending mailbox's address.</param>
     /// <param name="rawBytes">The message as submitted.</param>
     /// <param name="ct">Cancellation.</param>
-    public async System.Threading.Tasks.Task<bool> FileSentCopyAsync(string address, byte[] rawBytes, System.Threading.CancellationToken ct = default)
+    /// <returns>True when a copy was filed.</returns>
+    public async System.Threading.Tasks.Task<bool> FileSentCopyAsync(string address, byte[] rawBytes, System.Threading.CancellationToken ct = default) =>
+        await this.FileSentCopyWithEvidenceAsync(address, rawBytes, evidenceId: null, ct).ConfigureAwait(false) is not null;
+
+    /// <summary>
+    /// <see cref="FileSentCopyAsync"/>, also linking the copy to the evidence of
+    /// the submission as received (v1.0.0-rc.8), and returning the copy's id.
+    /// </summary>
+    /// <param name="address">The sending mailbox's address.</param>
+    /// <param name="rawBytes">The message as submitted.</param>
+    /// <param name="evidenceId">The evidence of the submission, or null.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The Sent copy's id, or null when the address is not a local mailbox.</returns>
+    public async System.Threading.Tasks.Task<System.Guid?> FileSentCopyWithEvidenceAsync(string address, byte[] rawBytes, System.Guid? evidenceId, System.Threading.CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(address);
         System.ArgumentNullException.ThrowIfNull(rawBytes);
         (Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)? resolved = await this.ResolveAsync(address, ct).ConfigureAwait(false);
         if (resolved is null)
         {
-            return false;
+            return null;
         }
         (Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox) = resolved.Value;
 
@@ -326,10 +416,11 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         Anjal.Store.FolderRow sent = await this.store.EnsureFolderAsync(mailbox.Id, "Sent", ct).ConfigureAwait(false);
         MaildirWriteResult written = await this.maildir.WriteAsync(tenant.Slug, mailbox.Address, sent.Name, rawBytes, ct).ConfigureAwait(false);
         string? seenPath = this.maildir.SetFlags(tenant.Slug, mailbox.Address, sent.Name, written.RelativePath, seen: true, flagged: false, answered: false);
-        await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
+        Anjal.Store.MessageRow saved = await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
         {
             MailboxId = mailbox.Id,
             FolderId = sent.Id,
+            EvidenceId = evidenceId,
             MaildirFile = seenPath ?? written.RelativePath,
             EnvelopeFrom = mailbox.Address,
             MessageId = parsed?.MessageId ?? string.Empty,
@@ -344,8 +435,12 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             BodyText = MessageText.Extract(parsed),
         }, ct).ConfigureAwait(false);
         await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
+        if (evidenceId is System.Guid e && this.store is Anjal.Store.IEvidenceStore evidenceStore)
+        {
+            await evidenceStore.RaiseEvidenceRetentionAsync(e, tenant.EvidenceRetentionDays, ct).ConfigureAwait(false);
+        }
         this.log?.Invoke($"Filed sent copy for {mailbox.Address} ({written.SizeBytes} bytes)");
-        return true;
+        return saved.Id;
     }
 
     /// <summary>

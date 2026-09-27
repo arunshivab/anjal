@@ -436,7 +436,7 @@ config) and installs and enables the systemd units without starting them.
 | Path | Owner / mode | Purpose |
 |---|---|---|
 | `/opt/anjal/server`, `/opt/anjal/webmail` | root 755 | binaries (previous release kept as `*.old`) |
-| `/opt/anjal/bin` | root 755 | `backup.sh`, `restore.sh` |
+| `/opt/anjal/bin` | root 755 | `backup.sh`, `restore.sh`, `anjal-firewall.sh`, `anjal-portcheck.sh` |
 | `/etc/anjal/server.env`, `webmail.env`, `rclone.conf` | root:anjal 640 | configuration and secrets |
 | `/var/mail/anjal` | anjal 700 | Maildirs, one per mailbox |
 | `/var/lib/anjal/acme` | anjal 700 | ACME account key, certificate, key, status |
@@ -1426,6 +1426,40 @@ must print `disabled`.
    `Greylisting: on (delay 300s, senders remembered 35 days, kept in /var/lib/anjal/greylist.tsv, senders passing SPF not delayed).`
    The state file appears after the first greylisting decision.
 
+**rc.7 to rc.8** (the integrity release), in addition. Take a backup first:
+```
+vm$ sudo systemctl start anjal-backup && sudo journalctl -u anjal-backup --since "-5min" --no-pager | grep -E "verify ok|done"
+```
+then the usual steps above. `install.sh` creates `/var/lib/anjal/evidence`
+and installs the firewall scripts in `/opt/anjal/bin` (an existing firewall
+stays as it is). `schema.sql` adds three tables (`evidence`,
+`evidence_attempts`, `evidence_manifests`), the columns
+`messages.evidence_id`, `outbound_messages.evidence_id` and `sent_message_id`,
+`tenants.evidence_retention_days` and `tenants.postmaster_mailbox`, and the
+trigger that starts the retention clock when mail is deleted. No new setting
+is required (`ANJAL_EVIDENCE_ROOT`, `ANJAL_POSTMASTER` and `ANJAL_TIMEZONE`
+have defaults - see the templates). **Check:**
+```
+vm$ sudo journalctl -u anjal-server --since "-3min" --no-pager | grep -E "Evidence: originals kept|Outbound worker started"
+vm$ sudo ls -ld /var/lib/anjal/evidence                                           # drwxr-x--- anjal anjal
+```
+Designate the postmaster mailbox. `POST /api/tenants` needs the whole tenant -
+read it first, so the display name and `enabled` are sent back unchanged:
+```
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/tenants/imagiqa \
+      | jq '{slug, displayName, enabled, postmasterMailbox: "arun@anjal.co.in"}' \
+      | curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d @- http://127.0.0.1:8025/api/tenants | jq .
+```
+Then, once, for mail stored before rc.8 (section 13g): the label recovery and
+the reconstruction, each as a dry run first; apply only after reviewing the
+dry run. Send a message from outside to `postmaster@anjal.co.in` - it must
+arrive - and confirm a new message has its original kept:
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, direction, outcome, left(sha256,16) from evidence order by captured_at desc limit 3"
+vm$ unset TOKEN
+```
+
 ## 13e. Settings (from rc.7)
 
 Non-secret settings live in the database table `settings`, one row per
@@ -1455,6 +1489,97 @@ A tenant's folder for unencrypted mail is a tenant setting, not a service
 one: `POST /api/tenants` with `"unencryptedFolder": "Unencrypted"` files such
 mail there (unless the recipient trusts the sender); `""` puts it back in
 INBOX with the red lock (the default).
+
+## 13f. Outbound firewall (from rc.8, incident ANJAL-INC-01)
+
+Only the `anjal` account may send mail from this server (TCP 25, 465, 587);
+root, manual tests and any other program are refused and logged. Everything
+else outbound is allowed per account and purpose only. A check every 5
+minutes confirms that only Anjal holds its ports. Incoming traffic stays with
+E2E's Security Group and fail2ban; the rules live in their own nftables table.
+
+**Never run manual mail tests from this server.** Use another machine. If one
+must run here, give it the server's real name: `openssl s_client -starttls smtp
+-name mail.anjal.co.in ...` - without `-name`, OpenSSL greets as
+`mail.example.com`, which got this IP listed by Spamhaus (INC-01). The firewall
+now refuses such a test before it leaves the server.
+
+Install, or re-apply after changing accounts - always with the automatic undo,
+and confirm only after a **new** SSH session and the webmail both work:
+
+```
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh generate    # writes and checks /etc/anjal/anjal-egress.nft
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh apply       # active now; removes itself in 3 minutes
+      (in a second terminal: open a new SSH session; load the webmail)
+vm$ timeout 5 bash -c 'exec 3<>/dev/tcp/gmail-smtp-in.l.google.com/25' && echo WRONG || echo "refused (correct)"
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh confirm     # keep: loaded at every boot, port check on
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh status      # rules, units, recent refusals
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh remove      # take it off completely
+```
+
+Refusals are in the kernel log: `sudo journalctl -k | grep anjal-egress`. A
+port-check alert is in `journalctl -u anjal-portcheck` and marks that unit failed.
+
+## 13g. Evidence store (from rc.8, ANJAL-DES-01)
+
+The original of every message is kept in `/var/lib/anjal/evidence`: incoming
+exactly as received, outgoing exactly as sent (after DKIM signing), each with
+its SHA-256, and every outgoing attempt with the receiving server's reply. A
+message is not accepted, nor sent, unless its original is kept. Deleting mail
+removes the mailbox copy only; the original stays for the tenant's evidence
+retention (3 years by default), then the hourly housekeeping purges it. A
+daily manifest, chained to the one before, lists every copy added and purged.
+
+```
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/verify | jq .          # whole chain
+vm$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/<id> | jq .                     # details, attempts
+vm$ curl -s -H "Authorization: Bearer $TOKEN" -o original.eml http://127.0.0.1:8025/api/evidence/<id>/raw        # the original
+vm$ unset TOKEN
+```
+
+Every read is audited. An original whose file no longer matches its SHA-256
+is never returned (409). A message's evidence id is shown on request by the
+admin API; users see "Original kept" and the fingerprint in the webmail.
+
+A tenant's evidence retention: `POST /api/tenants` with
+`"evidenceRetentionDays": 1095`. An update that omits it keeps the current value.
+
+**Backups** copy evidence append-only (`rclone copy`): a file leaves the
+backup only when a purge list names it. The restore brings evidence back
+read-only (section 12).
+
+**Housekeeping log lines** begin `Evidence`. `CRIT evidence` means a file is
+missing, altered or has no database record - investigate before anything
+else; nothing is ever deleted to tidy up. `WARN evidence disk` means the disk
+is over 80% full.
+
+### Mail stored before rc.8 (once, after upgrading)
+
+Both are dry runs unless `?apply=true`. Neither changes a message file.
+Every POST here carries `-d ''`: without a body, curl sends no Content-Length
+and the API refuses the request with 411 (DEF-053).
+
+```
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/maintenance/transport-labels | jq .
+      (review: each message's recorded and recovered encryption)
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/maintenance/transport-labels?apply=true" | jq '.changes'
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/maintenance/reconstruct-evidence | jq .
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/maintenance/reconstruct-evidence?apply=true" | jq .
+vm$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/maintenance/trusted-senders | jq .
+vm$ curl -s -X DELETE -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/maintenance/trusted-senders?mailbox=arun@anjal.co.in&sender=noreply@spamhaus.org"
+```
+
+Reconstructed originals are marked as such and are never shown as "as received".
+
+## 13h. postmaster@ and abuse@ (from rc.8)
+
+Every domain accepts `postmaster@` and `abuse@` (RFC 5321, RFC 2142), and
+the server accepts bare `<postmaster>`. Each tenant's go to its designated
+mailbox - `POST /api/tenants` with `"postmasterMailbox": "arun@anjal.co.in"` -
+or, until one is designated, to its first mailbox (logged). `postmaster@` the
+server's own name goes to `ANJAL_POSTMASTER` (default: `postmaster@` its parent
+domain).
 
 ---
 

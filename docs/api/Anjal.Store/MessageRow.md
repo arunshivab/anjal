@@ -11,6 +11,7 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 - **CategoryId** *(property)* - The category this message carries, or null.
 - **DateHeader** *(property)* - The raw Date header value, or empty.
 - **EnvelopeFrom** *(property)* - SMTP envelope MAIL FROM.
+- **EvidenceId** *(property)* - The evidence copy this message came from (v1.0.0-rc.8), or null for mail from before rc.8.
 - **Flagged** *(property)* - Maildir "F" flag - the message is flagged/starred.
 - **FolderId** *(property)* - The folder the message is in.
 - **FromHeader** *(property)* - The raw From header value.

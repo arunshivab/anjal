@@ -136,7 +136,26 @@ public static class Program
         var mailboxStore = (Anjal.Store.IMailboxStore)store;
         string maildirRoot = System.Environment.GetEnvironmentVariable("ANJAL_MAILDIR_ROOT") ?? Anjal.Mailbox.MaildirStore.DefaultRoot;
         var maildir = new Anjal.Mailbox.MaildirStore(maildirRoot, hostname);
-        var mailboxSink = new Anjal.Mailbox.MailboxSink(mailboxStore, maildir, Log);
+        // postmaster@ and abuse@ (v1.0.0-rc.8): each tenant's designated mailbox;
+        // at this server's own name, the operator (ANJAL_POSTMASTER).
+        string? operatorPostmaster = System.Environment.GetEnvironmentVariable("ANJAL_POSTMASTER");
+        var mailboxSink = new Anjal.Mailbox.MailboxSink(mailboxStore, maildir, Log)
+        {
+            ServerHostName = hostname,
+            OperatorPostmaster = string.IsNullOrWhiteSpace(operatorPostmaster) ? null : operatorPostmaster.Trim(),
+        };
+
+        // v1.0.0-rc.8: the evidence store (ANJAL-DES-01) - the original of every
+        // message as received or sent, fingerprinted, with a daily manifest chain.
+        Anjal.Mailbox.EvidenceRecorder? evidence = null;
+        Anjal.Mailbox.EvidenceWorker? evidenceWorker = null;
+        if (store is Anjal.Store.IEvidenceStore evidenceStore)
+        {
+            var vault = new Anjal.Mailbox.EvidenceVault(System.Environment.GetEnvironmentVariable("ANJAL_EVIDENCE_ROOT") ?? Anjal.Mailbox.EvidenceVault.DefaultRoot);
+            evidence = new Anjal.Mailbox.EvidenceRecorder(evidenceStore, vault);
+            evidenceWorker = new Anjal.Mailbox.EvidenceWorker(evidenceStore, vault, log: Log);
+            Log($"Evidence: originals kept in {vault.Root} - incoming as received, outgoing as sent, SHA-256 each, daily manifest chain; a message is not accepted or sent unless its original is kept.");
+        }
 
         // Fan out: mailbox sink first, then webhook routing. An address may
         // be a mailbox, a webhook target, or both.
@@ -181,6 +200,7 @@ public static class Program
             TlsCertificateSource = certSource,
             RequireTlsForMail = requireTls && (tlsCert is not null || certWatcher is not null),
             Role = Anjal.Smtp.SmtpServerRole.Mta,
+            Evidence = evidence,
             Policy = mtaPolicy,
             CommandTimeout = System.TimeSpan.FromSeconds(ParseIntEnv("ANJAL_SMTP_IDLE_TIMEOUT_SECONDS", 120)),
             MaxSessionDuration = System.TimeSpan.FromMinutes(ParseIntEnv("ANJAL_SMTP_MAX_SESSION_MINUTES", 15)),
@@ -253,6 +273,7 @@ public static class Program
                 BindAddress = System.Net.IPAddress.Parse(bind),
                 Port = submissionPort,
                 AdvertisedHostName = hostname,
+                Evidence = evidence,
                 TlsCertificate = tlsCert,
                 TlsCertificateSource = certSource,
                 RequireTlsForMail = false, // submission has its own TLS-before-AUTH logic
@@ -292,6 +313,7 @@ public static class Program
                     BindAddress = submissionOptions.BindAddress,
                     Port = implicitPort,
                     AdvertisedHostName = hostname,
+                    Evidence = evidence,
                     TlsCertificate = tlsCert,
                     TlsCertificateSource = certSource,
                     RequireTlsForMail = false,
@@ -366,7 +388,8 @@ public static class Program
                 log: Log,
                 dkimResolver: dkimResolver,
                 dkimSigner: dkimSigner,
-                requireDkim: requireDkim);
+                requireDkim: requireDkim,
+                evidence: evidence);
             workerTask = worker.RunAsync(cts.Token);
             string dkimNote = dkimResolver is not null
                 ? (requireDkim ? "DKIM=required" : "DKIM=opportunistic")
@@ -446,6 +469,8 @@ public static class Program
                 BearerToken = token,
                 AcmeDirectory = acme.Configured ? acme.Directory : null,
                 MaildirRoot = maildir.Root,
+                EvidenceRoot = System.Environment.GetEnvironmentVariable("ANJAL_EVIDENCE_ROOT") ?? Anjal.Mailbox.EvidenceVault.DefaultRoot,
+                HostName = hostname,
                 PreviousBearerToken = previousToken,
                 Log = Log,
             }, store, Log, mailboxStore, maildir);
@@ -497,6 +522,10 @@ public static class Program
                 server.StartAsync(cts.Token),
                 webhookWorker.RunAsync(cts.Token),
             };
+            if (evidenceWorker is not null)
+            {
+                listeners.Add(RunEvidenceHousekeepingAsync(evidenceWorker, Log, cts.Token));
+            }
             if (submissionServer is not null)
             {
                 listeners.Add(submissionServer.StartAsync(cts.Token));
@@ -634,6 +663,34 @@ public static class Program
         log("DKIM: store-backed per-domain lookup enabled.");
 
         return (new Anjal.Dkim.ChainedKeyResolver(resolvers.ToArray()), requireDkim);
+    }
+
+    /// <summary>
+    /// The evidence store's housekeeping (v1.0.0-rc.8): a pass shortly after
+    /// start and then every hour - manifests, purges, clocks, disk space. A
+    /// failed pass is logged and retried at the next hour; it never stops the server.
+    /// </summary>
+    private static async System.Threading.Tasks.Task RunEvidenceHousekeepingAsync(Anjal.Mailbox.EvidenceWorker worker, System.Action<string> log, System.Threading.CancellationToken ct)
+    {
+        await System.Threading.Tasks.Task.Delay(System.TimeSpan.FromMinutes(1), ct).ConfigureAwait(false);
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                Anjal.Mailbox.EvidencePassResult r = await worker.RunOnceAsync(ct).ConfigureAwait(false);
+                if (r.ManifestsWritten > 0 || r.Purged > 0 || r.ClocksStarted > 0)
+                {
+                    log($"Evidence housekeeping: {r.ManifestsWritten} manifest(s), {r.Purged} purged, {r.ClocksStarted} retention clock(s) started.");
+                }
+            }
+#pragma warning disable CA1031 // A failed pass is logged and retried; it must not stop the server.
+            catch (System.Exception ex) when (ex is not System.OperationCanceledException)
+            {
+                log($"CRIT evidence housekeeping failed: {ex.GetType().Name}: {ex.Message}");
+            }
+#pragma warning restore CA1031
+            await System.Threading.Tasks.Task.Delay(System.TimeSpan.FromHours(1), ct).ConfigureAwait(false);
+        }
     }
 
     private static Anjal.Dkim.DkimKey? TryLoadEnvDkimKey(System.Action<string> log)

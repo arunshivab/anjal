@@ -146,6 +146,30 @@ public sealed class RequestContext
         this.context.Response.OutputStream.Close();
     }
 
+    /// <summary>Write raw bytes, with optional extra headers (v1.0.0-rc.8: an evidence original).</summary>
+    /// <param name="statusCode">HTTP status.</param>
+    /// <param name="contentType">Content type.</param>
+    /// <param name="bytes">The body.</param>
+    /// <param name="headers">Extra response headers, or null.</param>
+    /// <returns>A task.</returns>
+    public async System.Threading.Tasks.Task WriteBytesAsync(int statusCode, string contentType, byte[] bytes, System.Collections.Generic.IReadOnlyDictionary<string, string>? headers = null)
+    {
+        System.ArgumentNullException.ThrowIfNull(contentType);
+        System.ArgumentNullException.ThrowIfNull(bytes);
+        this.context.Response.StatusCode = statusCode;
+        this.context.Response.ContentType = contentType;
+        if (headers is not null)
+        {
+            foreach (System.Collections.Generic.KeyValuePair<string, string> h in headers)
+            {
+                this.context.Response.Headers[h.Key] = h.Value;
+            }
+        }
+        this.context.Response.ContentLength64 = bytes.Length;
+        await this.context.Response.OutputStream.WriteAsync(bytes.AsMemory(0, bytes.Length)).ConfigureAwait(false);
+        this.context.Response.OutputStream.Close();
+    }
+
     /// <summary>
     /// Write an empty response with the given status code (used for 204 etc.).
     /// </summary>

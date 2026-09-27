@@ -10,6 +10,30 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.8** (28 September 2026) - the integrity release: the original of
+every message kept as proof, and records that tell the truth.
+- **Evidence store** (ANJAL-DES-01): every incoming message is kept exactly as
+  received - before any repair or addition - and every outgoing message exactly
+  as sent (signed once; every retry sends the same bytes), each with its
+  SHA-256, and every delivery attempt with the receiving server's reply. A
+  message is not accepted, nor sent, unless its original is kept. A daily
+  manifest, chained to the one before, lists every copy added and purged; the
+  admin API verifies the chain and every file, and returns an original only
+  after re-hashing it. Deleting mail leaves the original for the tenant's
+  retention (3 years by default); backups copy evidence append-only.
+- **DEF-065:** the spam filter dropped how a message arrived, so all incoming
+  mail since rc.7 showed "arrived unencrypted". Fixed; past labels are
+  recovered from each message's own Received line (admin API, dry run first).
+  Mail stored before rc.8 can be given evidence copies marked *reconstructed*.
+- **postmaster@ and abuse@** every domain, and bare `<postmaster>`, are
+  accepted (RFC 5321, RFC 2142) and go to a designated mailbox.
+- **Outbound firewall** from incident ANJAL-INC-01 is in the release and the
+  runbook (DEPLOY.md 13f): only Anjal may send mail from the server.
+- Dates Anjal writes are in India time with their true offset
+  (`ANJAL_TIMEZONE`); delivery log lines name the server and the TLS used.
+- The webmail shows "Original kept" with the fingerprint, and says the
+  original stays when mail is deleted permanently.
+
 **v1.0.0-rc.7** (27 September 2026) - encryption both ways, and memory
 that survives a rebuild.
 - **DEF-064:** mail to rediffmail.com stayed queued - its MX offers only DHE

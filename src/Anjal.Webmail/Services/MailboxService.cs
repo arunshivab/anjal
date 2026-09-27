@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Text;
 using Anjal.Mailbox;
 using Anjal.Mime;
@@ -87,6 +86,12 @@ public sealed class MessageView
     /// before v0.17.1). See <see cref="AuthVerdicts.FromHeaders"/>.
     /// </summary>
     public AuthVerdicts? Auth { get; init; }
+
+    /// <summary>The kept original of this message (v1.0.0-rc.8), or null for mail from before rc.8 not yet reconstructed.</summary>
+    public EvidenceRow? Evidence { get; init; }
+
+    /// <summary>Days the organisation keeps the original after the message is deleted.</summary>
+    public int EvidenceRetentionDays { get; init; } = 1095;
 
     /// <summary>Attachments in order.</summary>
     public IReadOnlyList<AttachmentView> Attachments { get; init; } = Array.Empty<AttachmentView>();
@@ -350,6 +355,10 @@ public sealed partial class MailboxService
             BodyShortened = shortened,
             Auth = parsed is null ? null : AuthVerdicts.FromHeaders(parsed.Headers),
             Attachments = views,
+            Evidence = row.EvidenceId is Guid evidenceId && this.messageStore is IEvidenceStore evidenceStore
+                ? await evidenceStore.GetEvidenceAsync(evidenceId, ct).ConfigureAwait(false)
+                : null,
+            EvidenceRetentionDays = (await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false))?.Tenant.EvidenceRetentionDays ?? 1095,
         };
     }
 
@@ -621,9 +630,10 @@ public sealed partial class MailboxService
                 return $"Could not deliver to {string.Join(", ", local)}: {delivered.ReplyText}";
             }
         }
+        var queued = new List<Guid>();
         foreach (MailAddress rcpt in external)
         {
-            await this.messageStore.EnqueueOutboundAsync(new OutboundMessage
+            OutboundMessage row = await this.messageStore.EnqueueOutboundAsync(new OutboundMessage
             {
                 EnvelopeFrom = mailbox.Address,
                 EnvelopeTo = rcpt.Address,
@@ -632,13 +642,14 @@ public sealed partial class MailboxService
                 NextAttemptAt = now,
                 GiveUpAt = now.AddHours(24),
             }, ct).ConfigureAwait(false);
+            queued.Add(row.Id);
         }
 
         // Sent copy: written already-seen straight into cur/.
         FolderRow sent = await this.store.EnsureFolderAsync(mailbox.Id, "Sent", ct).ConfigureAwait(false);
         MaildirWriteResult written = await this.maildir.WriteAsync(tenant.Slug, mailbox.Address, sent.Name, raw, ct).ConfigureAwait(false);
         string? seenPath = this.maildir.SetFlags(tenant.Slug, mailbox.Address, sent.Name, written.RelativePath, seen: true, flagged: false, answered: false);
-        await this.store.SaveMessageAsync(new MessageRow
+        MessageRow sentRow = await this.store.SaveMessageAsync(new MessageRow
         {
             MailboxId = mailbox.Id,
             FolderId = sent.Id,
@@ -657,6 +668,13 @@ public sealed partial class MailboxService
             SpamChecked = false,
         }, ct).ConfigureAwait(false);
         await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
+
+        // v1.0.0-rc.8: the queued rows' outgoing evidence belongs to this Sent copy,
+        // so deleting the Sent copy starts that evidence's retention clock.
+        if (queued.Count > 0 && this.messageStore is IEvidenceStore evidenceStore)
+        {
+            await evidenceStore.LinkOutboundToSentCopyAsync(queued, sentRow.Id, ct).ConfigureAwait(false);
+        }
 
         // The draft this was composed from is now redundant.
         if (request.DraftId is Guid draftId)
@@ -864,8 +882,8 @@ public sealed partial class MailboxService
         return "\"" + name.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal) + "\"";
     }
 
-    private static string FormatDate(DateTimeOffset when) =>
-        when.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", CultureInfo.InvariantCulture);
+    // v1.0.0-rc.8: in the configured zone (India by default) with its true offset.
+    private static string FormatDate(DateTimeOffset when) => Anjal.Mime.MessageDate.Format(when);
 
     private static string SafeFileName(string fileName)
     {
