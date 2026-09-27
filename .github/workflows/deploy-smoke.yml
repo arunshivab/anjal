@@ -68,7 +68,11 @@ jobs:
           PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -q -f "$REL/bin/schema.sql"
           tables=$(PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'")
           echo "tables: $tables"
-          test "$tables" -eq 20
+          # 20 up to rc.6; rc.7 adds mailbox_trusted_senders, greylist_entries, settings.
+          test "$tables" -eq 23
+          for t in mailbox_trusted_senders greylist_entries settings; do
+            PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select to_regclass('public.$t')" | grep -qx "$t"
+          done
 
       - name: Fill the shipped env templates as DEPLOY.md section 4 does
         run: |
