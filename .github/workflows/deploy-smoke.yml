@@ -268,10 +268,13 @@ jobs:
           # Which connections work: raw QUIC and HTTP/3, presenting a name or an
           # IP address. Each on a fresh client, every error printed in full.
           cat > "$RUNNER_TEMP/h3.cs" <<'EOF'
+          #:property PublishAot=false
           using System.Net;
           using System.Net.Quic;
           using System.Net.Security;
-          Console.WriteLine($"client: QuicConnection.IsSupported = {QuicConnection.IsSupported}");
+          // .NET 10 builds a single-file program with Native-AOT defaults, which
+          // switch HttpClient's HTTP/3 off; PublishAot=false above keeps it on.
+          Console.WriteLine($"client: QuicConnection.IsSupported = {QuicConnection.IsSupported}; HttpClient HTTP/3 switch = {(AppContext.TryGetSwitch("System.Net.SocketsHttpHandler.Http3Support", out bool h3on) ? h3on.ToString() : "default (on)")}");
           static void Chain(string label, Exception ex)
           {
               Console.WriteLine($"{label}: FAILED");
