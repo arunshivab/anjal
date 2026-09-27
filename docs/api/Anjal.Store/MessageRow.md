@@ -26,3 +26,5 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 - **SpamScore** *(property)* - Spam score assigned at delivery (0 when scoring was not run).
 - **Subject** *(property)* - The Subject header, decoded if RFC 2047 encoded.
 - **ToHeader** *(property)* - The raw To header value.
+- **TransportEncrypted** *(property)* - Whether mail from outside reached this server encrypted: true when the sending server used TLS, false when it did not, null for mail from a signed-in account, copies of the user's own mail and messages stored before v1.0.0-rc.7.
+- **TransportTls** *(property)* - The TLS version and cipher suite the sending server used, for example TLSv1.3 TLS_AES_256_GCM_SHA384; null when not encrypted or not recorded.

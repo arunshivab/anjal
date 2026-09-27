@@ -13,6 +13,7 @@ Classic greylisting. The first time a given (client /24 or /64, sender, recipien
 - **OnMailFromAsync** *(method)* - _(no description)_
 - **OnRcptTo** *(method)* - Synchronous RCPT TO check.
 - **OnRcptToAsync** *(method)* - _(no description)_
-- **Save** *(method)* - One line per triplet: key, first seen, last seen (UTC ticks), passed. Written to a temporary file and moved into place, so a crash mid-write leaves the previous file intact.
+- **Remember** *(method)* - Keep a loaded triplet unless it has expired or the table is full.
+- **Save** *(method)* - One line per triplet: key, first seen, last seen (UTC ticks), passed. Written to a temporary file and moved into place, so a crash mid-write leaves the previous file intact. The same rows go to the database.
 - **Shrink** *(method)* - Forget expired triplets now; if still full, the least recently seen tenth.
 - **Count** *(property)* - Number of triplets currently remembered (pending or passed).

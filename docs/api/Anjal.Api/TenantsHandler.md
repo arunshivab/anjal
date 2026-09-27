@@ -11,6 +11,7 @@ Endpoint handlers for /api/tenants and /api/tenant-domains. Tenant creation is a
 - **DeleteDomainAsync** *(method)* - DELETE /api/tenant-domains/{domain} - unregister.
 - **DeleteSenderRuleAsync** *(method)* - DELETE /api/tenants/{slug}/sender-rules/{pattern} - remove a rule.
 - **GetAsync** *(method)* - GET /api/tenants/{slug} - fetch one.
+- **IsFolderForUnencrypted** *(method)* - A folder name usable for unencrypted mail: not a system folder, no path separator.
 - **IsValidSenderPattern** *(method)* - A pattern is local@domain or @domain, with no whitespace.
 - **IsValidSlug** *(method)* - Validate a tenant slug: 1-63 characters of lowercase ASCII letters, digits and hyphens, not starting or ending with a hyphen.
 - **ListAsync** *(method)* - GET /api/tenants - list.

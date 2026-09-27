@@ -115,6 +115,67 @@ public static class StaticAssets
         };
     }
 
+    private static readonly Dictionary<string, byte[]?> CompressedCache = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether an asset is worth compressing: stylesheets, scripts and SVG.
+    /// Fonts (woff2) are compressed already.
+    /// </summary>
+    /// <param name="relativePath">Path under wwwroot.</param>
+    /// <returns>True when compressible.</returns>
+    public static bool IsCompressible(string relativePath)
+    {
+        ArgumentNullException.ThrowIfNull(relativePath);
+        string ext = Path.GetExtension(relativePath).ToLowerInvariant();
+        return ext is ".css" or ".js" or ".svg" or ".txt";
+    }
+
+    /// <summary>
+    /// The asset compressed with <paramref name="encoding"/> ("br" or "gzip"),
+    /// prepared once and kept in memory; null when the asset is unknown, not
+    /// compressible, or would not get smaller (v1.0.0-rc.7). Only these
+    /// static files are ever compressed - never a page: pages carry security
+    /// tokens and mail, and compressing them would open the BREACH attack.
+    /// </summary>
+    /// <param name="relativePath">Path under wwwroot.</param>
+    /// <param name="encoding">"br" or "gzip".</param>
+    /// <returns>The compressed bytes, or null.</returns>
+    public static byte[]? Compressed(string relativePath, string encoding)
+    {
+        ArgumentNullException.ThrowIfNull(relativePath);
+        ArgumentNullException.ThrowIfNull(encoding);
+        if (!IsCompressible(relativePath) || (encoding != "br" && encoding != "gzip"))
+        {
+            return null;
+        }
+        string key = encoding + ":" + relativePath;
+        lock (Gate)
+        {
+            if (CompressedCache.TryGetValue(key, out byte[]? known))
+            {
+                return known;
+            }
+        }
+        byte[]? raw = Load(relativePath);
+        byte[]? result = null;
+        if (raw is not null)
+        {
+            using var output = new MemoryStream();
+            using (Stream compressor = encoding == "br"
+                ? new System.IO.Compression.BrotliStream(output, System.IO.Compression.CompressionLevel.SmallestSize, leaveOpen: true)
+                : new System.IO.Compression.GZipStream(output, System.IO.Compression.CompressionLevel.SmallestSize, leaveOpen: true))
+            {
+                compressor.Write(raw);
+            }
+            result = output.Length < raw.Length ? output.ToArray() : null;
+        }
+        lock (Gate)
+        {
+            CompressedCache[key] = result;
+        }
+        return result;
+    }
+
     /// <summary>Whether an asset may be cached immutably (content fixed for the life of the URL).</summary>
     /// <param name="relativePath">Path under wwwroot.</param>
     public static bool IsImmutable(string relativePath)

@@ -10,3 +10,4 @@ Request body for creating or updating a tenant.
 - **Enabled** *(property)* - When false, no mail is delivered to the tenant's mailboxes.
 - **Slug** *(property)* - Unique slug: letters, digits and hyphens, 1-63 characters; stored lowercase.
 - **SpamThreshold** *(property)* - Spam score at or above which mail is filed in Junk. Null keeps the default (5); 0 disables Junk filing.
+- **UnencryptedFolder** *(property)* - Folder for mail that reaches the tenant unencrypted (v1.0.0-rc.7). Omitted: unchanged. Empty: cleared, so such mail stays in INBOX with a red open lock (the default).

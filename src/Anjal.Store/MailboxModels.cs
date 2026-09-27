@@ -33,6 +33,13 @@ public sealed class TenantRow
     /// </summary>
     public int SpamThreshold { get; set; } = DefaultSpamThreshold;
 
+    /// <summary>
+    /// Folder that mail reaching this tenant unencrypted is filed in, or null
+    /// (the default) to keep it in INBOX with a red open lock. Mail from a
+    /// sender the recipient trusts is never filed away.
+    /// </summary>
+    public string? UnencryptedFolder { get; set; }
+
     /// <summary>When the tenant was created.</summary>
     public System.DateTimeOffset CreatedAt { get; set; }
 }
@@ -302,6 +309,20 @@ public sealed class MessageRow
     /// <see cref="SpamScore"/> of 0 mean "checked and clean".
     /// </summary>
     public bool? SpamChecked { get; set; }
+
+    /// <summary>
+    /// Whether mail from outside reached this server encrypted: true when
+    /// the sending server used TLS, false when it did not, null for mail
+    /// from a signed-in account, copies of the user's own mail and messages
+    /// stored before v1.0.0-rc.7.
+    /// </summary>
+    public bool? TransportEncrypted { get; set; }
+
+    /// <summary>
+    /// The TLS version and cipher suite the sending server used, for example
+    /// <c>TLSv1.3 TLS_AES_256_GCM_SHA384</c>; null when not encrypted or not recorded.
+    /// </summary>
+    public string? TransportTls { get; set; }
 
     /// <summary>Time the message was delivered to the folder.</summary>
     public System.DateTimeOffset ReceivedAt { get; set; }

@@ -10,6 +10,34 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.7** (27 September 2026) - encryption both ways, and memory
+that survives a rebuild.
+- **DEF-064:** mail to rediffmail.com stayed queued - its MX offers only DHE
+  and static-RSA ciphers, and .NET on Linux offers neither by default.
+  Anjal now offers TLS 1.3, ECDHE, DHE and static RSA with AES-GCM, in that
+  order (what Gmail and Yahoo use to reach it), and never 3DES, RC4, CBC,
+  NULL or export. A handshake failure logs its real cause.
+- **Never unencrypted** (owner's decision): a message is held, retried and
+  returned to its sender rather than sent without encryption - including to
+  servers that offer no STARTTLS, which earlier releases served in plain text.
+- **Incoming:** each message records whether it arrived encrypted and how;
+  unencrypted mail shows a red open lock and **Trust this sender**; a tenant
+  may file it in its own folder.
+- **Greylisting memory** in the database, mirrored to the file and backed up.
+- **Settings in the database** (imported from the env files once, changed
+  through `/api/settings`, audited; secrets never stored), and a
+  secrets-removed copy of the env files in every backup.
+- The restore drill now writes its isolation into the restored database.
+- **Webmail over slow routes:** `HEAD` is answered (it returned 405), and
+  stylesheets, scripts and SVG are compressed (Brotli, else gzip) - built
+  into .NET, nothing external. Pages are never compressed: they carry
+  security tokens and mail (BREACH). Static files were already cached by
+  browsers for a year under versioned names.
+- **HTTP/3** on the webmail's HTTPS port (QUIC: one round trip to connect,
+  and a lost packet no longer stalls the whole page), with Microsoft's
+  libmsquic and UDP 443 (DEPLOY.md section 1d). Without them the webmail
+  says so and serves HTTP/1.1 and HTTP/2 as before.
+
 **Runbook update after v1.0.0-rc.6** (documentation only; production
 stays on rc.6). Section 11 rewritten from the first real backup setup on
 26 September 2026: the backup account, bucket, lifecycle and bucket-limited

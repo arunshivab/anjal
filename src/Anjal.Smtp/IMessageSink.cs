@@ -35,6 +35,13 @@ public sealed class DeliveryContext
     /// is <c>Anjal.Auth.AuthenticationResults</c> when populated.
     /// </summary>
     public object? AuthResults { get; init; }
+
+    /// <summary>
+    /// The TLS version and cipher suite the sending server used to reach
+    /// this server (for example <c>TLSv1.3 TLS_AES_256_GCM_SHA384</c>), or
+    /// null when the message arrived unencrypted.
+    /// </summary>
+    public string? TransportTls { get; init; }
 }
 
 /// <summary>

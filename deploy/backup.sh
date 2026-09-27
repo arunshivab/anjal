@@ -72,7 +72,8 @@ for kv in "${PARTS[@]}"; do
 done
 DUMP="$SCRATCH/anjal-$STAMP.sql.gz"
 # The dump is unencrypted: remove it however this script ends (DEF-062).
-trap 'rm -f "$DUMP"' EXIT
+SNAP="$SCRATCH/settings"
+trap 'rm -f "$DUMP"; rm -rf "$SNAP"' EXIT
 log "pg_dump ${PGDATABASE:-anjal} -> $DUMP"
 pg_dump --no-owner --no-privileges | gzip -6 > "$DUMP"
 log "dump size: $(du -h "$DUMP" | cut -f1)"
@@ -102,6 +103,32 @@ if [ -d "$ACME_DIR" ]; then
 fi
 
 # ---- 5. Prune old deleted-file archives (30 days) ----
+# Settings snapshot with every secret removed, and the greylist mirror
+# (v1.0.0-rc.7). Settings also live in the database dump; this copy covers
+# what the env files hold, so a rebuild can be compared against it. Secrets
+# never leave the server: they are on the paper custody forms.
+SETTINGS_DIR=${ANJAL_SETTINGS_DIR:-/etc/anjal}
+GREYLIST_FILE=${ANJAL_GREYLIST_STATE:-/var/lib/anjal/greylist.tsv}
+SECRET_KEYS='^[A-Za-z0-9_]*(POSTGRES|PASSWORD|TOKEN|SECRET|KEK)[A-Za-z0-9_]*='
+rm -rf "$SNAP"; mkdir -p "$SNAP"; chmod 700 "$SNAP"
+for f in "$SETTINGS_DIR/server.env" "$SETTINGS_DIR/webmail.env"; do
+  [ -r "$f" ] || continue
+  sed -E "s/(${SECRET_KEYS#^}).*/\1<secret removed - see the custody forms>/" "$f" > "$SNAP/$(basename "$f")"
+done
+if grep -hE "$SECRET_KEYS" "$SNAP"/*.env 2>/dev/null | grep -vq '<secret removed - see the custody forms>$'; then
+  log "FAILED: a secret survived removal from the settings snapshot; nothing was uploaded"
+  exit 1
+fi
+if [ -r "$GREYLIST_FILE" ] && [ "$GREYLIST_FILE" != "none" ]; then
+  cp "$GREYLIST_FILE" "$SNAP/greylist.tsv"
+fi
+if [ -n "$(ls -A "$SNAP")" ]; then
+  log "sync settings snapshot (secrets removed) and greylist -> ${REMOTE}settings/"
+  rclone sync "$SNAP" "${REMOTE}settings/" --stats=0 --quiet
+  verify "$SNAP" "${REMOTE}settings/"
+fi
+rm -rf "$SNAP"
+
 rclone delete "${REMOTE}deleted/" --min-age 30d --quiet 2>/dev/null || true
 rclone rmdirs "${REMOTE}deleted/" --leave-root --quiet 2>/dev/null || true
 

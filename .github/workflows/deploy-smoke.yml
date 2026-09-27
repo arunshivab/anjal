@@ -111,7 +111,15 @@ jobs:
           fi
           # rc.5 (decision 2B): greylisting keeps remembered senders in its state
           # file under the shipped unit, and does not delay senders passing SPF.
-          grep -q "Greylisting: on (delay 300s, senders remembered 35 days, kept in /var/lib/anjal/greylist.tsv, senders passing SPF not delayed)." "$RUNNER_TEMP/services.log"
+          # rc.7: the database is the primary record, the file its mirror.
+          grep -q "Greylisting: on (delay 300s, senders remembered 35 days, kept in the database and mirrored to /var/lib/anjal/greylist.tsv, senders passing SPF not delayed)." "$RUNNER_TEMP/services.log"
+          # rc.7: settings live in the database; each service imports its env once.
+          grep -q "Settings: none stored yet for server; imported" "$RUNNER_TEMP/services.log"
+          grep -q "Settings: none stored yet for webmail; imported" "$RUNNER_TEMP/services.log"
+          # rc.7 (DEF-064 and the owner's rule): never unencrypted, with DHE and RSA-GCM offered.
+          if grep -q "Outbound worker started" "$RUNNER_TEMP/services.log"; then
+            grep -q "never unencrypted, 13 cipher suites incl. DHE and RSA-GCM" "$RUNNER_TEMP/services.log"
+          fi
           # DEF-048: the spam filter swallowed the same failure; it must not recur.
           if grep -q "no system DNS resolver" "$RUNNER_TEMP/services.log"; then
             echo "::error::the DNS resolver could not be created under the unit's sandbox"; exit 1
@@ -167,6 +175,20 @@ jobs:
           test "$code" = 202
           sudo test -e /var/lib/anjal/acme/renew.request
 
+      - name: Settings in the database hold no secrets (rc.7)
+        run: |
+          set -euo pipefail
+          token=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+          curl -sf -H "Authorization: Bearer $token" http://127.0.0.1:8025/api/settings > "$RUNNER_TEMP/settings.json"
+          jq -r '.server[].key, .webmail[].key' "$RUNNER_TEMP/settings.json" | tee "$RUNNER_TEMP/settings-keys.txt"
+          test "$(jq '.server | length' "$RUNNER_TEMP/settings.json")" -gt 0
+          test "$(jq '.webmail | length' "$RUNNER_TEMP/settings.json")" -gt 0
+          if grep -E '(POSTGRES|PASSWORD|TOKEN|SECRET|KEK)' "$RUNNER_TEMP/settings-keys.txt"; then
+            echo "::error::a secret was stored in the settings table"; exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d '{"value":"x"}' http://127.0.0.1:8025/api/settings/server/ANJAL_KEK)
+          test "$code" = 400
+
       - name: A backup under its real unit - refused until configured, verified, never leaves the dump
         run: |
           set -euo pipefail
@@ -192,6 +214,12 @@ jobs:
           sudo systemctl start anjal-backup
           log=$(blog); grep -q "dump uploaded and verified" <<< "$log"; grep -q "verify ok" <<< "$log"
           test -z "$(sudo ls -A /var/lib/anjal/backup)"
+          # rc.7: the settings snapshot is backed up with every secret removed.
+          snap=$(sudo -u anjal rclone --config /etc/anjal/rclone.conf cat b2crypt:settings/server.env)
+          grep -q "^ANJAL_API_TOKEN=<secret removed - see the custody forms>$" <<< "$snap"
+          grep -q "^ANJAL_POSTGRES=<secret removed - see the custody forms>$" <<< "$snap"
+          token=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+          if grep -qF "$token" <<< "$snap"; then echo "::error::the admin token reached the backup"; exit 1; fi
           # DEF-061: damage the stored mail at rest (size and time unchanged);
           # the next run must fail, and still leave no dump.
           f=$(sudo find /var/lib/anjal/smoke-remote -type f -size 4048c | head -n 1)
@@ -202,6 +230,48 @@ jobs:
           if sudo systemctl start anjal-backup; then echo "::error::a damaged backup verified"; exit 1; fi
           log=$(blog); grep -q "hashes differ" <<< "$log"
           test -z "$(sudo ls -A /var/lib/anjal/backup)"
+
+      - name: HTTP/3 under the real unit (rc.7)
+        run: |
+          set -euo pipefail
+          # libmsquic from Microsoft's repository, exactly as DEPLOY.md section 1d.
+          curl -sSLo /tmp/packages-microsoft-prod.deb https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
+          sudo dpkg -i /tmp/packages-microsoft-prod.deb
+          sudo apt-get update -q && sudo apt-get install -y -q libmsquic
+          # CI's ACME domain is deliberately invalid, so the webmail has no real
+          # certificate. Switch it to a self-signed one: ACME off in the database
+          # (settings live there since rc.7) and in the env file, fixed PEM pair on.
+          token=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+          curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $token" http://127.0.0.1:8025/api/settings/webmail/ANJAL_ACME_DOMAINS
+          sudo sed -i 's|^ANJAL_ACME_DOMAINS=.*|ANJAL_ACME_DOMAINS=|' /etc/anjal/webmail.env
+          sudo install -d -o root -g anjal -m 750 /etc/anjal/ci-tls
+          sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -keyout /etc/anjal/ci-tls/key.pem -out /etc/anjal/ci-tls/cert.pem 2>/dev/null
+          sudo chgrp anjal /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
+          sudo chmod 640 /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
+          printf 'ANJAL_TLS_CERT_PATH=/etc/anjal/ci-tls/cert.pem\nANJAL_TLS_KEY_PATH=/etc/anjal/ci-tls/key.pem\n' | sudo tee -a /etc/anjal/webmail.env >/dev/null
+          sudo systemctl restart anjal-webmail
+          sleep 8
+          test "$(systemctl is-active anjal-webmail)" = active
+          sudo journalctl -u anjal-webmail --since "-2min" --no-pager > "$RUNNER_TEMP/h3.log"
+          grep "HTTP/3:" "$RUNNER_TEMP/h3.log"
+          grep -q "HTTP/3: on" "$RUNNER_TEMP/h3.log"
+          sudo ss -ulnp | tee "$RUNNER_TEMP/udp.txt"
+          grep -E ':443\b' "$RUNNER_TEMP/udp.txt" | grep -q Anjal.Webmail
+          # A real HTTP/3 request, and the Alt-Svc header that tells browsers.
+          cat > "$RUNNER_TEMP/h3.cs" <<'EOF'
+          using System.Net;
+          var handler = new SocketsHttpHandler { SslOptions = { RemoteCertificateValidationCallback = (a, b, c, d) => true } };
+          using var client = new HttpClient(handler);
+          var h2 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
+          string alt = h2.Headers.TryGetValues("Alt-Svc", out var v) ? string.Join(",", v) : "(none)";
+          Console.WriteLine($"HTTP/2: {(int)h2.StatusCode}, Alt-Svc: {alt}");
+          if (!alt.Contains("h3")) { Console.WriteLine("::error::HTTP/3 is not advertised"); return 1; }
+          var h3 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
+          Console.WriteLine($"HTTP/3: {(int)h3.StatusCode}, version {h3.Version}");
+          return h3.StatusCode == HttpStatusCode.OK && h3.Version == HttpVersion.Version30 ? 0 : 1;
+          EOF
+          dotnet run "$RUNNER_TEMP/h3.cs"
 
       - name: Service logs on failure
         if: failure()

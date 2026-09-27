@@ -24,6 +24,7 @@ public sealed class SmtpSession
     private readonly ILocalDomainResolver? localDomains;
     private readonly string remoteAddress;
     private bool isTls;
+    private string? tlsDescription;
 
     // Buffered input. One 16 KB window instead of an allocation and a
     // stream read per byte; over TLS each of those reads was a full trip
@@ -313,6 +314,7 @@ public sealed class SmtpSession
 
         this.stream = ssl;
         this.isTls = true;
+        this.tlsDescription = TlsCipherSet.Describe(ssl);
         this.clientHostName = string.Empty;
         this.envelopeFrom = string.Empty;
         this.envelopeTo.Clear();
@@ -861,6 +863,7 @@ public sealed class SmtpSession
             ClientHostName = this.clientHostName,
             AuthenticatedUser = this.authenticatedUser?.Username,
             AuthResults = authResult?.Detail,
+            TransportTls = this.tlsDescription,
         };
 
         DeliveryResult result;
@@ -1251,7 +1254,8 @@ public sealed class SmtpSession
         string helo = SanitiseTraceToken(this.clientHostName.Length > 0 ? this.clientHostName : "unknown");
         string id = System.Guid.NewGuid().ToString("N").Substring(0, 16);
         string date = System.DateTimeOffset.UtcNow.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", System.Globalization.CultureInfo.InvariantCulture);
-        return $"Received: from {helo} ([{this.remoteAddress}])\r\n\tby {this.options.AdvertisedHostName} with {protocol} id {id};\r\n\t{date}\r\n";
+        string tls = this.tlsDescription is null ? string.Empty : $" ({this.tlsDescription})";
+        return $"Received: from {helo} ([{this.remoteAddress}])\r\n\tby {this.options.AdvertisedHostName} with {protocol} id {id}{tls};\r\n\t{date}\r\n";
     }
 
     /// <summary>
@@ -1321,6 +1325,7 @@ public sealed class SmtpSession
 #pragma warning restore CA1031
         this.stream = ssl;
         this.isTls = true;
+        this.tlsDescription = TlsCipherSet.Describe(ssl);
         return true;
     }
 

@@ -13,3 +13,4 @@ A tenant: one customer organisation hosted on an Anjal deployment. Every mailbox
 - **Id** *(property)* - Identifier assigned by the store.
 - **Slug** *(property)* - Unique, URL-safe and filesystem-safe identifier (e.g. "imagiqa"). Lowercase letters, digits and hyphens only; 1-63 characters.
 - **SpamThreshold** *(property)* - Messages scoring at or above this land in Junk instead of INBOX. Scores are integers; see Anjal.Spam.SpamScorer for the rules.
+- **UnencryptedFolder** *(property)* - Folder that mail reaching this tenant unencrypted is filed in, or null (the default) to keep it in INBOX with a red open lock. Mail from a sender the recipient trusts is never filed away.

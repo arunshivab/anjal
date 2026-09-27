@@ -21,6 +21,7 @@ public sealed class ApiServer : System.IDisposable
     private readonly OutboundHandler outbound;
     private readonly InboundHandler inbound;
     private readonly OutboundTlsPoliciesHandler tlsPolicies;
+    private readonly SettingsHandler settings;
     private readonly DkimKeysHandler dkimKeys;
     private readonly SmtpUsersHandler smtpUsers;
     private readonly LocalDomainsHandler localDomains;
@@ -89,6 +90,7 @@ public sealed class ApiServer : System.IDisposable
         this.outbound = new OutboundHandler(store);
         this.inbound = new InboundHandler(store);
         this.tlsPolicies = new OutboundTlsPoliciesHandler(store);
+        this.settings = new SettingsHandler(store);
         this.dkimKeys = new DkimKeysHandler(store);
         this.smtpUsers = new SmtpUsersHandler(store);
         this.localDomains = new LocalDomainsHandler(store);
@@ -450,6 +452,30 @@ public sealed class ApiServer : System.IDisposable
                     await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
                     return;
             }
+        }
+
+        if (path.Equals("/api/settings", System.StringComparison.OrdinalIgnoreCase) && ctx.Method == "GET")
+        {
+            await this.settings.ListAsync(ctx).ConfigureAwait(false);
+            return;
+        }
+
+        const string settingsPrefix = "/api/settings/";
+        if (path.StartsWith(settingsPrefix, System.StringComparison.OrdinalIgnoreCase))
+        {
+            string[] parts = path.Substring(settingsPrefix.Length).Split('/');
+            if (parts.Length == 2 && parts[0].Length > 0 && parts[1].Length > 0)
+            {
+                string scope = parts[0].ToLowerInvariant();
+                string key = parts[1].ToUpperInvariant();
+                switch (ctx.Method)
+                {
+                    case "PUT": await this.settings.PutAsync(ctx, scope, key).ConfigureAwait(false); return;
+                    case "DELETE": await this.settings.DeleteAsync(ctx, scope, key).ConfigureAwait(false); return;
+                }
+            }
+            await ctx.WriteErrorAsync(405, "method_not_allowed", $"{ctx.Method} not allowed on {path}.").ConfigureAwait(false);
+            return;
         }
 
         const string tlsPolicyPrefix = "/api/outbound-tls-policies/";

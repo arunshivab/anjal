@@ -205,6 +205,17 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     : new System.Collections.Generic.List<Anjal.Store.SenderRuleRow>(rules.Concat(personal));
                 string folderName = ChooseFolder(spamScore, tenant.SpamThreshold, Anjal.Spam.SenderRules.Evaluate(effective, ctx.EnvelopeFrom, fromHeaderAddress));
 
+                // Unencrypted mail from outside (v1.0.0-rc.7): filed in the
+                // tenant's chosen folder, if it has one, unless the recipient
+                // trusts the sender. Junk decisions come first.
+                if (ctx.AuthenticatedUser is null && ctx.TransportTls is null
+                    && !string.IsNullOrWhiteSpace(tenant.UnencryptedFolder)
+                    && string.Equals(folderName, "INBOX", System.StringComparison.OrdinalIgnoreCase)
+                    && !await this.IsTrustedAsync(mailbox.Id, fromHeaderAddress, ctx.EnvelopeFrom, ct).ConfigureAwait(false))
+                {
+                    folderName = tenant.UnencryptedFolder.Trim();
+                }
+
                 Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
                 MaildirWriteResult written = await this.maildir
                     .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, ctx.RawBytes, ct)
@@ -224,6 +235,8 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     SizeBytes = written.SizeBytes,
                     SpamScore = spamScore,
                     SpamChecked = spamChecked,
+                    TransportEncrypted = ctx.AuthenticatedUser is null ? ctx.TransportTls is not null : null,
+                    TransportTls = ctx.AuthenticatedUser is null ? ctx.TransportTls : null,
                     HasAttachments = HasAttachment(parsed?.Body),
                     BodyText = MessageText.Extract(parsed),
                     CategoryId = await this.CategoryForAsync(mailbox.Id, ctx.EnvelopeFrom, parsed?.Headers.Get("From") ?? string.Empty, ct).ConfigureAwait(false),
@@ -414,5 +427,13 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             }
         }
         return domainMatch;
+    }
+
+    /// <summary>Whether the mailbox trusts the sender although their mail arrives unencrypted.</summary>
+    private async System.Threading.Tasks.Task<bool> IsTrustedAsync(System.Guid mailboxId, string fromHeaderAddress, string envelopeFrom, System.Threading.CancellationToken ct)
+    {
+        IReadOnlyList<string> trusted = await this.store.ListTrustedSendersAsync(mailboxId, ct).ConfigureAwait(false);
+        return (fromHeaderAddress.Length > 0 && trusted.Contains(fromHeaderAddress.ToLowerInvariant()))
+            || (envelopeFrom.Length > 0 && trusted.Contains(envelopeFrom.ToLowerInvariant()));
     }
 }

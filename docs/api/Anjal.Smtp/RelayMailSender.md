@@ -8,4 +8,5 @@ Outbound sender that always relays through a single configured host. This is the
 
 - **#ctor** *(method)* - Construct the relay sender with options.
 - **ClassifyReply** *(method)* - Classify an SMTP reply code as transient (4xx) or permanent (5xx). Exposed as static for use by other senders.
+- **IsLoopback** *(method)* - True when the relay host is this machine (a loopback name or address).
 - **SendAsync** *(method)* - _(no description)_

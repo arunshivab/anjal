@@ -133,16 +133,21 @@ public sealed class DirectMailSender : IMailSender
                 Anjal.Store.TlsMode mode = await this.options.Tls.ResolveModeAsync(domain, ct).ConfigureAwait(false);
                 bool offered = SmtpClientSession.EhloSupportsStartTls(ehlo);
 
-                if (mode == Anjal.Store.TlsMode.Required && !offered)
+                TlsAction action = TlsDecision.Decide(mode, offered, this.options.Tls.AllowPlaintext, loopback: false);
+                if (action == TlsAction.Hold)
                 {
+                    // Never unencrypted (owner's rule, 27 Sep 2026): hold the
+                    // message; the worker retries and finally returns it.
                     await session.QuitAsync(ct).ConfigureAwait(false);
                     return new SendResult
                     {
                         Outcome = SendOutcome.TransientFailure,
-                        Message = $"TLS required for {domain} but {host} did not advertise STARTTLS",
+                        Message = mode == Anjal.Store.TlsMode.Required
+                            ? $"TLS required for {domain} but {host} did not advertise STARTTLS"
+                            : $"Not sent: {host} does not offer encryption (STARTTLS), and this server never sends mail unencrypted",
                     };
                 }
-                if (mode != Anjal.Store.TlsMode.Disabled && offered)
+                if (action == TlsAction.StartTls)
                 {
                     // Opportunistic TLS encrypts without authenticating the
                     // peer (RFC 7435): many MX hosts present self-signed or
@@ -187,7 +192,8 @@ public sealed class DirectMailSender : IMailSender
 
             if (data.Code == 250)
             {
-                return new SendResult { Outcome = SendOutcome.Sent, ReplyCode = 250, Message = $"Accepted by {host}: {data.Text}" };
+                string tls = session.NegotiatedTls is null ? "unencrypted" : session.NegotiatedTls;
+                return new SendResult { Outcome = SendOutcome.Sent, ReplyCode = 250, Message = $"Accepted by {host} ({tls}): {data.Text}" };
             }
             return RelayMailSender.ClassifyReply(data, $"DATA at {host}");
         }

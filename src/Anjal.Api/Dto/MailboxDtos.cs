@@ -14,6 +14,13 @@ public sealed class TenantRequest
 
     /// <summary>Spam score at or above which mail is filed in Junk. Null keeps the default (5); 0 disables Junk filing.</summary>
     public int? SpamThreshold { get; set; }
+
+    /// <summary>
+    /// Folder for mail that reaches the tenant unencrypted (v1.0.0-rc.7).
+    /// Omitted: unchanged. Empty: cleared, so such mail stays in INBOX with a
+    /// red open lock (the default).
+    /// </summary>
+    public string? UnencryptedFolder { get; set; }
 }
 
 /// <summary>Request body for a sender allow/block rule.</summary>
@@ -59,6 +66,9 @@ public sealed class TenantResponse
 
     /// <summary>Spam threshold in effect.</summary>
     public int SpamThreshold { get; set; }
+
+    /// <summary>Folder for mail that arrives unencrypted, or null to keep it in INBOX with a red lock.</summary>
+    public string? UnencryptedFolder { get; set; }
 
     /// <summary>When the tenant was created.</summary>
     public System.DateTimeOffset CreatedAt { get; set; }
