@@ -265,17 +265,41 @@ jobs:
           # A real HTTP/3 request, and the Alt-Svc header that tells browsers.
           cat > "$RUNNER_TEMP/h3.cs" <<'EOF'
           using System.Net;
+          // Diagnostic as well as a check: says whether the CLIENT can use QUIC,
+          // prints the whole error chain, and shows what a fall-back request negotiates.
+          Console.WriteLine($"client: QuicConnection.IsSupported = {System.Net.Quic.QuicConnection.IsSupported}");
           var handler = new SocketsHttpHandler { SslOptions = { RemoteCertificateValidationCallback = (a, b, c, d) => true } };
           using var client = new HttpClient(handler);
           var h2 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
           string alt = h2.Headers.TryGetValues("Alt-Svc", out var v) ? string.Join(",", v) : "(none)";
           Console.WriteLine($"HTTP/2: {(int)h2.StatusCode}, Alt-Svc: {alt}");
           if (!alt.Contains("h3")) { Console.WriteLine("::error::HTTP/3 is not advertised"); return 1; }
-          var h3 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
-          Console.WriteLine($"HTTP/3: {(int)h3.StatusCode}, version {h3.Version}");
-          return h3.StatusCode == HttpStatusCode.OK && h3.Version == HttpVersion.Version30 ? 0 : 1;
+          try
+          {
+              var lower = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionOrLower });
+              Console.WriteLine($"HTTP/3-or-lower request negotiated version {lower.Version}");
+          }
+          catch (Exception ex) { Console.WriteLine("HTTP/3-or-lower request failed: " + ex); }
+          try
+          {
+              var h3 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
+              Console.WriteLine($"HTTP/3: {(int)h3.StatusCode}, version {h3.Version}");
+              return h3.StatusCode == HttpStatusCode.OK && h3.Version == HttpVersion.Version30 ? 0 : 1;
+          }
+          catch (Exception ex)
+          {
+              Console.WriteLine("HTTP/3 request failed - full chain:");
+              for (Exception? e = ex; e is not null; e = e.InnerException) { Console.WriteLine($"  {e.GetType().FullName}: {e.Message}"); }
+              return 1;
+          }
           EOF
+          set +e
           dotnet run "$RUNNER_TEMP/h3.cs"
+          rc=$?
+          set -e
+          echo "== webmail log since the restart"
+          sudo journalctl -u anjal-webmail --since "-3min" --no-pager | tail -40
+          exit $rc
 
       - name: Service logs on failure
         if: failure()
