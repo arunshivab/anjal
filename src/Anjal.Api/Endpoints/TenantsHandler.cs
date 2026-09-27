@@ -78,6 +78,13 @@ public sealed class TenantsHandler
             return;
         }
 
+        string? folder = req.UnencryptedFolder?.Trim();
+        if (folder is { Length: > 0 } && !IsFolderForUnencrypted(folder))
+        {
+            await ctx.WriteErrorAsync(400, "invalid_request", "unencryptedFolder must be 1-64 characters without '/', and not INBOX, Junk, Sent, Drafts or Trash.").ConfigureAwait(false);
+            return;
+        }
+
         TenantRow? current = await this.store.GetTenantAsync(slug).ConfigureAwait(false);
         TenantRow saved = await this.store.UpsertTenantAsync(new TenantRow
         {
@@ -85,6 +92,7 @@ public sealed class TenantsHandler
             DisplayName = req.DisplayName.Trim(),
             Enabled = req.Enabled,
             SpamThreshold = req.SpamThreshold ?? current?.SpamThreshold ?? TenantRow.DefaultSpamThreshold,
+            UnencryptedFolder = folder is null ? current?.UnencryptedFolder : (folder.Length == 0 ? null : folder),
         }).ConfigureAwait(false);
         await ctx.WriteJsonAsync(200, ToResponse(saved)).ConfigureAwait(false);
     }
@@ -348,8 +356,22 @@ public sealed class TenantsHandler
         DisplayName = t.DisplayName,
         Enabled = t.Enabled,
         SpamThreshold = t.SpamThreshold,
+        UnencryptedFolder = t.UnencryptedFolder,
         CreatedAt = t.CreatedAt,
     };
+
+    /// <summary>A folder name usable for unencrypted mail: not a system folder, no path separator.</summary>
+    /// <param name="name">The trimmed name.</param>
+    /// <returns>True when usable.</returns>
+    public static bool IsFolderForUnencrypted(string name)
+    {
+        System.ArgumentNullException.ThrowIfNull(name);
+        string[] system = { "INBOX", "Junk", "Sent", "Drafts", "Trash" };
+        return name.Length is > 0 and <= 64
+            && name.IndexOf('/', System.StringComparison.Ordinal) < 0
+            && !name.StartsWith('.')
+            && !system.Any(s => string.Equals(s, name, System.StringComparison.OrdinalIgnoreCase));
+    }
 
     private static SenderRuleResponse ToResponse(SenderRuleRow r) => new()
     {

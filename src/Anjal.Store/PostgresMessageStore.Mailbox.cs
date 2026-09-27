@@ -9,12 +9,12 @@ namespace Anjal.Store;
 /// </summary>
 public sealed partial class PostgresMessageStore
 {
-    private const string TenantColumns = "id, slug, display_name, enabled, spam_threshold, created_at";
+    private const string TenantColumns = "id, slug, display_name, enabled, spam_threshold, created_at, unencrypted_folder";
     private const string SenderRuleColumns = "id, tenant_id, pattern, action, created_at";
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
     private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
-    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked";
+    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls";
 
     /// <inheritdoc/>
     public async Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
@@ -22,12 +22,13 @@ public sealed partial class PostgresMessageStore
         System.ArgumentNullException.ThrowIfNull(tenant);
 
         const string sql = @"
-INSERT INTO tenants (slug, display_name, enabled, spam_threshold)
-VALUES (lower(@slug), @display_name, @enabled, @spam_threshold)
+INSERT INTO tenants (slug, display_name, enabled, spam_threshold, unencrypted_folder)
+VALUES (lower(@slug), @display_name, @enabled, @spam_threshold, @unencrypted_folder)
 ON CONFLICT (slug) DO UPDATE
-    SET display_name   = EXCLUDED.display_name,
-        enabled        = EXCLUDED.enabled,
-        spam_threshold = EXCLUDED.spam_threshold
+    SET display_name       = EXCLUDED.display_name,
+        enabled            = EXCLUDED.enabled,
+        spam_threshold     = EXCLUDED.spam_threshold,
+        unencrypted_folder = EXCLUDED.unencrypted_folder
 RETURNING " + TenantColumns + ";";
 
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
@@ -36,6 +37,7 @@ RETURNING " + TenantColumns + ";";
         cmd.Parameters.AddWithValue("display_name", tenant.DisplayName);
         cmd.Parameters.AddWithValue("enabled", tenant.Enabled);
         cmd.Parameters.AddWithValue("spam_threshold", tenant.SpamThreshold);
+        cmd.Parameters.Add(new NpgsqlParameter<string?>("unencrypted_folder", NpgsqlTypes.NpgsqlDbType.Text) { TypedValue = string.IsNullOrWhiteSpace(tenant.UnencryptedFolder) ? null : tenant.UnencryptedFolder.Trim() });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -339,8 +341,8 @@ RETURNING " + FolderColumns + ";";
         System.ArgumentNullException.ThrowIfNull(message);
 
         const string sql = @"
-INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, spam_checked)
-VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @spam_checked)
+INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, spam_checked, transport_encrypted, transport_tls)
+VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @spam_checked, @transport_encrypted, @transport_tls)
 RETURNING " + MessageColumns + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -362,6 +364,8 @@ RETURNING " + MessageColumns + ";";
         cmd.Parameters.AddWithValue("answered", message.Answered);
         cmd.Parameters.AddWithValue("spam_score", message.SpamScore);
         cmd.Parameters.Add(new NpgsqlParameter<bool?>("spam_checked", NpgsqlTypes.NpgsqlDbType.Boolean) { TypedValue = message.SpamChecked });
+        cmd.Parameters.Add(new NpgsqlParameter<bool?>("transport_encrypted", NpgsqlTypes.NpgsqlDbType.Boolean) { TypedValue = message.TransportEncrypted });
+        cmd.Parameters.Add(new NpgsqlParameter<string?>("transport_tls", NpgsqlTypes.NpgsqlDbType.Text) { TypedValue = message.TransportTls });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -595,6 +599,7 @@ RETURNING " + SenderRuleColumns + ";";
         Enabled = r.GetBoolean(3),
         SpamThreshold = r.GetInt32(4),
         CreatedAt = r.GetFieldValue<System.DateTimeOffset>(5),
+        UnencryptedFolder = r.IsDBNull(6) ? null : r.GetString(6),
     };
 
     /// <inheritdoc/>
@@ -742,6 +747,8 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         CategoryId = r.IsDBNull(16) ? null : r.GetGuid(16),
         HasAttachments = r.GetBoolean(17),
         SpamChecked = r.IsDBNull(18) ? null : r.GetBoolean(18),
+        TransportEncrypted = r.IsDBNull(19) ? null : r.GetBoolean(19),
+        TransportTls = r.IsDBNull(20) ? null : r.GetString(20),
     };
 
     // ================= Categories (v0.15.0) =================

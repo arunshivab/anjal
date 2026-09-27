@@ -954,3 +954,6 @@ table.ml td.c-att svg { vertical-align: -2px; }
   .readsubj { margin: 10px 0 6px; }
   .byline { margin-bottom: 12px; }
 }
+
+/* v1.0.0-rc.7: mail that arrived unencrypted (red open lock). */
+.unenc { color: var(--danger); display: inline-flex; vertical-align: -2px; margin-right: 4px; }

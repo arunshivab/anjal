@@ -76,16 +76,19 @@ public sealed class RelayMailSender : IMailSender
                 Anjal.Store.TlsMode mode = await this.options.Tls.ResolveModeAsync(this.options.Host, ct).ConfigureAwait(false);
                 bool offered = SmtpClientSession.EhloSupportsStartTls(ehlo);
 
-                if (mode == Anjal.Store.TlsMode.Required && !offered)
+                TlsAction action = TlsDecision.Decide(mode, offered, this.options.Tls.AllowPlaintext, IsLoopback(this.options.Host));
+                if (action == TlsAction.Hold)
                 {
                     await session.QuitAsync(ct).ConfigureAwait(false);
                     return new SendResult
                     {
                         Outcome = SendOutcome.TransientFailure,
-                        Message = $"TLS required for {this.options.Host} but server did not advertise STARTTLS",
+                        Message = mode == Anjal.Store.TlsMode.Required
+                            ? $"TLS required for {this.options.Host} but server did not advertise STARTTLS"
+                            : $"Not sent: relay {this.options.Host} does not offer encryption (STARTTLS), and this server never sends mail unencrypted",
                     };
                 }
-                if (mode != Anjal.Store.TlsMode.Disabled && offered)
+                if (action == TlsAction.StartTls)
                 {
                     // A relay is a named, configured provider: always validated.
                     SmtpReply tlsReply = await session.StartTlsAsync(this.options.Host, this.options.Tls.ValidateCertificate, this.options.Tls.Revocation, ct).ConfigureAwait(false);
@@ -125,7 +128,8 @@ public sealed class RelayMailSender : IMailSender
 
             if (data.Code == 250)
             {
-                return new SendResult { Outcome = SendOutcome.Sent, ReplyCode = 250, Message = data.Text };
+                string tls = session.NegotiatedTls is null ? "unencrypted" : session.NegotiatedTls;
+                return new SendResult { Outcome = SendOutcome.Sent, ReplyCode = 250, Message = $"({tls}) {data.Text}" };
             }
             return ClassifyReply(data, "DATA");
         }
@@ -166,5 +170,18 @@ public sealed class RelayMailSender : IMailSender
             ReplyCode = reply.Code,
             Message = $"{stage}: {reply.Code} {reply.Text}",
         };
+    }
+
+    /// <summary>True when the relay host is this machine (a loopback name or address).</summary>
+    /// <param name="host">The configured relay host.</param>
+    /// <returns>True for localhost and loopback addresses.</returns>
+    public static bool IsLoopback(string host)
+    {
+        System.ArgumentNullException.ThrowIfNull(host);
+        if (string.Equals(host, "localhost", System.StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        return System.Net.IPAddress.TryParse(host, out System.Net.IPAddress? ip) && System.Net.IPAddress.IsLoopback(ip);
     }
 }

@@ -218,6 +218,14 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS spam_score     INTEGER NOT NULL DE
 -- messages stored before rc.5 (the webmail then decides by folder). Without
 -- it, "checked and scored 0" and "never checked" were the same stored 0.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS spam_checked   BOOLEAN;
+-- How mail from outside reached this server (v1.0.0-rc.7, DEF-064 and the
+-- owner's decision of 27 Sep 2026): transport_encrypted is true when the
+-- sending server used TLS, false when it did not (the webmail shows a red
+-- open lock), NULL for mail from a signed-in account, copies of your own
+-- mail, and messages stored before rc.7. transport_tls is the negotiated
+-- version and cipher, for example "TLSv1.3 TLS_AES_256_GCM_SHA384".
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS transport_encrypted BOOLEAN;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS transport_tls       TEXT;
 
 CREATE TABLE IF NOT EXISTS sender_rules (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -370,3 +378,44 @@ ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS signature_html TEXT NOT NULL DEFA
 ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS signature_text TEXT NOT NULL DEFAULT '';
 
 COMMIT;
+
+-- ======================= v1.0.0-rc.7 (27 Sep 2026) =======================
+
+-- Where a tenant files mail that reached it unencrypted (owner's decision,
+-- 27 Sep 2026). NULL (the default) keeps it in INBOX with a red open lock;
+-- a folder name files it there instead, unless the recipient trusts the sender.
+ALTER TABLE tenants ADD COLUMN IF NOT EXISTS unencrypted_folder TEXT;
+
+-- Senders a mailbox has chosen to trust although their mail arrives
+-- unencrypted ("Trust this sender"): no red lock, never filed away.
+CREATE TABLE IF NOT EXISTS mailbox_trusted_senders (
+    mailbox_id UUID        NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    address    TEXT        NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (mailbox_id, address)
+);
+
+-- Greylisting memory (decision 2B). Kept here so it survives a rebuild from
+-- the backup, and mirrored to /var/lib/anjal/greylist.tsv in case the
+-- database cannot be recovered (owner's decision, 27 Sep 2026).
+CREATE TABLE IF NOT EXISTS greylist_entries (
+    key        TEXT        PRIMARY KEY,
+    first_seen TIMESTAMPTZ NOT NULL,
+    last_seen  TIMESTAMPTZ NOT NULL,
+    passed     BOOLEAN     NOT NULL
+);
+
+-- Non-secret settings (owner's decision, 27 Sep 2026). The database is the
+-- source of truth; at the first start after rc.7 each service imports its
+-- current /etc/anjal/*.env values once. Secrets (passwords, tokens, the KEK,
+-- the database connection) are never stored here - they stay in the env
+-- files and on the paper custody forms. Changed through the admin API; a
+-- change takes effect when the service restarts.
+CREATE TABLE IF NOT EXISTS settings (
+    scope      TEXT        NOT NULL CHECK (scope IN ('server', 'webmail')),
+    key        TEXT        NOT NULL,
+    value      TEXT        NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by TEXT        NOT NULL DEFAULT '',
+    PRIMARY KEY (scope, key)
+);

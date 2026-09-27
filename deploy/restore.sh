@@ -49,6 +49,21 @@ chmod 700 "$ACME_DIR"
 find "$ACME_DIR" -name '*.key.pem' -exec chmod 600 {} +
 find "$MAILDIR_ROOT" -type d -exec chmod 700 {} +
 find "$MAILDIR_ROOT" -type f -exec chmod 600 {} +
+# Greylist memory back into place, and the settings snapshot beside
+# /etc/anjal for comparison only - never over it: secrets come from paper
+# (v1.0.0-rc.7).
+STATE_DIR=${ANJAL_STATE_DIR:-/var/lib/anjal}
+if [ -n "$(rclone lsf "${REMOTE}settings/" --files-only 2>/dev/null)" ]; then
+  mkdir -p "$STATE_DIR/restored-settings"
+  rclone copy "${REMOTE}settings/" "$STATE_DIR/restored-settings/" --exclude greylist.tsv --stats=0 --quiet
+  if rclone lsf "${REMOTE}settings/" --files-only 2>/dev/null | grep -qx 'greylist.tsv'; then
+    rclone copyto "${REMOTE}settings/greylist.tsv" "$STATE_DIR/greylist.tsv" --stats=0 --quiet
+    chown anjal:anjal "$STATE_DIR/greylist.tsv"; chmod 600 "$STATE_DIR/greylist.tsv"
+  fi
+  chown -R anjal:anjal "$STATE_DIR/restored-settings"
+  chmod 700 "$STATE_DIR/restored-settings"; find "$STATE_DIR/restored-settings" -type f -exec chmod 600 {} +
+  log "settings snapshot (secrets removed) in $STATE_DIR/restored-settings - compare with /etc/anjal; greylist memory restored"
+fi
 log "files restored"
 
 if [ "$FILES_ONLY" = "1" ]; then

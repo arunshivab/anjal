@@ -89,6 +89,18 @@ else
                 <span><b>@SenderName</b><span class="sep">·</span>@view.Date</span>
             </p>
 
+            @if (MailboxService.ShowsUnencryptedWarning(view.Row, trusted))
+            {
+                <div class="notice n-warn readnotice" data-unencrypted-warning>
+                    <LipiIcon Name="unlock" Size="16" />
+                    <span>This message reached Anjal <b>without encryption</b>. Anyone on the network path could have read it on the way.
+                          If you know this sender, you can trust them and the warning will not be shown for their mail again.</span>
+                    <form method="post" action="/message/@Id/trust-sender" class="inline act">
+                        <AntiforgeryToken />
+                        <button type="submit" class="btn btn-s btn-sm">Trust this sender</button>
+                    </form>
+                </div>
+            }
             @if (view.HasBlockedImages)
             {
                 <div class="notice n-info readnotice">
@@ -204,6 +216,13 @@ else
                 {
                     <p class="railnote avwarn"><LipiIcon Name="warning" Size="14" /> This message was too large to show in full, so what you see has been cut short. Download the original to read all of it.</p>
                 }
+                @if (view.Row.TransportEncrypted is bool arrivedEncrypted)
+                {
+                    <p class="railnote @(arrivedEncrypted ? null : "avwarn")" data-transport>
+                        <LipiIcon Name="@(arrivedEncrypted ? "lock" : "unlock")" Size="14" />
+                        @(arrivedEncrypted ? $"Arrived encrypted ({view.Row.TransportTls})." : "Arrived unencrypted.")
+                    </p>
+                }
                 <p class="railnote"><LipiIcon Name="security" Size="14" /> Shown in a sandbox; scripts cannot run.</p>
             </section>
 
@@ -263,6 +282,7 @@ else
 
     private MessageView? view;
     private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
+    private IReadOnlySet<string> trusted = new HashSet<string>();
 
     private string SenderName
     {
@@ -358,5 +378,6 @@ else
             });
         }
         categories = await Mail.ListCategoriesAsync(mailboxId.Value);
+        trusted = await Mail.TrustedSendersAsync(mailboxId.Value);
     }
 }

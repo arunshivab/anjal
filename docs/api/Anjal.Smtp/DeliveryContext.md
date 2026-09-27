@@ -13,3 +13,4 @@ Context for a delivery attempt. Captures the SMTP envelope and the fully-receive
 - **EnvelopeTo** *(property)* - The RCPT TO addresses from the SMTP envelope (without angle brackets).
 - **RawBytes** *(property)* - The full DATA payload as received over the wire (CRLF preserved, dot-unstuffed).
 - **RemoteAddress** *(property)* - IP address of the connected client, in dotted form.
+- **TransportTls** *(property)* - The TLS version and cipher suite the sending server used to reach this server (for example TLSv1.3 TLS_AES_256_GCM_SHA384), or null when the message arrived unencrypted.

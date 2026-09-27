@@ -292,4 +292,44 @@ public interface IMessageStore
     /// <param name="ct">Cancellation.</param>
     /// <returns>True if a row was removed.</returns>
     System.Threading.Tasks.Task<bool> DeleteLocalDomainAsync(string domain, System.Threading.CancellationToken ct = default);
+
+    // -------- Greylisting memory (v1.0.0-rc.7) --------
+
+    /// <summary>All remembered greylisting triplets.</summary>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The triplets.</returns>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<GreylistRow>> ListGreylistAsync(System.Threading.CancellationToken ct = default);
+
+    /// <summary>Replace the remembered triplets with <paramref name="rows"/>, in one transaction.</summary>
+    /// <param name="rows">The complete set to keep.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    System.Threading.Tasks.Task ReplaceGreylistAsync(System.Collections.Generic.IReadOnlyList<GreylistRow> rows, System.Threading.CancellationToken ct = default);
+
+    // -------- Settings (v1.0.0-rc.7) --------
+
+    /// <summary>The stored settings of one scope, by key.</summary>
+    /// <param name="scope">"server" or "webmail".</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The settings.</returns>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SettingRow>> ListSettingsAsync(string scope, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Insert or replace one setting.</summary>
+    /// <param name="setting">The setting.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The stored row.</returns>
+    System.Threading.Tasks.Task<SettingRow> UpsertSettingAsync(SettingRow setting, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Remove one setting.</summary>
+    /// <param name="scope">"server" or "webmail".</param>
+    /// <param name="key">The setting's name.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True if a row was removed.</returns>
+    System.Threading.Tasks.Task<bool> DeleteSettingAsync(string scope, string key, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Insert the settings that are not stored yet; never overwrite one that is.</summary>
+    /// <param name="rows">The settings to import.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>How many were inserted.</returns>
+    System.Threading.Tasks.Task<int> ImportSettingsAsync(System.Collections.Generic.IReadOnlyList<SettingRow> rows, System.Threading.CancellationToken ct = default);
 }

@@ -60,6 +60,13 @@ public static class Program
             return 0;
         }
 
+        // Settings live in the database (v1.0.0-rc.7): apply them before any
+        // setting is read, so everything below sees the stored values.
+        if (Environment.GetEnvironmentVariable("ANJAL_POSTGRES") is { Length: > 0 } settingsDb)
+        {
+            await StoredSettings.ApplyAsync(new PostgresMessageStore(settingsDb), SettingRow.WebmailScope, line => Console.WriteLine(line)).ConfigureAwait(false);
+        }
+
         string bind = Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_BIND") ?? "127.0.0.1";
         string portStr = Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_PORT") ?? "8080";
         if (!int.TryParse(portStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out int port))
@@ -170,10 +177,29 @@ public static class Program
             staticCert = !string.IsNullOrEmpty(tls.StaticKeyPath) && File.Exists(tls.StaticKeyPath)
                 ? System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(tls.StaticCertPath, tls.StaticKeyPath)
                 : System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(tls.StaticCertPath);
+            if (OperatingSystem.IsWindows() && staticCert.HasPrivateKey)
+            {
+                // A key loaded from PEM is ephemeral, and Windows' TLS (SChannel)
+                // refuses ephemeral keys on a server: every handshake was closed
+                // (found by the rc.7 HTTP/3 test on Windows, 27 Sep 2026). A
+                // PKCS#12 round trip gives it a key it can use. Linux is unaffected.
+                System.Security.Cryptography.X509Certificates.X509Certificate2 pem = staticCert;
+                staticCert = System.Security.Cryptography.X509Certificates.X509CertificateLoader.LoadPkcs12(
+                    pem.Export(System.Security.Cryptography.X509Certificates.X509ContentType.Pkcs12), null);
+                pem.Dispose();
+            }
         }
         bool httpsOn = tls is { HttpsEnabled: true } && (watcher is not null || staticCert is not null);
 
         var listenUri = new Uri(url);
+        string http3Note = string.Empty;
+        bool http3 = httpsOn && Http3Available(out http3Note);
+        if (httpsOn)
+        {
+            Console.WriteLine(http3
+                ? $"HTTP/3: on (QUIC on UDP port {tls!.HttpsPort}; browsers learn of it through Alt-Svc and fall back to HTTP/2 where UDP is blocked)."
+                : $"HTTP/3: off - {http3Note}; HTTP/1.1 and HTTP/2 only.");
+        }
         builder.WebHost.ConfigureKestrel(kestrel =>
         {
             // A compose with attachments is the largest thing a browser sends.
@@ -185,11 +211,21 @@ public static class Program
             kestrel.Listen(httpAddress, listenUri.Port);
             if (httpsOn)
             {
-                kestrel.Listen(httpAddress, tls!.HttpsPort, listen => listen.UseHttps(https =>
+                kestrel.Listen(httpAddress, tls!.HttpsPort, listen =>
                 {
-                    // Consulted per connection: a renewed certificate is used by the next handshake.
-                    https.ServerCertificateSelector = (_, _) => watcher?.Current ?? staticCert;
-                }));
+                    // HTTP/3 (v1.0.0-rc.7): QUIC sets up the connection and its
+                    // encryption in one round trip and a lost packet delays only
+                    // its own request - what slow, lossy routes need. Kestrel
+                    // adds the Alt-Svc header that tells browsers.
+                    listen.Protocols = http3
+                        ? Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2AndHttp3
+                        : Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
+                    listen.UseHttps(https =>
+                    {
+                        // Consulted per connection: a renewed certificate is used by the next handshake.
+                        https.ServerCertificateSelector = (_, _) => watcher?.Current ?? staticCert;
+                    });
+                });
             }
         });
 
@@ -227,6 +263,20 @@ public static class Program
         builder.Services.AddSingleton(new AuditTrail(store));
 
         WebApplication app = builder.Build();
+
+        // HEAD is answered wherever GET is (v1.0.0-rc.7): before, every HEAD got
+        // 405. Kestrel keeps the headers and sends no body. This must run
+        // before routing, so routing is placed explicitly right after it;
+        // everything below keeps its order relative to routing.
+        app.Use(async (http, next) =>
+        {
+            if (HttpMethods.IsHead(http.Request.Method))
+            {
+                http.Request.Method = HttpMethods.Get;
+            }
+            await next(http).ConfigureAwait(false);
+        });
+        app.UseRouting();
 
         // Any unhandled fault - a database outage, most likely - gets a page
         // that says so, with a reference that matches one line in the log
@@ -452,6 +502,17 @@ public static class Program
             }
             bool removed = await svc.DeleteAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
             return removed ? Results.Redirect(SafeBack(back, "/folder/Trash")) : Results.NotFound();
+        }).RequireAuthorization();
+
+        app.MapPost("/message/{id:guid}/trust-sender", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? trustedAddress = await svc.TrustSenderOfAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return trustedAddress is null ? Results.NotFound() : Results.Redirect($"/message/{id}");
         }).RequireAuthorization();
 
         app.MapPost("/message/{id:guid}/images", (HttpContext http, Guid id) =>
@@ -784,6 +845,31 @@ public static class Program
     /// script for an hour with an ETag carrying the build version, so a
     /// redeploy invalidates them.
     /// </summary>
+    /// <summary>
+    /// Whether HTTP/3 can be offered: not switched off with
+    /// <c>ANJAL_WEBMAIL_HTTP3=false</c>, and QUIC available - which on Linux
+    /// needs Microsoft's libmsquic and IPv6 enabled in the kernel (.NET's QUIC
+    /// uses dual-mode sockets). When it cannot, the webmail serves HTTP/1.1
+    /// and HTTP/2 only and says why; it never fails to start over HTTP/3.
+    /// </summary>
+    /// <param name="note">Why HTTP/3 is off, when it is.</param>
+    /// <returns>True to offer HTTP/3.</returns>
+    public static bool Http3Available(out string note)
+    {
+        if (string.Equals(Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_HTTP3"), "false", StringComparison.OrdinalIgnoreCase))
+        {
+            note = "switched off (ANJAL_WEBMAIL_HTTP3=false)";
+            return false;
+        }
+        if ((OperatingSystem.IsLinux() || OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) && System.Net.Quic.QuicListener.IsSupported)
+        {
+            note = string.Empty;
+            return true;
+        }
+        note = "QUIC is not available on this system (Linux needs libmsquic from packages.microsoft.com and IPv6 enabled - DEPLOY.md section 1d)";
+        return false;
+    }
+
     private static IResult Asset(string relativePath, HttpContext http)
     {
         byte[]? bytes = StaticAssets.Load(relativePath);
@@ -799,19 +885,21 @@ public static class Program
         // fonts/lipi.css - is revalidated on each use against its fingerprint.
         bool versioned = string.Equals(http.Request.Query["v"].ToString(), fingerprint, StringComparison.Ordinal);
         bool fixedFile = relativePath.EndsWith(".woff2", StringComparison.Ordinal) || relativePath.StartsWith("logos/", StringComparison.Ordinal);
-        return new AssetResult(bytes, StaticAssets.ContentType(relativePath), versioned || fixedFile, fingerprint);
+        return new AssetResult(relativePath, bytes, StaticAssets.ContentType(relativePath), versioned || fixedFile, fingerprint);
     }
 
     /// <summary>Writes an embedded asset with caching headers and ETag revalidation.</summary>
     private sealed class AssetResult : IResult
     {
+        private readonly string relativePath;
         private readonly byte[] bytes;
         private readonly string contentType;
         private readonly bool immutable;
         private readonly string fingerprint;
 
-        public AssetResult(byte[] bytes, string contentType, bool immutable, string fingerprint)
+        public AssetResult(string relativePath, byte[] bytes, string contentType, bool immutable, string fingerprint)
         {
+            this.relativePath = relativePath;
             this.bytes = bytes;
             this.contentType = contentType;
             this.immutable = immutable;
@@ -821,7 +909,26 @@ public static class Program
         public async Task ExecuteAsync(HttpContext httpContext)
         {
             ArgumentNullException.ThrowIfNull(httpContext);
-            string etag = '"' + this.fingerprint + '"';
+
+            // Static files only are compressed, Brotli first, then gzip (v1.0.0-rc.7).
+            // Each variant has its own ETag, and Vary keeps caches from mixing them.
+            byte[] body = this.bytes;
+            string? encoding = null;
+            if (StaticAssets.IsCompressible(this.relativePath))
+            {
+                httpContext.Response.Headers.Vary = "Accept-Encoding";
+                string accept = httpContext.Request.Headers.AcceptEncoding.ToString();
+                foreach (string candidate in new[] { "br", "gzip" })
+                {
+                    if (Accepts(accept, candidate) && StaticAssets.Compressed(this.relativePath, candidate) is byte[] packed)
+                    {
+                        body = packed;
+                        encoding = candidate;
+                        break;
+                    }
+                }
+            }
+            string etag = '"' + this.fingerprint + (encoding is null ? string.Empty : "-" + encoding) + '"';
             httpContext.Response.Headers.CacheControl = this.immutable
                 ? "public, max-age=31536000, immutable"
                 : "no-cache";
@@ -838,8 +945,27 @@ public static class Program
                 return;
             }
             httpContext.Response.ContentType = this.contentType;
-            httpContext.Response.ContentLength = this.bytes.Length;
-            await httpContext.Response.Body.WriteAsync(this.bytes).ConfigureAwait(false);
+            if (encoding is not null)
+            {
+                httpContext.Response.Headers.ContentEncoding = encoding;
+            }
+            httpContext.Response.ContentLength = body.Length;
+            await httpContext.Response.Body.WriteAsync(body).ConfigureAwait(false);
+        }
+
+        /// <summary>Whether an Accept-Encoding value allows <paramref name="coding"/> (present, and not q=0).</summary>
+        private static bool Accepts(string acceptEncoding, string coding)
+        {
+            foreach (string part in acceptEncoding.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                string[] bits = part.Split(';', StringSplitOptions.TrimEntries);
+                if (!string.Equals(bits[0], coding, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                return !bits.Skip(1).Any(b => b.Replace(" ", string.Empty, StringComparison.Ordinal) is "q=0" or "q=0.0" or "q=0.00" or "q=0.000");
+            }
+            return false;
         }
     }
 

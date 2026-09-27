@@ -81,6 +81,13 @@ public sealed class SmtpClientSession : System.IDisposable
     }
 
     /// <summary>
+    /// The negotiated TLS version and cipher suite after a successful
+    /// STARTTLS (for example <c>TLSv1.2 TLS_DHE_RSA_WITH_AES_256_GCM_SHA384</c>),
+    /// or null while the session is unencrypted.
+    /// </summary>
+    public string? NegotiatedTls { get; private set; }
+
+    /// <summary>
     /// Issue <c>STARTTLS</c> and, on a <c>220</c> reply, upgrade the
     /// underlying stream to TLS. The caller MUST re-issue <c>EHLO</c>
     /// after this returns successfully, per RFC 3207.
@@ -152,15 +159,17 @@ public sealed class SmtpClientSession : System.IDisposable
                     TargetHost = targetHostname,
                     EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
                     CertificateRevocationCheckMode = validateCertificate ? revocation : System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
+                    CipherSuitesPolicy = TlsCipherSet.OutboundPolicy(),
                 },
                 ct).ConfigureAwait(false);
         }
         catch (System.Exception ex)
         {
             try { ssl.Dispose(); } catch (System.Exception) { /* swallow */ }
-            throw new SmtpProtocolException($"TLS handshake to {targetHostname} failed: {ex.Message}", ex);
+            throw new SmtpProtocolException($"TLS handshake to {targetHostname} failed: {TlsCipherSet.ErrorChain(ex)}", ex);
         }
 
+        this.NegotiatedTls = TlsCipherSet.Describe(ssl);
         this.stream = ssl;
         this.reader = new System.IO.StreamReader(this.stream, Encoding.ASCII);
         this.writer = new System.IO.StreamWriter(this.stream, Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true };

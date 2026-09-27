@@ -283,6 +283,62 @@ is a finding.
 
 ---
 
+### 1d. HTTP/3: libmsquic and UDP port 443 (from rc.7)
+
+The webmail offers HTTP/3 alongside HTTP/1.1 and HTTP/2. HTTP/3 runs over
+QUIC: it sets up a connection and its encryption in one round trip instead
+of two or three, a lost packet delays only its own request instead of the
+whole page, and a connection survives a switch from Wi-Fi to mobile data -
+what slow or lossy routes need (27 September 2026: a Pune-Chennai route was
+carried abroad and back, about 0.2 s per round trip, with loss).
+
+On Linux .NET's QUIC needs Microsoft's **libmsquic**, from Microsoft's own
+signed package repository (the owner accepted this one external package),
+and IPv6 enabled in the kernel (it uses dual-mode sockets; E2E's image has
+it):
+
+```
+vm$ curl -sSLo /tmp/packages-microsoft-prod.deb https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb
+vm$ sudo dpkg -i /tmp/packages-microsoft-prod.deb && rm /tmp/packages-microsoft-prod.deb
+vm$ sudo apt update && sudo apt install -y libmsquic
+vm$ echo 'Unattended-Upgrade::Origins-Pattern { "site=packages.microsoft.com"; };' | sudo tee /etc/apt/apt.conf.d/53unattended-upgrades-microsoft
+vm$ dpkg -l libmsquic | tail -1; test -d /proc/sys/net/ipv6 && echo "IPv6 enabled"
+```
+
+The last line keeps libmsquic's security fixes automatic, like PostgreSQL's.
+Only packages actually installed from that repository are upgraded.
+
+At E2E, add to the `anjal-mail` security group an **inbound rule: UDP,
+port 443, from anywhere** (next to the existing TCP 443). Without it
+browsers simply keep using HTTP/2.
+
+**Check** after the webmail starts:
+
+```
+vm$ sudo journalctl -u anjal-webmail --since "-5min" --no-pager | grep "HTTP/3:"   # HTTP/3: on (QUIC on UDP port 443; ...)
+vm$ sudo ss -ulnp | grep ':443 '                                                   # Anjal.Webmail on UDP 443
+```
+
+and in a browser: open the webmail, reload once (the first visit only
+learns that HTTP/3 exists, through the `Alt-Svc` header), then Developer
+tools (F12) -> Network -> right-click a column heading -> **Protocol**:
+requests show `h3`. Where UDP is blocked they show `h2`, and nothing else
+changes.
+
+Browsers reach the webmail **by name over IPv4** (`mail` has an A record
+and no AAAA), which is the path HTTP/3 was proven on in CI (27 September
+2026). Two things to know: the webmail listens on **IPv4 only**, so do
+not add an AAAA (IPv6) record for `mail` - IPv6 visitors would not reach
+HTTP/3 or anything else; and a client that connects by IP address instead
+of by name is refused by Linux's QUIC, as TLS requires a name - browsers
+always use the name.
+
+Without libmsquic, or with `ANJAL_WEBMAIL_HTTP3=false`, the webmail logs
+`HTTP/3: off - ...` and serves HTTP/1.1 and HTTP/2 only; it never fails to
+start over HTTP/3.
+
+---
+
 ## 2. PostgreSQL
 
 Install **PostgreSQL 18** from the PostgreSQL project's own repository,
@@ -525,6 +581,12 @@ At GoDaddy, for `anjal.co.in`:
 | MX | `@` | `10 mail.anjal.co.in` | 600 |
 
 Leave SPF as `v=spf1 -all` and DMARC as it is for now (nothing sends yet).
+
+600 seconds suits the first days, while records may still change. Once the
+server is settled, raise the TTL of `mail` and `MX` to **3600** (one hour):
+resolvers everywhere then keep the answer longer, so fewer users wait on a
+slow first lookup (one took 3.6 seconds on 27 September 2026). Lower it
+again to 600 a day before any planned move of the server.
 
 At E2E, after the A record answers: MyAccount → Network → DNS → **Add
 Reverse DNS**. The IP's existing PTR row points at E2E's own name; open its
@@ -973,11 +1035,19 @@ encryption. Any difference fails the run (`systemctl --failed` lists
 detected difference still ended in `done` (DEF-061), and a failed upload
 left the unencrypted dump on disk (DEF-062).
 
-Not in the backup, by design: `/etc/anjal/*.env` and `rclone.conf` (their
+From rc.7 each run also uploads `settings/`: copies of `/etc/anjal/server.env`
+and `webmail.env` with every secret replaced by
+`<secret removed - see the custody forms>` (the run refuses to upload if a
+secret value survives), and the greylisting file `greylist.tsv`. Settings
+are in the database dump as well (section 13e); the copy shows what the env
+files held. A restore puts the greylisting file back and the settings copy
+in `/var/lib/anjal/restored-settings/` for comparison - never over
+`/etc/anjal`.
+
+Not in the backup, by design: `/etc/anjal/*.env` themselves and `rclone.conf` (their
 secrets are on the custody forms - without `ANJAL_KEK` a restored database
-cannot unseal the DKIM key), the webmail session keys (everyone signs in
-again) and `/var/lib/anjal/greylist.tsv` (senders are greylisted once
-more).
+cannot unseal the DKIM key), and the webmail session keys (everyone signs in
+again). Before rc.7 the greylisting file was not backed up either.
 
 ---
 
@@ -1085,6 +1155,35 @@ vm$ sudo /opt/anjal/bin/restore.sh
 vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/ | tail -1      # the dump it used
 ```
 
+**Isolation must also be written into the restored database.** From rc.7
+the services take their settings from the database (section 13e), and the
+database just restored is production's - it says *listen on every address,
+deliver directly*. The env edits of 12.3 alone would be overridden and the
+drill machine could send real mail. Before starting anything, and **only on
+the drill machine**:
+
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO settings (scope, key, value, updated_by) VALUES
+  ('server',  'ANJAL_BIND',               '127.0.0.1', 'drill'),
+  ('server',  'ANJAL_OUTBOUND_MODE',      'relay',     'drill'),
+  ('server',  'ANJAL_RELAY_HOST',         '127.0.0.1', 'drill'),
+  ('server',  'ANJAL_RELAY_PORT',         '2525',      'drill'),
+  ('server',  'ANJAL_ACME_DOMAINS',       '',          'drill'),
+  ('webmail', 'ANJAL_WEBMAIL_BIND',       '127.0.0.1', 'drill'),
+  ('webmail', 'ANJAL_WEBMAIL_PORT',       '8080',      'drill'),
+  ('webmail', 'ANJAL_WEBMAIL_HTTPS_PORT', '0',         'drill'),
+  ('webmail', 'ANJAL_ACME_DOMAINS',       '',          'drill')
+ON CONFLICT (scope, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now(), updated_by = 'drill';
+SQL
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select scope, key, value from settings where updated_by = 'drill' order by 1, 2"
+```
+
+After the services start (below), **check** before anything else:
+`sudo ss -tlnp | grep -E ':(25|465|587|80|443|8080) '` shows nothing but
+`127.0.0.1`, and the server's log has `Outbound worker started (mode=relay, ...`.
+If either is wrong, stop both services at once.
+
 Start the capture program - it holds every outgoing message on this
 machine - then the services:
 
@@ -1176,6 +1275,9 @@ future you can see each one and where it lives.
 | Connection floods | 120 s idle timeout, 15 min session limit, 200 connections, 10 per address | `server.env` |
 | DKIM private keys | AES-256-GCM in the database under `ANJAL_KEK`, which lives only in `server.env` and on the handwritten custody forms | section 4 |
 | Everything else at rest | Mail, database, and certificates on the VM's disk, which E2E encrypts at rest (chosen when the node was created, no passphrase so it boots unattended) | section 0 |
+| Outgoing encryption | Never unencrypted (owner's decision, 27 Sep 2026): a message that cannot be encrypted is held, retried and finally returned to its sender. Offered, most preferred first: TLS 1.3, ECDHE, DHE and static RSA with AES-GCM (the last two added for servers such as rediffmail.com's, DEF-064); never 3DES, RC4, CBC, NULL or export. Every sent message logs the TLS version and cipher | section 13d |
+| Incoming encryption | Every message from outside records whether it arrived encrypted and with which cipher (`Received:` header and database); unencrypted mail shows a red open lock until the recipient trusts the sender, or a tenant may file it in its own folder | section 13e |
+| Settings | Non-secret settings in the database (in every dump) and a secrets-removed copy of the env files in every backup; secrets only in `/etc/anjal` and on paper; every change through the API audited | sections 11, 13e |
 | Backups | Nightly, encrypted on the server by rclone crypt before upload, verified by checksum (`cryptcheck`) every run; bucket private, key limited to that bucket, deleted files recoverable for 30 days; encryption passwords proven on three paper copies | section 11 |
 | Restore | Proven by a drill on a separate machine using only the backup, the paper forms and the release; isolated so it cannot send, receive or request certificates | section 12 |
 | Data residency | **Patient data stays in India** (owner's decision, 26 Sep 2026). The server is in E2E's Chennai region. Backblaze B2 (EU Central) holds only encrypted backups of test and operator mail; **before HIS goes live or any mail naming a patient reaches Anjal, whichever is first, backups move to Indian storage (E2E EOS planned) and the Backblaze bucket is deleted** | section 11 |
@@ -1262,6 +1364,49 @@ setting to the templates, add it by hand; the release note says which.
 3. Add the fail2ban tuning (section 1) and the `Subsystem` line (section 1b)
    if they are not already present.
 
+**rc.6 to rc.7** (27 September 2026), in addition. Take a backup first,
+because this release changes the database and how settings are read:
+
+```
+vm$ sudo systemctl start anjal-backup && sudo journalctl -u anjal-backup --since "-5min" --no-pager | grep -E "verify ok|done"
+```
+
+then **section 1d**: install libmsquic and add the UDP 443 rule at E2E, so
+HTTP/3 is on from the first start. Then the usual steps above. `schema.sql` adds two columns
+(`messages.transport_encrypted`, `messages.transport_tls`), one tenant
+column (`tenants.unencrypted_folder`) and three tables
+(`mailbox_trusted_senders`, `greylist_entries`, `settings`). At the first
+start each service imports its non-secret settings from `/etc/anjal/*.env`
+once; **from then on the database is the source of truth** (section 13e).
+**Check** the four new start-up lines:
+
+```
+vm$ sudo journalctl -u anjal-server -u anjal-webmail --since "-3min" --no-pager | grep -E "Settings:|Greylisting: on|Greylist:|Outbound worker started"
+```
+
+- `Settings: none stored yet for server; imported N from the environment (secrets excluded)...`, the same for webmail, then `Settings: N applied from the database` for each;
+- `Greylisting: on (... kept in the database and mirrored to /var/lib/anjal/greylist.tsv ...)`, and `Greylist: ... remembered from ...` (the file the first time: the database starts empty);
+- `Outbound worker started (mode=direct, tls.default=Opportunistic, never unencrypted, 13 cipher suites incl. DHE and RSA-GCM, ...)`;
+- `HTTP/3: on (QUIC on UDP port 443; ...)` from the webmail.
+
+and, from any machine, that `HEAD` is answered and static files are
+compressed while pages are not:
+
+```
+pc> curl.exe -sI https://mail.anjal.co.in/sign-in | Select-String "^HTTP"                                  # HTTP/1.1 200 OK (was 405)
+pc> curl.exe -s -D - -o NUL -H "Accept-Encoding: br" "https://mail.anjal.co.in/app.css" | Select-String "content-encoding"   # br
+pc> curl.exe -s -D - -o NUL -H "Accept-Encoding: br" https://mail.anjal.co.in/sign-in | Select-String "content-encoding"    # nothing
+```
+
+and that no secret was stored:
+`psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from settings where key ~ '(POSTGRES|PASSWORD|TOKEN|SECRET|KEK)'"` prints `0`.
+
+What changes for users: mail that arrives unencrypted shows a red open
+lock and a warning with **Trust this sender**; mail is never sent
+unencrypted - a message that cannot be encrypted is held, retried, and
+finally returned to its sender with the reason (DEF-064). Messages
+stored before rc.7 carry no lock either way.
+
 **rc.5 to rc.6**, in addition: the backup timer was enabled by every
 earlier `install.sh` and comes alive at the next boot (DEF-062). Until
 section 11 is done, switch it off:
@@ -1280,6 +1425,36 @@ must print `disabled`.
    all four). **Check:** the server's start-up line reads
    `Greylisting: on (delay 300s, senders remembered 35 days, kept in /var/lib/anjal/greylist.tsv, senders passing SPF not delayed).`
    The state file appears after the first greylisting decision.
+
+## 13e. Settings (from rc.7)
+
+Non-secret settings live in the database table `settings`, one row per
+service (`server`, `webmail`) and name, so a rebuild from the backup brings
+them back. Secrets - `ANJAL_POSTGRES`, `ANJAL_API_TOKEN`, `ANJAL_KEK`, every
+password - never go there: they stay in `/etc/anjal/*.env` and on the custody
+forms, and the API refuses them.
+
+```
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/settings | jq .                  # list
+vm$ curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+        -d '{"value":"600"}' http://127.0.0.1:8025/api/settings/server/ANJAL_GREYLIST_DELAY_SECONDS      # change
+vm$ curl -s -X DELETE -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/settings/server/ANJAL_GREYLIST_DELAY_SECONDS   # remove
+vm$ unset TOKEN; sudo systemctl restart anjal-server                                                    # takes effect
+```
+
+Every change is recorded in the audit trail. A change takes effect when
+that service restarts. **Editing `/etc/anjal/*.env` no longer changes a
+setting that is stored** - the start-up log names every setting whose
+env value differs and says the database value was used. A setting present
+only in the env file is used and logged as such; store it through the API
+to keep it in the backups. If the database cannot be reached at start-up,
+the service runs on its env file and the log says so.
+
+A tenant's folder for unencrypted mail is a tenant setting, not a service
+one: `POST /api/tenants` with `"unencryptedFolder": "Unencrypted"` files such
+mail there (unless the recipient trusts the sender); `""` puts it back in
+INBOX with the red lock (the default).
 
 ---
 

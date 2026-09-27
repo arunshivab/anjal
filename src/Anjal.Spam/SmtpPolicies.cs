@@ -239,6 +239,23 @@ public sealed class GreylistOptions
     public TimeSpan SaveInterval { get; init; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
+    /// Reads the remembered triplets from the database (v1.0.0-rc.7). When set,
+    /// the database is the primary record and <see cref="StateFile"/> is its
+    /// mirror: at start-up the database is read first, and the file only if
+    /// the database cannot be read or holds nothing (owner's decision,
+    /// 27 Sep 2026: "if the database cannot recover, we can use the file").
+    /// </summary>
+    public Func<CancellationToken, Task<IReadOnlyList<Anjal.Store.GreylistRow>>>? LoadFromStore { get; init; }
+
+    /// <summary>
+    /// Writes the remembered triplets to the database whenever the file is
+    /// written. It runs off the mail-handling path, so a slow or unavailable
+    /// database never delays mail; a failure is logged and retried at the
+    /// next save.
+    /// </summary>
+    public Func<IReadOnlyList<Anjal.Store.GreylistRow>, CancellationToken, Task>? SaveToStore { get; init; }
+
+    /// <summary>
     /// Optional check that exempts a sender from greylisting: given the client
     /// IP and the MAIL FROM address, true lets the message through at once.
     /// The server uses "the IP passes SPF for the MAIL FROM domain".
@@ -385,18 +402,22 @@ public sealed class Greylist : ISmtpPolicy
     /// Write the state file now, if one is configured and anything changed.
     /// The server calls this on shutdown so an orderly restart loses nothing.
     /// </summary>
-    public void Flush()
+    public void Flush() => this.Flush(waitForStore: true);
+
+    private bool Persisted => this.options.StateFile is not null || this.options.SaveToStore is not null;
+
+    private void Flush(bool waitForStore)
     {
-        if (this.options.StateFile is null || Interlocked.Exchange(ref this.dirty, 0) == 0)
+        if (!this.Persisted || Interlocked.Exchange(ref this.dirty, 0) == 0)
         {
             return;
         }
-        this.Save();
+        this.Save(waitForStore);
     }
 
     private void SaveIfDue(DateTimeOffset now)
     {
-        if (this.options.StateFile is null)
+        if (!this.Persisted)
         {
             return;
         }
@@ -406,18 +427,18 @@ public sealed class Greylist : ISmtpPolicy
         {
             return;
         }
-        this.Flush();
+        this.Flush(waitForStore: false);
     }
 
     /// <summary>
     /// One line per triplet: key, first seen, last seen (UTC ticks), passed.
     /// Written to a temporary file and moved into place, so a crash mid-write
-    /// leaves the previous file intact.
+    /// leaves the previous file intact. The same rows go to the database.
     /// </summary>
-    private void Save()
+    private void Save(bool waitForStore)
     {
-        string path = this.options.StateFile!;
         var sb = new System.Text.StringBuilder();
+        var rows = new List<Anjal.Store.GreylistRow>(this.entries.Count);
         foreach (KeyValuePair<string, Entry> kv in this.entries)
         {
             lock (kv.Value)
@@ -426,7 +447,33 @@ public sealed class Greylist : ISmtpPolicy
                   .Append(kv.Value.FirstSeen.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('\t')
                   .Append(kv.Value.LastSeen.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append('\t')
                   .Append(kv.Value.Passed ? '1' : '0').Append('\n');
+                rows.Add(new Anjal.Store.GreylistRow { Key = kv.Key, FirstSeen = kv.Value.FirstSeen, LastSeen = kv.Value.LastSeen, Passed = kv.Value.Passed });
             }
+        }
+        if (this.options.SaveToStore is { } saveToStore)
+        {
+            Task stored = Task.Run(async () =>
+            {
+                try
+                {
+                    await saveToStore(rows, CancellationToken.None).ConfigureAwait(false);
+                }
+#pragma warning disable CA1031 // The database copy failing must never affect mail; try again at the next save.
+                catch (Exception ex)
+                {
+                    Interlocked.Exchange(ref this.dirty, 1);
+                    this.options.Log?.Invoke($"Greylist: could not save to the database: {ex.Message}");
+                }
+#pragma warning restore CA1031
+            });
+            if (waitForStore)
+            {
+                stored.Wait(TimeSpan.FromSeconds(15));
+            }
+        }
+        if (this.options.StateFile is not { } path)
+        {
+            return;
         }
         lock (this.saveGate)
         {
@@ -448,6 +495,34 @@ public sealed class Greylist : ISmtpPolicy
 
     private void Load()
     {
+        if (this.options.LoadFromStore is { } loadFromStore)
+        {
+            try
+            {
+                IReadOnlyList<Anjal.Store.GreylistRow> rows = loadFromStore(CancellationToken.None).GetAwaiter().GetResult();
+                if (rows.Count > 0)
+                {
+                    DateTimeOffset at = this.clock();
+                    int keptRows = 0;
+                    foreach (Anjal.Store.GreylistRow r in rows)
+                    {
+                        if (this.Remember(r.Key, r.FirstSeen, r.LastSeen, r.Passed, at))
+                        {
+                            keptRows++;
+                        }
+                    }
+                    this.options.Log?.Invoke($"Greylist: {keptRows} sender(s) remembered from the database" + (rows.Count - keptRows > 0 ? $" ({rows.Count - keptRows} expired, dropped)." : "."));
+                    return;
+                }
+                this.options.Log?.Invoke("Greylist: the database holds no remembered senders; trying the file.");
+            }
+#pragma warning disable CA1031 // An unreadable database falls back to the file (owner's decision, 27 Sep 2026).
+            catch (Exception ex)
+            {
+                this.options.Log?.Invoke($"Greylist: could not read the database ({ex.Message}); trying the file.");
+            }
+#pragma warning restore CA1031
+        }
         string? path = this.options.StateFile;
         if (path is null || !System.IO.File.Exists(path))
         {
@@ -469,19 +544,11 @@ public sealed class Greylist : ISmtpPolicy
                     skipped++;
                     continue;
                 }
-                var e = new Entry
-                {
-                    FirstSeen = new DateTimeOffset(first, TimeSpan.Zero),
-                    LastSeen = new DateTimeOffset(last, TimeSpan.Zero),
-                    Passed = f[3] == "1",
-                };
-                TimeSpan idle = now - e.LastSeen;
-                if (idle > (e.Passed ? this.options.PassedLifetime : this.options.PendingLifetime) || this.entries.Count >= this.options.MaxEntries)
+                if (!this.Remember(f[0], new DateTimeOffset(first, TimeSpan.Zero), new DateTimeOffset(last, TimeSpan.Zero), f[3] == "1", now))
                 {
                     skipped++;
                     continue;
                 }
-                this.entries[f[0]] = e;
                 kept++;
             }
         }
@@ -493,6 +560,18 @@ public sealed class Greylist : ISmtpPolicy
         }
 #pragma warning restore CA1031
         this.options.Log?.Invoke($"Greylist: {kept} sender(s) remembered from {path}" + (skipped > 0 ? $" ({skipped} expired or unreadable, dropped)." : "."));
+    }
+
+    /// <summary>Keep a loaded triplet unless it has expired or the table is full.</summary>
+    private bool Remember(string key, DateTimeOffset firstSeen, DateTimeOffset lastSeen, bool passed, DateTimeOffset now)
+    {
+        TimeSpan idle = now - lastSeen;
+        if (idle > (passed ? this.options.PassedLifetime : this.options.PendingLifetime) || this.entries.Count >= this.options.MaxEntries)
+        {
+            return false;
+        }
+        this.entries[key] = new Entry { FirstSeen = firstSeen, LastSeen = lastSeen, Passed = passed };
+        return true;
     }
 
     /// <summary>

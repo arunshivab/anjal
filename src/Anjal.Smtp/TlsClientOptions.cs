@@ -22,6 +22,17 @@ public sealed class TlsClientOptions
     public bool ValidateCertificate { get; init; } = true;
 
     /// <summary>
+    /// Whether a message may be sent unencrypted when encryption cannot be
+    /// set up (the server does not offer STARTTLS, or the destination's
+    /// policy is Disabled). Default true for library compatibility; the
+    /// Anjal server sets it false unless <c>ANJAL_TLS_ALLOW_PLAINTEXT=true</c>,
+    /// so it never sends mail unencrypted: such a message is held, retried,
+    /// and finally returned to its sender. A relay on the loopback interface
+    /// is exempt - nothing leaves the machine.
+    /// </summary>
+    public bool AllowPlaintext { get; init; } = true;
+
+    /// <summary>
     /// Revocation checking when a certificate is validated (Required mode and
     /// relays). Default <see cref="System.Security.Cryptography.X509Certificates.X509RevocationMode.Online"/>.
     /// </summary>

@@ -39,6 +39,7 @@ public sealed partial class InMemoryMessageStore
                 existing.DisplayName = tenant.DisplayName;
                 existing.Enabled = tenant.Enabled;
                 existing.SpamThreshold = tenant.SpamThreshold;
+                existing.UnencryptedFolder = string.IsNullOrWhiteSpace(tenant.UnencryptedFolder) ? null : tenant.UnencryptedFolder.Trim();
                 return Task.FromResult(Clone(existing));
             }
             var row = new TenantRow
@@ -48,6 +49,7 @@ public sealed partial class InMemoryMessageStore
                 DisplayName = tenant.DisplayName,
                 Enabled = tenant.Enabled,
                 SpamThreshold = tenant.SpamThreshold,
+                UnencryptedFolder = string.IsNullOrWhiteSpace(tenant.UnencryptedFolder) ? null : tenant.UnencryptedFolder.Trim(),
                 CreatedAt = System.DateTimeOffset.UtcNow,
             };
             this.tenants.Add(row);
@@ -711,6 +713,7 @@ public sealed partial class InMemoryMessageStore
         DisplayName = t.DisplayName,
         Enabled = t.Enabled,
         SpamThreshold = t.SpamThreshold,
+        UnencryptedFolder = t.UnencryptedFolder,
         CreatedAt = t.CreatedAt,
     };
 
@@ -765,6 +768,8 @@ public sealed partial class InMemoryMessageStore
         Answered = m.Answered,
         SpamScore = m.SpamScore,
         SpamChecked = m.SpamChecked,
+        TransportEncrypted = m.TransportEncrypted,
+        TransportTls = m.TransportTls,
         ReceivedAt = m.ReceivedAt,
         CategoryId = m.CategoryId,
         HasAttachments = m.HasAttachments,

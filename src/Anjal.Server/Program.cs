@@ -79,6 +79,13 @@ public static class Program
             return 0;
         }
 
+        // Settings live in the database (v1.0.0-rc.7): apply them before any
+        // setting is read, so everything below sees the stored values.
+        if (System.Environment.GetEnvironmentVariable("ANJAL_POSTGRES") is { Length: > 0 } settingsDb)
+        {
+            await Anjal.Store.StoredSettings.ApplyAsync(new Anjal.Store.PostgresMessageStore(settingsDb), Anjal.Store.SettingRow.ServerScope, Log).ConfigureAwait(false);
+        }
+
         string bind = System.Environment.GetEnvironmentVariable("ANJAL_BIND") ?? "127.0.0.1";
         string portStr = System.Environment.GetEnvironmentVariable("ANJAL_PORT") ?? "2525";
         string hostname = System.Environment.GetEnvironmentVariable("ANJAL_HOSTNAME") ?? "anjal.localhost";
@@ -142,7 +149,7 @@ public static class Program
         // Anti-spam (v0.11.0): score unauthenticated mail before fan-out.
         // Verdict headers ride along; the mailbox sink files Junk.
         Anjal.Spam.SpamFilterSink sink = BuildSpamFilter(fanOut, Log);
-        Anjal.Spam.CompositeSmtpPolicy mtaPolicy = BuildMtaPolicy(mailboxStore, Log, out Anjal.Spam.Greylist? greylist);
+        Anjal.Spam.CompositeSmtpPolicy mtaPolicy = BuildMtaPolicy(mailboxStore, store, Log, out Anjal.Spam.Greylist? greylist);
         // Remembered senders reach the state file on every exit, including the
         // SIGTERM that "systemctl stop" sends (decision 2B).
         System.AppDomain.CurrentDomain.ProcessExit += (_, _) => greylist?.Flush();
@@ -364,7 +371,9 @@ public static class Program
             string dkimNote = dkimResolver is not null
                 ? (requireDkim ? "DKIM=required" : "DKIM=opportunistic")
                 : "DKIM=disabled";
-            Log($"Outbound worker started (mode={outboundMode}, tls.default={tlsClient.DefaultMode}, {dkimNote}).");
+            string plain = tlsClient.AllowPlaintext ? "plaintext fallback ALLOWED" : "never unencrypted";
+            string ciphers = System.OperatingSystem.IsLinux() ? $"{Anjal.Smtp.TlsCipherSet.OutboundSuites.Count} cipher suites incl. DHE and RSA-GCM" : "platform default ciphers";
+            Log($"Outbound worker started (mode={outboundMode}, tls.default={tlsClient.DefaultMode}, {plain}, {ciphers}, {dkimNote}).");
         }
         else
         {
@@ -582,6 +591,11 @@ public static class Program
         {
             DefaultMode = defaultMode,
             ValidateCertificate = validate,
+            // Never send mail unencrypted (owner's decision, 27 Sep 2026):
+            // a message that cannot be encrypted is held, retried and finally
+            // returned to its sender. ANJAL_TLS_ALLOW_PLAINTEXT=true restores
+            // plaintext fallback (for test rigs only).
+            AllowPlaintext = string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_TLS_ALLOW_PLAINTEXT"), "true", System.StringComparison.OrdinalIgnoreCase),
             Revocation = revocation,
             PolicyLookup = async (domain, ct) =>
             {
@@ -809,7 +823,7 @@ public static class Program
     }
 
     /// <summary>MTA-port policy: rate limits plus greylisting.</summary>
-    private static Anjal.Spam.CompositeSmtpPolicy BuildMtaPolicy(Anjal.Store.IMailboxStore mailboxStore, System.Action<string> log, out Anjal.Spam.Greylist? greylistPolicy)
+    private static Anjal.Spam.CompositeSmtpPolicy BuildMtaPolicy(Anjal.Store.IMailboxStore mailboxStore, Anjal.Store.IMessageStore store, System.Action<string> log, out Anjal.Spam.Greylist? greylistPolicy)
     {
         greylistPolicy = null;
         var limits = new Anjal.Spam.RateLimitOptions
@@ -832,12 +846,14 @@ public static class Program
                 Delay = System.TimeSpan.FromSeconds(delay),
                 PassedLifetime = System.TimeSpan.FromDays(rememberDays),
                 StateFile = stateFile,
+                LoadFromStore = store.ListGreylistAsync,
+                SaveToStore = store.ReplaceGreylistAsync,
                 TrustedSender = skipSpfPass ? SpfPassExemption(log) : null,
                 Log = log,
             });
             policies.Add(greylistPolicy);
-            log($"Greylisting: on (delay {delay}s, senders remembered {rememberDays} days, " +
-                (stateFile is null ? "in memory only" : $"kept in {stateFile}") +
+            log($"Greylisting: on (delay {delay}s, senders remembered {rememberDays} days, kept in the database" +
+                (stateFile is null ? string.Empty : $" and mirrored to {stateFile}") +
                 (skipSpfPass ? ", senders passing SPF not delayed)." : ")."));
         }
         else

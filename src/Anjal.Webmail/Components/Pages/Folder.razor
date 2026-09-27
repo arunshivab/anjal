@@ -161,6 +161,10 @@ else
                         </td>
                         <td class="c-subject">
                             <span class="subj">
+                                @if (MailboxService.ShowsUnencryptedWarning(m, trusted))
+                                {
+                                    <span class="unenc" data-unencrypted title="Arrived unencrypted: anyone on the network path could have read it" aria-label="Arrived unencrypted"><LipiIcon Name="unlock" Size="13" /></span>
+                                }
                                 <a href="@OpenLink(m)" data-open>@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a>
                             </span>
                         </td>
@@ -229,6 +233,7 @@ else
     private int pageIndex;
     private int threshold = TenantRow.DefaultSpamThreshold;
     private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
+    private IReadOnlySet<string> trusted = new HashSet<string>();
 
     private CategoryView? Lookup(Guid id)
     {
@@ -332,5 +337,6 @@ else
         (items, total) = await Mail.ListMessagesAsync(mailboxId.Value, folder.Id, pageIndex, MailboxService.PageSize);
         unread = await Mail.UnreadInFolderAsync(mailboxId.Value, folder.Id);
         categories = await Mail.ListCategoriesAsync(mailboxId.Value);
+        trusted = await Mail.TrustedSendersAsync(mailboxId.Value);
     }
 }

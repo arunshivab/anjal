@@ -7,6 +7,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 ## Members
 
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
+- **AddTrustedSenderAsync** *(method)* - _(no description)_
 - **AppendAuditAsync** *(method)* - _(no description)_
 - **CompleteWebhookJobAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
@@ -25,6 +26,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **DeleteOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **DeleteRoutingRuleAsync** *(method)* - _(no description)_
 - **DeleteSenderRuleAsync** *(method)* - _(no description)_
+- **DeleteSettingAsync** *(method)* - _(no description)_
 - **DeleteSmtpUserAsync** *(method)* - _(no description)_
 - **DeleteTenantAsync** *(method)* - _(no description)_
 - **DeleteTenantDomainAsync** *(method)* - _(no description)_
@@ -47,6 +49,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **GetTenantAsync** *(method)* - _(no description)_
 - **GetTenantByIdAsync** *(method)* - _(no description)_
 - **GetTenantDomainAsync** *(method)* - _(no description)_
+- **ImportSettingsAsync** *(method)* - _(no description)_
 - **IsLocalDomainAsync** *(method)* - _(no description)_
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
 - **LeaseWebhookJobsAsync** *(method)* - _(no description)_
@@ -55,6 +58,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **ListCategoryRulesAsync** *(method)* - _(no description)_
 - **ListDkimKeysAsync** *(method)* - _(no description)_
 - **ListFoldersAsync** *(method)* - _(no description)_
+- **ListGreylistAsync** *(method)* - _(no description)_
 - **ListLocalDomainsAsync** *(method)* - _(no description)_
 - **ListMailboxSenderRulesAsync** *(method)* - _(no description)_
 - **ListMailboxesAsync** *(method)* - _(no description)_
@@ -62,12 +66,16 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
 - **ListSenderRulesAsync** *(method)* - _(no description)_
+- **ListSettingsAsync** *(method)* - _(no description)_
 - **ListSmtpUsersAsync** *(method)* - _(no description)_
 - **ListTenantDomainsAsync** *(method)* - _(no description)_
 - **ListTenantsAsync** *(method)* - _(no description)_
+- **ListTrustedSendersAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
 - **NoteRecoveredFromJunk** *(method)* - Record that a message was moved out of Junk by the reader.
+- **RemoveTrustedSenderAsync** *(method)* - _(no description)_
+- **ReplaceGreylistAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveMessageAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
@@ -84,6 +92,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **UpsertOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **UpsertRoutingRuleAsync** *(method)* - _(no description)_
 - **UpsertSenderRuleAsync** *(method)* - _(no description)_
+- **UpsertSettingAsync** *(method)* - _(no description)_
 - **UpsertSmtpUserAsync** *(method)* - _(no description)_
 - **UpsertTenantAsync** *(method)* - _(no description)_
 - **UpsertTenantDomainAsync** *(method)* - _(no description)_

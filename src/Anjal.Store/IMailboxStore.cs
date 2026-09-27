@@ -248,6 +248,26 @@ public interface IMailboxStore
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SenderRuleRow>> ListMailboxSenderRulesAsync(System.Guid mailboxId, System.Threading.CancellationToken ct = default);
 
+    /// <summary>Addresses the mailbox trusts although their mail arrives unencrypted (v1.0.0-rc.7).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Lower-case addresses.</returns>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string>> ListTrustedSendersAsync(System.Guid mailboxId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Trust an address although its mail arrives unencrypted; adding it twice is harmless.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="address">The sender's address.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    System.Threading.Tasks.Task AddTrustedSenderAsync(System.Guid mailboxId, string address, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Stop trusting an address.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="address">The sender's address.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True if it was trusted.</returns>
+    System.Threading.Tasks.Task<bool> RemoveTrustedSenderAsync(System.Guid mailboxId, string address, System.Threading.CancellationToken ct = default);
+
     /// <summary>
     /// Delete a personal sender rule. Matches on both the mailbox and the rule
     /// id, so a rule can only ever be removed by the mailbox that owns it.

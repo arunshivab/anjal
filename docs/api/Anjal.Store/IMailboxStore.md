@@ -7,6 +7,7 @@ Persistence interface for multi-tenant mailbox storage: tenants, their domains, 
 ## Members
 
 - **AddMailboxUsageAsync** *(method)* - Adjust by a signed delta and return the new total. Returns if no such mailbox.
+- **AddTrustedSenderAsync** *(method)* - Trust an address although its mail arrives unencrypted; adding it twice is harmless.
 - **CountMessagesAsync** *(method)* - Count messages in a folder (or the whole mailbox when is null).
 - **CountSearchAsync** *(method)* - Count of matches.
 - **CountUnreadAsync** *(method)* - Count unread (not seen) messages in a folder, or the whole mailbox when is null.
@@ -37,7 +38,9 @@ Persistence interface for multi-tenant mailbox storage: tenants, their domains, 
 - **ListSenderRulesAsync** *(method)* - List a tenant's sender rules ordered by pattern.
 - **ListTenantDomainsAsync** *(method)* - List domains, optionally restricted to one tenant. Ordered by domain.
 - **ListTenantsAsync** *(method)* - List all tenants ordered by slug.
+- **ListTrustedSendersAsync** *(method)* - Addresses the mailbox trusts although their mail arrives unencrypted (v1.0.0-rc.7).
 - **MoveMessageAsync** *(method)* - Move a message to another folder of the same mailbox, recording the new Maildir file path. Returns the updated row, or if no such message.
+- **RemoveTrustedSenderAsync** *(method)* - Stop trusting an address.
 - **SaveMessageAsync** *(method)* - Record a delivered message. Returns the saved row with and populated.
 - **SearchMessagesAsync** *(method)* - Case-insensitive substring search over subject, From, To and envelope sender, newest first. null searches every folder.
 - **SetMessageCategoryAsync** *(method)* - Put a category on a message, or clear it with null.
