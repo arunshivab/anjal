@@ -325,6 +325,14 @@ tools (F12) -> Network -> right-click a column heading -> **Protocol**:
 requests show `h3`. Where UDP is blocked they show `h2`, and nothing else
 changes.
 
+Browsers reach the webmail **by name over IPv4** (`mail` has an A record
+and no AAAA), which is the path HTTP/3 was proven on in CI (27 September
+2026). Two things to know: the webmail listens on **IPv4 only**, so do
+not add an AAAA (IPv6) record for `mail` - IPv6 visitors would not reach
+HTTP/3 or anything else; and a client that connects by IP address instead
+of by name is refused by Linux's QUIC, as TLS requires a name - browsers
+always use the name.
+
 Without libmsquic, or with `ANJAL_WEBMAIL_HTTP3=false`, the webmail logs
 `HTTP/3: off - ...` and serves HTTP/1.1 and HTTP/2 only; it never fails to
 start over HTTP/3.

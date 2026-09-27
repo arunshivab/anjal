@@ -249,8 +249,11 @@ jobs:
           curl -s -o /dev/null -X DELETE -H "Authorization: Bearer $token" http://127.0.0.1:8025/api/settings/webmail/ANJAL_ACME_DOMAINS
           sudo sed -i 's|^ANJAL_ACME_DOMAINS=.*|ANJAL_ACME_DOMAINS=|' /etc/anjal/webmail.env
           sudo install -d -o root -g anjal -m 750 /etc/anjal/ci-tls
-          sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj "/CN=localhost" \
-            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" -keyout /etc/anjal/ci-tls/key.pem -out /etc/anjal/ci-tls/cert.pem 2>/dev/null
+          # Browsers reach the webmail by NAME over IPv4 (mail.anjal.co.in has an A
+          # record only), so the check does too: a test name pointing at 127.0.0.1.
+          echo "127.0.0.1 anjal-h3.test" | sudo tee -a /etc/hosts >/dev/null
+          sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj "/CN=anjal-h3.test" \
+            -addext "subjectAltName=DNS:anjal-h3.test,DNS:localhost,IP:127.0.0.1" -keyout /etc/anjal/ci-tls/key.pem -out /etc/anjal/ci-tls/cert.pem 2>/dev/null
           sudo chgrp anjal /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
           sudo chmod 640 /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
           printf 'ANJAL_TLS_CERT_PATH=/etc/anjal/ci-tls/cert.pem\nANJAL_TLS_KEY_PATH=/etc/anjal/ci-tls/key.pem\n' | sudo tee -a /etc/anjal/webmail.env >/dev/null
@@ -309,10 +312,12 @@ jobs:
           await Raw("1 raw QUIC, name localhost, 127.0.0.1", IPAddress.Loopback, "localhost");
           await Raw("2 raw QUIC, name 127.0.0.1, 127.0.0.1", IPAddress.Loopback, "127.0.0.1");
           await Raw("3 raw QUIC, name localhost, ::1      ", IPAddress.IPv6Loopback, "localhost");
-          bool byName = await Http3("4 HTTP/3 https://localhost/sign-in ", "https://localhost/sign-in");
-          bool byIp = await Http3("5 HTTP/3 https://127.0.0.1/sign-in ", "https://127.0.0.1/sign-in");
-          Console.WriteLine($"verdict: HTTP/3 by name {(byName ? "WORKS" : "FAILS")}, by IP address {(byIp ? "WORKS" : "FAILS")}");
-          return byName ? 0 : 1;
+          await Http3("4 HTTP/3 https://localhost/sign-in (tries IPv6 first)", "https://localhost/sign-in");
+          await Http3("5 HTTP/3 https://127.0.0.1/sign-in (IP as TLS name)  ", "https://127.0.0.1/sign-in");
+          // The decisive check: a name over IPv4, exactly as browsers reach mail.anjal.co.in.
+          bool asBrowsers = await Http3("6 HTTP/3 https://anjal-h3.test/sign-in (name, IPv4)", "https://anjal-h3.test/sign-in");
+          Console.WriteLine($"verdict: HTTP/3 as browsers use it (name over IPv4) {(asBrowsers ? "WORKS" : "FAILS")}");
+          return asBrowsers ? 0 : 1;
           EOF
           set +e
           dotnet run "$RUNNER_TEMP/h3.cs" 2>&1 | grep -v "warning CA1416"
@@ -320,11 +325,14 @@ jobs:
           set -e
           echo "== webmail log since the restart"
           sudo journalctl -u anjal-webmail --since "-2min" --no-pager | tail -30
-          echo "== the in-process HTTP/3 test, outside the unit (messages only)"
+          echo "== the in-process HTTP/3 test, outside the unit - must pass too"
           set +e
-          dotnet test tests/Anjal.Webmail.Tests -c Release --filter "FullyQualifiedName~Rc7Http3" --logger "console;verbosity=normal" 2>&1 | grep -E "Passed|Failed|Error Message|Exception|QUIC|TLS|alert|handshake" | head -30
+          dotnet test tests/Anjal.Webmail.Tests -c Release --filter "FullyQualifiedName~Rc7Http3" --logger "console;verbosity=normal" > "$RUNNER_TEMP/h3test.txt" 2>&1
+          trc=$?
           set -e
-          exit $rc
+          grep -E "Passed|Failed|Error Message|Exception|QUIC|TLS|HTTP/3:" "$RUNNER_TEMP/h3test.txt" | head -30
+          test "$rc" -eq 0
+          test "$trc" -eq 0
 
       - name: Service logs on failure
         if: failure()
