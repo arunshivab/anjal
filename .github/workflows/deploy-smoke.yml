@@ -236,7 +236,7 @@ jobs:
           api "http://127.0.0.1:8025/api/evidence/$id/raw" -o /tmp/raw.eml
           cmp /tmp/raw.eml /tmp/sent.eml
           test "$(q "select count(*) from audit_events where action='READ evidence raw' and subject='$id'")" -ge 1
-          api -X POST http://127.0.0.1:8025/api/evidence/verify | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["intact"], d; print("chain intact")'
+          api -X POST -d '' http://127.0.0.1:8025/api/evidence/verify | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["intact"], d; print("chain intact")'
           echo "evidence $id: kept exactly as sent, read-only, hash verified, audited"
 
       - name: A backup under its real unit - refused until configured, verified, never leaves the dump
@@ -265,7 +265,9 @@ jobs:
           log=$(blog); grep -q "dump uploaded and verified" <<< "$log"; grep -q "verify ok" <<< "$log"
           # rc.8: the evidence reached the encrypted backup, and was verified with it.
           grep -q "verify evidence" <<< "$log"
-          sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf -R b2crypt:evidence/ | grep -q '\.eml$'
+          # Captured, then searched: "cmd | grep -q" can fail under pipefail when grep stops early.
+          ev=$(sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf -R b2crypt:evidence/)
+          grep -q '\.eml$' <<< "$ev"
           test -z "$(sudo ls -A /var/lib/anjal/backup)"
           # rc.7: the settings snapshot is backed up with every secret removed.
           snap=$(sudo -u anjal rclone --config /etc/anjal/rclone.conf cat b2crypt:settings/server.env)

@@ -1532,7 +1532,7 @@ daily manifest, chained to the one before, lists every copy added and purged.
 
 ```
 vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
-vm$ curl -s -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/verify | jq .          # whole chain
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/verify | jq .          # whole chain
 vm$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/<id> | jq .                     # details, attempts
 vm$ curl -s -H "Authorization: Bearer $TOKEN" -o original.eml http://127.0.0.1:8025/api/evidence/<id>/raw        # the original
 vm$ unset TOKEN
@@ -1557,13 +1557,15 @@ is over 80% full.
 ### Mail stored before rc.8 (once, after upgrading)
 
 Both are dry runs unless `?apply=true`. Neither changes a message file.
+Every POST here carries `-d ''`: without a body, curl sends no Content-Length
+and the API refuses the request with 411 (DEF-053).
 
 ```
-vm$ curl -s -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/maintenance/transport-labels | jq .
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/maintenance/transport-labels | jq .
       (review: each message's recorded and recovered encryption)
-vm$ curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/maintenance/transport-labels?apply=true" | jq '.changes'
-vm$ curl -s -X POST -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/maintenance/reconstruct-evidence | jq .
-vm$ curl -s -X POST -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/maintenance/reconstruct-evidence?apply=true" | jq .
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/maintenance/transport-labels?apply=true" | jq '.changes'
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/maintenance/reconstruct-evidence | jq .
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/maintenance/reconstruct-evidence?apply=true" | jq .
 vm$ curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/maintenance/trusted-senders | jq .
 vm$ curl -s -X DELETE -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8025/api/maintenance/trusted-senders?mailbox=arun@anjal.co.in&sender=noreply@spamhaus.org"
 ```
