@@ -254,8 +254,6 @@ jobs:
           sudo chgrp anjal /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
           sudo chmod 640 /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
           printf 'ANJAL_TLS_CERT_PATH=/etc/anjal/ci-tls/cert.pem\nANJAL_TLS_KEY_PATH=/etc/anjal/ci-tls/key.pem\n' | sudo tee -a /etc/anjal/webmail.env >/dev/null
-          # Diagnostic for this step only: Kestrel's HTTP/3 and QUIC logging at Debug.
-          printf 'Logging__LogLevel__Microsoft.AspNetCore.Server.Kestrel=Debug\nLogging__LogLevel__Microsoft.AspNetCore.Server.Kestrel.Transport.Quic=Debug\n' | sudo tee -a /etc/anjal/webmail.env >/dev/null
           sudo systemctl restart anjal-webmail
           sleep 8
           test "$(systemctl is-active anjal-webmail)" = active
@@ -264,61 +262,67 @@ jobs:
           grep -q "HTTP/3: on" "$RUNNER_TEMP/h3.log"
           sudo ss -ulnp | tee "$RUNNER_TEMP/udp.txt"
           grep -E ':443\b' "$RUNNER_TEMP/udp.txt" | grep -q Anjal.Webmail
-          # A raw QUIC connection, then a strict HTTP/3 request - each on a fresh
-          # client, so a failure is reported instead of remembered as "broken".
+          # Which connections work: raw QUIC and HTTP/3, presenting a name or an
+          # IP address. Each on a fresh client, every error printed in full.
           cat > "$RUNNER_TEMP/h3.cs" <<'EOF'
           using System.Net;
           using System.Net.Quic;
           using System.Net.Security;
           Console.WriteLine($"client: QuicConnection.IsSupported = {QuicConnection.IsSupported}");
-          int result = 1;
-          try
+          static void Chain(string label, Exception ex)
           {
-              using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-              await using QuicConnection quic = await QuicConnection.ConnectAsync(new QuicClientConnectionOptions
+              Console.WriteLine($"{label}: FAILED");
+              for (Exception? e = ex; e is not null; e = e.InnerException) { Console.WriteLine($"    {e.GetType().FullName}: {e.Message}"); }
+          }
+          async Task Raw(string label, IPAddress address, string name)
+          {
+              try
               {
-                  RemoteEndPoint = new IPEndPoint(IPAddress.Loopback, 443),
-                  DefaultStreamErrorCode = 0x100,
-                  DefaultCloseErrorCode = 0x100,
-                  ClientAuthenticationOptions = new SslClientAuthenticationOptions
+                  using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                  await using QuicConnection quic = await QuicConnection.ConnectAsync(new QuicClientConnectionOptions
                   {
-                      ApplicationProtocols = new List<SslApplicationProtocol> { new SslApplicationProtocol("h3") },
-                      TargetHost = "localhost",
-                      RemoteCertificateValidationCallback = (a, b, c, d) => true,
-                  },
-              }, cts.Token);
-              Console.WriteLine($"raw QUIC: connected, ALPN {quic.NegotiatedApplicationProtocol}, cipher {quic.NegotiatedCipherSuite}");
+                      RemoteEndPoint = new IPEndPoint(address, 443),
+                      DefaultStreamErrorCode = 0x100,
+                      DefaultCloseErrorCode = 0x100,
+                      ClientAuthenticationOptions = new SslClientAuthenticationOptions
+                      {
+                          ApplicationProtocols = new List<SslApplicationProtocol> { new SslApplicationProtocol("h3") },
+                          TargetHost = name,
+                          RemoteCertificateValidationCallback = (a, b, c, d) => true,
+                      },
+                  }, cts.Token);
+                  Console.WriteLine($"{label}: connected, ALPN {quic.NegotiatedApplicationProtocol}");
+              }
+              catch (Exception ex) { Chain(label, ex); }
           }
-          catch (Exception ex)
+          async Task<bool> Http3(string label, string url)
           {
-              Console.WriteLine("raw QUIC: failed - full chain:");
-              for (Exception? e = ex; e is not null; e = e.InnerException) { Console.WriteLine($"  {e.GetType().FullName}: {e.Message}"); }
+              try
+              {
+                  using var client = new HttpClient(new SocketsHttpHandler { SslOptions = { RemoteCertificateValidationCallback = (a, b, c, d) => true } });
+                  var r = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, url) { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
+                  Console.WriteLine($"{label}: {(int)r.StatusCode}, version {r.Version}");
+                  return r.StatusCode == HttpStatusCode.OK && r.Version == HttpVersion.Version30;
+              }
+              catch (Exception ex) { Chain(label, ex); return false; }
           }
-          try
-          {
-              using var client = new HttpClient(new SocketsHttpHandler { SslOptions = { RemoteCertificateValidationCallback = (a, b, c, d) => true } });
-              var h3 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
-              Console.WriteLine($"HTTP/3: {(int)h3.StatusCode}, version {h3.Version}");
-              result = h3.StatusCode == HttpStatusCode.OK && h3.Version == HttpVersion.Version30 ? 0 : 1;
-          }
-          catch (Exception ex)
-          {
-              Console.WriteLine("HTTP/3 request: failed - full chain:");
-              for (Exception? e = ex; e is not null; e = e.InnerException) { Console.WriteLine($"  {e.GetType().FullName}: {e.Message}"); }
-          }
-          return result;
+          await Raw("1 raw QUIC, name localhost, 127.0.0.1", IPAddress.Loopback, "localhost");
+          await Raw("2 raw QUIC, name 127.0.0.1, 127.0.0.1", IPAddress.Loopback, "127.0.0.1");
+          await Raw("3 raw QUIC, name localhost, ::1      ", IPAddress.IPv6Loopback, "localhost");
+          bool byName = await Http3("4 HTTP/3 https://localhost/sign-in ", "https://localhost/sign-in");
+          bool byIp = await Http3("5 HTTP/3 https://127.0.0.1/sign-in ", "https://127.0.0.1/sign-in");
+          Console.WriteLine($"verdict: HTTP/3 by name {(byName ? "WORKS" : "FAILS")}, by IP address {(byIp ? "WORKS" : "FAILS")}");
+          return byName ? 0 : 1;
           EOF
           set +e
-          dotnet run "$RUNNER_TEMP/h3.cs"
-          rc=$?
+          dotnet run "$RUNNER_TEMP/h3.cs" 2>&1 | grep -v "warning CA1416"
+          rc=${PIPESTATUS[0]}
           set -e
-          echo "== webmail log since the restart (Kestrel HTTP/3 and QUIC at Debug)"
-          sudo journalctl -u anjal-webmail --since "-2min" --no-pager | tail -60
-          # The same check in-process, outside the systemd unit: tells a sandbox
-          # restriction from a problem in the code or the certificate.
-          echo "== the HTTP/3 test in-process, outside the unit"
+          echo "== webmail log since the restart"
+          sudo journalctl -u anjal-webmail --since "-2min" --no-pager | tail -30
+          echo "== the in-process HTTP/3 test, outside the unit (messages only)"
           set +e
-          dotnet test tests/Anjal.Webmail.Tests -c Release --filter "FullyQualifiedName~Rc7Http3" --logger "console;verbosity=normal" 2>&1 | tail -25
+          dotnet test tests/Anjal.Webmail.Tests -c Release --filter "FullyQualifiedName~Rc7Http3" --logger "console;verbosity=normal" 2>&1 | grep -E "Passed|Failed|Error Message|Exception|QUIC|TLS|alert|handshake" | head -30
           set -e
           exit $rc
 
