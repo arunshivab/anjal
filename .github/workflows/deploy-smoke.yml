@@ -254,6 +254,8 @@ jobs:
           sudo chgrp anjal /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
           sudo chmod 640 /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
           printf 'ANJAL_TLS_CERT_PATH=/etc/anjal/ci-tls/cert.pem\nANJAL_TLS_KEY_PATH=/etc/anjal/ci-tls/key.pem\n' | sudo tee -a /etc/anjal/webmail.env >/dev/null
+          # Diagnostic for this step only: Kestrel's HTTP/3 and QUIC logging at Debug.
+          printf 'Logging__LogLevel__Microsoft.AspNetCore.Server.Kestrel=Debug\nLogging__LogLevel__Microsoft.AspNetCore.Server.Kestrel.Transport.Quic=Debug\n' | sudo tee -a /etc/anjal/webmail.env >/dev/null
           sudo systemctl restart anjal-webmail
           sleep 8
           test "$(systemctl is-active anjal-webmail)" = active
@@ -262,43 +264,62 @@ jobs:
           grep -q "HTTP/3: on" "$RUNNER_TEMP/h3.log"
           sudo ss -ulnp | tee "$RUNNER_TEMP/udp.txt"
           grep -E ':443\b' "$RUNNER_TEMP/udp.txt" | grep -q Anjal.Webmail
-          # A real HTTP/3 request, and the Alt-Svc header that tells browsers.
+          # A raw QUIC connection, then a strict HTTP/3 request - each on a fresh
+          # client, so a failure is reported instead of remembered as "broken".
           cat > "$RUNNER_TEMP/h3.cs" <<'EOF'
           using System.Net;
-          // Diagnostic as well as a check: says whether the CLIENT can use QUIC,
-          // prints the whole error chain, and shows what a fall-back request negotiates.
-          Console.WriteLine($"client: QuicConnection.IsSupported = {System.Net.Quic.QuicConnection.IsSupported}");
-          var handler = new SocketsHttpHandler { SslOptions = { RemoteCertificateValidationCallback = (a, b, c, d) => true } };
-          using var client = new HttpClient(handler);
-          var h2 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version20, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
-          string alt = h2.Headers.TryGetValues("Alt-Svc", out var v) ? string.Join(",", v) : "(none)";
-          Console.WriteLine($"HTTP/2: {(int)h2.StatusCode}, Alt-Svc: {alt}");
-          if (!alt.Contains("h3")) { Console.WriteLine("::error::HTTP/3 is not advertised"); return 1; }
+          using System.Net.Quic;
+          using System.Net.Security;
+          Console.WriteLine($"client: QuicConnection.IsSupported = {QuicConnection.IsSupported}");
+          int result = 1;
           try
           {
-              var lower = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionOrLower });
-              Console.WriteLine($"HTTP/3-or-lower request negotiated version {lower.Version}");
-          }
-          catch (Exception ex) { Console.WriteLine("HTTP/3-or-lower request failed: " + ex); }
-          try
-          {
-              var h3 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
-              Console.WriteLine($"HTTP/3: {(int)h3.StatusCode}, version {h3.Version}");
-              return h3.StatusCode == HttpStatusCode.OK && h3.Version == HttpVersion.Version30 ? 0 : 1;
+              using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+              await using QuicConnection quic = await QuicConnection.ConnectAsync(new QuicClientConnectionOptions
+              {
+                  RemoteEndPoint = new IPEndPoint(IPAddress.Loopback, 443),
+                  DefaultStreamErrorCode = 0x100,
+                  DefaultCloseErrorCode = 0x100,
+                  ClientAuthenticationOptions = new SslClientAuthenticationOptions
+                  {
+                      ApplicationProtocols = new List<SslApplicationProtocol> { new SslApplicationProtocol("h3") },
+                      TargetHost = "localhost",
+                      RemoteCertificateValidationCallback = (a, b, c, d) => true,
+                  },
+              }, cts.Token);
+              Console.WriteLine($"raw QUIC: connected, ALPN {quic.NegotiatedApplicationProtocol}, cipher {quic.NegotiatedCipherSuite}");
           }
           catch (Exception ex)
           {
-              Console.WriteLine("HTTP/3 request failed - full chain:");
+              Console.WriteLine("raw QUIC: failed - full chain:");
               for (Exception? e = ex; e is not null; e = e.InnerException) { Console.WriteLine($"  {e.GetType().FullName}: {e.Message}"); }
-              return 1;
           }
+          try
+          {
+              using var client = new HttpClient(new SocketsHttpHandler { SslOptions = { RemoteCertificateValidationCallback = (a, b, c, d) => true } });
+              var h3 = await client.SendAsync(new HttpRequestMessage(HttpMethod.Get, "https://127.0.0.1/sign-in") { Version = HttpVersion.Version30, VersionPolicy = HttpVersionPolicy.RequestVersionExact });
+              Console.WriteLine($"HTTP/3: {(int)h3.StatusCode}, version {h3.Version}");
+              result = h3.StatusCode == HttpStatusCode.OK && h3.Version == HttpVersion.Version30 ? 0 : 1;
+          }
+          catch (Exception ex)
+          {
+              Console.WriteLine("HTTP/3 request: failed - full chain:");
+              for (Exception? e = ex; e is not null; e = e.InnerException) { Console.WriteLine($"  {e.GetType().FullName}: {e.Message}"); }
+          }
+          return result;
           EOF
           set +e
           dotnet run "$RUNNER_TEMP/h3.cs"
           rc=$?
           set -e
-          echo "== webmail log since the restart"
-          sudo journalctl -u anjal-webmail --since "-3min" --no-pager | tail -40
+          echo "== webmail log since the restart (Kestrel HTTP/3 and QUIC at Debug)"
+          sudo journalctl -u anjal-webmail --since "-2min" --no-pager | tail -60
+          # The same check in-process, outside the systemd unit: tells a sandbox
+          # restriction from a problem in the code or the certificate.
+          echo "== the HTTP/3 test in-process, outside the unit"
+          set +e
+          dotnet test tests/Anjal.Webmail.Tests -c Release --filter "FullyQualifiedName~Rc7Http3" --logger "console;verbosity=normal" 2>&1 | tail -25
+          set -e
           exit $rc
 
       - name: Service logs on failure
