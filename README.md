@@ -10,6 +10,15 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.9.1** (29 September 2026) - hotfix: SPF counted DNS lookups wrongly
+(DEF-081). Every include was counted twice, so a sender publishing five
+includes - the structure Microsoft 365 uses - reached 11 and got a PermError
+instead of Pass. Consequences in rc.9: such senders were greylisted and could
+loop (each retry comes from another address); a sender without DKIM whose
+domain has DMARC p=reject would have been refused. Counting now follows
+RFC 7208 4.6.4; Authentication-Results now gives the reason for a PermError or
+TempError.
+
 **v1.0.0-rc.9** (28 September 2026) - standards fixes from the compliance
 audit (ANJAL-TST-12), and the unread count.
 - **Delivery:** a domain with no MX record is delivered to its own address

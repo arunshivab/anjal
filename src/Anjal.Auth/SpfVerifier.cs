@@ -170,7 +170,11 @@ public sealed class SpfVerifier
         SpfState state,
         System.Threading.CancellationToken ct)
     {
-        state.IncrementLookups();
+        // v1.0.0-rc.9.1 (DEF-081): fetching a domain's own record is not counted.
+        // RFC 7208 4.6.4 counts the terms that cause a lookup - include, a, mx,
+        // ptr, exists, redirect - and each is counted where it is evaluated.
+        // Counting here as well counted every include twice and the first record
+        // once: a 5-include record (Microsoft 365) reached 11 and was a PermError.
         System.Collections.Generic.IReadOnlyList<string> records =
             await this.dns.LookupTxtAsync(domain, ct).ConfigureAwait(false);
 

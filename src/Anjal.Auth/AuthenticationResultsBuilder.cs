@@ -34,6 +34,13 @@ public static class AuthenticationResultsBuilder
         {
             sb.Append(" (").Append(spf.Explanation).Append(')');
         }
+        else if ((spf.Result == SpfResult.PermError || spf.Result == SpfResult.TempError) && !string.IsNullOrWhiteSpace(spf.Explanation))
+        {
+            // v1.0.0-rc.9.1 (DEF-081): say why. Parentheses and line breaks are
+            // removed so the comment stays well formed (RFC 8601).
+            string why = new string(spf.Explanation.Where(c => c is not '(' and not ')' and not '\r' and not '\n').ToArray()).Trim();
+            sb.Append(" (").Append(why).Append(')');
+        }
         if (!string.IsNullOrEmpty(spf.Domain))
         {
             sb.Append(" smtp.mailfrom=").Append(spf.Domain);
