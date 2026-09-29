@@ -1460,6 +1460,9 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.9 to rc.9.1**: the usual steps only (backup first). No schema change, no
+setting to change.
+
 **rc.8 to rc.9**, in addition to the usual steps (backup first). No schema
 change. **One stored setting must change:** since rc.7 the SMTP idle timeout
 lives in the database, imported as 120 seconds from the old template, so the
