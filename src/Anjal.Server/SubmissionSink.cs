@@ -57,6 +57,12 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
             return await this.localSink.DeliverAsync(ctx, ct).ConfigureAwait(false);
         }
 
+        // v1.0.0-rc.9 (DEF-073; RFC 6409 8.2, 8.3): a missing Date or Message-ID is
+        // added once, and every copy - local, outgoing, Sent - carries the same
+        // message. The evidence of the submission stays as the program sent it.
+        int at = ctx.EnvelopeFrom.LastIndexOf('@');
+        ctx = ctx.WithRawBytes(SubmissionHeaders.Complete(ctx.RawBytes, at >= 0 ? ctx.EnvelopeFrom[(at + 1)..] : string.Empty, this.clock()));
+
         var local = new System.Collections.Generic.List<string>();
         var external = new System.Collections.Generic.List<string>();
         foreach (string rcpt in ctx.EnvelopeTo)
@@ -76,16 +82,8 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
         Anjal.Smtp.DeliveryResult? localResult = null;
         if (local.Count > 0)
         {
-            localResult = await this.localSink.DeliverAsync(new Anjal.Smtp.DeliveryContext
-            {
-                EnvelopeFrom = ctx.EnvelopeFrom,
-                EnvelopeTo = local.ToArray(),
-                RawBytes = ctx.RawBytes,
-                RemoteAddress = ctx.RemoteAddress,
-                ClientHostName = ctx.ClientHostName,
-                AuthenticatedUser = ctx.AuthenticatedUser,
-                AuthResults = ctx.AuthResults,
-            }, ct).ConfigureAwait(false);
+            // DEF-077: every property travels on, including the evidence link.
+            localResult = await this.localSink.DeliverAsync(ctx.WithRecipients(local.ToArray()), ct).ConfigureAwait(false);
             if (localResult.Outcome == Anjal.Smtp.DeliveryOutcome.TransientFailure)
             {
                 return localResult;
@@ -103,7 +101,7 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
                 RawBytes = ctx.RawBytes,
                 CreatedAt = now,
                 NextAttemptAt = now,
-                GiveUpAt = now.AddHours(24),
+                GiveUpAt = now + Anjal.Store.OutboundMessage.DefaultGiveUp,
             }, ct).ConfigureAwait(false);
             queued.Add(row.Id);
         }

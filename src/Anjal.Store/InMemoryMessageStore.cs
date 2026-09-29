@@ -207,7 +207,7 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore,
             }
             if (message.GiveUpAt == default)
             {
-                message.GiveUpAt = message.CreatedAt.AddHours(24);
+                message.GiveUpAt = message.CreatedAt + OutboundMessage.DefaultGiveUp;
             }
             this.outbound.Add(message);
             return Task.FromResult(message);

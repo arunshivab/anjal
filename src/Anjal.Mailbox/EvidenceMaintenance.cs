@@ -90,7 +90,8 @@ public sealed partial class EvidenceMaintenance
         foreach ((string name, string value, int end) in HeaderFields(raw))
         {
             bool ours =
-                (!receivedSeen && name.Equals("Received", System.StringComparison.OrdinalIgnoreCase)
+                (cut == 0 && name.Equals("Return-Path", System.StringComparison.OrdinalIgnoreCase))
+                || (!receivedSeen && name.Equals("Received", System.StringComparison.OrdinalIgnoreCase)
                     && OwnReceived().Match(value) is { Success: true } m && m.Groups["host"].Value.Equals(hostName, System.StringComparison.OrdinalIgnoreCase))
                 || name.StartsWith("X-Anjal-Spam-", System.StringComparison.OrdinalIgnoreCase)
                 || (name.Equals("Authentication-Results", System.StringComparison.OrdinalIgnoreCase)

@@ -70,14 +70,14 @@
                     }
                 </nav>
                 <section class="pane" id="main">
-                    @Body
+                    <CascadingValue Value="this" IsFixed="true">@Body</CascadingValue>
                 </section>
             </div>
         </div>
     </Authorized>
     <NotAuthorized>
         <div class="shell">
-            <section class="pane" id="main">@Body</section>
+            <section class="pane" id="main"><CascadingValue Value="this" IsFixed="true">@Body</CascadingValue></section>
         </div>
     </NotAuthorized>
 </AuthorizeView>
@@ -197,8 +197,38 @@
         {
             return;
         }
-        folders = await Mail.ListFoldersAsync(mailboxId.Value);
+        this.currentMailbox ??= mailboxId;
+        await this.LoadFoldersAsync(mailboxId.Value);
         mailbox = (await Mail.GetContextAsync(mailboxId.Value))?.Mailbox;
+    }
+
+    private Guid? currentMailbox;
+    private int foldersGeneration;
+
+    /// <summary>
+    /// Reload the folder counts (v1.0.0-rc.9, DEF-066, D-56): the message page
+    /// calls this right after marking a message read, so the INBOX count on that
+    /// same page is already lower.
+    /// </summary>
+    /// <param name="mailboxId">The signed-in mailbox.</param>
+    /// <returns>A task.</returns>
+    public async Task RefreshFoldersAsync(Guid mailboxId)
+    {
+        this.currentMailbox ??= mailboxId;
+        await this.LoadFoldersAsync(mailboxId);
+        StateHasChanged();
+    }
+
+    // The first load and a refresh run concurrently; only the newest may land,
+    // so a slow first query cannot overwrite the fresh count with a stale one.
+    private async Task LoadFoldersAsync(Guid mailboxId)
+    {
+        int mine = System.Threading.Interlocked.Increment(ref this.foldersGeneration);
+        IReadOnlyList<FolderView> result = await Mail.ListFoldersAsync(mailboxId);
+        if (mine == System.Threading.Volatile.Read(ref this.foldersGeneration))
+        {
+            folders = result;
+        }
     }
 
     private bool IsCurrent(string folderName)

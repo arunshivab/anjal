@@ -85,7 +85,7 @@ public sealed class OutboundHandler
         System.DateTimeOffset now = this.clock();
         System.DateTimeOffset giveUp = req.GiveUpHours > 0
             ? now.AddHours(req.GiveUpHours)
-            : now.AddHours(24);
+            : now + Anjal.Store.OutboundMessage.DefaultGiveUp;
 
         OutboundMessage saved = await this.store.EnqueueOutboundAsync(new OutboundMessage
         {

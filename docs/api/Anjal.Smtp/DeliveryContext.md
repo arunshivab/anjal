@@ -6,7 +6,10 @@ Context for a delivery attempt. Captures the SMTP envelope and the fully-receive
 
 ## Members
 
-- **WithRawBytes** *(method)* - A copy with every property kept and only the message bytes replaced - for a sink that rewrites the message (for example to add headers) before passing it on. Copying property by property elsewhere lost once (DEF-065); a property added here is kept.
+- **#ctor** *(method)* - A new, empty delivery context.
+- **#ctor** *(method)* - The one copy of every property (v1.0.0-rc.9, DEF-077). A property added to this class is added here, and every With- method keeps it; the guard test fails otherwise. Hand-written copies lost TransportTls once (DEF-065) and the evidence link once (DEF-077).
+- **WithRawBytes** *(method)* - A copy with every property kept and only the message bytes replaced - for a sink that rewrites the message (for example to add headers) before passing it on (DEF-065).
+- **WithRecipients** *(method)* - A copy with every property kept and only the recipients replaced (v1.0.0-rc.9, DEF-077).
 - **AuthResults** *(property)* - Authentication detail (SPF/DKIM/DMARC verdicts) if an authenticator was configured. Null if inbound auth is disabled. The concrete type is Anjal.Auth.AuthenticationResults when populated.
 - **AuthenticatedUser** *(property)* - Username that authenticated on the submission port, or null for unauthenticated (MTA) deliveries. Authenticated mail is never scored for spam.
 - **ClientHostName** *(property)* - The EHLO/HELO hostname the client claimed.

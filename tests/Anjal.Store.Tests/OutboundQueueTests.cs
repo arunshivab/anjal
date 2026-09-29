@@ -19,8 +19,10 @@ public class OutboundQueueTests
         Assert.NotEqual(default, saved.CreatedAt);
         Assert.NotEqual(default, saved.GiveUpAt);
         // Default give-up should be 24 hours after creation.
-        Assert.True(saved.GiveUpAt - saved.CreatedAt > System.TimeSpan.FromHours(23));
-        Assert.True(saved.GiveUpAt - saved.CreatedAt < System.TimeSpan.FromHours(25));
+        // The default give-up time was 24 hours until v1.0.0-rc.9; it is now 5 days
+        // (DEF-068, D-53; RFC 5321 4.5.4.1).
+        Assert.True(saved.GiveUpAt - saved.CreatedAt > System.TimeSpan.FromDays(5) - System.TimeSpan.FromHours(1));
+        Assert.True(saved.GiveUpAt - saved.CreatedAt < System.TimeSpan.FromDays(5) + System.TimeSpan.FromHours(1));
     }
 
     [Fact]

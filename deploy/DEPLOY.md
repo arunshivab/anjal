@@ -1460,6 +1460,21 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.8 to rc.9**, in addition to the usual steps (backup first). No schema
+change. **One stored setting must change:** since rc.7 the SMTP idle timeout
+lives in the database, imported as 120 seconds from the old template, so the
+new default of 300 (RFC 5321 4.5.3.2.7, D-52) does not reach this server by
+itself:
+```
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+        -d '{"value":"300"}' http://127.0.0.1:8025/api/settings/server/ANJAL_SMTP_IDLE_TIMEOUT_SECONDS | jq .
+vm$ unset TOKEN; sudo systemctl restart anjal-server
+vm$ sudo journalctl -u anjal-server --since "-2min" --no-pager | grep "SMTP limits"          # idle 300s
+```
+Mail already queued keeps the give-up time it was queued with (24 hours);
+mail queued after the upgrade is retried for 5 days.
+
 ## 13e. Settings (from rc.7)
 
 Non-secret settings live in the database table `settings`, one row per

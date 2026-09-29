@@ -160,9 +160,15 @@ public sealed class OutboundMessage
     public System.DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>
+    /// How long outgoing mail is retried by default: 5 days (v1.0.0-rc.9,
+    /// DEF-068, D-53; RFC 5321 4.5.4.1 asks for at least 4 to 5 days).
+    /// </summary>
+    public static readonly System.TimeSpan DefaultGiveUp = System.TimeSpan.FromDays(5);
+
+    /// <summary>
     /// Cutoff after which the message should be permanently failed regardless
-    /// of remaining retry budget. Default is 24 hours after creation; the
-    /// caller can override per-message.
+    /// of remaining retry budget. Default is <see cref="DefaultGiveUp"/> after
+    /// creation; the caller can override per-message.
     /// </summary>
     public System.DateTimeOffset GiveUpAt { get; set; }
 

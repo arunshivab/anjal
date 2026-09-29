@@ -219,10 +219,14 @@ public sealed class SmtpSession
             case "HELP": return await this.HandleHelpAsync(ct).ConfigureAwait(false);
             case "VRFY":
                 // RFC 5321 section 3.5.2 - acceptable to deny VRFY for privacy.
-                await this.WriteLineAsync("252 Cannot VRFY user, but will accept message and attempt delivery", ct).ConfigureAwait(false);
+                await this.WriteLineAsync("252 2.0.0 Cannot VRFY user, but will accept message and attempt delivery", ct).ConfigureAwait(false);
+                return true;
+            case "EXPN":
+                // RFC 5321 4.2.4: recognised but not implemented (mailing-list expansion is not offered).
+                await this.WriteLineAsync("502 5.5.1 EXPN not implemented", ct).ConfigureAwait(false);
                 return true;
             default:
-                await this.WriteLineAsync("500 Syntax error, command unrecognised", ct).ConfigureAwait(false);
+                await this.WriteLineAsync("500 5.5.2 Syntax error, command unrecognised", ct).ConfigureAwait(false);
                 return true;
         }
     }
@@ -231,7 +235,7 @@ public sealed class SmtpSession
     {
         if (string.IsNullOrWhiteSpace(args))
         {
-            await this.WriteLineAsync("501 Syntax: EHLO hostname", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("501 5.5.4 Syntax: EHLO hostname", ct).ConfigureAwait(false);
             return true;
         }
 
@@ -246,6 +250,10 @@ public sealed class SmtpSession
             await this.WriteLineAsync($"250-{this.options.AdvertisedHostName} Hello {this.clientHostName} [{this.remoteAddress}]", ct).ConfigureAwait(false);
             await this.WriteLineAsync($"250-SIZE {this.options.MaxMessageBytes}", ct).ConfigureAwait(false);
             await this.WriteLineAsync("250-8BITMIME", ct).ConfigureAwait(false);
+            // RFC 2920 and RFC 2034 (v1.0.0-rc.9): both already behaved correctly;
+            // now they are advertised, and every reply carries an enhanced code.
+            await this.WriteLineAsync("250-PIPELINING", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("250-ENHANCEDSTATUSCODES", ct).ConfigureAwait(false);
             if (this.tlsCertificate is not null && !this.isTls)
             {
                 await this.WriteLineAsync("250-STARTTLS", ct).ConfigureAwait(false);
@@ -274,12 +282,12 @@ public sealed class SmtpSession
     {
         if (this.tlsCertificate is null)
         {
-            await this.WriteLineAsync("502 STARTTLS not supported", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("502 5.5.1 STARTTLS not supported", ct).ConfigureAwait(false);
             return true;
         }
         if (this.isTls)
         {
-            await this.WriteLineAsync("503 STARTTLS already active", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("503 5.5.1 STARTTLS already active", ct).ConfigureAwait(false);
             return true;
         }
 
@@ -293,7 +301,7 @@ public sealed class SmtpSession
         this.inStart = this.inEnd = 0;
         this.pushedBack = -1;
 
-        await this.WriteLineAsync("220 Ready to start TLS", ct).ConfigureAwait(false);
+        await this.WriteLineAsync("220 2.0.0 Ready to start TLS", ct).ConfigureAwait(false);
 
         var ssl = new System.Net.Security.SslStream(this.stream, leaveInnerStreamOpen: false);
         try
@@ -332,18 +340,18 @@ public sealed class SmtpSession
         // Only submission listeners offer AUTH.
         if (this.options.Role != SmtpServerRole.Submission || this.smtpAuthenticator is null)
         {
-            await this.WriteLineAsync("502 AUTH not available on this listener", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("502 5.5.1 AUTH not available on this listener", ct).ConfigureAwait(false);
             return true;
         }
         // Need an established session (EHLO done).
         if (this.state == State.AwaitingGreeting || this.state == State.AwaitingHelo)
         {
-            await this.WriteLineAsync("503 Send EHLO first", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("503 5.5.1 Send EHLO first", ct).ConfigureAwait(false);
             return true;
         }
         if (this.authenticatedUser is not null)
         {
-            await this.WriteLineAsync("503 Already authenticated", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("503 5.5.1 Already authenticated", ct).ConfigureAwait(false);
             return true;
         }
         // Refuse AUTH on insecure channel unless explicit opt-in.
@@ -355,7 +363,7 @@ public sealed class SmtpSession
         // In an in-progress transaction, refuse new AUTH.
         if (!string.IsNullOrEmpty(this.envelopeFrom) || this.envelopeTo.Count > 0)
         {
-            await this.WriteLineAsync("503 AUTH not permitted during mail transaction", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("503 5.5.1 AUTH not permitted during mail transaction", ct).ConfigureAwait(false);
             return true;
         }
 
@@ -557,12 +565,12 @@ public sealed class SmtpSession
     {
         if (this.state == State.AwaitingHelo)
         {
-            await this.WriteLineAsync("503 Bad sequence of commands, send HELO/EHLO first", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("503 5.5.1 Bad sequence of commands, send HELO/EHLO first", ct).ConfigureAwait(false);
             return true;
         }
         if (this.options.RequireTlsForMail && this.tlsCertificate is not null && !this.isTls)
         {
-            await this.WriteLineAsync("530 Must issue a STARTTLS command first", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("530 5.7.0 Must issue a STARTTLS command first", ct).ConfigureAwait(false);
             return true;
         }
         // Submission listener requires the client to have authenticated.
@@ -575,7 +583,16 @@ public sealed class SmtpSession
         string? addr = ParseAddressArg(args, "FROM:");
         if (addr is null)
         {
-            await this.WriteLineAsync("501 Syntax: MAIL FROM:<address>", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("501 5.5.4 Syntax: MAIL FROM:<address>", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        // RFC 5321 4.1.1.11 (v1.0.0-rc.9, DEF-070): only parameters of advertised
+        // extensions are accepted; anything else is refused, not silently ignored.
+        string? paramError = this.CheckMailParameters(args);
+        if (paramError is not null)
+        {
+            await this.WriteLineAsync(paramError, ct).ConfigureAwait(false);
             return true;
         }
 
@@ -623,7 +640,7 @@ public sealed class SmtpSession
         this.envelopeFrom = addr;
         this.envelopeTo.Clear();
         this.state = State.HasMail;
-        await this.WriteLineAsync("250 OK", ct).ConfigureAwait(false);
+        await this.WriteLineAsync("250 2.1.0 OK", ct).ConfigureAwait(false);
         return true;
     }
 
@@ -654,14 +671,23 @@ public sealed class SmtpSession
     {
         if (this.state != State.HasMail && this.state != State.HasRcpt)
         {
-            await this.WriteLineAsync("503 Bad sequence of commands, send MAIL FROM first", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("503 5.5.1 Bad sequence of commands, send MAIL FROM first", ct).ConfigureAwait(false);
             return true;
         }
 
         string? addr = ParseAddressArg(args, "TO:");
         if (addr is null)
         {
-            await this.WriteLineAsync("501 Syntax: RCPT TO:<address>", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("501 5.5.4 Syntax: RCPT TO:<address>", ct).ConfigureAwait(false);
+            return true;
+        }
+
+        // RFC 5321 4.1.1.11 (v1.0.0-rc.9, DEF-070): no RCPT parameter is advertised
+        // (no DSN extension), so any parameter is refused.
+        string? rcptParam = Parameters(args).FirstOrDefault();
+        if (rcptParam is not null)
+        {
+            await this.WriteLineAsync($"555 5.5.4 RCPT parameter {Keyword(rcptParam)} not recognised", ct).ConfigureAwait(false);
             return true;
         }
 
@@ -674,7 +700,7 @@ public sealed class SmtpSession
 
         if (this.envelopeTo.Count >= this.options.MaxRecipients)
         {
-            await this.WriteLineAsync("452 Too many recipients", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("452 4.5.3 Too many recipients", ct).ConfigureAwait(false);
             return true;
         }
 
@@ -756,7 +782,7 @@ public sealed class SmtpSession
 
         this.envelopeTo.Add(addr);
         this.state = State.HasRcpt;
-        await this.WriteLineAsync("250 OK", ct).ConfigureAwait(false);
+        await this.WriteLineAsync("250 2.1.5 OK", ct).ConfigureAwait(false);
         return true;
     }
 
@@ -787,7 +813,7 @@ public sealed class SmtpSession
     {
         if (this.state != State.HasRcpt)
         {
-            await this.WriteLineAsync("503 Bad sequence of commands, send RCPT TO first", ct).ConfigureAwait(false);
+            await this.WriteLineAsync("503 5.5.1 Bad sequence of commands, send RCPT TO first", ct).ConfigureAwait(false);
             return true;
         }
 
@@ -839,7 +865,7 @@ public sealed class SmtpSession
                     string why = string.IsNullOrEmpty(authResult.RejectReason)
                         ? "Message failed DMARC policy (p=reject)"
                         : authResult.RejectReason;
-                    await this.WriteLineAsync($"550 {why}", ct).ConfigureAwait(false);
+                    await this.WriteLineAsync($"550 {Enhanced(why, "5.7.1")}", ct).ConfigureAwait(false);
                     this.ResetTransaction();
                     return true;
                 }
@@ -964,7 +990,7 @@ public sealed class SmtpSession
             DeliveryOutcome.TransientFailure => "anjal_smtp_messages_deferred_total",
             _ => "anjal_smtp_messages_rejected_total",
         });
-        await this.WriteLineAsync($"{code} {result.ReplyText}", ct).ConfigureAwait(false);
+        await this.WriteLineAsync($"{code} {Enhanced(result.ReplyText, code[0] + ".0.0")}", ct).ConfigureAwait(false);
         this.ResetTransaction();
         return true;
     }
@@ -972,27 +998,27 @@ public sealed class SmtpSession
     private async System.Threading.Tasks.Task<bool> HandleRsetAsync(System.Threading.CancellationToken ct)
     {
         this.ResetTransaction();
-        await this.WriteLineAsync("250 OK", ct).ConfigureAwait(false);
+        await this.WriteLineAsync("250 2.0.0 OK", ct).ConfigureAwait(false);
         return true;
     }
 
     private async System.Threading.Tasks.Task<bool> HandleNoopAsync(System.Threading.CancellationToken ct)
     {
-        await this.WriteLineAsync("250 OK", ct).ConfigureAwait(false);
+        await this.WriteLineAsync("250 2.0.0 OK", ct).ConfigureAwait(false);
         return true;
     }
 
     private async System.Threading.Tasks.Task<bool> HandleQuitAsync(System.Threading.CancellationToken ct)
     {
-        await this.WriteLineAsync($"221 {this.options.AdvertisedHostName} closing connection", ct).ConfigureAwait(false);
+        await this.WriteLineAsync($"221 2.0.0 {this.options.AdvertisedHostName} closing connection", ct).ConfigureAwait(false);
         return false;
     }
 
     private async System.Threading.Tasks.Task<bool> HandleHelpAsync(System.Threading.CancellationToken ct)
     {
-        await this.WriteLineAsync("214-Supported commands:", ct).ConfigureAwait(false);
-        await this.WriteLineAsync("214-  EHLO, HELO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, VRFY, HELP", ct).ConfigureAwait(false);
-        await this.WriteLineAsync("214 End of HELP", ct).ConfigureAwait(false);
+        await this.WriteLineAsync("214-2.0.0 Supported commands:", ct).ConfigureAwait(false);
+        await this.WriteLineAsync("214-2.0.0 EHLO, HELO, MAIL, RCPT, DATA, RSET, NOOP, QUIT, VRFY, EXPN, HELP", ct).ConfigureAwait(false);
+        await this.WriteLineAsync("214 2.0.0 End of HELP", ct).ConfigureAwait(false);
         return true;
     }
 
@@ -1406,6 +1432,53 @@ public sealed class SmtpSession
     }
 
     /// <summary>The SIZE= value on a MAIL FROM line, or 0 when absent or unreadable.</summary>
+    /// <summary>The parameters after the &lt;address&gt; of a MAIL or RCPT command.</summary>
+    private static string[] Parameters(string args)
+    {
+        int gt = args.IndexOf('>', System.StringComparison.Ordinal);
+        return gt < 0 ? System.Array.Empty<string>() : args[(gt + 1)..].Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
+    }
+
+    private static string Keyword(string parameter)
+    {
+        int eq = parameter.IndexOf('=', System.StringComparison.Ordinal);
+        return (eq < 0 ? parameter : parameter[..eq]).ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// The refusal for a MAIL parameter this listener does not advertise, or null
+    /// when every parameter is acceptable: SIZE (RFC 1870), BODY=7BIT or 8BITMIME
+    /// (RFC 6152), and AUTH (RFC 4954) where AUTH is offered - submission only.
+    /// </summary>
+    private string? CheckMailParameters(string args)
+    {
+        foreach (string p in Parameters(args))
+        {
+            string key = Keyword(p);
+            string value = p.Contains('=', System.StringComparison.Ordinal) ? p[(p.IndexOf('=', System.StringComparison.Ordinal) + 1)..] : string.Empty;
+            switch (key)
+            {
+                case "SIZE":
+                    if (value.Length == 0 || !value.All(char.IsAsciiDigit))
+                    {
+                        return "501 5.5.4 SIZE must be a number";
+                    }
+                    break;
+                case "BODY":
+                    if (!value.Equals("7BIT", System.StringComparison.OrdinalIgnoreCase) && !value.Equals("8BITMIME", System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        return "501 5.5.4 BODY must be 7BIT or 8BITMIME";
+                    }
+                    break;
+                case "AUTH" when this.options.Role == SmtpServerRole.Submission:
+                    break;
+                default:
+                    return $"555 5.5.4 MAIL parameter {key} not recognised";
+            }
+        }
+        return null;
+    }
+
     private static long DeclaredSize(string args)
     {
         foreach (string part in args.Split(' ', System.StringSplitOptions.RemoveEmptyEntries))
@@ -1469,6 +1542,23 @@ public sealed class SmtpSession
         public bool TooLarge { get; }
 
         public static DataResult Of(byte[] raw, byte[] body) => new(body, false, raw: raw);
+    }
+
+    /// <summary>
+    /// A reply text with an RFC 3463 enhanced status code: kept when it already
+    /// starts with one, otherwise the given default is added (v1.0.0-rc.9,
+    /// ENHANCEDSTATUSCODES is advertised, so every reply carries one - RFC 2034).
+    /// </summary>
+    private static string Enhanced(string text, string fallback)
+    {
+        string t = (text ?? string.Empty).TrimStart();
+        int sp = t.IndexOf(' ', System.StringComparison.Ordinal);
+        string first = sp < 0 ? t : t[..sp];
+        string[] parts = first.Split('.');
+        bool has = parts.Length == 3 && parts[0].Length == 1 && "245".Contains(parts[0][0], System.StringComparison.Ordinal)
+            && parts[1].Length is >= 1 and <= 3 && parts[1].All(char.IsAsciiDigit)
+            && parts[2].Length is >= 1 and <= 3 && parts[2].All(char.IsAsciiDigit);
+        return has ? t : (fallback + " " + t).TrimEnd();
     }
 
     private async System.Threading.Tasks.Task WriteLineAsync(string line, System.Threading.CancellationToken ct)

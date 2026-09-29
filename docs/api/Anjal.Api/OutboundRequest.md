@@ -10,7 +10,7 @@ Request body for POST /api/outbound: enqueue an outbound message. Either must be
 - **EnvelopeFrom** *(property)* - The SMTP envelope sender (no angle brackets).
 - **EnvelopeTo** *(property)* - The SMTP envelope recipient (no angle brackets).
 - **FromHeader** *(property)* - The From header. Used when RawBytesBase64 is empty.
-- **GiveUpHours** *(property)* - Optional override for the give-up deadline in hours from now. Default is 24. Useful for less-time-sensitive messages.
+- **GiveUpHours** *(property)* - Optional override for the give-up deadline in hours from now. Default is 120 (5 days, RFC 5321 4.5.4.1; v1.0.0-rc.9). A shorter time suits time-sensitive notices.
 - **RawBytesBase64** *(property)* - Base64-encoded RFC 5322 message bytes. Mutually exclusive with the structured fields below.
 - **Subject** *(property)* - The Subject header. Used when RawBytesBase64 is empty.
 - **ToHeader** *(property)* - The To header. Used when RawBytesBase64 is empty.

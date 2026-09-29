@@ -230,7 +230,7 @@ RETURNING id, inbound_message_id, url, status_code, attempted_at, error_message;
 
         System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
         System.DateTimeOffset next = message.NextAttemptAt == default ? now : message.NextAttemptAt;
-        System.DateTimeOffset giveUp = message.GiveUpAt == default ? now.AddHours(24) : message.GiveUpAt;
+        System.DateTimeOffset giveUp = message.GiveUpAt == default ? now + OutboundMessage.DefaultGiveUp : message.GiveUpAt;
 
         const string sql = @"
 INSERT INTO outbound_messages

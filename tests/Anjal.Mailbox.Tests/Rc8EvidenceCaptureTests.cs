@@ -127,7 +127,8 @@ public sealed class Rc8EvidenceCaptureTests : System.IDisposable
         // The working copy still gets its repairs; the evidence does not.
         string working = await System.IO.File.ReadAllTextAsync(System.IO.Directory.GetFiles(System.IO.Path.Combine(this.root, "mail"), "*", System.IO.SearchOption.AllDirectories).Single(f => f.Contains("/new/", System.StringComparison.Ordinal) || f.Contains("\\new\\", System.StringComparison.Ordinal)));
         Assert.DoesNotContain("Authentication-Results: test.localhost; spf=pass", working, System.StringComparison.Ordinal);
-        Assert.StartsWith("Received: from sender.example.org", working, System.StringComparison.Ordinal);
+        // Final delivery puts Return-Path first since v1.0.0-rc.9 (DEF-069); the evidence above is unchanged.
+        Assert.StartsWith("Return-Path: <doctor@example.org>\r\nReceived: from sender.example.org", working, System.StringComparison.Ordinal);
         Assert.DoesNotContain("in.co\n", working.Replace("\r\n", string.Empty, System.StringComparison.Ordinal), System.StringComparison.Ordinal);
         if (!System.OperatingSystem.IsWindows())
         {

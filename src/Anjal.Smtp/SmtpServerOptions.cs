@@ -31,7 +31,7 @@ public sealed class SmtpServerOptions
     public int MaxMessageBytes { get; init; } = 25 * 1024 * 1024;
 
     /// <summary>Idle-timeout per command. Connections that go this long with no data are closed.</summary>
-    public System.TimeSpan CommandTimeout { get; init; } = System.TimeSpan.FromSeconds(120);
+    public System.TimeSpan CommandTimeout { get; init; } = System.TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// The longest a single session may last, however active. Stops a client

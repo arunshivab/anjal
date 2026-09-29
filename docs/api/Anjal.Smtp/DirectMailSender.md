@@ -8,3 +8,4 @@ Outbound sender that looks up the destination domain's MX records and connects d
 
 - **#ctor** *(method)* - Construct a direct sender.
 - **SendAsync** *(method)* - _(no description)_
+- **SystemHostLookupAsync** *(method)* - The system resolver's answer: an address, no such host, or a temporary failure.
