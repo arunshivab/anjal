@@ -27,7 +27,7 @@ namespace Anjal.Server;
 ///   ANJAL_WEBHOOK_ALLOW_HTTP    - "true" allows plain-http webhook URLs (default https only).
 ///   ANJAL_WEBHOOK_ALLOW_PRIVATE - "true" allows webhooks to loopback/private addresses (default public only).
 ///   ANJAL_SUBMISSION_TLS_PORT         - Implicit-TLS submission port, normally 465 (RFC 8314). 0 disables.
-///   ANJAL_SMTP_IDLE_TIMEOUT_SECONDS   - Close a session idle this long (default 120).
+///   ANJAL_SMTP_IDLE_TIMEOUT_SECONDS   - Close a session idle this long (default 300; RFC 5321 4.5.3.2.7).
 ///   ANJAL_SMTP_MAX_SESSION_MINUTES    - Hard limit on one session (default 15).
 ///   ANJAL_SMTP_MAX_CONNECTIONS        - Concurrent sessions per listener (default 200).
 ///   ANJAL_SMTP_MAX_CONNECTIONS_PER_IP - Concurrent sessions per client address (default 10).
@@ -202,7 +202,7 @@ public static class Program
             Role = Anjal.Smtp.SmtpServerRole.Mta,
             Evidence = evidence,
             Policy = mtaPolicy,
-            CommandTimeout = System.TimeSpan.FromSeconds(ParseIntEnv("ANJAL_SMTP_IDLE_TIMEOUT_SECONDS", 120)),
+            CommandTimeout = System.TimeSpan.FromSeconds(ParseIntEnv("ANJAL_SMTP_IDLE_TIMEOUT_SECONDS", 300)),
             MaxSessionDuration = System.TimeSpan.FromMinutes(ParseIntEnv("ANJAL_SMTP_MAX_SESSION_MINUTES", 15)),
             MaxConcurrentSessions = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS", 200),
             MaxSessionsPerAddress = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS_PER_IP", 10),

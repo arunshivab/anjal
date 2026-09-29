@@ -6,12 +6,13 @@ A queued outbound message. Created by the API layer or by a webhook auto-reply r
 
 ## Members
 
+- **DefaultGiveUp** *(field)* - How long outgoing mail is retried by default: 5 days (v1.0.0-rc.9, DEF-068, D-53; RFC 5321 4.5.4.1 asks for at least 4 to 5 days).
 - **LeaseDuration** *(field)* - How long a lease lasts. Longer than any single delivery attempt can take with its timeouts, so a slow but live send is never taken over.
 - **Attempts** *(property)* - Number of send attempts made so far.
 - **CreatedAt** *(property)* - Time the message was enqueued.
 - **EnvelopeFrom** *(property)* - The SMTP envelope sender (no angle brackets).
 - **EnvelopeTo** *(property)* - The SMTP envelope recipient (no angle brackets). One row per recipient.
-- **GiveUpAt** *(property)* - Cutoff after which the message should be permanently failed regardless of remaining retry budget. Default is 24 hours after creation; the caller can override per-message.
+- **GiveUpAt** *(property)* - Cutoff after which the message should be permanently failed regardless of remaining retry budget. Default is after creation; the caller can override per-message.
 - **Id** *(property)* - Identifier assigned by the store.
 - **LastError** *(property)* - The reply text of the most recent attempt (success or failure).
 - **LeaseExpiresAt** *(property)* - While , when the lease lapses. A worker that stops mid-batch (crash, restart, deploy) leaves its leased messages in Sending; once this time passes they are leased again rather than stranded. Null when not leased.

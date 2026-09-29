@@ -19,6 +19,12 @@ public sealed class DirectSenderOptions
     /// keyed by destination domain (e.g. "gmail.com"), not MX hostname.
     /// </summary>
     public TlsClientOptions? Tls { get; init; }
+
+    /// <summary>
+    /// Looks up whether a domain has an address, for implicit MX (v1.0.0-rc.9,
+    /// RFC 5321 5.1). Null uses the system resolver; tests replace it.
+    /// </summary>
+    public System.Func<string, System.Threading.CancellationToken, System.Threading.Tasks.Task<HostLookup>>? HostLookup { get; init; }
 }
 
 /// <summary>
@@ -82,18 +88,35 @@ public sealed class DirectMailSender : IMailSender
             return new SendResult { Outcome = SendOutcome.TransientFailure, Message = $"DNS error for {domain}: {ex.Message}" };
         }
 
-        if (mxs.Count == 0)
+        // RFC 7505 (v1.0.0-rc.9, DEF-071): a null MX - the root name "." - says the
+        // domain accepts no mail. Fail at once; never attempt delivery.
+        if (mxs.Count > 0 && mxs.All(m => IsRootName(m.Exchange)))
         {
-            // RFC 5321 section 5.1: if there is no MX record, fall back to A/AAAA
-            // ("implicit MX"). We treat absent MX as a permanent failure for v0.3.0;
-            // implicit-MX fallback is a future improvement.
-            return new SendResult { Outcome = SendOutcome.PermanentFailure, Message = $"No MX records for {domain}" };
+            return new SendResult { Outcome = SendOutcome.PermanentFailure, ReplyCode = 556, Message = $"556 5.1.10 {domain} does not accept mail (null MX, RFC 7505)" };
+        }
+
+        var hosts = mxs.Where(m => !IsRootName(m.Exchange)).Select(m => m.Exchange).ToList();
+        if (hosts.Count == 0)
+        {
+            // RFC 5321 5.1 (v1.0.0-rc.9, DEF-067): with no MX, the domain itself
+            // is the mail host ("implicit MX") - if it has an address.
+            HostLookup found = await (this.options.HostLookup ?? SystemHostLookupAsync)(domain, ct).ConfigureAwait(false);
+            switch (found)
+            {
+                case Smtp.HostLookup.Found:
+                    hosts.Add(domain);
+                    break;
+                case Smtp.HostLookup.NotFound:
+                    return new SendResult { Outcome = SendOutcome.PermanentFailure, ReplyCode = 550, Message = $"550 5.1.2 {domain} has no mail server: no MX and no address record (RFC 5321 5.1)" };
+                default:
+                    return new SendResult { Outcome = SendOutcome.TransientFailure, Message = $"DNS lookup of {domain} failed temporarily" };
+            }
         }
 
         SendResult? lastResult = null;
-        foreach (Anjal.Dns.MxRecord mx in mxs)
+        foreach (string host in hosts)
         {
-            SendResult attempt = await this.TryDeliverToHostAsync(mx.Exchange, domain, delivery, ct).ConfigureAwait(false);
+            SendResult attempt = await this.TryDeliverToHostAsync(host, domain, delivery, ct).ConfigureAwait(false);
             lastResult = attempt;
             if (attempt.Outcome == SendOutcome.Sent)
             {
@@ -106,6 +129,26 @@ public sealed class DirectMailSender : IMailSender
             // Transient: try the next MX.
         }
         return lastResult ?? new SendResult { Outcome = SendOutcome.TransientFailure, Message = "No MX could be tried" };
+    }
+
+    private static bool IsRootName(string name) => name.Length == 0 || name == ".";
+
+    /// <summary>The system resolver's answer: an address, no such host, or a temporary failure.</summary>
+    private static async System.Threading.Tasks.Task<HostLookup> SystemHostLookupAsync(string host, System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            System.Net.IPAddress[] addresses = await System.Net.Dns.GetHostAddressesAsync(host, ct).ConfigureAwait(false);
+            return addresses.Length > 0 ? Smtp.HostLookup.Found : Smtp.HostLookup.NotFound;
+        }
+        catch (System.Net.Sockets.SocketException ex) when (ex.SocketErrorCode is System.Net.Sockets.SocketError.HostNotFound or System.Net.Sockets.SocketError.NoData)
+        {
+            return Smtp.HostLookup.NotFound;
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            return Smtp.HostLookup.TryAgain;
+        }
     }
 
     private async System.Threading.Tasks.Task<SendResult> TryDeliverToHostAsync(
@@ -239,4 +282,17 @@ public sealed class DirectMailSender : IMailSender
         }
         return address.Substring(at + 1).ToLowerInvariant();
     }
+}
+
+/// <summary>Whether a domain has an address (v1.0.0-rc.9, implicit MX).</summary>
+public enum HostLookup
+{
+    /// <summary>At least one address.</summary>
+    Found,
+
+    /// <summary>No such host, or no address records: a permanent answer.</summary>
+    NotFound,
+
+    /// <summary>The lookup failed temporarily.</summary>
+    TryAgain,
 }

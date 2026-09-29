@@ -295,6 +295,8 @@ else
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
     [CascadingParameter] private HttpContext? Http { get; set; }
 
+    [CascadingParameter] private Anjal.Webmail.Components.Layout.MainLayout? Layout { get; set; }
+
     private MessageView? view;
 
     /// <summary>"3 years", "18 months", "45 days" - the retention in plain words.</summary>
@@ -386,6 +388,11 @@ else
             return;
         }
         view = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
+        // DEF-066: opening marked the message read; the left pane recounts now.
+        if (Layout is not null)
+        {
+            await Layout.RefreshFoldersAsync(mailboxId.Value);
+        }
         if (view is null && Http is not null)
         {
             // The friendly page stays; the status says what happened (DEF-013).

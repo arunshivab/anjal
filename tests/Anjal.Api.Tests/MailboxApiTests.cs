@@ -451,7 +451,8 @@ public class MailboxApiTests : System.IDisposable
         Assert.Equal("1@x", meta!.MessageId);
 
         var raw = await this.client.GetFromJsonAsync<MessageRawResponse>($"api/messages/{id}/raw", ApiJson.Options);
-        Assert.Equal(one, System.Convert.FromBase64String(raw!.RawBytesBase64));
+        // The raw message is the filed copy: what was delivered, with the Return-Path line added at final delivery (v1.0.0-rc.9, DEF-069).
+        Assert.Equal(Anjal.Mailbox.MailboxSink.WithReturnPath(one, "s@x"), System.Convert.FromBase64String(raw!.RawBytesBase64));
 
         var folders = await this.client.GetFromJsonAsync<System.Collections.Generic.List<FolderResponse>>("api/mailboxes/arun@anjal.co.in/folders", ApiJson.Options);
         Assert.Equal(2, folders![0].MessageCount);

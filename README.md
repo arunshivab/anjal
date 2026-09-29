@@ -10,6 +10,23 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.9** (28 September 2026) - standards fixes from the compliance
+audit (ANJAL-TST-12), and the unread count.
+- **Delivery:** a domain with no MX record is delivered to its own address
+  (RFC 5321 5.1, DEF-067); a null MX fails at once (RFC 7505, DEF-071);
+  outgoing mail is retried for 5 days, every 6 hours after the first hours
+  (DEF-068) - an API caller's own give-up time is kept.
+- **Receiving:** every reply carries an enhanced status code, PIPELINING and
+  ENHANCEDSTATUSCODES are advertised, EXPN answers 502 (DEF-074); parameters
+  that are not advertised are refused with 555 (DEF-070); the idle timeout is
+  5 minutes (DEF-072); final delivery adds Return-Path (DEF-069).
+- **Submission:** a missing Date or Message-ID is added (RFC 6409, DEF-073);
+  a local recipient's copy keeps its evidence link (DEF-077).
+- **Webmail:** opening an unread message lowers the INBOX count at once
+  (DEF-066); a message sent from the webmail keeps its original as composed,
+  with the colleague's copy and the Sent copy linked to it - and is not sent
+  if the original cannot be kept (DEF-076).
+
 **v1.0.0-rc.8** (28 September 2026) - the integrity release: the original of
 every message kept as proof, and records that tell the truth.
 - **Evidence store** (ANJAL-DES-01): every incoming message is kept exactly as

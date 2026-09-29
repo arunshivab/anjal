@@ -18,5 +18,6 @@ that delivers accepted SMTP messages into tenant mailboxes. For each recipient: 
 - **IsTrustedAsync** *(method)* - Whether the mailbox trusts the sender although their mail arrives unencrypted.
 - **ResolveAsync** *(method)* - Resolve a recipient address to an enabled mailbox of an enabled tenant whose domain is registered. Returns when any link in that chain is missing.
 - **TrySplitAddress** *(method)* - Split an address into (local-part without "+tag", domain), both lowercased. Returns if the address has no "@" or an empty side.
+- **WithReturnPath** *(method)* - The message as filed at final delivery (v1.0.0-rc.9, DEF-069; RFC 5321 4.4): a Return-Path line with the envelope sender first, after removing any Return-Path the sender included (the standard allows it; only the final server knows the real envelope - D-55). The evidence copy is untouched.
 - **OperatorPostmaster** *(property)* - The operator's mailbox for postmaster@ this server; null for postmaster@ its parent domain.
 - **ServerHostName** *(property)* - This server's own name, for postmaster@ it (v1.0.0-rc.8); null to not recognise it.

@@ -109,6 +109,55 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
     /// <summary>The operator's mailbox for postmaster@ this server; null for postmaster@ its parent domain.</summary>
     public string? OperatorPostmaster { get; init; }
 
+    /// <summary>
+    /// The message as filed at final delivery (v1.0.0-rc.9, DEF-069; RFC 5321 4.4):
+    /// a Return-Path line with the envelope sender first, after removing any
+    /// Return-Path the sender included (the standard allows it; only the final
+    /// server knows the real envelope - D-55). The evidence copy is untouched.
+    /// </summary>
+    /// <param name="raw">The message.</param>
+    /// <param name="envelopeFrom">The envelope sender; empty for bounces, giving &lt;&gt;.</param>
+    /// <returns>The bytes to file.</returns>
+    public static byte[] WithReturnPath(byte[] raw, string? envelopeFrom)
+    {
+        System.ArgumentNullException.ThrowIfNull(raw);
+        var kept = new System.IO.MemoryStream(raw.Length + 64);
+        int pos = 0;
+        bool inHeader = true;
+        while (pos < raw.Length)
+        {
+            int nl = System.Array.IndexOf(raw, (byte)'\n', pos);
+            int end = nl < 0 ? raw.Length : nl + 1;
+            if (inHeader && (raw[pos] == (byte)'\r' || raw[pos] == (byte)'\n'))
+            {
+                inHeader = false;
+            }
+            bool drop = false;
+            if (inHeader && end - pos >= 12 && raw[pos] != (byte)' ' && raw[pos] != (byte)'\t'
+                && System.Text.Encoding.ASCII.GetString(raw, pos, 12).Equals("Return-Path:", System.StringComparison.OrdinalIgnoreCase))
+            {
+                drop = true;
+                // Also drop its folded continuation lines.
+                while (end < raw.Length && (raw[end] == (byte)' ' || raw[end] == (byte)'\t'))
+                {
+                    int n2 = System.Array.IndexOf(raw, (byte)'\n', end);
+                    end = n2 < 0 ? raw.Length : n2 + 1;
+                }
+            }
+            if (!drop)
+            {
+                kept.Write(raw, pos, end - pos);
+            }
+            pos = end;
+        }
+        byte[] line = System.Text.Encoding.UTF8.GetBytes("Return-Path: <" + (envelopeFrom ?? string.Empty) + ">\r\n");
+        byte[] body = kept.ToArray();
+        var result = new byte[line.Length + body.Length];
+        line.CopyTo(result, 0);
+        body.CopyTo(result, line.Length);
+        return result;
+    }
+
     /// <summary>Whether a local part is one every mail domain must accept (postmaster, abuse).</summary>
     /// <param name="local">The local part.</param>
     /// <returns>True for postmaster and abuse, in any case.</returns>
@@ -288,7 +337,7 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
 
                 Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
                 MaildirWriteResult written = await this.maildir
-                    .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, ctx.RawBytes, ct)
+                    .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, WithReturnPath(ctx.RawBytes, ctx.EnvelopeFrom), ct)
                     .ConfigureAwait(false);
 
                 await this.store.SaveMessageAsync(new Anjal.Store.MessageRow

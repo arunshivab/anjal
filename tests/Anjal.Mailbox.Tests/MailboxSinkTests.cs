@@ -82,13 +82,14 @@ public sealed class MailboxSinkTests : System.IDisposable
         Assert.Equal("m1@example.com", row.MessageId);
         Assert.Equal("Sender <sender@example.com>", row.FromHeader);
         Assert.Equal("sender@example.com", row.EnvelopeFrom);
-        Assert.Equal(Sample.Length, row.SizeBytes);
+        // The filed copy starts with a Return-Path line since v1.0.0-rc.9 (DEF-069).
+        Assert.Equal(MailboxSink.WithReturnPath(Sample, "sender@example.com").Length, row.SizeBytes);
 
         byte[]? back = await this.maildir.ReadAsync(tenant.Slug, mailbox.Address, FolderRow.Inbox, row.MaildirFile);
-        Assert.Equal(Sample, back);
+        Assert.Equal(MailboxSink.WithReturnPath(Sample, "sender@example.com"), back);   // DEF-069
 
         MailboxRow? after = await this.store.GetMailboxByIdAsync(mailbox.Id);
-        Assert.Equal(Sample.Length, after!.UsedBytes);
+        Assert.Equal(MailboxSink.WithReturnPath(Sample, "sender@example.com").Length, after!.UsedBytes);   // usage counts the filed copy (DEF-069)
 
         var folders = await this.store.ListFoldersAsync(mailbox.Id);
         Assert.Single(folders);
@@ -172,7 +173,8 @@ public sealed class MailboxSinkTests : System.IDisposable
         Assert.Equal(DeliveryOutcome.Accepted, r.Outcome);
         MessageRow row = Assert.Single(this.store.MailboxMessages);
         byte[]? back = await this.maildir.ReadAsync(tenant.Slug, mailbox.Address, FolderRow.Inbox, row.MaildirFile);
-        Assert.Equal(Garbage, back);
+        // Filed exactly, with the Return-Path line final delivery adds (v1.0.0-rc.9, DEF-069).
+        Assert.Equal(MailboxSink.WithReturnPath(Garbage, row.EnvelopeFrom), back);
     }
 
     [Fact]

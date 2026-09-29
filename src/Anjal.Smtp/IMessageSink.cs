@@ -46,29 +46,50 @@ public sealed class DeliveryContext
     /// <summary>The evidence copy of this message as received (v1.0.0-rc.8), or null when none is kept.</summary>
     public System.Guid? EvidenceId { get; init; }
 
+    /// <summary>A new, empty delivery context.</summary>
+    public DeliveryContext()
+    {
+    }
+
+    /// <summary>
+    /// The one copy of every property (v1.0.0-rc.9, DEF-077). A property added to
+    /// this class is added here, and every With- method keeps it; the guard test
+    /// fails otherwise. Hand-written copies lost TransportTls once (DEF-065) and
+    /// the evidence link once (DEF-077).
+    /// </summary>
+    private DeliveryContext(DeliveryContext source, byte[]? rawBytes, IReadOnlyList<string>? envelopeTo)
+    {
+        this.EnvelopeFrom = source.EnvelopeFrom;
+        this.EnvelopeTo = envelopeTo ?? source.EnvelopeTo;
+        this.RawBytes = rawBytes ?? source.RawBytes;
+        this.RemoteAddress = source.RemoteAddress;
+        this.ClientHostName = source.ClientHostName;
+        this.AuthenticatedUser = source.AuthenticatedUser;
+        this.AuthResults = source.AuthResults;
+        this.TransportTls = source.TransportTls;
+        this.EvidenceId = source.EvidenceId;
+    }
+
     /// <summary>
     /// A copy with every property kept and only the message bytes replaced -
     /// for a sink that rewrites the message (for example to add headers)
-    /// before passing it on. Copying property by property elsewhere lost
-    /// <see cref="TransportTls"/> once (DEF-065); a property added here is kept.
+    /// before passing it on (DEF-065).
     /// </summary>
     /// <param name="rawBytes">The new message bytes.</param>
     /// <returns>The copy.</returns>
     public DeliveryContext WithRawBytes(byte[] rawBytes)
     {
         System.ArgumentNullException.ThrowIfNull(rawBytes);
-        return new DeliveryContext
-        {
-            EnvelopeFrom = this.EnvelopeFrom,
-            EnvelopeTo = this.EnvelopeTo,
-            RawBytes = rawBytes,
-            RemoteAddress = this.RemoteAddress,
-            ClientHostName = this.ClientHostName,
-            AuthenticatedUser = this.AuthenticatedUser,
-            AuthResults = this.AuthResults,
-            TransportTls = this.TransportTls,
-            EvidenceId = this.EvidenceId,
-        };
+        return new DeliveryContext(this, rawBytes, null);
+    }
+
+    /// <summary>A copy with every property kept and only the recipients replaced (v1.0.0-rc.9, DEF-077).</summary>
+    /// <param name="envelopeTo">The new recipients.</param>
+    /// <returns>The copy.</returns>
+    public DeliveryContext WithRecipients(IReadOnlyList<string> envelopeTo)
+    {
+        System.ArgumentNullException.ThrowIfNull(envelopeTo);
+        return new DeliveryContext(this, null, envelopeTo);
     }
 }
 

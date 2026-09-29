@@ -201,6 +201,7 @@
 - [Anjal.Server.ServerRecipientResolver](Anjal.Server/ServerRecipientResolver.md)
 - [Anjal.Server.ServerSmtpAuthenticator](Anjal.Server/ServerSmtpAuthenticator.md)
 - [Anjal.Server.StoreBackedDkimResolver](Anjal.Server/StoreBackedDkimResolver.md)
+- [Anjal.Server.SubmissionHeaders](Anjal.Server/SubmissionHeaders.md)
 - [Anjal.Server.SubmissionSink](Anjal.Server/SubmissionSink.md)
 - [Anjal.Server.WebhookWorker](Anjal.Server/WebhookWorker.md)
 
@@ -217,6 +218,7 @@
 - [Anjal.Smtp.DeliveryResult](Anjal.Smtp/DeliveryResult.md)
 - [Anjal.Smtp.DirectMailSender](Anjal.Smtp/DirectMailSender.md)
 - [Anjal.Smtp.DirectSenderOptions](Anjal.Smtp/DirectSenderOptions.md)
+- [Anjal.Smtp.HostLookup](Anjal.Smtp/HostLookup.md)
 - [Anjal.Smtp.IEvidenceRecorder](Anjal.Smtp/IEvidenceRecorder.md)
 - [Anjal.Smtp.IInboundAuthenticator](Anjal.Smtp/IInboundAuthenticator.md)
 - [Anjal.Smtp.ILocalDomainResolver](Anjal.Smtp/ILocalDomainResolver.md)

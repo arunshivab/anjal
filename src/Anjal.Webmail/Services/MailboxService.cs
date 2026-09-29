@@ -165,6 +165,14 @@ public sealed partial class MailboxService
     /// <param name="messageStore">Outbound queue.</param>
     /// <param name="maildir">Filesystem store for message bodies.</param>
     /// <param name="hostName">Host name used in generated Message-IDs.</param>
+    /// <summary>
+    /// Keeps the original of every message sent from the webmail, as composed
+    /// (v1.0.0-rc.9, DEF-076): the recipients' copies and the Sent copy point to
+    /// it. Null keeps none (tests, or no evidence folder). When set, a message
+    /// whose original cannot be kept is not sent (SPEC-08 R-08).
+    /// </summary>
+    public Anjal.Mailbox.EvidenceRecorder? Evidence { get; init; }
+
     public MailboxService(IMailboxStore store, IMessageStore messageStore, IMaildirStore maildir, string hostName)
     {
         ArgumentNullException.ThrowIfNull(store);
@@ -587,6 +595,31 @@ public sealed partial class MailboxService
         byte[] raw = BuildMessage(mailbox, request, to, cc);
         DateTimeOffset now = DateTimeOffset.UtcNow;
 
+        // v1.0.0-rc.9 (DEF-076, D-59): keep the message as composed before anything
+        // is delivered or queued; if it cannot be kept, it is not sent.
+        Guid? evidenceId = null;
+        if (this.Evidence is not null)
+        {
+            try
+            {
+                evidenceId = await this.Evidence.RecordInboundAsync(new Anjal.Smtp.InboundEvidence
+                {
+                    RawBytes = raw,
+                    EnvelopeFrom = mailbox.Address,
+                    EnvelopeTo = to.Concat(cc).Concat(bcc).Select(a => a.Address).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                    ClientHostName = this.hostName,
+                    AuthenticatedUser = mailbox.Address,
+                    ReceivedAt = now,
+                }, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // Any failure to keep the original stops the send; the user is told.
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return "Not sent: the message could not be recorded as evidence. Please try again in a moment.";
+            }
+#pragma warning restore CA1031
+        }
+
         var recipients = new List<MailAddress>(to);
         recipients.AddRange(cc);
         recipients.AddRange(bcc);
@@ -624,9 +657,14 @@ public sealed partial class MailboxService
                 EnvelopeTo = local.ToArray(),
                 RawBytes = System.Text.Encoding.ASCII.GetBytes(trace).Concat(raw).ToArray(),
                 AuthenticatedUser = mailbox.Address,
+                EvidenceId = evidenceId,
             }, ct).ConfigureAwait(false);
             if (delivered.Outcome != Anjal.Smtp.DeliveryOutcome.Accepted)
             {
+                if (evidenceId is Guid notSent && this.Evidence is not null)
+                {
+                    await this.Evidence.CompleteInboundAsync(notSent, accepted: false, ct).ConfigureAwait(false);
+                }
                 return $"Could not deliver to {string.Join(", ", local)}: {delivered.ReplyText}";
             }
         }
@@ -640,7 +678,7 @@ public sealed partial class MailboxService
                 RawBytes = raw,
                 CreatedAt = now,
                 NextAttemptAt = now,
-                GiveUpAt = now.AddHours(24),
+                GiveUpAt = now + OutboundMessage.DefaultGiveUp,
             }, ct).ConfigureAwait(false);
             queued.Add(row.Id);
         }
@@ -658,6 +696,7 @@ public sealed partial class MailboxService
             BodyText = Anjal.Mailbox.MessageText.Extract(TryParse(raw)),
             MaildirFile = seenPath ?? written.RelativePath,
             EnvelopeFrom = mailbox.Address,
+            EvidenceId = evidenceId,
             MessageId = MessageIdOf(raw),
             FromHeader = FormatFrom(mailbox),
             ToHeader = request.To.Trim(),
@@ -677,6 +716,15 @@ public sealed partial class MailboxService
         }
 
         // The draft this was composed from is now redundant.
+        if (evidenceId is Guid kept && this.Evidence is not null)
+        {
+            await this.Evidence.CompleteInboundAsync(kept, accepted: true, ct).ConfigureAwait(false);
+            if (this.messageStore is IEvidenceStore retentionStore)
+            {
+                await retentionStore.RaiseEvidenceRetentionAsync(kept, tenant.EvidenceRetentionDays, ct).ConfigureAwait(false);
+            }
+        }
+
         if (request.DraftId is Guid draftId)
         {
             await this.DeleteAsync(mailbox.Id, draftId, ct).ConfigureAwait(false);

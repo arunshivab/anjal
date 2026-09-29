@@ -232,7 +232,16 @@ public static class Program
         builder.Services.AddSingleton(store);
         builder.Services.AddSingleton(mailboxStore);
         builder.Services.AddSingleton(maildir);
-        builder.Services.AddSingleton(new MailboxService(mailboxStore, store, maildir, hostName));
+        // v1.0.0-rc.9 (DEF-076): originals of mail sent from the webmail are kept when
+        // the evidence folder exists (install.sh creates it; the unit may write there).
+        string evidenceRoot = Environment.GetEnvironmentVariable("ANJAL_EVIDENCE_ROOT") ?? Anjal.Mailbox.EvidenceVault.DefaultRoot;
+        Anjal.Mailbox.EvidenceRecorder? evidence = store is IEvidenceStore evidenceStore && Directory.Exists(evidenceRoot)
+            ? new Anjal.Mailbox.EvidenceRecorder(evidenceStore, new Anjal.Mailbox.EvidenceVault(evidenceRoot))
+            : null;
+        Console.WriteLine(evidence is null
+            ? $"Evidence: not kept for webmail sends (no folder at {evidenceRoot})."
+            : $"Evidence: originals of webmail sends kept in {evidenceRoot}; a message is not sent unless its original is kept.");
+        builder.Services.AddSingleton(new MailboxService(mailboxStore, store, maildir, hostName) { Evidence = evidence });
         builder.Services.AddSingleton(new WebmailAuthService(mailboxStore));
         builder.Services.AddSingleton(new HostInfo(hostName));
         builder.Services.AddHttpContextAccessor();

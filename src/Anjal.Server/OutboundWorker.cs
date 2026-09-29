@@ -11,14 +11,18 @@ namespace Anjal.Server;
 /// </summary>
 public sealed class OutboundWorker
 {
+    // v1.0.0-rc.9 (DEF-068): quick early retries (greylisting usually clears in
+    // minutes), then every 6 hours, so a 5-day give-up time is used in full.
     private static readonly System.TimeSpan[] BackoffSchedule = new[]
     {
         System.TimeSpan.FromMinutes(1),
         System.TimeSpan.FromMinutes(5),
         System.TimeSpan.FromMinutes(15),
+        System.TimeSpan.FromMinutes(30),
         System.TimeSpan.FromHours(1),
+        System.TimeSpan.FromHours(2),
+        System.TimeSpan.FromHours(4),
         System.TimeSpan.FromHours(6),
-        System.TimeSpan.FromHours(24),
     };
 
     private readonly Anjal.Store.IMessageStore store;

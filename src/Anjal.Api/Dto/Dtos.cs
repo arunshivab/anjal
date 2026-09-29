@@ -117,7 +117,8 @@ public sealed class OutboundRequest
 
     /// <summary>
     /// Optional override for the give-up deadline in hours from now.
-    /// Default is 24. Useful for less-time-sensitive messages.
+    /// Default is 120 (5 days, RFC 5321 4.5.4.1; v1.0.0-rc.9). A shorter time
+    /// suits time-sensitive notices.
     /// </summary>
     public int GiveUpHours { get; set; }
 }

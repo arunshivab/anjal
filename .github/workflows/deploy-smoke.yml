@@ -239,6 +239,32 @@ jobs:
           api -X POST -d '' http://127.0.0.1:8025/api/evidence/verify | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["intact"], d; print("chain intact")'
           echo "evidence $id: kept exactly as sent, read-only, hash verified, audited"
 
+      - name: Standards conformance under the real units (rc.9, ANJAL-TST-12)
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import smtplib, re
+          with smtplib.SMTP("127.0.0.1", 25, timeout=30) as s:
+              code, ehlo = s.ehlo("ci.anjal-ci.invalid")
+              kw = ehlo.decode().upper()
+              assert "PIPELINING" in kw and "ENHANCEDSTATUSCODES" in kw, kw
+              checks = [("EXPN staff", "502"), ("MAIL FROM:<ci@anjal-ci.invalid> FOO=BAR", "555"), ("MAIL FROM:<ci@anjal-ci.invalid> SMTPUTF8", "555"),
+                        ("MAIL FROM:<ci@anjal-ci.invalid>", "250"), ("RCPT TO:<ci@anjal.co.in> NOTIFY=NEVER", "555"), ("RCPT TO:<ci@anjal.co.in>", "250"),
+                        ("RSET", "250"), ("NOOP", "250"), ("FROBNICATE", "500")]
+              for cmd, want in checks:
+                  code, text = s.docmd(cmd)
+                  line = f"{code} {text.decode()}"
+                  assert line.startswith(want), (cmd, line)
+                  assert re.match(r"^[245]\d\d [245]\.\d{1,3}\.\d{1,3}\b", line), ("no enhanced status code", cmd, line)
+                  print(f"{cmd:45} {line}")
+          EOF
+          # Final delivery added Return-Path to the stored copy of the evidence step's message (DEF-069);
+          # the evidence step already proved that the evidence itself is exactly as sent.
+          f=$(sudo grep -rl "rc8-evidence@anjal-ci.invalid" /var/mail/anjal | head -1)
+          first=$(sudo head -1 "$f" | tr -d '\r')
+          echo "stored copy begins: $first"
+          test "$first" = "Return-Path: <ci@anjal-ci.invalid>"
+
       - name: A backup under its real unit - refused until configured, verified, never leaves the dump
         run: |
           set -euo pipefail
