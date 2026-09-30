@@ -10,6 +10,17 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**Runbook update after v1.0.0-rc.9.1** (documentation only; production
+stays on rc.9.1). Section 12, the restore drill, brought up to date with
+what the backup now holds: the production record and a manual backup are
+taken together at a quiet moment; the proofs add the evidence (records,
+files read-only, manifest chain verified), greylisting memory (kept in the
+database since rc.7, so it comes back) and the settings snapshot, and run
+in an order where nothing on the drill machine can create mail before the
+counts are compared; results go on a drill record form (ANJAL-OPS-02).
+Section 12a corrected (host firewall since 27 Sep, 300 s idle timeout)
+and extended (evidence, DNS authentication, postmaster@ and abuse@).
+
 **v1.0.0-rc.9.1** (29 September 2026) - hotfix: SPF counted DNS lookups wrongly
 (DEF-081). Every include was counted twice, so a sender publishing five
 includes - the structure Microsoft 365 uses - reached 11 and got a PermError

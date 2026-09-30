@@ -1055,45 +1055,82 @@ again). Before rc.7 the greylisting file was not backed up either.
 
 A backup nobody has restored is a hope, not a backup. The drill answers
 one question: **if this server were lost tonight, could Anjal be rebuilt,
-with all its mail, from what survives?** In a disaster only three things
-survive, and the drill uses only those:
+with all its mail and its evidence, from what survives?** In a disaster
+only three things survive, and the drill uses only those:
 
-1. the encrypted backup in the bucket (database, mail, certificates);
+1. the encrypted backup in the bucket (database, mail, evidence and its
+   manifest chain, certificates, the settings snapshot, greylisting memory);
 2. the **paper custody forms** (database password, admin token, KEK, the
    two backup encryption passwords, the backup account);
 3. the release on GitHub and this runbook.
 
-Nothing is copied from the production server. Typing the secrets from
-paper takes about 15 minutes of a two-to-three-hour rebuild; the time
-goes on building the machine and moving the data.
+Nothing is copied from the production server.
 
 **When:** a few days after section 11, so several nightly backups exist;
-after any change to `backup.sh` or `restore.sh`; before go-live; and at
-least twice a year.
+after any change to `backup.sh` or `restore.sh`; after a release that adds
+something to the backup (rc.7 settings and greylisting, rc.8 evidence);
+before go-live; and at least twice a year.
+
+**Why it takes hours, not minutes.** The nightly backup already checks
+every file by checksum (`verify ok`): that proves the *copy* is intact. It
+does not prove that a server can be *rebuilt* from it, which is what a
+disaster needs - so the drill builds one from nothing:
+
+| Step | Time |
+| --- | --- |
+| 12.1 record production, run a backup | 10 min |
+| 12.2 create the drill node, sections 1-3 | 60-90 min |
+| 12.3 secrets from paper, drill key, isolation | 20 min |
+| 12.4 restore and the six proofs | 30-40 min |
+| 12.5 record, destroy | 15 min |
+
+Plan for **two to three hours**, in one sitting: the node holds a full
+copy of the mail until it is destroyed.
 
 **What it proves:** the backup is complete and readable; the paper forms
-are complete and correct; the runbook rebuilds a server from nothing; and
-the KEK on paper unseals the restored DKIM key. It is also the check for
-what CI cannot see - E2E's own image, found only on a real VM.
+are complete and correct; the runbook rebuilds a server from nothing; the
+KEK on paper unseals the restored DKIM key; the **evidence** comes back
+complete, read-only and with its manifest chain intact; greylisting memory
+and the settings snapshot come back. It is also the check for what CI
+cannot see - E2E's own image, found only on a real VM.
+
+Write every result on the drill record form, **ANJAL-OPS-02 Restore Drill
+Record**, as you go; filled in, it is the drill report.
 
 ### 12.1 On production, before the drill
 
-Record what the restored copy must match, and check that nothing is
-waiting to be sent (both only read):
+Choose a quiet moment - the record and the backup must describe the same
+state. Record what the restored copy must match (all of these only read):
 
 ```
 vm$ date
-vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select t.slug, m.local_part||'@'||m.domain, f.name, count(x.id), count(x.id) filter (where x.seen), count(x.id) filter (where x.flagged) from tenants t join mailboxes m on m.tenant_id=t.id join folders f on f.mailbox_id=m.id left join messages x on x.folder_id=f.id group by 1,2,3 order by 1,2,3" | tee ~/drill-counts-production.txt | sha256sum | cut -c1-16
-vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from outbound_messages where status in (0,1)"
-vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/ | tail -1
-vm$ sudo journalctl -u anjal-backup --since "-1day" --no-pager | grep -E "verify ok|done"
 vm$ curl -s http://127.0.0.1:8025/healthz | jq -r .version
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select t.slug, m.local_part||'@'||m.domain, f.name, count(x.id), count(x.id) filter (where x.seen), count(x.id) filter (where x.flagged) from tenants t join mailboxes m on m.tenant_id=t.id join folders f on f.mailbox_id=m.id left join messages x on x.folder_id=f.id group by 1,2,3 order by 1,2,3" | tee ~/drill-counts-production.txt | sha256sum | cut -c1-16
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select direction, outcome, reconstructed, count(*) from evidence group by 1,2,3 order by 1,2,3" | tee ~/drill-evidence-production.txt | sha256sum | cut -c1-16
+vm$ sudo find /var/lib/anjal/evidence -name '*.eml' | wc -l
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*), max(day) from evidence_manifests"
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from greylist_entries"
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from outbound_messages where status in (0,1)"
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/verify | jq '{intact, manifests, problems}'; unset TOKEN
 ```
 
-Keep the counts file and its 16-character hash; note the newest dump's
-name and the release version. **Then run a backup by hand**
-(`sudo systemctl start anjal-backup`) so the counts and the newest dump
-describe the same moment - mail arriving between them changes the counts.
+Write on the form: the release, the two 16-character hashes, the number
+of evidence files, the manifests (count and newest day), the greylisting
+count, the queue (it should be 0) and the chain result (`intact: true`).
+**Then, straight away, run a backup by hand** and check it finished and
+that no mail arrived in between:
+
+```
+vm$ T0=$(date '+%Y-%m-%d %H:%M:%S'); sudo systemctl start anjal-backup
+vm$ sudo journalctl -u anjal-backup --since "$T0" --no-pager | grep -E "verify ok|done"
+vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/ | tail -1      # the dump the drill will use
+vm$ sudo journalctl -u anjal-server --since "$T0" --no-pager | grep -c "Delivered"        # must be 0
+```
+
+If anything was delivered after the record, repeat 12.1: the evidence
+files are copied after the database dump, so a message arriving between
+them would leave a file without its record.
 
 ### 12.2 A drill machine that cannot touch the world
 
@@ -1147,12 +1184,13 @@ followed by the `read ... KID/AKEY`, `rclone obscure`, `tee`, `chown`,
 
 ### 12.4 Restore, and prove it
 
-With the services stopped (as section 3 leaves them), restore the files
-first and then the newest database dump:
+With the services stopped (as section 3 leaves them), restore - files
+first, then the newest database dump, then the evidence (read-only again),
+the settings snapshot and the greylisting memory:
 
 ```
 vm$ sudo /opt/anjal/bin/restore.sh
-vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/ | tail -1      # the dump it used
+vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/ | tail -1      # must be the dump noted in 12.1
 ```
 
 **Isolation must also be written into the restored database.** From rc.7
@@ -1179,30 +1217,10 @@ SQL
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select scope, key, value from settings where updated_by = 'drill' order by 1, 2"
 ```
 
-After the services start (below), **check** before anything else:
-`sudo ss -tlnp | grep -E ':(25|465|587|80|443|8080) '` shows nothing but
-`127.0.0.1`, and the server's log has `Outbound worker started (mode=relay, ...`.
-If either is wrong, stop both services at once.
+**Proofs 1 and 2 come before the services start**, while nothing on the
+drill machine can have created mail or evidence.
 
-Start the capture program - it holds every outgoing message on this
-machine - then the services:
-
-```
-vm$ sudo apt install -y python3-aiosmtpd python3-dkim
-vm$ nohup python3 -m aiosmtpd -n -l 127.0.0.1:2525 -c aiosmtpd.handlers.Mailbox ~/drill-capture >/dev/null 2>&1 &
-vm$ sudo systemctl start anjal-server anjal-webmail
-vm$ sleep 10; systemctl is-active anjal-server anjal-webmail; curl -s http://127.0.0.1:8025/healthz | jq '{status, version}'
-vm$ sudo journalctl -u anjal-server --since "-2min" --no-pager | grep -E "Outbound worker started|Outbound disabled|STARTTLS"
-```
-
-Let the capture program create `~/drill-capture` itself: a folder made
-beforehand makes it refuse every message, and each refusal would put a
-bounce notice into the restored mailbox (measured while writing this
-section). **Check:** `active` twice; the release version recorded in
-12.1; `Outbound worker started (mode=relay, ...)`.
-
-**1. The counts match** - the same query as 12.1, before anything else
-touches the mailbox:
+**1. The mailbox counts match** - the same query as 12.1:
 
 ```
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select t.slug, m.local_part||'@'||m.domain, f.name, count(x.id), count(x.id) filter (where x.seen), count(x.id) filter (where x.flagged) from tenants t join mailboxes m on m.tenant_id=t.id join folders f on f.mailbox_id=m.id left join messages x on x.folder_id=f.id group by 1,2,3 order by 1,2,3" | tee ~/drill-counts-restored.txt | sha256sum | cut -c1-16
@@ -1212,18 +1230,82 @@ The hash must equal production's from 12.1. If not, compare the two
 files line by line: each line is tenant, mailbox, folder, messages, read,
 flagged.
 
-**2. The mail is readable.** From the laptop, open a tunnel and sign in
+**2a. The evidence came back, complete and read-only** (v1.0.0-rc.8):
+
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select direction, outcome, reconstructed, count(*) from evidence group by 1,2,3 order by 1,2,3" | tee ~/drill-evidence-restored.txt | sha256sum | cut -c1-16
+vm$ sudo find /var/lib/anjal/evidence -name '*.eml' | wc -l
+vm$ sudo find /var/lib/anjal/evidence -name '*.eml' ! -perm 440 | wc -l                  # must be 0
+vm$ sudo find /var/lib/anjal/evidence -name '*.eml' ! -user anjal | wc -l                # must be 0
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*), max(day) from evidence_manifests"
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from greylist_entries"
+```
+
+**Check:** the evidence hash, the number of files, the manifests and the
+greylisting count all equal the 12.1 record; no file is writable or
+owned by anyone but `anjal`.
+
+Start the capture program - it holds every outgoing message on this
+machine - then the services:
+
+```
+vm$ sudo apt install -y python3-aiosmtpd python3-dkim
+vm$ nohup python3 -m aiosmtpd -n -l 127.0.0.1:2525 -c aiosmtpd.handlers.Mailbox ~/drill-capture >/dev/null 2>&1 &
+vm$ sudo systemctl start anjal-server anjal-webmail
+vm$ sleep 10; systemctl is-active anjal-server anjal-webmail; curl -s http://127.0.0.1:8025/healthz | jq '{status, version}'
+vm$ sudo journalctl -u anjal-server --since "-2min" --no-pager | grep -E "Outbound worker started|Outbound disabled|STARTTLS|Greylist: .* remembered|Evidence: originals kept"
+vm$ sudo ss -tlnp | grep -E ':(25|465|587|80|443|8080) '
+```
+
+Let the capture program create `~/drill-capture` itself: a folder made
+beforehand makes it refuse every message, and each refusal would put a
+bounce notice into the restored mailbox (measured on 26 September).
+**Check:** `active` twice; the release version recorded in 12.1;
+`Outbound worker started (mode=relay, ...)`; every listening address is
+`127.0.0.1`; and `Greylist: N sender(s) remembered from the database`
+with N equal to 12.1's greylisting count - since rc.7 that memory is kept
+in the database, so it comes back. **If the outbound mode is not relay, or
+any port listens on another address, stop both services at once.**
+
+**2b. The manifest chain and every evidence file verify:**
+
+```
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/verify | jq '{intact, manifests, problems}'; unset TOKEN
+```
+
+**Check:** `intact: true`, `problems: []`. Each file is re-hashed and
+compared with its database record and its manifest, so a pass proves the
+restored originals are byte for byte the ones kept in production. A
+problem naming a file **without a record** ("orphan") means mail arrived
+between the dump and the evidence copy - compare with the 12.1 record; a
+file **missing or altered** is a real failure.
+
+**3. The settings snapshot came back** (for a recovery with the database
+lost):
+
+```
+vm$ sudo ls -l /var/lib/anjal/restored-settings/
+```
+
+**Check:** copies of `server.env` and `webmail.env` with the secrets
+removed.
+
+**4. The mail is readable.** From the laptop, open a tunnel and sign in
 with the real mailbox password:
 
 ```
 pc> ssh -i $env:USERPROFILE\.ssh\anjal_e2e -L 8080:127.0.0.1:8080 arun@<drill-ip>
 ```
 
-Browse to `http://127.0.0.1:8080/`. Open messages from each folder -
-the first Gmail message, the Outlook one, the mail-tester report, the
-Sent items - and check their read and flagged state.
+Browse to `http://127.0.0.1:8080/`. Open messages from each folder - the
+first Gmail message, the Outlook one, the mail-tester report, the Sent
+items - and check their read and flagged state; on a message received
+since rc.8, **This message** says "Original kept exactly as received" with
+the same fingerprint as in production. Sign in as `ops@anjal.co.in` too:
+its password is on the custody form.
 
-**3. The KEK from paper unseals the DKIM key.** In the drill webmail,
+**5. The KEK from paper unseals the DKIM key.** In the drill webmail,
 compose a short message to `drill-check@example.com` and send it. The
 server signs it with the restored key and hands it to the capture
 program; nothing leaves the machine. Then:
@@ -1236,28 +1318,27 @@ vm$ dkimverify < "$(ls -t ~/drill-capture/new/* | head -1)"
 **Check:** `signature ok`. The key is looked up in public DNS
 (`default._domainkey.anjal.co.in`), so a pass proves that the key sealed
 in the backup, unsealed with the KEK typed from paper, is the domain's
-real key. The whole chain - relay to a capture program, signing,
-independent verification - was run and passed on 26 September while
-writing this section.
+real key. (This send creates new evidence on the drill machine - that is
+why the counts were taken first.)
 
-**4. The certificates came back:**
+**6. The certificates came back:**
 
 ```
 vm$ sudo openssl x509 -in /var/lib/anjal/acme/fullchain.pem -noout -subject -enddate
 ```
 
-Expected not to come back, by design: webmail sessions (sign in again)
-and the greylisting memory (senders greylisted once more).
+Expected not to come back, by design: webmail sessions (sign in again).
 
 ### 12.5 Record, and destroy
 
-Write down the times, the two hashes, the dump used, the release, and
-anything that failed or differed from this section. Then **destroy the
-drill node and release its reserved IP** - it holds a full copy of the
-mail and the certificate's private key - and **delete the drill key** in
-the backup account.
-
----
+Complete the drill record form: the times, the release, every hash and
+count from 12.1 and 12.4 side by side, the dump used, and anything that
+failed or differed from this section. Then **destroy the drill node and
+release its reserved IP** - it holds a full copy of the mail, the evidence
+and the certificate's private key - **delete the drill key** in the backup
+account, and delete the `anjal-drill` security group if it is not kept
+for the next drill. The filled form is filed as ANJAL-OPS-02; anything
+that differed becomes a defect or a correction to this section.
 
 ## 12a. What protects what (for audits)
 
@@ -1266,20 +1347,23 @@ future you can see each one and where it lives.
 
 | Concern | Control | Where |
 | --- | --- | --- |
-| Network exposure | E2E Security Group only (no host firewall, per E2E's advice); only 22, 25, 80, 443, 465, 587 open; internal services bound to 127.0.0.1 and measured with `ss -tlnp` | sections 1a, 1c |
+| Network exposure | E2E Security Group (only 22, 25, 80, 443, 465, 587 and UDP 443 open) and, since 27 Sep 2026, a host firewall: outbound mail ports only for Anjal, an outbound allowlist and a port-ownership check every 5 minutes (incident ANJAL-INC-01); internal services bound to 127.0.0.1 and measured with `ss -tlnp` | sections 1a, 1c, 13f |
 | Administrative access | Named account per person with sudo; root SSH login, passwords, keyboard-interactive, GSSAPI and X11 off; fail2ban; port 22 to move behind WireGuard before real mail | section 1b, `01-anjal-hardening.conf` |
 | Software updates | unattended-upgrades for Ubuntu security and the PostgreSQL repository | sections 1, 2 |
 | Admin API | Loopback only, bearer token required, refuses to start otherwise; reached over SSH | `server.env`, section 13 |
 | Password storage | PBKDF2-HMAC-SHA256, 600,000 rounds, upgraded on sign-in | application |
 | Brute force | SMTP AUTH: 3 per session, 10 per address per 15 min. Webmail: 5 per address+account, 50 per account | application |
-| Connection floods | 120 s idle timeout, 15 min session limit, 200 connections, 10 per address | `server.env` |
+| Connection floods | 300 s idle timeout (RFC 5321; 120 s until rc.9), 15 min session limit, 200 connections, 10 per address; greylisting of first-time senders that do not pass SPF | settings (13e) |
 | DKIM private keys | AES-256-GCM in the database under `ANJAL_KEK`, which lives only in `server.env` and on the handwritten custody forms | section 4 |
 | Everything else at rest | Mail, database, and certificates on the VM's disk, which E2E encrypts at rest (chosen when the node was created, no passphrase so it boots unattended) | section 0 |
 | Outgoing encryption | Never unencrypted (owner's decision, 27 Sep 2026): a message that cannot be encrypted is held, retried and finally returned to its sender. Offered, most preferred first: TLS 1.3, ECDHE, DHE and static RSA with AES-GCM (the last two added for servers such as rediffmail.com's, DEF-064); never 3DES, RC4, CBC, NULL or export. Every sent message logs the TLS version and cipher | section 13d |
 | Incoming encryption | Every message from outside records whether it arrived encrypted and with which cipher (`Received:` header and database); unencrypted mail shows a red open lock until the recipient trusts the sender, or a tenant may file it in its own folder | section 13e |
 | Settings | Non-secret settings in the database (in every dump) and a secrets-removed copy of the env files in every backup; secrets only in `/etc/anjal` and on paper; every change through the API audited | sections 11, 13e |
 | Backups | Nightly, encrypted on the server by rclone crypt before upload, verified by checksum (`cryptcheck`) every run; bucket private, key limited to that bucket, deleted files recoverable for 30 days; encryption passwords proven on three paper copies | section 11 |
-| Restore | Proven by a drill on a separate machine using only the backup, the paper forms and the release; isolated so it cannot send, receive or request certificates | section 12 |
+| Evidence | The original of every message kept byte for byte (incoming as received, outgoing as sent), SHA-256 each, a daily manifest chain; files read-only; a message is not accepted or sent unless its original is kept; backed up append-only; deletion only by the retention rule (3 years after the last copy is deleted) | sections 11, 13g; ANJAL-DES-08 |
+| Mail authentication (DNS) | SPF `-all` for the domain and for the server's own name; DKIM 2048-bit; DMARC `p=reject` with strict alignment; CAA allowing only Let's Encrypt; TLS reporting to postmaster@; MTA-STS to follow (rc.10); anjalmail.com: null MX, SPF `-all`, DMARC reject | ANJAL-OPS-11 section 11; ANJAL-TST-13 |
+| Abuse and postmaster | postmaster@ and abuse@ accepted for every domain (RFC 5321, RFC 2142), delivered to the role mailbox ops@anjal.co.in | section 13h; ANJAL-OPS-13 |
+| Restore | Proven by a drill on a separate machine using only the backup, the paper forms and the release; isolated so it cannot send, receive or request certificates; proves mail, evidence and its manifest chain, the DKIM key, certificates, settings and greylisting memory | section 12; ANJAL-OPS-02 |
 | Data residency | **Patient data stays in India** (owner's decision, 26 Sep 2026). The server is in E2E's Chennai region. Backblaze B2 (EU Central) holds only encrypted backups of test and operator mail; **before HIS goes live or any mail naming a patient reaches Anjal, whichever is first, backups move to Indian storage (E2E EOS planned) and the Backblaze bucket is deleted** | section 11 |
 | Backup immutability | Object Lock **off** (decision of 26 Sep 2026): it would stop the script pruning dumps older than 30 days, and the 30-day version history covers mistakes. It does not stop a determined attacker holding the key; to be revisited before go-live | section 11.2 |
 | Changes | Every admin API change and webmail sign-in/password change is recorded in `audit_events`, which the database itself makes append-only | section 13 |
@@ -1538,7 +1622,7 @@ vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh remove      # take it off complet
 Refusals are in the kernel log: `sudo journalctl -k | grep anjal-egress`. A
 port-check alert is in `journalctl -u anjal-portcheck` and marks that unit failed.
 
-## 13g. Evidence store (from rc.8, ANJAL-DES-01)
+## 13g. Evidence store (from rc.8, ANJAL-DES-08 - formerly numbered DES-01)
 
 The original of every message is kept in `/var/lib/anjal/evidence`: incoming
 exactly as received, outgoing exactly as sent (after DKIM signing), each with
