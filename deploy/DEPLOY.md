@@ -1581,6 +1581,13 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.9.2 to rc.10**: the usual steps (backup first). No schema change. After
+the install: the start-up log has a new `Postmaster:` line saying where
+postmaster@ and abuse@ at the server's own name go; the Let's Encrypt contact
+can now be changed (ANJAL_ACME_EMAIL, both scopes - the existing account is
+updated at the next certificate issue: the renewal, or the forced issue of
+section 13i step 2, so set it before that step); MTA-STS stays off until 13i.
+
 **rc.9.1 to rc.9.2**: the usual steps only (backup first). No schema change,
 no setting to change.
 
@@ -1755,6 +1762,52 @@ Things to watch in the first weeks:
   release.
 - Disk: `df -h /var/mail` monthly. The 2 GB default quota per mailbox
   bounds it.
+
+## 13i. MTA-STS (from rc.10)
+
+MTA-STS (RFC 8461) tells other servers to deliver mail to this domain only
+encrypted, to the listed MX, with a valid certificate. Anjal serves the policy
+itself - built from its settings, never a hand-written file (decision D-63).
+The order matters: the policy must be served correctly before any sender is
+told to look for it.
+
+1. **DNS:** an A record `mta-sts` pointing at the server's address (the same
+   as `mail`). Check: `dig +short A mta-sts.anjal.co.in @1.1.1.1`.
+2. **Certificate:** add the name to the certificate - the setting is stored in
+   the database (13e), in both processes:
+
+```
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ for scope in server webmail; do curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"value":"mail.anjal.co.in,mta-sts.anjal.co.in"}' http://127.0.0.1:8025/api/settings/$scope/ANJAL_ACME_DOMAINS | jq -c '{scope, key, value}'; done
+vm$ for scope in server webmail; do curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"value":"ops@anjal.co.in"}' http://127.0.0.1:8025/api/settings/$scope/ANJAL_ACME_EMAIL | jq -c '{scope, key, value}'; done
+vm$ curl -s -X PUT -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"value":"testing"}' http://127.0.0.1:8025/api/settings/webmail/ANJAL_MTA_STS_MODE | jq -c '{scope, key, value}'; unset TOKEN
+vm$ sudo systemctl restart anjal-webmail anjal-server
+vm$ sudo -u anjal /opt/anjal/server/Anjal.Server --acme-renew-now
+```
+
+   **Check** after a minute: `sudo journalctl -u anjal-webmail --since "-5min" | grep -E "ACME|MTA-STS"`
+   shows `ACME account: contact set to ops@anjal.co.in` (the contact change,
+   once), the certificate issued, and `MTA-STS: testing (mx mail.anjal.co.in, max_age 86400) at https://mta-sts.anjal.co.in/.well-known/mta-sts.txt`.
+3. **Fetch it from outside**, exactly as a sending server does:
+
+```
+pc> curl.exe -s https://mta-sts.anjal.co.in/.well-known/mta-sts.txt
+```
+
+   **Check:** four lines - `version: STSv1`, `mode: testing`,
+   `mx: mail.anjal.co.in`, `max_age: 86400` - and no certificate warning.
+4. **Only now, DNS:** TXT `_mta-sts` with `v=STSv1; id=20261002T000000`
+   (any new id each time the policy changes; a date is easiest).
+5. **One week in testing** (owner, 1 Oct 2026): the daily TLS reports arrive
+   at postmaster@ (ops@). Enforce only when they show successful encrypted
+   deliveries; with no reports, extend the week rather than enforce blind.
+6. **Enforce:** set `ANJAL_MTA_STS_MODE` to `enforce` (webmail scope; the
+   max_age becomes a week), restart the webmail, fetch again (step 3), then
+   change the TXT record's `id`.
+
+To withdraw: set the mode to `none` for at least one max_age before removing
+the TXT record and the policy; removing them abruptly leaves senders holding a
+cached policy. anjalmail.com needs none - it receives no mail (null MX).
 
 ## 14. When something is wrong
 

@@ -205,7 +205,42 @@ public sealed class AcmeClient : IDisposable
         }
         this.AccountUrl = headers.Location ?? throw new AcmeException("newAccount response had no Location header.");
         this.log?.Invoke($"ACME account: {this.AccountUrl}");
+        // v1.0.0-rc.10: an existing account keeps the contact it was created with;
+        // a changed ANJAL_ACME_EMAIL reaches it only through an update (RFC 8555 7.3.2).
+        if (contactEmail.Length > 0 && !string.Equals(FirstContact(body), "mailto:" + contactEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            string update = "{\"contact\":[\"mailto:" + contactEmail + "\"]}";
+            (HttpStatusCode updated, string updateBody, _) = await this.PostAsync(this.AccountUrl, update, useJwk: false, ct).ConfigureAwait(false);
+            if (updated != HttpStatusCode.OK)
+            {
+                throw Problem("account update", updated, updateBody);
+            }
+            this.log?.Invoke($"ACME account: contact set to {contactEmail}");
+        }
         return this.AccountUrl;
+    }
+
+    // The first contact URL in an account object, or null.
+    private static string? FirstContact(string accountJson)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(accountJson);
+            if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("contact", out System.Text.Json.JsonElement contact)
+                && contact.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (System.Text.Json.JsonElement c in contact.EnumerateArray())
+                {
+                    return c.GetString();
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // An account object that cannot be read is treated as having no contact.
+        }
+        return null;
     }
 
     /// <summary>Create an order for the given DNS names.</summary>

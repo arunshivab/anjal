@@ -93,7 +93,9 @@ public static class Program
             Acme = acme,
             StaticCertPath = Environment.GetEnvironmentVariable("ANJAL_TLS_CERT_PATH"),
             StaticKeyPath = Environment.GetEnvironmentVariable("ANJAL_TLS_KEY_PATH"),
+            MtaSts = MtaStsPolicy.FromEnvironment(hostname, out string mtaStsNote),
         };
+        Console.WriteLine(mtaStsNote);
 
         WebApplication app = CreateApp(args ?? Array.Empty<string>(), store, new MaildirStore(maildirRoot, hostname), hostname, $"http://{bind}:{port}", tls);
         Console.WriteLine($"Anjal webmail listening on http://{bind}:{port}/" + (httpsPort > 0 ? $" and https://{bind}:{httpsPort}/" : string.Empty));
@@ -108,6 +110,9 @@ public static class Program
     }
 
     /// <summary>TLS-related settings for <see cref="CreateApp(string[], IMessageStore, IMaildirStore, string, string, TlsSettings?)"/>.</summary>
+    // Set once the evidence line has been written (v1.0.0-rc.10).
+    private static int evidenceNoteWritten;
+
     public sealed class TlsSettings
     {
         /// <summary>HTTPS port; 0 disables HTTPS.</summary>
@@ -124,6 +129,9 @@ public static class Program
 
         /// <summary>Whether HTTPS is requested.</summary>
         public bool HttpsEnabled => this.HttpsPort > 0;
+
+        /// <summary>The MTA-STS policy served over HTTPS (v1.0.0-rc.10), or null when off.</summary>
+        public MtaStsPolicy? MtaSts { get; init; }
     }
 
     /// <summary>
@@ -255,9 +263,13 @@ public static class Program
         Anjal.Mailbox.EvidenceRecorder? evidence = store is IEvidenceStore evidenceStore && Directory.Exists(evidenceRoot)
             ? new Anjal.Mailbox.EvidenceRecorder(evidenceStore, new Anjal.Mailbox.EvidenceVault(evidenceRoot))
             : null;
-        Console.WriteLine(evidence is null
-            ? $"Evidence: not kept for webmail sends (no folder at {evidenceRoot})."
-            : $"Evidence: originals of webmail sends kept in {evidenceRoot}; a message is not sent unless its original is kept.");
+        // v1.0.0-rc.10 (D-75): once per process - tests build the app many times.
+        if (System.Threading.Interlocked.Exchange(ref evidenceNoteWritten, 1) == 0)
+        {
+            Console.WriteLine(evidence is null
+                ? $"Evidence: not kept for webmail sends (no folder at {evidenceRoot})."
+                : $"Evidence: originals of webmail sends kept in {evidenceRoot}; a message is not sent unless its original is kept.");
+        }
         builder.Services.AddSingleton(new MailboxService(mailboxStore, store, maildir, hostName) { Evidence = evidence });
         builder.Services.AddSingleton(new WebmailAuthService(mailboxStore));
         builder.Services.AddSingleton(new HostInfo(hostName));
@@ -374,6 +386,25 @@ public static class Program
                 await next().ConfigureAwait(false);
             });
         }
+
+        // v1.0.0-rc.10 (D-63): the MTA-STS policy, over HTTPS, for mta-sts.<domain>
+        // only, never redirected (RFC 8461); 404 everywhere else and when off.
+        MtaStsPolicy? mtaSts = tls?.MtaSts;
+        app.Use(async (http, next) =>
+        {
+            if (string.Equals(http.Request.Path.Value, MtaStsPolicy.PolicyPath, StringComparison.Ordinal))
+            {
+                if (mtaSts is not null && http.Request.IsHttps && mtaSts.Serves(http.Request.Host.Host))
+                {
+                    http.Response.ContentType = "text/plain";
+                    await http.Response.WriteAsync(mtaSts.Text()).ConfigureAwait(false);
+                    return;
+                }
+                http.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+            await next(http).ConfigureAwait(false);
+        });
 
         // A form rendered before the session cookie was re-issued (a theme
         // change, a re-sign-in in another tab) carries an antiforgery token

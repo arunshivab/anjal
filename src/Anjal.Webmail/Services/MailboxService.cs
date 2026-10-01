@@ -330,8 +330,16 @@ public sealed partial class MailboxService
             bodyHtml = HtmlSanitizer.FromPlainText(textPart.GetBodyAsText());
             isHtml = false;
         }
+        else if (parsed is not null)
+        {
+            // v1.0.0-rc.10 (DEF-079): a well-formed message with no text part - a
+            // DMARC report is a single zip - says so; its attachments are listed.
+            bodyHtml = HtmlSanitizer.FromPlainText(attachments.Count > 0 ? NoTextNotice : NoContentNotice);
+            isHtml = false;
+        }
         else
         {
+            // Only a message that cannot be parsed at all is shown as raw text.
             bodyHtml = HtmlSanitizer.FromPlainText(Encoding.UTF8.GetString(raw));
             isHtml = false;
         }
@@ -955,6 +963,12 @@ public sealed partial class MailboxService
         string? raw = parsed?.Headers.Get(name);
         return raw is null ? EncodedWordDecoder.Decode(fallback) : EncodedWordDecoder.Decode(raw);
     }
+
+    /// <summary>Shown for a message whose content is only attachments (v1.0.0-rc.10).</summary>
+    public const string NoTextNotice = "This message has no text. Its content is in the attachment(s) listed alongside.";
+
+    /// <summary>Shown for a message with neither text nor attachments (v1.0.0-rc.10).</summary>
+    public const string NoContentNotice = "This message has no text and no attachments.";
 
     private static MimeMessage? TryParse(byte[] raw)
     {
