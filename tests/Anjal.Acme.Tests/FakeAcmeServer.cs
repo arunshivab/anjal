@@ -21,6 +21,7 @@ internal sealed class FakeAcmeServer : IDisposable
     private readonly CancellationTokenSource cts = new();
     private readonly ConcurrentDictionary<string, byte> nonces = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, string> accounts = new(StringComparer.Ordinal); // kid -> jwk json
+    private readonly ConcurrentDictionary<string, string> contacts = new(StringComparer.Ordinal); // kid -> contact URL
     private readonly ConcurrentDictionary<string, Order> orders = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Authz> authzs = new(StringComparer.Ordinal);
     private readonly X509Certificate2 root;
@@ -49,6 +50,13 @@ internal sealed class FakeAcmeServer : IDisposable
 
     /// <summary>Set to make challenge validation fail regardless of the token served.</summary>
     public bool FailValidation { get; set; }
+
+    /// <summary>Number of account updates (v1.0.0-rc.10).</summary>
+    public int AccountUpdates { get; private set; }
+
+    /// <summary>The contact stored for an account, or null.</summary>
+    /// <param name="accountUrl">The account URL.</param>
+    public string? ContactOf(string accountUrl) => this.contacts.TryGetValue(accountUrl, out string? c) ? c : null;
 
     /// <summary>Number of newAccount calls (to check the client re-uses the account).</summary>
     public int NewAccountCalls { get; private set; }
@@ -223,8 +231,30 @@ internal sealed class FakeAcmeServer : IDisposable
             string accountUrl = this.BaseUrl + "/acct/" + k.Thumbprint;
             bool existed = this.accounts.ContainsKey(accountUrl);
             this.accounts[accountUrl] = NormalizeJwk(jwkJson);
+            // As Let's Encrypt: a new account takes the contact it is created with;
+            // an existing one is returned unchanged.
+            if (!existed && FirstContact(payload) is string created)
+            {
+                this.contacts[accountUrl] = created;
+            }
             ctx.Response.Headers["Location"] = accountUrl;
-            Json(ctx, existed ? 200 : 201, "{\"status\":\"valid\"}");
+            Json(ctx, existed ? 200 : 201, this.AccountJson(accountUrl));
+            return;
+        }
+        if (path.StartsWith("/acct/", StringComparison.Ordinal))
+        {
+            string accountUrl = this.BaseUrl + path;
+            if (!string.Equals(kid, accountUrl, StringComparison.Ordinal))
+            {
+                Problem(ctx, 401, "urn:ietf:params:acme:error:unauthorized", "kid does not match the account");
+                return;
+            }
+            if (FirstContact(payload) is string updated)
+            {
+                this.contacts[accountUrl] = updated;
+                this.AccountUpdates++;
+            }
+            Json(ctx, 200, this.AccountJson(accountUrl));
             return;
         }
         if (path == "/new-order")
@@ -372,6 +402,27 @@ internal sealed class FakeAcmeServer : IDisposable
     {
         string error = a.Status == "invalid" ? ",\"error\":{\"type\":\"urn:ietf:params:acme:error:unauthorized\",\"detail\":\"" + a.Error.Replace("\"", "'", StringComparison.Ordinal) + "\"}" : string.Empty;
         return "{\"type\":\"http-01\",\"url\":\"" + this.BaseUrl + "/chall/" + a.Id + "\",\"token\":\"" + a.Token + "\",\"status\":\"" + a.Status + "\"" + error + "}";
+    }
+
+    private string AccountJson(string accountUrl) => this.contacts.TryGetValue(accountUrl, out string? c)
+        ? "{\"status\":\"valid\",\"contact\":[\"" + c + "\"]}"
+        : "{\"status\":\"valid\"}";
+
+    private static string? FirstContact(string json)
+    {
+        if (json.Length == 0)
+        {
+            return null;
+        }
+        using JsonDocument doc = JsonDocument.Parse(json);
+        if (doc.RootElement.TryGetProperty("contact", out JsonElement contact) && contact.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement c in contact.EnumerateArray())
+            {
+                return c.GetString();
+            }
+        }
+        return null;
     }
 
     private static void Json(HttpListenerContext ctx, int status, string json)

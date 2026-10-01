@@ -328,12 +328,14 @@ jobs:
           sudo install -d -o root -g anjal -m 750 /etc/anjal/ci-tls
           # Browsers reach the webmail by NAME over IPv4 (mail.anjal.co.in has an A
           # record only), so the check does too: a test name pointing at 127.0.0.1.
-          echo "127.0.0.1 anjal-h3.test" | sudo tee -a /etc/hosts >/dev/null
+          echo "127.0.0.1 anjal-h3.test mta-sts.anjal-h3.test" | sudo tee -a /etc/hosts >/dev/null
           sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 1 -subj "/CN=anjal-h3.test" \
             -addext "subjectAltName=DNS:anjal-h3.test,DNS:localhost,IP:127.0.0.1" -keyout /etc/anjal/ci-tls/key.pem -out /etc/anjal/ci-tls/cert.pem 2>/dev/null
           sudo chgrp anjal /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
           sudo chmod 640 /etc/anjal/ci-tls/key.pem /etc/anjal/ci-tls/cert.pem
           printf 'ANJAL_TLS_CERT_PATH=/etc/anjal/ci-tls/cert.pem\nANJAL_TLS_KEY_PATH=/etc/anjal/ci-tls/key.pem\n' | sudo tee -a /etc/anjal/webmail.env >/dev/null
+          # rc.10 (D-63): MTA-STS on, for the test domain, under the real unit.
+          printf 'ANJAL_MTA_STS_MODE=testing\nANJAL_MTA_STS_DOMAINS=anjal-h3.test\nANJAL_MTA_STS_MX=mail.anjal-h3.test\n' | sudo tee -a /etc/anjal/webmail.env >/dev/null
           sudo systemctl restart anjal-webmail
           sleep 8
           test "$(systemctl is-active anjal-webmail)" = active
@@ -352,6 +354,14 @@ jobs:
           hdr=$(curl -sk -o /dev/null -D - https://anjal-h3.test/sign-in)
           grep -i '^alt-svc' <<< "$hdr"
           grep -qi '^alt-svc: h3=":443"' <<< "$hdr"
+          # rc.10 (D-63): the policy, fetched as a sending server fetches it, exactly;
+          # another host gets 404; the start-up line says what is served.
+          printf 'version: STSv1\r\nmode: testing\r\nmx: mail.anjal-h3.test\r\nmax_age: 86400\r\n' > "$RUNNER_TEMP/sts-expected.txt"
+          curl -sk -o "$RUNNER_TEMP/sts.txt" -w '%{http_code} %{content_type}\n' https://mta-sts.anjal-h3.test/.well-known/mta-sts.txt | tee "$RUNNER_TEMP/sts-status.txt"
+          grep -q '^200 text/plain' "$RUNNER_TEMP/sts-status.txt"
+          cmp "$RUNNER_TEMP/sts.txt" "$RUNNER_TEMP/sts-expected.txt"
+          test "$(curl -sk -o /dev/null -w '%{http_code}' https://anjal-h3.test/.well-known/mta-sts.txt)" = 404
+          grep "MTA-STS: testing" "$RUNNER_TEMP/h3.log"
           # Which connections work: raw QUIC and HTTP/3, presenting a name or an
           # IP address. Each on a fresh client, every error printed in full.
           cat > "$RUNNER_TEMP/h3.cs" <<'EOF'

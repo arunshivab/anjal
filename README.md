@@ -10,6 +10,16 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.10** (2 October 2026) - the open defects and MTA-STS (ANJAL-SPEC-10).
+After Back, a page the browser restores from its back-forward cache reloads, so
+a message just read no longer shows as unread (DEF-078). A message whose content
+is only attachments - Google's DMARC reports are a single zip - says so instead
+of showing its raw headers (DEF-079). The start-up log says where postmaster@
+and abuse@ at the server's own name go (DEF-082). The webmail serves the
+MTA-STS policy for each hosted domain, built from settings, off until enabled
+(DEPLOY.md 13i). A changed ANJAL_ACME_EMAIL now reaches the existing Let's
+Encrypt account, at the next certificate issue (renewal or --acme-renew-now). Test output prints the evidence line once.
+
 **v1.0.0-rc.9.2** (1 October 2026) - hotfix from the first restore drill:
 restore.sh restores the database again (DEF-083, critical). It read
 /etc/anjal/server.env through bash, where the ';' in ANJAL_POSTGRES

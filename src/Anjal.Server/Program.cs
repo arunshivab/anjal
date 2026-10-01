@@ -144,6 +144,7 @@ public static class Program
             ServerHostName = hostname,
             OperatorPostmaster = string.IsNullOrWhiteSpace(operatorPostmaster) ? null : operatorPostmaster.Trim(),
         };
+        Log(mailboxSink.DescribeServerRoleAddresses());
 
         // v1.0.0-rc.8: the evidence store (ANJAL-DES-01) - the original of every
         // message as received or sent, fingerprinted, with a daily manifest chain.

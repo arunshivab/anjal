@@ -462,4 +462,13 @@
       }
     });
   }());
+
+  /* v1.0.0-rc.10 (DEF-078): a page the browser restores from its
+     back-forward cache shows what it showed when it was left - a message
+     just read would still look unread. Reload it instead. */
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted) {
+      window.location.reload();
+    }
+  });
 }());

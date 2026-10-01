@@ -167,6 +167,24 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         return local.Equals("postmaster", System.StringComparison.OrdinalIgnoreCase) || local.Equals("abuse", System.StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// One line for the start-up log: where postmaster@ and abuse@ at this
+    /// server's own name are delivered (v1.0.0-rc.10, DEF-082). Built from the
+    /// same rule the delivery uses, so the two cannot disagree.
+    /// </summary>
+    /// <returns>The sentence.</returns>
+    public string DescribeServerRoleAddresses()
+    {
+        if (string.IsNullOrEmpty(this.ServerHostName))
+        {
+            return "Postmaster: no server name set; postmaster@ and abuse@ go to each domain's designated mailbox.";
+        }
+        string host = this.ServerHostName;
+        return this.OperatorPostmaster is string op
+            ? $"Postmaster: postmaster@ and abuse@ at {host} go to {op} (ANJAL_POSTMASTER)."
+            : $"Postmaster: postmaster@ and abuse@ at {host} go to postmaster@{ParentDomain(host)} (the parent domain; ANJAL_POSTMASTER not set), then to that domain's designated mailbox.";
+    }
+
     private static string ParentDomain(string host)
     {
         int dot = host.IndexOf('.', System.StringComparison.Ordinal);
