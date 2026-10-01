@@ -81,10 +81,18 @@ if [ "$FILES_ONLY" = "1" ]; then
 fi
 
 # ---- 2. Database ----
-# Read ANJAL_POSTGRES from the server env file (this script runs as root).
-# shellcheck disable=SC1091
-set -a; . /etc/anjal/server.env; set +a
-IFS=';' read -ra PARTS <<< "${ANJAL_POSTGRES:?ANJAL_POSTGRES is not set in /etc/anjal/server.env}"
+# Read ANJAL_POSTGRES from the server env file (this script runs as root) as
+# text, the way systemd reads it (EnvironmentFile). The file is not a shell
+# script: run through bash, the ';' between the connection's parts separates
+# commands, ANJAL_POSTGRES became "Host=127.0.0.1" and psql connected as root
+# (DEF-083, found by the restore drill of 1 Oct 2026). One pair of
+# surrounding quotes is removed, as systemd does.
+ENV_FILE=${ANJAL_ENV_FILE:-/etc/anjal/server.env}
+ANJAL_POSTGRES=$(sed -n 's/^ANJAL_POSTGRES=//p' "$ENV_FILE" | tail -n 1 | tr -d '\r')
+case "$ANJAL_POSTGRES" in
+  \"*\") ANJAL_POSTGRES=${ANJAL_POSTGRES#\"}; ANJAL_POSTGRES=${ANJAL_POSTGRES%\"} ;;
+esac
+IFS=';' read -ra PARTS <<< "${ANJAL_POSTGRES:?ANJAL_POSTGRES is not set in $ENV_FILE}"
 for kv in "${PARTS[@]}"; do
   key=${kv%%=*}; val=${kv#*=}
   case "${key,,}" in
@@ -95,6 +103,13 @@ for kv in "${PARTS[@]}"; do
     password)     export PGPASSWORD="$val" ;;
   esac
 done
+
+# Prove the connection before deciding anything: a failed connection used to
+# read as "0 tenants" below and only failed later, at DROP SCHEMA (DEF-083).
+if ! psql -tAc 'SELECT 1' >/dev/null; then
+  echo "Cannot connect to the database as ${PGUSER:-?} on ${PGHOST:-?}:${PGPORT:-5432} - check ANJAL_POSTGRES in $ENV_FILE. Nothing in the database was changed." >&2
+  exit 1
+fi
 
 if [ -z "$DUMP" ]; then
   DUMP=$(rclone lsf "${REMOTE}db/" --files-only | sort | tail -n 1)
@@ -115,4 +130,4 @@ psql -v ON_ERROR_STOP=1 -q -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;
 gunzip -c "$SCRATCH/$DUMP" | psql -v ON_ERROR_STOP=1 -q
 rm -f "$SCRATCH/$DUMP"
 log "database restored; tenants: $(psql -tAc 'SELECT count(*) FROM tenants')"
-log "done - start the services: systemctl start anjal-server anjal-webmail"
+log "done - start the services: systemctl start anjal-server anjal-webmail (a restore drill writes its isolation into the database first - DEPLOY.md 12.4)"

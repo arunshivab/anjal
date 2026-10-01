@@ -10,6 +10,17 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.9.2** (1 October 2026) - hotfix from the first restore drill:
+restore.sh restores the database again (DEF-083, critical). It read
+/etc/anjal/server.env through bash, where the ';' in ANJAL_POSTGRES
+separates commands, so it connected as root and never restored a database;
+backups were never affected (systemd reads the file literally). It now reads
+the setting as text and proves the connection before deciding anything; CI
+restores a real backup into a real database with it. The webmail offers
+browsers TLS 1.3, or TLS 1.2 with ECDHE and GCM or ChaCha20 only - the two
+CBC suites SSL Labs marked weak are gone (DEF-084). The runbook carries the
+drill's eleven corrections; new installations get hex backup passwords.
+
 **Runbook update after v1.0.0-rc.9.1** (documentation only; production
 stays on rc.9.1). Section 12, the restore drill, brought up to date with
 what the backup now holds: the production record and a manual backup are

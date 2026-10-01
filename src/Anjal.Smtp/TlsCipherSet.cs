@@ -47,8 +47,46 @@ public static class TlsCipherSet
         System.Net.Security.TlsCipherSuite.TLS_RSA_WITH_AES_128_GCM_SHA256,
     };
 
+    // v1.0.0-rc.9.2 (DEF-084): what the webmail offers browsers. Browsers need
+    // none of the fallbacks above: TLS 1.3, then TLS 1.2 with ECDHE and GCM or
+    // ChaCha20 only. Without a policy the platform's defaults also offered two
+    // CBC suites, which SSL Labs marks weak; only Safari 6-8 (iOS 6-8, OS X
+    // 10.9-10.10) chose them.
+    private static readonly System.Net.Security.TlsCipherSuite[] WebSuites =
+    {
+        System.Net.Security.TlsCipherSuite.TLS_AES_256_GCM_SHA384,
+        System.Net.Security.TlsCipherSuite.TLS_AES_128_GCM_SHA256,
+        System.Net.Security.TlsCipherSuite.TLS_CHACHA20_POLY1305_SHA256,
+        System.Net.Security.TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+        System.Net.Security.TlsCipherSuite.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+        System.Net.Security.TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+        System.Net.Security.TlsCipherSuite.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+        System.Net.Security.TlsCipherSuite.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
+        System.Net.Security.TlsCipherSuite.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
+    };
+
     /// <summary>The suites offered on outbound connections, most preferred first.</summary>
     public static System.Collections.Generic.IReadOnlyList<System.Net.Security.TlsCipherSuite> OutboundSuites => Suites;
+
+    /// <summary>
+    /// The suites the webmail offers browsers, most preferred first: TLS 1.3,
+    /// then TLS 1.2 with ECDHE and AES-GCM or ChaCha20 (no CBC, no DHE, no static RSA).
+    /// </summary>
+    public static System.Collections.Generic.IReadOnlyList<System.Net.Security.TlsCipherSuite> WebmailSuites => WebSuites;
+
+    /// <summary>
+    /// The policy for the webmail's HTTPS handshakes: <see cref="WebmailSuites"/>
+    /// on Linux, and null (platform defaults) elsewhere.
+    /// </summary>
+    /// <returns>The policy, or null where a policy cannot be set.</returns>
+    public static System.Net.Security.CipherSuitesPolicy? WebmailPolicy()
+    {
+        if (System.OperatingSystem.IsLinux())
+        {
+            return new System.Net.Security.CipherSuitesPolicy(WebSuites);
+        }
+        return null;
+    }
 
     /// <summary>
     /// The policy to use for an outbound handshake: the suites above on

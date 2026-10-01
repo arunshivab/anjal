@@ -220,10 +220,17 @@ public static class Program
                     listen.Protocols = http3
                         ? Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2AndHttp3
                         : Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
+                    // v1.0.0-rc.9.2 (DEF-084): an explicit cipher policy - TLS 1.3, or
+                    // TLS 1.2 with ECDHE and GCM or ChaCha20; no CBC suites.
+                    System.Net.Security.CipherSuitesPolicy? cipherPolicy = Anjal.Smtp.TlsCipherSet.WebmailPolicy();
                     listen.UseHttps(https =>
                     {
                         // Consulted per connection: a renewed certificate is used by the next handshake.
                         https.ServerCertificateSelector = (_, _) => watcher?.Current ?? staticCert;
+                        if (cipherPolicy is not null)
+                        {
+                            https.OnAuthenticate = (_, ssl) => ssl.CipherSuitesPolicy = cipherPolicy;
+                        }
                     });
                 });
             }

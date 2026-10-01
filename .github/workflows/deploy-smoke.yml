@@ -414,6 +414,50 @@ jobs:
           test "$rc" -eq 0
           test "$trc" -eq 0
 
+      - name: A database restore with the real restore.sh (rc.9.2, DEF-083)
+        run: |
+          set -euo pipefail
+          # The restore drill of 1 Oct 2026 found that restore.sh had never
+          # restored a database: it read server.env through bash, where the ';'
+          # in ANJAL_POSTGRES separates commands, and connected as root. Here the
+          # real script restores a real backup into a real PostgreSQL.
+          PGPW=$(sudo grep '^ANJAL_POSTGRES=' /etc/anjal/server.env | sed -E 's/.*Password=([^;]*).*/\1/')
+          q() { PGPASSWORD="$PGPW" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "$1"; }
+          fp() { q "select (select count(*) from tenants)||'/'||(select count(*) from mailboxes)||'/'||(select count(*) from evidence)||'/'||(select count(*) from settings)||'/'||(select count(*) from dkim_keys)"; }
+          # A clean backup: the backup step damaged a stored file on purpose (DEF-061).
+          sudo systemctl stop anjal-server anjal-webmail
+          sudo find /var/lib/anjal/smoke-remote -mindepth 1 -delete
+          t0=$(date '+%Y-%m-%d %H:%M:%S')
+          sudo systemctl start anjal-backup
+          log=$(sudo journalctl -u anjal-backup --since "$t0" --no-pager); grep -q "verify ok" <<< "$log"
+          before=$(fp); echo "backed up: $before"
+          test "$(q "select count(*) from tenants")" -ge 1
+          # A change after the backup, which the restore must undo.
+          q "insert into settings (scope, key, value, updated_by) values ('server','ANJAL_RESTORE_MARKER','x','ci')" >/dev/null
+          # 1. Tenants exist: refused without --force (the files are restored first, the database is not touched).
+          if out=$(sudo /opt/anjal/bin/restore.sh 2>&1); then echo "::error::restore over existing tenants ran without --force"; exit 1; fi
+          grep -q "already has" <<< "$out"
+          test "$(q "select count(*) from settings where key='ANJAL_RESTORE_MARKER'")" = 1
+          # 2. With --force: the database is back as it was backed up.
+          out=$(sudo /opt/anjal/bin/restore.sh --force 2>&1); echo "$out"
+          grep -q "database restored; tenants:" <<< "$out"
+          after=$(fp); echo "restored:  $after"
+          test "$before" = "$after"
+          test "$(q "select count(*) from settings where key='ANJAL_RESTORE_MARKER'")" = 0
+          # 3. A wrong database password: refused at once, plainly, nothing changed.
+          q "insert into settings (scope, key, value, updated_by) values ('server','ANJAL_RESTORE_MARKER2','x','ci')" >/dev/null
+          sudo cp -p /etc/anjal/server.env /tmp/server.env.keep
+          sudo sed -i 's/Password=[^;]*/Password=wrong-on-purpose/' /etc/anjal/server.env
+          if out=$(sudo /opt/anjal/bin/restore.sh --force 2>&1); then echo "::error::restore ran with a wrong password"; exit 1; fi
+          grep -q "Cannot connect to the database as anjal" <<< "$out"
+          if grep -q "restore database" <<< "$out"; then echo "::error::the database step started without a connection"; exit 1; fi
+          sudo cp -p /tmp/server.env.keep /etc/anjal/server.env
+          test "$(q "select count(*) from settings where key='ANJAL_RESTORE_MARKER2'")" = 1
+          # 4. Back up and healthy.
+          sudo systemctl start anjal-server anjal-webmail
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8025/healthz >/dev/null 2>&1 && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8025/healthz | grep -q '"status"'
+
       - name: Service logs on failure
         if: failure()
         run: sudo journalctl -u anjal-server -u anjal-webmail -u anjal-backup -u postgresql --no-pager | tail -200
