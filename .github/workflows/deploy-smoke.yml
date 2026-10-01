@@ -342,6 +342,16 @@ jobs:
           grep -q "HTTP/3: on" "$RUNNER_TEMP/h3.log"
           sudo ss -ulnp | tee "$RUNNER_TEMP/udp.txt"
           grep -E ':443\b' "$RUNNER_TEMP/udp.txt" | grep -q Anjal.Webmail
+          # rc.9.2 (DEF-084), under the real unit with HTTP/3 on - as production:
+          # TLS 1.2 offers no CBC suite; GCM works; browsers are still told of HTTP/3.
+          cbc=$(echo | openssl s_client -connect 127.0.0.1:443 -servername anjal-h3.test -tls1_2 -cipher 'ECDHE-ECDSA-AES256-SHA384:ECDHE-ECDSA-AES128-SHA256' 2>&1 || true)
+          if grep -q "Cipher is ECDHE" <<< "$cbc"; then echo "::error::a CBC suite was accepted"; grep "Cipher is" <<< "$cbc"; exit 1; fi
+          gcm=$(echo | openssl s_client -connect 127.0.0.1:443 -servername anjal-h3.test -tls1_2 -cipher 'ECDHE-ECDSA-AES128-GCM-SHA256' 2>&1 || true)
+          grep "Cipher is" <<< "$gcm"
+          grep -q "Cipher is ECDHE-ECDSA-AES128-GCM-SHA256" <<< "$gcm"
+          hdr=$(curl -sk -o /dev/null -D - https://anjal-h3.test/sign-in)
+          grep -i '^alt-svc' <<< "$hdr"
+          grep -qi '^alt-svc: h3=":443"' <<< "$hdr"
           # Which connections work: raw QUIC and HTTP/3, presenting a name or an
           # IP address. Each on a fresh client, every error printed in full.
           cat > "$RUNNER_TEMP/h3.cs" <<'EOF'

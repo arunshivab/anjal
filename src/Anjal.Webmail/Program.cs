@@ -211,18 +211,16 @@ public static class Program
             kestrel.Listen(httpAddress, listenUri.Port);
             if (httpsOn)
             {
+                // v1.0.0-rc.9.2 (DEF-084): an explicit cipher policy - TLS 1.3, or
+                // TLS 1.2 with ECDHE and GCM or ChaCha20; no CBC suites. Kestrel
+                // refuses the OnAuthenticate callback on a listener that also
+                // serves HTTP/3, so TCP (HTTP/1.1 and HTTP/2) and UDP (HTTP/3)
+                // get their own listeners on the same port. QUIC is TLS 1.3
+                // only: no CBC suite can arise there.
+                System.Net.Security.CipherSuitesPolicy? cipherPolicy = Anjal.Smtp.TlsCipherSet.WebmailPolicy();
                 kestrel.Listen(httpAddress, tls!.HttpsPort, listen =>
                 {
-                    // HTTP/3 (v1.0.0-rc.7): QUIC sets up the connection and its
-                    // encryption in one round trip and a lost packet delays only
-                    // its own request - what slow, lossy routes need. Kestrel
-                    // adds the Alt-Svc header that tells browsers.
-                    listen.Protocols = http3
-                        ? Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2AndHttp3
-                        : Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
-                    // v1.0.0-rc.9.2 (DEF-084): an explicit cipher policy - TLS 1.3, or
-                    // TLS 1.2 with ECDHE and GCM or ChaCha20; no CBC suites.
-                    System.Net.Security.CipherSuitesPolicy? cipherPolicy = Anjal.Smtp.TlsCipherSet.WebmailPolicy();
+                    listen.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
                     listen.UseHttps(https =>
                     {
                         // Consulted per connection: a renewed certificate is used by the next handshake.
@@ -233,6 +231,18 @@ public static class Program
                         }
                     });
                 });
+                if (http3)
+                {
+                    // HTTP/3 (v1.0.0-rc.7): QUIC sets up the connection and its
+                    // encryption in one round trip and a lost packet delays only
+                    // its own request - what slow, lossy routes need. On its own
+                    // listener Kestrel no longer adds Alt-Svc; the pipeline does.
+                    kestrel.Listen(httpAddress, tls.HttpsPort, listen =>
+                    {
+                        listen.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http3;
+                        listen.UseHttps(https => https.ServerCertificateSelector = (_, _) => watcher?.Current ?? staticCert);
+                    });
+                }
             }
         });
 
@@ -355,6 +365,11 @@ public static class Program
                 if (http.Request.IsHttps)
                 {
                     http.Response.Headers.StrictTransportSecurity = "max-age=31536000; includeSubDomains";
+                    if (http3 && !HttpProtocol.IsHttp3(http.Request.Protocol))
+                    {
+                        // Tells browsers HTTP/3 is on this port (rc.9.2: HTTP/3 has its own listener).
+                        http.Response.Headers.AltSvc = $"h3=\":{tls!.HttpsPort}\"; ma=86400";
+                    }
                 }
                 await next().ConfigureAwait(false);
             });
