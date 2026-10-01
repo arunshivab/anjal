@@ -131,6 +131,7 @@ findtime = 10m
 maxretry = 5
 CONF
 vm$ sudo systemctl restart fail2ban
+vm$ sleep 3                                     # asked at once, fail2ban answers "socket not found" (drill 1 Oct 2026)
 vm$ sudo fail2ban-client get sshd bantime       # 3600
 ```
 
@@ -256,6 +257,13 @@ session. From here on every `vm$` command runs as `arun`. If SSH ever
 breaks, E2E's web console still logs in as root with the console password
 (also on the custody forms); the console does not use SSH.
 
+**Test the root refusal once.** fail2ban counts refused logins (aggressive
+mode: 5 in 10 minutes ban the address for an hour). On the drill of
+1 October 2026 repeated tests banned the administrator's own address and cut
+every open session; the sign is `Connection timed out` from one address
+only. To recover, connect from another address (a phone's mobile data) and
+run `sudo fail2ban-client set sshd unbanip <your address>`.
+
 ### 1c. What else is on the image, and what faces the internet
 
 E2E's image ships agents of its own. Measure them:
@@ -270,6 +278,11 @@ vm$ sudo ss -tlnp
   E2E backup you declined, installed and running anyway, with read access
   to the whole disk. Switch it off:
   `sudo systemctl disable --now sbm-agent.service cdp-agent.service`.
+  Check that nothing of it runs - systemd keeps showing `cdp-agent`, an
+  old-style script, as "active (exited)" after it is disabled:
+  `pgrep -a 'cdp|sbm|buagent'` and `sudo ss -tlnp | grep ':1167 '` print
+  nothing, and `systemctl is-enabled sbm-agent cdp-agent` prints `disabled`
+  twice.
   Its apt source (`repo.r1soft.com`) can stay; updates do not re-enable a
   disabled service.
 - **Zabbix agent** (`zabbix-agent`, port 10050) - feeds the graphs and
@@ -462,10 +475,10 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -f ~/anjal-
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -c '\dt'
 ```
 
-On a first run one `NOTICE: trigger "audit_events_no_change" ... does not
-exist, skipping` is expected; on a re-run, `already exists, skipping`
+On a first run two notices are expected - `NOTICE: trigger "audit_events_no_change" ... does not
+exist, skipping` and, from rc.8, the same for `messages_evidence_deleted`; on a re-run, `already exists, skipping`
 notices are expected. The script is safe to apply again, which is how an
-upgrade applies it. **Check:** `\dt` lists **20 tables**, all owned by
+upgrade applies it. **Check:** `\dt` lists **26 tables** at v1.0.0-rc.9.x (20 at rc.2), all owned by
 `anjal`, including `tenants`, `mailboxes`, `messages`, `sender_rules` and
 `audit_events` (measured on PostgreSQL 18.6, with the file's CRLF line
 endings exactly as shipped).
@@ -949,14 +962,18 @@ back (nothing is shown while typing). Stay in the same SSH session until
 11.5 is done: the passwords exist only in its memory.
 
 ```
-vm$ P1=$(openssl rand -base64 18); P2=$(openssl rand -base64 18)
+vm$ P1=$(openssl rand -hex 24); P2=$(openssl rand -hex 24)
 vm$ echo "Backup crypt password 1: $P1"; echo "Backup crypt password 2: $P2"
 vm$ clear
 vm$ provevar() { local want got c; want=$(printf '%s' "$2" | sha256sum | cut -c1-16); for c in 1 2 3; do read -rs -p "$1 from paper copy $c: " got; echo; if [ "$(printf '%s' "$got" | sha256sum | cut -c1-16)" = "$want" ]; then echo "copy $c: MATCH"; else echo "copy $c: NO MATCH - check this copy"; fi; done; }
 vm$ provevar "Crypt password 1" "$P1"; provevar "Crypt password 2" "$P2"
 ```
 
-Six `MATCH` lines are needed. On 26 September copy 3 of password 2 did
+Six `MATCH` lines are needed. From v1.0.0-rc.9.2 the passwords are hex
+(0-9, a-f), like the database password and the admin token: on the drill of
+1 October 2026 the base64 passwords of 26 September were mistyped from paper
+four times, with the forms themselves correct. Servers set up before keep
+their passwords; read those character by character. On 26 September copy 3 of password 2 did
 not match; it was corrected against copies 1 and 2 and `provevar` re-run
 for that password. Write zero as `Ø` and keep letters clearly apart
 (`0`/`O`, `1`/`l`/`I`, upper and lower case, `+` and `/`).
@@ -994,7 +1011,10 @@ vm$ sudo ls -l /etc/anjal/rclone.conf
 vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsd b2crypt: && echo "B2 CONNECTION OK"
 ```
 
-**Check:** `-rw-r----- 1 root anjal`, then `B2 CONNECTION OK`.
+**Check:** `-rw-r----- 1 root anjal`, then `B2 CONNECTION OK`. That proves
+the key connects - not the passwords: rclone skips folders it cannot decrypt
+without an error. The proof comes after the first backup (11.6), when
+`lsd b2crypt:` must list the folders by their real names.
 
 ### 11.6 The first run, then the nightly timer
 
@@ -1109,7 +1129,7 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select t.slug, m.local_p
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select direction, outcome, reconstructed, count(*) from evidence group by 1,2,3 order by 1,2,3" | tee ~/drill-evidence-production.txt | sha256sum | cut -c1-16
 vm$ sudo find /var/lib/anjal/evidence -name '*.eml' | wc -l
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*), max(day) from evidence_manifests"
-vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from greylist_entries"
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select passed, count(*) from greylist_entries group by 1 order by 1"
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from outbound_messages where status in (0,1)"
 vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
 vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/verify | jq '{intact, manifests, problems}'; unset TOKEN
@@ -1141,7 +1161,11 @@ them would leave a file without its record.
   outbound ALL. No 25, 80, 443, 465 or 587: the drill VM can neither
   receive mail nor be mistaken for the mail server.
 - **Sections 1 and 2** as written (hardening, admin account, fail2ban,
-  PostgreSQL 18). **Section 3** with the **same release** as production
+  PostgreSQL 18) - except the database role's password in section 2:
+  **type it from the custody form** at `createuser --pwprompt`; do not
+  generate a new one. Section 4 puts the same paper password into the
+  configuration, and the restored database is reached with it. Test root's
+  refusal in 1b once (fail2ban). **Section 3** with the **same release** as production
   (the version recorded in 12.1).
 
 ### 12.3 Rebuild from paper
@@ -1157,15 +1181,15 @@ production:
 ```
 vm$ S=/etc/anjal/server.env; W=/etc/anjal/webmail.env
 vm$ sudo sed -i 's|^ANJAL_BIND=.*|ANJAL_BIND=127.0.0.1|; s|^ANJAL_OUTBOUND_MODE=.*|ANJAL_OUTBOUND_MODE=relay|; s|^ANJAL_ACME_DOMAINS=.*|ANJAL_ACME_DOMAINS=|' $S
-vm$ printf 'ANJAL_RELAY_HOST=127.0.0.1\nANJAL_RELAY_PORT=2525\n' | sudo tee -a $S >/dev/null
+vm$ printf 'ANJAL_RELAY_HOST=127.0.0.1\nANJAL_RELAY_PORT=2525\nANJAL_TLS_ALLOW_PLAINTEXT=true\n' | sudo tee -a $S >/dev/null
 vm$ sudo sed -i 's|^ANJAL_WEBMAIL_BIND=.*|ANJAL_WEBMAIL_BIND=127.0.0.1|; s|^ANJAL_WEBMAIL_PORT=.*|ANJAL_WEBMAIL_PORT=8080|; s|^ANJAL_WEBMAIL_HTTPS_PORT=.*|ANJAL_WEBMAIL_HTTPS_PORT=0|; s|^ANJAL_ACME_DOMAINS=.*|ANJAL_ACME_DOMAINS=|' $W
-vm$ sudo grep -E '^ANJAL_(BIND|OUTBOUND_MODE|RELAY_HOST|RELAY_PORT|ACME_DOMAINS|WEBMAIL_BIND|WEBMAIL_PORT|WEBMAIL_HTTPS_PORT)=' $S $W
+vm$ sudo grep -E '^ANJAL_(BIND|OUTBOUND_MODE|RELAY_HOST|RELAY_PORT|TLS_ALLOW_PLAINTEXT|ACME_DOMAINS|WEBMAIL_BIND|WEBMAIL_PORT|WEBMAIL_HTTPS_PORT)=' $S $W
 ```
 
 | Isolation | Setting |
 | --- | --- |
 | Cannot receive mail | `ANJAL_BIND=127.0.0.1`, and the security group opens 22 only |
-| Cannot send mail | `ANJAL_OUTBOUND_MODE=relay` to `127.0.0.1:2525`, where a capture program keeps every message on the machine - including anything left in the restored queue |
+| Cannot send mail | `ANJAL_OUTBOUND_MODE=relay` to `127.0.0.1:2525`, where a capture program keeps every message on the machine - including anything left in the restored queue. `ANJAL_TLS_ALLOW_PLAINTEXT=true`: the capture program offers no STARTTLS, and since outbound mail is never sent unencrypted the relay would be refused (drill 1 Oct 2026) - on the drill machine only |
 | No certificate requests | `ANJAL_ACME_DOMAINS` empty (ACME off) in both files; `ANJAL_WEBMAIL_HTTPS_PORT=0` |
 | Webmail not public | `ANJAL_WEBMAIL_BIND=127.0.0.1`, port 8080, reached through an SSH tunnel |
 
@@ -1180,7 +1204,12 @@ vm$ read -rs -p "Crypt password 1 (paper): " P1; echo; read -rs -p "Crypt passwo
 ```
 
 followed by the `read ... KID/AKEY`, `rclone obscure`, `tee`, `chown`,
-`chmod`, `unset` and `lsd` lines of 11.5. **Check:** `B2 CONNECTION OK`.
+`chmod`, `unset` and `lsd` lines of 11.5. **Check:** `lsd b2crypt:` lists
+the folders by their **real names** - acme, db, evidence, mail, settings (and
+deleted) - and `lsf b2crypt:db/` the dumps. `B2 CONNECTION OK` with an empty
+list is **not** a pass: wrong crypt passwords make rclone skip every folder
+without an error (`-vv` shows "Skipping undecryptable dir name"; drill of
+1 October 2026).
 
 ### 12.4 Restore, and prove it
 
@@ -1189,9 +1218,14 @@ first, then the newest database dump, then the evidence (read-only again),
 the settings snapshot and the greylisting memory:
 
 ```
-vm$ sudo /opt/anjal/bin/restore.sh
-vm$ sudo -u anjal rclone --config /etc/anjal/rclone.conf lsf b2crypt:db/ | tail -1      # must be the dump noted in 12.1
+vm$ sudo /opt/anjal/bin/restore.sh --dump <the dump noted in 12.1>
 ```
+
+Restore the dump **by name**: the nightly backup (about 21:10 UTC, 02:40 IST)
+may run between 12.1 and this step, and the newest dump would then describe
+a later database than the one recorded. `restore.sh` restores the database
+from v1.0.0-rc.9.2; before it, its database step connected as root and
+failed (DEF-083, found by the drill of 1 October 2026).
 
 **Isolation must also be written into the restored database.** From rc.7
 the services take their settings from the database (section 13e), and the
@@ -1208,6 +1242,7 @@ INSERT INTO settings (scope, key, value, updated_by) VALUES
   ('server',  'ANJAL_RELAY_HOST',         '127.0.0.1', 'drill'),
   ('server',  'ANJAL_RELAY_PORT',         '2525',      'drill'),
   ('server',  'ANJAL_ACME_DOMAINS',       '',          'drill'),
+  ('server',  'ANJAL_TLS_ALLOW_PLAINTEXT','true',      'drill'),
   ('webmail', 'ANJAL_WEBMAIL_BIND',       '127.0.0.1', 'drill'),
   ('webmail', 'ANJAL_WEBMAIL_PORT',       '8080',      'drill'),
   ('webmail', 'ANJAL_WEBMAIL_HTTPS_PORT', '0',         'drill'),
@@ -1238,7 +1273,7 @@ vm$ sudo find /var/lib/anjal/evidence -name '*.eml' | wc -l
 vm$ sudo find /var/lib/anjal/evidence -name '*.eml' ! -perm 440 | wc -l                  # must be 0
 vm$ sudo find /var/lib/anjal/evidence -name '*.eml' ! -user anjal | wc -l                # must be 0
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*), max(day) from evidence_manifests"
-vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from greylist_entries"
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select passed, count(*) from greylist_entries group by 1 order by 1"
 ```
 
 **Check:** the evidence hash, the number of files, the manifests and the
@@ -1263,8 +1298,9 @@ bounce notice into the restored mailbox (measured on 26 September).
 **Check:** `active` twice; the release version recorded in 12.1;
 `Outbound worker started (mode=relay, ...)`; every listening address is
 `127.0.0.1`; and `Greylist: N sender(s) remembered from the database`
-with N equal to 12.1's greylisting count - since rc.7 that memory is kept
-in the database, so it comes back. **If the outbound mode is not relay, or
+with N equal to 12.1's **passed** entries - since rc.7 that memory is kept
+in the database, so it comes back; pending entries past their lifetime are
+dropped at start-up, by design (drill of 1 October 2026: 2 kept, 12 dropped). **If the outbound mode is not relay, or
 any port listens on another address, stop both services at once.**
 
 **2b. The manifest chain and every evidence file verify:**
@@ -1295,10 +1331,11 @@ removed.
 with the real mailbox password:
 
 ```
-pc> ssh -i $env:USERPROFILE\.ssh\anjal_e2e -L 8080:127.0.0.1:8080 arun@<drill-ip>
+pc> ssh -i $env:USERPROFILE\.ssh\anjal_e2e -L 18080:127.0.0.1:8080 arun@<drill-ip>
 ```
 
-Browse to `http://127.0.0.1:8080/`. Open messages from each folder - the
+Browse to `http://127.0.0.1:18080/` (on the laptop Windows often reserves
+port 8080: `bind ... Permission denied`, drill of 1 October 2026). Open messages from each folder - the
 first Gmail message, the Outlook one, the mail-tester report, the Sent
 items - and check their read and flagged state; on a message received
 since rc.8, **This message** says "Original kept exactly as received" with
@@ -1543,6 +1580,9 @@ arrive - and confirm a new message has its original kept:
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, direction, outcome, left(sha256,16) from evidence order by captured_at desc limit 3"
 vm$ unset TOKEN
 ```
+
+**rc.9.1 to rc.9.2**: the usual steps only (backup first). No schema change,
+no setting to change.
 
 **rc.9 to rc.9.1**: the usual steps only (backup first). No schema change, no
 setting to change.
