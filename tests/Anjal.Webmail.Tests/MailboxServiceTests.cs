@@ -8,6 +8,9 @@ namespace Anjal.Webmail.Tests;
 
 public sealed class MailboxServiceTests : System.IDisposable
 {
+    private static readonly string[] StandardOrder = { "INBOX", "Scheduled", "Drafts", "Sent", "Archive", "Junk", "Trash" };
+    private static readonly string[] OwnFolders = { "Audit 2026", "Suppliers" };
+
     private static readonly string[] ArunRecipient = new[] { "arun@anjal.co.in" };
 
     private readonly string root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "anjal-webmail-" + System.Guid.NewGuid().ToString("N"));
@@ -89,14 +92,25 @@ public sealed class MailboxServiceTests : System.IDisposable
         "--OUTER--\r\n";
 
     [Fact]
+    public async System.Threading.Tasks.Task ListFolders_OwnFoldersFollowTheStandardOnes_Alphabetically()
+    {
+        await this.SeedAsync();
+        await this.store.EnsureFolderAsync(this.mailbox.Id, "Suppliers");
+        await this.store.EnsureFolderAsync(this.mailbox.Id, "Audit 2026");
+        var folders = await this.svc.ListFoldersAsync(this.mailbox.Id);
+        Assert.Equal(StandardOrder.Concat(OwnFolders), folders.Select(f => f.Name));
+    }
+
+    [Fact]
     public async System.Threading.Tasks.Task ListFolders_CreatesDefaultsWithCounts()
     {
         await this.SeedAsync();
         await this.DeliverAsync("Subject: a\r\n\r\nb\r\n");
         var folders = await this.svc.ListFoldersAsync(this.mailbox.Id);
 
-        Assert.Equal(5, folders.Count);
-        Assert.Contains(folders, f => f.Name == "Junk");
+        // D-106: Archive is a standard folder; rc.12: so is Scheduled. The rail follows the approved order.
+        Assert.Equal(7, folders.Count);
+        Assert.Equal(StandardOrder, folders.Select(f => f.Name));
         Assert.Equal("INBOX", folders[0].Name);
         Assert.Equal(1, folders[0].Count);
         Assert.Contains(folders, f => f.Name == "Sent" && f.Count == 0);

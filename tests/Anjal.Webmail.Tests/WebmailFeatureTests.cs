@@ -331,9 +331,11 @@ public sealed class WebmailFeatureTests : System.IDisposable
         Assert.Equal("Dr. Arun Shiva B", (await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.DisplayName);
         Assert.NotNull(await this.svc.SetDisplayNameAsync(this.mailbox.Id, new string('x', 101)));
 
-        Assert.Null(await this.svc.SetThemeAsync(this.mailbox.Id, "Midnight"));
-        Assert.Equal("midnight", (await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.Theme);
+        Assert.Null(await this.svc.SetThemeAsync(this.mailbox.Id, "Plum-Dark"));
+        Assert.Equal("plum-dark", (await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.Theme);
+        Assert.Null(await this.svc.SetThemeAsync(this.mailbox.Id, "saffron-auto"));
         Assert.NotNull(await this.svc.SetThemeAsync(this.mailbox.Id, "neon"));
+        Assert.NotNull(await this.svc.SetThemeAsync(this.mailbox.Id, "midnight"));
 
         // The password survives a display-name change.
         Assert.True(Pbkdf2Hasher.Verify("correct horse battery", (await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.PasswordPbkdf2));
@@ -369,21 +371,49 @@ public class ThemeClaimTests
     [Fact]
     public void ThemeOf_DefaultsWhenAbsent_AndWithTheme_ReplacesWithoutLosingClaims()
     {
-        Assert.Equal("paper", WebmailAuthService.ThemeOf(null));
-        Assert.Equal("paper", WebmailAuthService.ThemeOf(new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity())));
+        Assert.Equal("anjal-light", WebmailAuthService.ThemeOf(null));
+        Assert.Equal("anjal-light", WebmailAuthService.ThemeOf(new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity())));
 
         var identity = new System.Security.Claims.ClaimsIdentity("AnjalWebmail");
         System.Guid mailboxId = System.Guid.NewGuid();
         identity.AddClaim(new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Name, "arun@anjal.co.in"));
         identity.AddClaim(new System.Security.Claims.Claim(WebmailAuthService.MailboxIdClaim, mailboxId.ToString()));
-        identity.AddClaim(new System.Security.Claims.Claim(WebmailAuthService.ThemeClaim, "paper"));
+        identity.AddClaim(new System.Security.Claims.Claim(WebmailAuthService.ThemeClaim, "teal-light"));
         var user = new System.Security.Claims.ClaimsPrincipal(identity);
 
-        System.Security.Claims.ClaimsPrincipal changed = WebmailAuthService.WithTheme(user, "midnight");
-        Assert.Equal("midnight", WebmailAuthService.ThemeOf(changed));
+        System.Security.Claims.ClaimsPrincipal changed = WebmailAuthService.WithTheme(user, "forest-dark");
+        Assert.Equal("forest-dark", WebmailAuthService.ThemeOf(changed));
         Assert.Equal(mailboxId, WebmailAuthService.MailboxIdOf(changed));
         Assert.Equal("arun@anjal.co.in", changed.Identity!.Name);
         Assert.Single(changed.Claims, c => c.Type == WebmailAuthService.ThemeClaim);
         Assert.True(changed.Identity.IsAuthenticated);
+    }
+
+    [Theory]
+    [InlineData("midnight", "anjal-dark")]
+    [InlineData("ink", "anjal-dark")]
+    [InlineData("paper", "anjal-light")]
+    [InlineData("postcard", "anjal-light")]
+    [InlineData("Ocean-Light", "ocean-light")]
+    [InlineData("graphite-auto", "graphite-auto")]
+    [InlineData("neon-dark", "anjal-light")]
+    [InlineData("teal-dim", "anjal-light")]
+    [InlineData("", "anjal-light")]
+    public void ThemeOf_ConvertsACookieFromBeforeRc11_AndRefusesUnknownThemes(string inCookie, string expected)
+    {
+        // rc.11: a person signed in before the upgrade keeps their light or dark
+        // choice at once, without signing in again (owner, 4 Oct 2026).
+        var identity = new System.Security.Claims.ClaimsIdentity("AnjalWebmail");
+        identity.AddClaim(new System.Security.Claims.Claim(WebmailAuthService.ThemeClaim, inCookie));
+        Assert.Equal(expected, WebmailAuthService.ThemeOf(new System.Security.Claims.ClaimsPrincipal(identity)));
+    }
+
+    [Fact]
+    public void Themes_AreTheHouseColourAndTwelveColours_EachLightDarkAndFollowingTheDevice()
+    {
+        Assert.Equal(63, MailboxService.Themes.Count); // DES-11 D4: Anjal, the house colour, and twenty named colours, each light, dark and following the device
+        Assert.Contains("teal-light", MailboxService.Themes);
+        Assert.Contains("graphite-auto", MailboxService.Themes);
+        Assert.Equal(MailboxRow.DefaultTheme, MailboxService.Themes[0]);
     }
 }

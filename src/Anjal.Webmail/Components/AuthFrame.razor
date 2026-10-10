@@ -1,0 +1,67 @@
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+
+@* rc.13: the frame every sign-in board shares (AuthSignIn, AuthReset, AuthInvite,
+   AuthTwoStep, AuthSignedOut): Anjal and the languages on the left; on the right
+   the organisation's logo and name, then the page. *@
+<div class="authpage">
+    <section class="authbrand">
+        <span class="mark-tile authmark" aria-hidden="true">
+            <svg viewBox="0 0 148 148" width="108" height="108"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg>
+            @* DES-11 D6 (item 39): the letter of the language shown, as on every other screen. *@
+            <span class="mt-letter" lang="@L.Language">@Words.MarkLetter(L.Language)</span>
+        </span>
+        <p class="authname">Anjal</p>
+        <p class="authline">@L["Mail for every organisation, in every script its people read."]</p>
+        <div class="authlangs">
+            <span class="authlabel">@L["Language"]</span>
+            <div class="authchips" role="group" aria-label="@L["Language"]">
+                @foreach (string lc in MailboxPreferences.Languages)
+                {
+                    bool on = Words.IsEnabled(lc);
+                    @if (on)
+                    {
+                        <a class="authchip @(lc == L.Language ? "on" : "")" lang="@lc" href="/auth/language?l=@lc&back=@Uri.EscapeDataString(Here)" aria-current="@(lc == L.Language ? "true" : null)">@Words.NativeName(lc)</a>
+                    }
+                    else
+                    {
+                        <span class="authchip soon" lang="@lc" title="@L["Coming soon"]">@Words.NativeName(lc)</span>
+                    }
+                }
+            </div>
+        </div>
+    </section>
+    <section class="authform">
+        <div class="authcard">
+            <div class="authorg">
+                @if (Org is not null && Org.Logo.Length > 0)
+                {
+                    <img class="authlogo-img" src="@Org.Logo" alt="" width="44" height="44" />
+                }
+                else
+                {
+                    <span class="authlogo" aria-hidden="true"><svg viewBox="0 0 148 148" width="44" height="44"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg></span>
+                }
+                <span><b>@(Org is null ? L["Mail"] : Org.Title.Length > 0 ? Org.Title : L["{organisation} mail"].Replace("{organisation}", Org.Name, StringComparison.Ordinal))</b><span class="hostline">@HostName</span></span>
+            </div>
+            @ChildContent
+        </div>
+    </section>
+    <JsWords L="L" />
+</div>
+
+@code {
+    /// <summary>The page.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>The page's words; the frame uses the same.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The organisation, when the page has already looked it up.</summary>
+    [Parameter] public OrganisationIdentity? Org { get; set; }
+
+    private string HostName => Http.HttpContext?.Request.Host.Host ?? string.Empty;
+
+    private string Here => (Http.HttpContext?.Request.Path.Value ?? "/sign-in") + (Http.HttpContext?.Request.QueryString.Value ?? string.Empty);
+}

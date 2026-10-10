@@ -121,10 +121,10 @@ public sealed class WebmailHardeningTests : IAsyncLifetime, System.IDisposable
     {
         for (int i = 0; i < 5; i++)
         {
-            Assert.Equal("/sign-in?error=1", (await this.SignInAsync("wrong")).Headers.Location!.ToString());
+            Assert.StartsWith("/sign-in?error=1&u=", (await this.SignInAsync("wrong")).Headers.Location!.ToString(), StringComparison.Ordinal);
         }
         // Even the right password is refused while throttled.
-        Assert.Equal("/sign-in?throttled=1", (await this.SignInAsync("correct horse battery")).Headers.Location!.ToString());
+        Assert.StartsWith("/sign-in?throttled=1&u=", (await this.SignInAsync("correct horse battery")).Headers.Location!.ToString(), StringComparison.Ordinal);
 
         IReadOnlyList<AuditEvent> events = await this.store.ListAuditAsync(20);
         Assert.Contains(events, e => e.Action == "webmail.signin.failed");
@@ -135,7 +135,7 @@ public sealed class WebmailHardeningTests : IAsyncLifetime, System.IDisposable
     public async System.Threading.Tasks.Task ASuccessfulSignIn_UpgradesAnOldHash_AndIsAudited()
     {
         Assert.True(Pbkdf2Hasher.NeedsRehash(this.mailbox.PasswordPbkdf2));
-        Assert.Equal("/folder/INBOX", (await this.SignInAsync("correct horse battery")).Headers.Location!.ToString());
+        Assert.Equal("/dashboard", (await this.SignInAsync("correct horse battery")).Headers.Location!.ToString());
         string upgraded = (await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.PasswordPbkdf2;
         Assert.False(Pbkdf2Hasher.NeedsRehash(upgraded));
         Assert.True(Pbkdf2Hasher.Verify("correct horse battery", upgraded));

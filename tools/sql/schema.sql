@@ -160,7 +160,7 @@ CREATE TABLE IF NOT EXISTS mailboxes (
     password_pbkdf2  TEXT NOT NULL DEFAULT '',
     display_name     TEXT NOT NULL DEFAULT '',
     enabled          BOOLEAN NOT NULL DEFAULT TRUE,
-    quota_bytes      BIGINT NOT NULL DEFAULT 2147483648,  -- 2 GiB soft quota
+    quota_bytes      BIGINT NOT NULL DEFAULT 1073741824,  -- 1 GiB (rc.15, DES-11 D2; was 2 GiB)
     used_bytes       BIGINT NOT NULL DEFAULT 0,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -238,6 +238,32 @@ CREATE TABLE IF NOT EXISTS sender_rules (
 
 -- Webmail (v0.14.0): per-mailbox theme, and an index for unread counts.
 ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'paper';
+
+-- rc.11: twelve colours, each light, dark or following the device. The four
+-- themes before rc.11 convert once: ink and midnight were dark, paper and
+-- postcard light. Running this again changes nothing.
+ALTER TABLE mailboxes ALTER COLUMN theme SET DEFAULT 'teal-light';
+-- rc.15: the house theme, Anjal, is the default for new mailboxes; existing ones keep their choice.
+ALTER TABLE mailboxes ALTER COLUMN theme SET DEFAULT 'anjal-light';
+UPDATE mailboxes
+   SET theme = CASE theme WHEN 'ink' THEN 'teal-dark' WHEN 'midnight' THEN 'teal-dark' ELSE 'teal-light' END
+ WHERE theme IN ('paper', 'ink', 'postcard', 'midnight');
+
+-- rc.11: each person's own settings. Saved only by SetMailboxPreferencesAsync.
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS time_zone   TEXT    NOT NULL DEFAULT 'Asia/Kolkata';
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS language    TEXT    NOT NULL DEFAULT 'en';
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS density     TEXT    NOT NULL DEFAULT 'comfortable';
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS layout      TEXT    NOT NULL DEFAULT 'three';
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS rail_folded BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS date_format TEXT    NOT NULL DEFAULT 'language';
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS week_start  TEXT    NOT NULL DEFAULT 'monday';
+-- rc.11 (items 14 and 11): messages per page; the new-mail sound, on by default (D-99).
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS page_size      INTEGER NOT NULL DEFAULT 50;
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS new_mail_sound BOOLEAN NOT NULL DEFAULT true;
+-- rc.11 (D-105): the welcome screen, shown once to everyone - those signed in before rc.11 too.
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS welcome_done   BOOLEAN NOT NULL DEFAULT false;
+-- rc.15: until a person folds or opens the rail themselves, it shows icons only up to laptop width.
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS rail_chosen    BOOLEAN NOT NULL DEFAULT false;
 
 CREATE INDEX IF NOT EXISTS messages_unread_idx
     ON messages (mailbox_id, folder_id)
@@ -517,3 +543,50 @@ CREATE TRIGGER messages_evidence_deleted AFTER DELETE ON messages
 -- v1.0.0-rc.8 (SPEC-08 R-14): postmaster@ and abuse@ each hosted domain (RFC 5321 4.5.1,
 -- RFC 2142) go to this mailbox; when null, to the tenant's first mailbox.
 ALTER TABLE tenants ADD COLUMN IF NOT EXISTS postmaster_mailbox TEXT;
+
+-- v1.0.0-rc.12: a mailbox's own documents - contacts, contact groups, templates
+-- and rules - each kind kept as one JSON document per mailbox.
+CREATE TABLE IF NOT EXISTS mailbox_documents (
+    mailbox_id  UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (mailbox_id, kind)
+);
+CREATE INDEX IF NOT EXISTS outbound_messages_sender_idx ON outbound_messages (lower(envelope_from)) WHERE status IN (0, 1);
+
+-- v1.0.0-rc.13: an organisation's own documents - its sign-in look, policies
+-- and defaults - each kind kept as one JSON document per organisation.
+CREATE TABLE IF NOT EXISTS tenant_documents (
+    tenant_id   UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, kind)
+);
+
+-- v1.0.0-rc.13: the audit trail is chained. Each entry carries SHA-256 of
+-- the previous entry's chain and its own fields, so an entry removed or
+-- changed (which needs the table's owner) shows when the chain is checked.
+-- Entries from before rc.13 keep an empty chain; the chain starts after them.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'audit_events' AND column_name = 'seq') THEN
+        ALTER TABLE audit_events ADD COLUMN seq BIGSERIAL;
+    END IF;
+END $$;
+ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS chain TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX IF NOT EXISTS audit_events_seq_idx ON audit_events (seq);
+
+-- v1.0.0-rc.15 (item 61): records the whole service keeps - the operator's daily
+-- disk record, restore drills and the mail server's refusal counts - as JSON.
+CREATE TABLE IF NOT EXISTS service_records (
+    kind        TEXT PRIMARY KEY,
+    body        TEXT NOT NULL,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- v1.0.0-rc.15 (DES-11 D2, owner 10 Oct 2026): a new mailbox gets 1 GiB unless its
+-- organisation's storage plan says otherwise. Mailboxes made before keep their size
+-- until the operator sets the organisation's plan in the Anjal console.
+ALTER TABLE mailboxes ALTER COLUMN quota_bytes SET DEFAULT 1073741824;

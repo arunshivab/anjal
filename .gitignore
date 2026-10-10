@@ -66,3 +66,7 @@ artifacts/
 .env
 *.env
 !deploy/server.env.example
+
+# Screen checks (tools/ui): packages and reports
+tools/ui/node_modules
+tools/ui/out/

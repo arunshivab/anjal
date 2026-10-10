@@ -1,0 +1,26 @@
+@* rc.15 (item 56): a graph's own period, chosen by its chips; the page keeps
+   every other graph's choice, and the anchor brings the reader back to the
+   graph they changed. *@
+<nav class="chips @Class" aria-label="@(L["Period for {what}"].Replace("{what}", For, StringComparison.Ordinal))">
+    @foreach ((string key, string label) in MailboxService.DashPeriods)
+    {
+        <a href="@Href(key)" aria-current="@(Current == key ? "page" : null)">@L[label]</a>
+    }
+</nav>
+
+@code {
+    /// <summary>The period shown.</summary>
+    [Parameter] public string Current { get; set; } = "today";
+
+    /// <summary>The address for a period.</summary>
+    [Parameter] public Func<string, string> Href { get; set; } = k => "?";
+
+    /// <summary>What the chips choose for, for screen readers.</summary>
+    [Parameter] public string For { get; set; } = string.Empty;
+
+    /// <summary>More classes.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+}

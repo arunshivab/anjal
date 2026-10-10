@@ -1,13 +1,15 @@
 @inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Anjal.Webmail.Services.Words Words
 <!DOCTYPE html>
-<html lang="en" data-theme="@Anjal.Webmail.Services.WebmailAuthService.ThemeOf(Http.HttpContext?.User)">
+<html lang="@Shown" data-theme="@Anjal.Webmail.Services.WebmailAuthService.ThemeOf(Http.HttpContext?.User)">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="referrer" content="no-referrer" />
     <meta name="color-scheme" content="light dark" />
     <base href="/" />
-    <link rel="icon" href="/logos/anjal-favicon.svg" type="image/svg+xml" />
+    @* DES-11 D6: the tab shows the mark with the letter of the language shown. *@
+    <link rel="icon" href="/logos/@(FaviconFile)?v=@StaticAssets.Fingerprint("logos/" + FaviconFile)" type="image/svg+xml" />
     @* Each link carries a fingerprint of the file's contents, so an upgrade
        reaches every browser at once instead of an hour later (DEF-033). *@
     <link rel="stylesheet" href="/tokens.css?v=@StaticAssets.Fingerprint("tokens.css")" />
@@ -16,6 +18,18 @@
 </head>
 <body>
     <Routes />
+    @* Owner, 10 Oct 2026 (P7): the eye the script puts beside every password box. *@
+    <template data-pwreveal><button type="button" class="pwreveal" aria-pressed="false" aria-label="@L["Show password"]" title="@L["Show password"]" data-show="@L["Show password"]" data-hide="@L["Hide password"]"><span class="pw-eye" aria-hidden="true"><LipiIcon Name="eye" Size="16" /></span><span class="pw-eyeoff" aria-hidden="true"><LipiIcon Name="eye-off" Size="16" /></span></button></template>
     <script src="/app.js?v=@StaticAssets.Fingerprint("app.js")" defer></script>
 </body>
 </html>
+
+@code {
+    // The language the page is shown in: the person's own once signed in, before that the one
+    // chosen on the sign-in page (DES-11 D6; the page's lang was "en" there before).
+    private string Shown => L.Language;
+
+    private Anjal.Webmail.Services.Lexicon L => Anjal.Webmail.Services.AuthWords.For(Http.HttpContext, Words);
+
+    private string FaviconFile => "anjal-favicon-" + Anjal.Webmail.Services.Words.MarkScript(Shown) + ".svg";
+}

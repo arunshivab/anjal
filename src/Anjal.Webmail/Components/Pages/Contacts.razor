@@ -1,0 +1,378 @@
+@page "/contacts"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+
+@* rc.12 (items 28-30, the board Contacts): the list on the left, the person in
+   the letter area, recent mail with them in the envelope. Add, edit, delete,
+   merge duplicates, import and export (vCard, CSV), and groups. *@
+<PageTitle>@L["Contacts"] — Anjal</PageTitle>
+
+<div class="@(HasRight ? "fview layout-three has-open" : "fview layout-three")">
+    <section class="listcol">
+        <div class="listhead">
+            <form method="get" action="/contacts" class="lh-row lh-find" role="search">
+                @if (Groups)
+                {
+                    <input type="hidden" name="tab" value="groups" />
+                }
+                <span class="listsearch"><span class="sfield">
+                    <LipiIcon Name="search" Size="15" Class="si" />
+                    <input class="sbox" type="search" name="q" value="@Q" placeholder="@L["Search contacts"]" aria-label="@L["Search contacts"]" />
+                </span></span>
+            </form>
+            <div class="lh-row">
+                <h1>@L["Contacts"]</h1>
+                <span class="lh-grow"></span>
+                <nav class="seg" aria-label="@L["Show"]">
+                    <a href="/contacts" aria-current="@(Groups ? null : "page")">@L["All"] @contacts.Count</a>
+                    <a href="/contacts?tab=groups" aria-current="@(Groups ? "page" : null)">@L["Groups"] @groups.Count</a>
+                </nav>
+                <a class="iconbtn" href="@(Groups ? "/contacts?tab=groups&new=1" : "/contacts?new=1")" title="@(Groups ? L["New group"] : L["New contact"])" aria-label="@(Groups ? L["New group"] : L["New contact"])"><LipiIcon Name="plus" Size="17" /></a>
+            </div>
+        </div>
+        @if (Groups)
+        {
+            @if (groups.Count == 0)
+            {
+                <p class="empty">@L["No groups yet. A group is many people as one recipient, and the list for Send one each."]</p>
+            }
+            <div class="mlist clist">
+                @foreach (ContactGroup g in groups.Where(g => Q.Length == 0 || g.Name.Contains(Q, StringComparison.OrdinalIgnoreCase)))
+                {
+                    <a class="@(OpenGroup?.Id == g.Id ? "crow open" : "crow")" href="/contacts?tab=groups&open=@g.Id" aria-current="@(OpenGroup?.Id == g.Id ? "true" : null)">
+                        <span class="cavatar cgroup"><LipiIcon Name="users" Size="16" /></span>
+                        <span class="cwho"><b>@g.Name</b><span>@L["{n} people"].Replace("{n}", MailboxService.Count(g.Addresses.Count), StringComparison.Ordinal)</span></span>
+                    </a>
+                }
+            </div>
+        }
+        else
+        {
+            @if (contacts.Count == 0)
+            {
+                <p class="empty">@L["No contacts yet. Add one, import a file, or save a sender from any message."]</p>
+            }
+            <div class="mlist clist">
+                @foreach (IGrouping<string, Contact> letter in Shown.GroupBy(c => FirstLetter(c.DisplayName)))
+                {
+                    <section aria-label="@letter.Key">
+                        <h2 class="mgroup-day">@letter.Key</h2>
+                        @foreach (Contact c in letter)
+                        {
+                            <a class="@(OpenContact?.Id == c.Id ? "crow open" : "crow")" href="/contacts?open=@c.Id" aria-current="@(OpenContact?.Id == c.Id ? "true" : null)">
+                                <span class="cavatar">@Initials(c)</span>
+                                <span class="cwho"><b>@c.DisplayName</b><span>@c.Address</span></span>
+                            </a>
+                        }
+                    </section>
+                }
+            </div>
+        }
+    </section>
+
+    @if (HasRight)
+    {
+        <section class="readcol">
+            <div class="focusbar phoneonly"><a class="linkbtn" href="@(Groups ? "/contacts?tab=groups" : "/contacts")"><LipiIcon Name="chevron-left" Size="15" />@L["Contacts"]</a></div>
+            <div class="mview">
+                <article class="letter ccard" aria-label="@L["Contact"]">
+                    @foreach (string n in Notices)
+                    {
+                        <div class="notice n-ok readnotice"><LipiIcon Name="check" Size="16" /><span>@n</span></div>
+                    }
+                    @if (Error is not null)
+                    {
+                        <div class="notice n-err readnotice"><LipiIcon Name="warning" Size="16" /><span>@L.Say(Error)</span></div>
+                    }
+
+                    @if (Groups && (New || OpenGroup is not null))
+                    {
+                        ContactGroup g = OpenGroup ?? new ContactGroup();
+                        <form method="post" action="/contacts/groups/save" class="cedit">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="id" value="@(OpenGroup?.Id.ToString() ?? string.Empty)" />
+                            <h1 class="lsubj">@(OpenGroup is null ? L["New group"] : g.Name)</h1>
+                            <label class="cfl">@L["Name"]<input class="railinp" name="name" value="@g.Name" required /></label>
+                            <label class="cfl">@L["People (one address a line, or separated by commas)"]
+                                <textarea class="railinp cmembers" name="members" rows="10">@string.Join("\n", g.Addresses)</textarea>
+                            </label>
+                            <div class="cbtns">
+                                <button type="submit" class="btn btn-p" data-needs-server>@L["Save group"]</button>
+                                @if (OpenGroup is not null)
+                                {
+                                    <a class="btn btn-s" href="/compose?to=@Uri.EscapeDataString(string.Join(", ", g.Addresses))"><LipiIcon Name="edit" Size="15" />@L["Write to the group"]</a>
+                                }
+                            </div>
+                        </form>
+                        @if (OpenGroup is not null)
+                        {
+                            <details class="pmenu confirm">
+                                <summary class="btn btn-q">@L["Delete group"]</summary>
+                                <form method="post" action="/contacts/groups/@OpenGroup.Id/delete" class="pmenu-body">
+                                    <AntiforgeryToken />
+                                    <p class="pm-note">@L["The people stay in your contacts."]</p>
+                                    <button type="submit" class="btn btn-d btn-sm" data-needs-server>@L["Delete group"]</button>
+                                </form>
+                            </details>
+                        }
+                    }
+                    else if (!Groups && (New || Edit) )
+                    {
+                        Contact c = OpenContact ?? new Contact { Address = AddressQuery ?? string.Empty };
+                        <form method="post" action="/contacts/save" class="cedit">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="id" value="@(OpenContact?.Id.ToString() ?? string.Empty)" />
+                            <h1 class="lsubj">@(OpenContact is null ? L["New contact"] : c.DisplayName)</h1>
+                            <div class="cgrid">
+                                <label class="cfl">@L["First name"]<input class="railinp" name="firstName" value="@c.FirstName" autofocus /></label>
+                                <label class="cfl">@L["Last name"]<input class="railinp" name="lastName" value="@c.LastName" /></label>
+                                <label class="cfl">@L["Address"]<input class="railinp" name="address" type="email" value="@c.Address" required /></label>
+                                <label class="cfl">@L["Phone"]<input class="railinp" name="phone" value="@c.Phone" /></label>
+                                <label class="cfl">@L["Organisation"]<input class="railinp" name="organisation" value="@c.Organisation" /></label>
+                                <label class="cfl cwide">@L["Notes"]<textarea class="railinp" name="notes" rows="3">@c.Notes</textarea></label>
+                            </div>
+                            <div class="cbtns">
+                                <button type="submit" class="btn btn-p" data-needs-server>@L["Save contact"]</button>
+                                <a class="btn btn-q" href="@(OpenContact is null ? "/contacts" : $"/contacts?open={OpenContact.Id}")">@L["Cancel"]</a>
+                            </div>
+                        </form>
+                    }
+                    else if (OpenContact is Contact shown)
+                    {
+                        <div class="chead">
+                            <span class="cavatar cbig">@Initials(shown)</span>
+                            <div class="cname">
+                                <h1 class="lsubj">@shown.DisplayName</h1>
+                                @if (shown.Organisation.Length > 0)
+                                {
+                                    <span class="csub">@shown.Organisation</span>
+                                }
+                            </div>
+                            <span class="lh-grow"></span>
+                            <a class="btn btn-p" href="/compose?to=@Uri.EscapeDataString(shown.Address)"><LipiIcon Name="edit" Size="15" />@L["Compose"]</a>
+                            <a class="btn btn-s" href="/contacts?open=@shown.Id&edit=1">@L["Edit"]</a>
+                        </div>
+                        <dl class="cfields">
+                            <div><dt>@L["Address"]</dt><dd>@shown.Address</dd></div>
+                            <div><dt>@L["Phone"]</dt><dd>@(shown.Phone.Length > 0 ? shown.Phone : "—")</dd></div>
+                            <div><dt>@L["Organisation"]</dt><dd>@(shown.Organisation.Length > 0 ? shown.Organisation : "—")</dd></div>
+                            <div><dt>@L["Groups"]</dt><dd>@(GroupsOf(shown) is { Length: > 0 } gs ? gs : "—")</dd></div>
+                            <div><dt>@L["Notes"]</dt><dd>@(shown.Notes.Length > 0 ? shown.Notes : "—")</dd></div>
+                            <div><dt>@L["Saved"]</dt><dd>@clock.Date(shown.Added)</dd></div>
+                        </dl>
+                        @if (!Inside(shown.Address))
+                        {
+                            <div class="cwarn"><LipiIcon Name="warning" Size="15" /><span><b>@L["Outside {org}."].Replace("{org}", orgName, StringComparison.Ordinal)</b> @L["Anjal reminds you when you send this person attachments."]</span></div>
+                        }
+                        <details class="pmenu confirm">
+                            <summary class="btn btn-q">@L["Delete contact"]</summary>
+                            <form method="post" action="/contacts/@shown.Id/delete" class="pmenu-body">
+                                <AntiforgeryToken />
+                                <p class="pm-note">@L["Remove {name} from your contacts? Their mail stays."].Replace("{name}", shown.DisplayName, StringComparison.Ordinal)</p>
+                                <button type="submit" class="btn btn-d btn-sm" data-needs-server>@L["Delete contact"]</button>
+                            </form>
+                        </details>
+                    }
+                    else
+                    {
+                        <h1 class="lsubj">@L["Contacts"]</h1>
+                        <p class="lead">@(contacts.Count == 1 ? L["1 person saved. Pick them on the left, or add, import and export here."] : L["{n} people saved. Pick one on the left, or add, import and export here."].Replace("{n}", MailboxService.Count(contacts.Count), StringComparison.Ordinal))</p>
+                    }
+
+                    @if (!Groups && !New && !Edit)
+                    {
+                        <div class="ctoolsrow">
+                            <form method="post" action="/contacts/merge" class="inline">
+                                <AntiforgeryToken />
+                                <button type="submit" class="btn btn-s" data-needs-server>@L["Merge duplicates"]</button>
+                            </form>
+                            <details class="pmenu">
+                                <summary class="btn btn-s">@L["Import (vCard, CSV)"]</summary>
+                                <form method="post" action="/contacts/import" enctype="multipart/form-data" class="pmenu-body">
+                                    <AntiforgeryToken />
+                                    <input type="file" name="file" accept=".csv,.vcf,text/csv,text/vcard" required aria-label="@L["File to import"]" />
+                                    <p class="pm-note">@L["A CSV with a header row (first name, last name, address, organisation, phone), or vCards. Addresses already saved only gain details they lacked."]</p>
+                                    <button type="submit" class="btn btn-p btn-sm" data-needs-server>@L["Import"]</button>
+                                </form>
+                            </details>
+                            <details class="pmenu">
+                                <summary class="btn btn-s">@L["Export"]</summary>
+                                <div class="pmenu-body">
+                                    <a class="pmi" href="/contacts/export?format=csv" download><LipiIcon Name="download" Size="15" />CSV</a>
+                                    <a class="pmi" href="/contacts/export?format=vcf" download><LipiIcon Name="download" Size="15" />vCard</a>
+                                </div>
+                            </details>
+                        </div>
+                        <form method="post" action="/contacts/settings" class="csetting">
+                            <AntiforgeryToken />
+                            <label class="checkline">
+                                <input type="checkbox" name="always" value="1" checked="@settings.SaveNewSendersAutomatically" data-autosubmit />
+                                <span>@L["Always save new senders without asking"]</span>
+                            </label>
+                            <noscript><button type="submit" class="btn btn-s btn-sm">@L["Apply"]</button></noscript>
+                        </form>
+                    }
+                </article>
+                <aside class="envelope" aria-label="@L["Envelope"]">
+                    @if (!Groups && OpenContact is Contact who && !Edit)
+                    {
+                        <div class="eactions">
+                            <a class="eb eb-p" href="/compose?to=@Uri.EscapeDataString(who.Address)"><LipiIcon Name="edit" Size="14" />@L["Compose"]</a>
+                        </div>
+                        @if (traffic is ContactTraffic t)
+                        {
+                            @* rc.15 (owner, 7 Oct): how much mail has passed between you; each number opens it. *@
+                            <section class="ecard ctraffic" aria-label="@L["Mail between you"]">
+                                <span class="elabel">@L["Mail between you"]</span>
+                                <div class="ctnums">
+                                    <a class="ctnum" href="/search?q=@Uri.EscapeDataString(who.Address)&amp;scope=Sent"><b>@MailboxService.Count(t.Sent)</b><span>@L["Sent to them"]</span></a>
+                                    <a class="ctnum" href="/search?q=&amp;scope=all&amp;sender=@Uri.EscapeDataString(who.Address)"><b>@MailboxService.Count(t.Received)</b><span>@L["Received from them"]</span></a>
+                                </div>
+                                @if (t.Last is DateTimeOffset at)
+                                {
+                                    <span class="eaddr">@L["Last mail: {when}, {way}"].Replace("{when}", clock.List(at, DateTimeOffset.UtcNow), StringComparison.Ordinal).Replace("{way}", t.LastWasSent ? L["to them"] : L["from them"], StringComparison.Ordinal)</span>
+                                }
+                            </section>
+                        }
+                        <section class="ecard">
+                            <span class="elabel">@L["Recent mail with {name}"].Replace("{name}", who.FirstName.Length > 0 ? who.FirstName : who.DisplayName, StringComparison.Ordinal)</span>
+                            @if (recent.Count == 0)
+                            {
+                                <span class="eaddr">@L["None yet."]</span>
+                            }
+                            @foreach (MessageRow m in recent)
+                            {
+                                <a class="crecent" href="/message/@m.Id">
+                                    <b>@(string.IsNullOrWhiteSpace(m.Subject) ? L["(no subject)"] : m.Subject)</b>
+                                    <time title="@clock.Full(m.ReceivedAt)"><span class="tt">@clock.Time(m.ReceivedAt)</span><small class="td">@clock.ListDay(m.ReceivedAt, DateTimeOffset.UtcNow)</small></time>
+                                </a>
+                            }
+                            @if (recentTotal > 0)
+                            {
+                                <a class="linkbtn" href="/search?q=@Uri.EscapeDataString(who.Address)">@(recentTotal == 1 ? L["1 message"] : L["All {n} messages"].Replace("{n}", MailboxService.Count(recentTotal), StringComparison.Ordinal))</a>
+                            }
+                        </section>
+                    }
+                    else
+                    {
+                        <p class="railnote">@L["Contacts give names to addresses in To and Cc, come first in suggestions, and make groups for Send one each."]</p>
+                    }
+                </aside>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] private string? QText { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] private string? Tab { get; set; }
+    [SupplyParameterFromQuery(Name = "open")] private string? OpenText { get; set; }
+    [SupplyParameterFromQuery(Name = "new")] private string? NewText { get; set; }
+    [SupplyParameterFromQuery(Name = "edit")] private string? EditText { get; set; }
+    [SupplyParameterFromQuery(Name = "address")] private string? AddressQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "saved")] private string? SavedText { get; set; }
+    [SupplyParameterFromQuery(Name = "deleted")] private string? DeletedText { get; set; }
+    [SupplyParameterFromQuery(Name = "merged")] private string? MergedText { get; set; }
+    [SupplyParameterFromQuery(Name = "added")] private string? AddedText { get; set; }
+    [SupplyParameterFromQuery(Name = "updated")] private string? UpdatedText { get; set; }
+    [SupplyParameterFromQuery(Name = "skipped")] private string? SkippedText { get; set; }
+    [SupplyParameterFromQuery(Name = "importerror")] private string? ImportError { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private IReadOnlyList<Contact> contacts = Array.Empty<Contact>();
+    private IReadOnlyList<ContactGroup> groups = Array.Empty<ContactGroup>();
+    private IReadOnlyList<MessageRow> recent = Array.Empty<MessageRow>();
+    private long recentTotal;
+    private ContactTraffic? traffic;
+    private ContactSettings settings = new();
+    private IReadOnlyList<string> orgDomains = Array.Empty<string>();
+    private string orgName = string.Empty;
+
+    private string Q => (QText ?? string.Empty).Trim();
+    private bool Groups => Tab == "groups";
+    private bool New => NewText == "1" || AddressQuery is not null;
+    private bool Edit => EditText == "1";
+    private Contact? OpenContact => Groups || !Guid.TryParse(OpenText, out Guid id) ? null : contacts.FirstOrDefault(c => c.Id == id);
+    private ContactGroup? OpenGroup => !Groups || !Guid.TryParse(OpenText, out Guid id) ? null : groups.FirstOrDefault(g => g.Id == id);
+    private bool HasRight => true;
+
+    private IEnumerable<Contact> Shown => Q.Length == 0
+        ? contacts
+        : contacts.Where(c => c.DisplayName.Contains(Q, StringComparison.CurrentCultureIgnoreCase) || c.Address.Contains(Q, StringComparison.OrdinalIgnoreCase)
+            || c.Organisation.Contains(Q, StringComparison.CurrentCultureIgnoreCase));
+
+    private IEnumerable<string> Notices
+    {
+        get
+        {
+            if (SavedText is not null) { yield return L["Saved."]; }
+            if (DeletedText is not null) { yield return L["Deleted."]; }
+            if (MergedText is not null) { yield return L["{n} duplicates merged."].Replace("{n}", MergedText, StringComparison.Ordinal); }
+            if (AddedText is not null) { yield return L["Imported: {added} added, {updated} updated, {skipped} skipped."].Replace("{added}", AddedText, StringComparison.Ordinal).Replace("{updated}", UpdatedText ?? "0", StringComparison.Ordinal).Replace("{skipped}", SkippedText ?? "0", StringComparison.Ordinal); }
+            if (ImportError is not null) { yield return L["That file could not be imported. Choose a CSV or vCard file under 5 MB."]; }
+        }
+    }
+
+    private static string FirstLetter(string name)
+    {
+        string t = name.TrimStart();
+        if (t.Length == 0)
+        {
+            return "#";
+        }
+        string first = System.Globalization.StringInfo.GetNextTextElement(t, 0).ToUpperInvariant();
+        return char.IsLetter(first[0]) ? first : "#";
+    }
+
+    private static string Initials(Contact c)
+    {
+        string first = c.FirstName.Trim();
+        string last = c.LastName.Trim();
+        if (first.Length > 0 && last.Length > 0)
+        {
+            return (System.Globalization.StringInfo.GetNextTextElement(first, 0) + System.Globalization.StringInfo.GetNextTextElement(last, 0)).ToUpperInvariant();
+        }
+        string any = c.DisplayName.Trim();
+        return any.Length == 0 ? "?" : System.Globalization.StringInfo.GetNextTextElement(any, 0).ToUpperInvariant();
+    }
+
+    private string GroupsOf(Contact c) =>
+        string.Join(", ", groups.Where(g => g.Addresses.Contains(c.Address, StringComparer.OrdinalIgnoreCase)).Select(g => g.Name));
+
+    private bool Inside(string address)
+    {
+        int at = address.LastIndexOf('@');
+        return at > 0 && orgDomains.Contains(address[(at + 1)..], StringComparer.OrdinalIgnoreCase);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        Guid? mailboxId = WebmailAuthService.PersonIdOf(user);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        contacts = await Mail.ListContactsAsync(mailboxId.Value);
+        groups = await Mail.ListGroupsAsync(mailboxId.Value);
+        settings = await Mail.GetContactSettingsAsync(mailboxId.Value);
+        orgDomains = await Mail.OrganisationDomainsAsync(mailboxId.Value);
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);
+        orgName = context is null ? string.Empty : context.Value.Tenant.DisplayName.Length > 0 ? context.Value.Tenant.DisplayName : context.Value.Tenant.Slug;
+        if (OpenContact is Contact c)
+        {
+            (recent, recentTotal) = await Mail.SearchAsync(mailboxId.Value, null, c.Address, 0, 5);
+            traffic = await Mail.ContactTrafficAsync(mailboxId.Value, c.Address);
+        }
+    }
+}

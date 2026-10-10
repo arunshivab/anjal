@@ -1,0 +1,1278 @@
+@page "/org"
+@page "/org/{Section}"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject SessionRegistry Sessions
+@inject IMessageStore Store
+@inject HostInfo Host
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+<PageTitle>@L["Organisation"] — Anjal</PageTitle>
+
+@* rc.14: the organisation console as the approved boards draw it (OrgPeople,
+   OrgSignin, OrgDomains, OrgShared, OrgRetention, OrgApps, OrgLog,
+   OrgBranding): the sections with what each holds, the section in a card,
+   and beside it the selected item or what a change will do. Only an
+   administrator of the organisation sees it, and no one's mail is shown. *@
+@if (!ready)
+{
+    <div class="dash"><p class="dnote">@L["Loading…"]</p></div>
+}
+else if (tenant is null)
+{
+    <div class="emptystate">
+        <h1>@L["Organisation"]</h1>
+        <p>@L["Only an administrator of your organisation can open this."]</p>
+        <a class="btn btn-s" href="/folder/INBOX">@L["Back to your mail"]</a>
+    </div>
+}
+else
+{
+<div class="settings3 orgconsole">
+    <nav class="setnav3 setnav-long" aria-label="@L["Organisation console sections"]">
+        <div class="setnav-title orgtitle"><span>@OrgName</span><small>@L["Organisation console"]</small></div>
+        @foreach ((string key, string label, string icon) in Sections)
+        {
+            <a href="/org/@key" class="setnav-item @(Current == key ? "on" : null)" aria-current="@(Current == key ? "page" : null)">
+                <LipiIcon Name="@icon" Size="20" />
+                <span class="setnav-text"><b>@L[label]</b><span>@NavSub(key)</span></span>
+            </a>
+        }
+    </nav>
+
+    <div class="setmain">
+    @if (Saved is not null)
+    {
+        <div class="notice n-ok setnotice" role="status"><LipiIcon Name="check" Size="16" /><span>@SavedMessage</span></div>
+    }
+    @if (note is not null)
+    {
+        <div class="notice n-err setnotice" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(note)</span></div>
+    }
+    @if (revealed is not null && Current is "people")
+    {
+        <div class="formcard orgreveal" role="status">
+            <h2><LipiIcon Name="link" Size="18" /> @L["Invitation links"]</h2>
+            <p class="hint">@L["Shown once. Give each person their link; it works once, for 7 days. Anyone with a link can choose that person's password."]</p>
+            <ul class="reveallist">
+                @foreach (string line in revealed)
+                {
+                    string[] parts = line.Split('|', 2);
+                    <li>
+                        <b>@parts[0]</b>
+                        @if (parts.Length > 1 && parts[1].StartsWith('!'))
+                        {
+                            <span class="pill pill-bad">@parts[1][1..]</span>
+                        }
+                        else if (parts.Length > 1)
+                        {
+                            <code class="mono revealval">@parts[1]</code>
+                            <button type="button" class="btn btn-s btn-sm" data-copy="@parts[1]"><LipiIcon Name="copy" Size="14" />@L["Copy"]</button>
+                        }
+                    </li>
+                }
+            </ul>
+        </div>
+    }
+
+    @switch (Current)
+    {
+        case "people":
+            <section class="formcard orgcard">
+                <header class="orghead">
+                    <h2>@L["People"]</h2>
+                    <div class="orgheadbtns">
+                        <a class="btn btn-s" href="/org/people?import=1">@L["Import list (CSV)"]</a>
+                        <a class="btn btn-p" href="/org/people?invite=1"><LipiIcon Name="plus" Size="16" />@L["Invite people"]</a>
+                    </div>
+                </header>
+                <div class="orgfilters">
+                    <form method="get" action="/org/people" class="orgsearch" role="search">
+                        <LipiIcon Name="search" Size="16" />
+                        <input type="search" name="q" value="@Q" placeholder="@L["Find a person"]" aria-label="@L["Find a person"]" />
+                        @if (Filter != "all")
+                        {
+                            <input type="hidden" name="f" value="@Filter" />
+                        }
+                    </form>
+                    <div class="seg orgseg" role="tablist">
+                        @foreach ((string key, string word) in PeopleFilters)
+                        {
+                            <a href="@PeopleLink(key)" aria-current="@(Filter == key ? "page" : null)">@L[word] @PeopleCount(key)</a>
+                        }
+                    </div>
+                </div>
+                <table class="orgtable">
+                    <thead><tr><th>@L["Person"]</th><th>@L["Role"]</th><th>@L["Status"]</th><th>@L["Two-step"]</th></tr></thead>
+                    <tbody>
+                    @foreach (PersonView p in PeoplePage)
+                    {
+                        <tr class="@(selPerson?.Mailbox.Id == p.Mailbox.Id ? "on" : null)">
+                            <td><a class="rowlink" href="@PeopleLink(Filter, p.Mailbox.Id)"><b>@NameOf(p.Mailbox)</b><span>@p.Mailbox.Address</span></a></td>
+                            <td>@(p.Admin ? L["Administrator"] : L["Member"])</td>
+                            <td><span class="pill @StatusPill(p.Status)">@L[StatusWord(p.Status)]</span>@if (p.Held) {<span class="pill pill-warn" title="@L["Under a legal hold"]">@L["Held"]</span>}</td>
+                            <td>@(p.Status is "invited" or "disabled" ? "-" : p.TwoStep.Length > 0 ? p.TwoStep : L["Not set up"])</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                @if (PeopleShown.Count == 0)
+                {
+                    <p class="orgempty">@L["No one matches."]</p>
+                }
+                <footer class="orgfoot">
+                    <span>@L["Showing {n} of {all}. Rows per page follow your own setting."].Replace("{n}", PeoplePage.Count.ToString(Inv), StringComparison.Ordinal).Replace("{all}", PeopleShown.Count.ToString(Inv), StringComparison.Ordinal)</span>
+                    <span class="pager orgpager"><PageSteps L="L" Index="PageNo - 1" Size="pageSize" Total="PeopleShown.Count" Link="@(i => PeopleLink(Filter, null, i + 1))" Previous="Previous" Next="Next" /></span>
+                </footer>
+            </section>
+            break;
+
+        case "signin":
+            <form id="signinform" method="post" action="/org/signin" class="formcard orgcard">
+                <AntiforgeryToken />
+                <h2>@L["Sign-in and sessions"]</h2>
+                <p class="hint orglead">@L["Anjal sets the outer limits; {org} can only make them stricter. Applications have their own rules under Applications."].Replace("{org}", OrgName, StringComparison.Ordinal)</p>
+                <table class="orgtable rules">
+                    <thead><tr><th>@L["Rule"]</th><th>@L["Anjal's limit"]</th><th>@OrgName</th><th>@L["Compared"]</th></tr></thead>
+                    <tbody>
+                        <tr><th scope="row">@L["Password length"]</th><td>@L["At least 15, or 12 with two-step"]</td>
+                            <td><select class="setsel" name="minLength" aria-label="@L["Password length"]">@foreach (int n in SignInPolicy.LengthChoices){<option value="@n" selected="@(Math.Max(policy.MinLength, SignInPolicy.AnjalMinLength) == n)">@(n == SignInPolicy.AnjalMinLength ? L["As Anjal"] : L["At least {n} for everyone"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal))</option>}</select></td>
+                            <td>@Compared(policy.MinLength > SignInPolicy.AnjalMinLength)</td></tr>
+                        <tr><th scope="row">@L["Earlier passwords"]</th><td>@L["Not checked"]</td>
+                            <td><select class="setsel" name="history" aria-label="@L["Earlier passwords"]">@foreach (int n in SignInPolicy.HistoryChoices){<option value="@n" selected="@(policy.PasswordHistory == n)">@(n == 0 ? L["Not checked"] : L["Not one of the last {n}"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal))</option>}</select></td>
+                            <td>@Compared(policy.PasswordHistory > 0)</td></tr>
+                        <tr><th scope="row">@L["Leaked-password check"]</th><td>@L["Always on"]</td><td>@L["On"]</td><td><span class="pill pill-mute">@L["Fixed"]</span></td></tr>
+                        <tr><th scope="row">@L["Two-step sign-in"]</th><td>@L["Optional, or required"]</td>
+                            <td><select class="setsel" name="twoStep" aria-label="@L["Two-step sign-in"]">
+                                <option value="optional" selected="@(policy.TwoStep == "optional")">@L["Optional"]</option>
+                                <option value="admins" selected="@(policy.TwoStep == "admins")">@L["Required for administrators"]</option>
+                                <option value="everyone" selected="@(policy.TwoStep == "everyone")">@L["Required for everyone"]</option>
+                            </select></td>
+                            <td>@Compared(policy.TwoStep != "optional")</td></tr>
+                        <tr><th scope="row">@L["Methods allowed"]</th><td>@L["Authenticator, passkeys, backup codes, hardware keys"]</td>
+                            <td><select class="setsel" name="methods" aria-label="@L["Methods allowed"]">
+                                <option value="all" selected="@(policy.Methods == "all")">@L["All four"]</option>
+                                <option value="no-backup" selected="@(policy.Methods == "no-backup")">@L["No backup codes"]</option>
+                            </select></td>
+                            <td>@Compared(policy.Methods != "all")</td></tr>
+                        <tr><th scope="row">@L["Idle sign-out, shared computer"]</th><td>@L["At most {n} minutes"].Replace("{n}", SignInPolicy.AnjalSharedIdleMinutes.ToString(Inv), StringComparison.Ordinal)</td>
+                            <td><select class="setsel" name="sharedIdle" aria-label="@L["Idle sign-out, shared computer"]">@foreach (int n in SignInPolicy.SharedIdleChoices){<option value="@n" selected="@(policy.SharedIdleMinutes == n)">@L["{n} minutes"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal)</option>}</select></td>
+                            <td>@Compared(policy.SharedIdleMinutes < SignInPolicy.AnjalSharedIdleMinutes)</td></tr>
+                        <tr><th scope="row">@L["Idle sign-out, own device"]</th><td>@L["At most {n} hours"].Replace("{n}", SignInPolicy.AnjalOwnIdleHours.ToString(Inv), StringComparison.Ordinal)</td>
+                            <td><select class="setsel" name="ownIdle" aria-label="@L["Idle sign-out, own device"]">@foreach (int n in SignInPolicy.OwnIdleChoices){<option value="@n" selected="@(policy.OwnIdleHours == n)">@(n == 1 ? L["1 hour"] : L["{n} hours"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal))</option>}</select></td>
+                            <td>@Compared(policy.OwnIdleHours < SignInPolicy.AnjalOwnIdleHours)</td></tr>
+                        <tr><th scope="row">@L["Stay signed in"]</th><td>@L["At most {n} days"].Replace("{n}", SignInPolicy.AnjalStayDays.ToString(Inv), StringComparison.Ordinal)</td>
+                            <td><select class="setsel" name="stay" aria-label="@L["Stay signed in"]">@foreach (int n in SignInPolicy.StayChoices){<option value="@n" selected="@(policy.StayDays == n)">@(n == 1 ? L["1 day"] : L["{n} days"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal))</option>}</select></td>
+                            <td>@Compared(policy.StayDays < SignInPolicy.AnjalStayDays)</td></tr>
+                        <tr><th scope="row">@L["Trust a device for two-step"]</th><td>@L["At most {n} days, never on shared computers"].Replace("{n}", SignInPolicy.AnjalTrustDays.ToString(Inv), StringComparison.Ordinal)</td>
+                            <td><select class="setsel" name="trust" aria-label="@L["Trust a device for two-step"]">@foreach (int n in SignInPolicy.TrustChoices){<option value="@n" selected="@(policy.TrustDays == n)">@(n == 0 ? L["Never"] : L["{n} days"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal))</option>}</select></td>
+                            <td>@Compared(policy.TrustDays < SignInPolicy.AnjalTrustDays)</td></tr>
+                        @* DES-11 D5 (owner, 10 Oct 2026): only the mail list is kept, locked with the person's offline code or passkey. *@
+                        <tr><th scope="row">@L["Mail list kept on devices to read offline"]</th><td>@L["Each person's choice; the list only, never the mail; locked with their offline code or passkey; never on shared computers"]</td>
+                            <td><select class="setsel" name="offline" aria-label="@L["Mail list kept on devices to read offline"]">
+                                <option value="1" selected="@(policy.OfflineMail && policy.OfflineSubjects)">@L["Allowed"]</option>
+                                <option value="2" selected="@(policy.OfflineMail && !policy.OfflineSubjects)">@L["Sender and date only"]</option>
+                                <option value="0" selected="@(!policy.OfflineMail)">@L["Not allowed"]</option>
+                            </select></td>
+                            <td>@Compared(!policy.OfflineMail || !policy.OfflineSubjects)</td></tr>
+                    </tbody>
+                </table>
+            </form>
+            break;
+
+        case "domains":
+            <section class="formcard orgcard">
+                <header class="orghead">
+                    <h2>@L["Domains"]</h2>
+                    @if (domains.Count > 0)
+                    {
+                        <a class="btn btn-s" href="/org/domains/records.txt" download><LipiIcon Name="download" Size="16" />@L["Download all records"]</a>
+                    }
+                </header>
+                <div class="domchips">
+                    @foreach (TenantDomainRow d in domains)
+                    {
+                        <a class="domchip @(SelDomain == d.Domain ? "on" : null)" href="/org/domains?domain=@Uri.EscapeDataString(d.Domain)">@d.Domain <span class="pill pill-info">@L["Receiving"]</span></a>
+                    }
+                    @foreach (string d in pending.Keys.OrderBy(x => x, StringComparer.Ordinal))
+                    {
+                        <a class="domchip @(SelDomain == d ? "on" : null)" href="/org/domains?domain=@Uri.EscapeDataString(d)">@d <span class="pill pill-warn">@L["Proof pending"]</span></a>
+                    }
+                </div>
+                @if (SelDomain is not null && pending.TryGetValue(SelDomain, out string? token))
+                {
+                    <div class="domproof">
+                        <h3>@L["Prove {domain} is yours"].Replace("{domain}", SelDomain, StringComparison.Ordinal)</h3>
+                        <p class="hint">@L["Publish this TXT record where the domain's DNS is managed, then press Check. Nothing is received for the domain until it is proved."]</p>
+                        <table class="orgtable recs">
+                            <thead><tr><th>@L["Type"]</th><th>@L["Name"]</th><th>@L["Value"]</th><th></th></tr></thead>
+                            <tbody><tr><td><b>TXT</b></td><td class="mono">_anjal</td><td class="mono recval">@token</td>
+                                <td><button type="button" class="iconbtn sqbtn" data-copy="@token" title="@L["Copy"]" aria-label="@L["Copy"]"><LipiIcon Name="copy" Size="16" /></button></td></tr></tbody>
+                        </table>
+                        <form method="post" action="/org/domains/prove" class="setactions">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="domain" value="@SelDomain" />
+                            <button type="submit" class="btn btn-p">@L["Check"]</button>
+                        </form>
+                    </div>
+                }
+                else if (SelDomain is not null)
+                {
+                    <p class="domcheck">
+                        @if (Check == "1")
+                        {
+                            @L["Checked live just now."] <a href="/org/domains?domain=@Uri.EscapeDataString(SelDomain)&check=1">@L["Check again"]</a>
+                        }
+                        else
+                        {
+                            @L["Not checked yet."] <a href="/org/domains?domain=@Uri.EscapeDataString(SelDomain)&check=1">@L["Check now"]</a>
+                        }
+                    </p>
+                    <table class="orgtable recs">
+                        <thead><tr><th>@L["Record"]</th><th>@L["Name"]</th><th>@L["Value"]</th><th>@L["Status"]</th><th></th></tr></thead>
+                        <tbody>
+                        @foreach (DnsRecordCheck r in records)
+                        {
+                            <tr>
+                                <th scope="row">@r.Kind</th>
+                                <td class="mono">@r.Name</td>
+                                <td class="mono recval" title="@r.Value">@r.Value</td>
+                                <td><span class="pill @RecordPill(r.Status)">@L[RecordWord(r.Status)]</span></td>
+                                <td><button type="button" class="iconbtn sqbtn" data-copy="@r.Value" title="@L["Copy"]" aria-label="@L["Copy {what}"].Replace("{what}", r.Kind, StringComparison.Ordinal)"><LipiIcon Name="copy" Size="16" /></button></td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <p class="orgempty">@L["No domain yet. Add the domain you own to start receiving mail at it."]</p>
+                }
+            </section>
+            break;
+
+        case "shared":
+            <section class="formcard orgcard">
+                <header class="orghead">
+                    <h2>@L["Shared mailboxes"]</h2>
+                    <a class="btn btn-p" href="/org/shared?new=1"><LipiIcon Name="plus" Size="16" />@L["New shared mailbox"]</a>
+                </header>
+                <p class="hint orglead">@L["A shared mailbox has no password of its own. People open it beside their own mailbox, with the rights given here."]</p>
+                <table class="orgtable">
+                    <thead><tr><th>@L["Address"]</th><th>@L["Name"]</th><th>@L["People"]</th><th>@L["Sending"]</th><th>@L["Mail"]</th></tr></thead>
+                    <tbody>
+                    @foreach ((MailboxRow box, SharedMailbox info, long unread) in shared)
+                    {
+                        <tr class="@(SelGuid == box.Id ? "on" : null)">
+                            <td><a class="rowlink" href="/org/shared?sel=@box.Id"><b>@box.Address</b></a></td>
+                            <td>@box.DisplayName</td>
+                            <td>@(info.Members.Count == 1 ? L["1 person"] : L["{n} people"].Replace("{n}", info.Members.Count.ToString(Inv), StringComparison.Ordinal))</td>
+                            <td><span class="pill pill-mute">@(info.SendMode == "behalf" ? L["On behalf"] : L["Send as"])</span></td>
+                            <td>@(unread == 0 ? "0" : L["{n} unread"].Replace("{n}", unread.ToString(Inv), StringComparison.Ordinal))</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                @if (shared.Count == 0)
+                {
+                    <p class="orgempty">@L["No shared mailbox yet. Make one for an address several people answer, such as enquiries@."]</p>
+                }
+            </section>
+            break;
+
+        case "retention":
+            <form id="retentionform" method="post" action="/org/retention" class="formcard orgcard">
+                <AntiforgeryToken />
+                <h2>@L["Retention"]</h2>
+                <p class="hint orglead">@L["How long mail and records are kept (policy CMP-02). {org} may change the defaults shown."].Replace("{org}", OrgName, StringComparison.Ordinal)</p>
+                <table class="orgtable rules">
+                    <thead><tr><th>@L["What"]</th><th>Anjal</th><th>@OrgName</th></tr></thead>
+                    <tbody>
+                        <tr><th scope="row">@L["Trash"]<span>@L["People who have not chosen follow this, including later changes"]</span></th><td>@L["Default {n} days"].Replace("{n}", MailboxService.DefaultTrashDays.ToString(Inv), StringComparison.Ordinal)</td>
+                            <td><select class="setsel" name="trash" aria-label="@L["Trash"]" data-default data-was="@retention.TrashDays.ToString(Inv)" data-longer-looser>@foreach (int n in MailboxService.TrashChoices){<option value="@n" selected="@(retention.TrashDays == n)">@L["{n} days"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal)</option>}</select></td></tr>
+                        @* rc.15 (item 22, owner 7 Oct): an organisation can only make the rules stricter - never past Anjal's 90 days. *@
+                        <tr><th scope="row">@L["Longest a person may choose"]<span>@L["For their own Trash; at least the setting above"]</span></th><td>@L["Up to {n} days"].Replace("{n}", MailboxService.MaxTrashDays.ToString(Inv), StringComparison.Ordinal)</td>
+                            <td><select class="setsel" name="trashmax" aria-label="@L["Longest a person may choose"]">@foreach (int n in MailboxService.TrashChoices){<option value="@n" selected="@(retention.TrashMaxDays == n)">@L["{n} days"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal)</option>}</select></td></tr>
+                        <tr><th scope="row">@L["Junk"]</th><td>@L["Default {n} days"].Replace("{n}", MailboxService.JunkDays.ToString(Inv), StringComparison.Ordinal)</td>
+                            <td><select class="setsel" name="junk" aria-label="@L["Junk"]" data-default data-was="@retention.JunkDays.ToString(Inv)" data-longer-looser>@foreach (int n in JunkChoices){<option value="@n" selected="@(retention.JunkDays == n)">@L["{n} days"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal)</option>}</select></td></tr>
+                        <tr><th scope="row">@L["Outbox copies after delivery"]<span>@L["Your Sent folder is not affected"]</span></th><td>@L["Removed within 30 days"]</td>
+                            <td><select class="setsel" name="outbox" aria-label="@L["Outbox copies after delivery"]">@foreach (int n in CopyChoices){<option value="@n" selected="@(retention.OutboxDays == n)">@L["Removed after {n} days"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal)</option>}</select></td></tr>
+                        <tr><th scope="row">@L["Copies passed to applications"]<span>@L["After the application confirms receipt"]</span></th><td>@L["Removed within 30 days"]</td>
+                            <td><select class="setsel" name="apps" aria-label="@L["Copies passed to applications"]">@foreach (int n in CopyChoices){<option value="@n" selected="@(retention.AppCopyDays == n)">@L["Removed after {n} days"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal)</option>}</select></td></tr>
+                        <tr><th scope="row">@L["Evidence (the untouched originals)"]<span>@L["Kept while the mail exists"]</span></th><td>@L["Default 3 years after deletion"]</td>
+                            <td><select class="setsel" name="evidence" aria-label="@L["Evidence"]">@foreach (int n in EvidenceChoices){<option value="@n" selected="@(retention.EvidenceYears == n)">@(n == 1 ? L["1 year after deletion"] : L["{n} years after deletion"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal))</option>}</select></td></tr>
+                        <tr><th scope="row">@L["Accounts without sign-in"]<span>@L["Shown to you under People"]</span></th><td>@L["Never deleted automatically"]</td><td>@L["Fixed by Anjal"]</td></tr>
+                        <tr><th scope="row">@L["Activity log"]</th><td>@L["Kept for ever, reviewed if space runs short"]</td><td>@L["For ever"]</td></tr>
+                    </tbody>
+                </table>
+                <WhoGetsIt L="L" What="@L["Who should get a changed Trash or Junk setting?"]" Retention="true" />
+            </form>
+            <section class="formcard orgcard holdcard">
+                <header class="orghead">
+                    <h3>@L["Legal hold"]</h3>
+                    <a class="btn btn-s" href="/org/retention?hold=1"><LipiIcon Name="plus" Size="16" />@L["Place a hold"]</a>
+                </header>
+                <p class="hint">@L["Nothing is deleted from a held mailbox, whatever the rules above say, until the hold is lifted."]</p>
+                @foreach (LegalHold h in holds)
+                {
+                    MailboxRow? held = everyone.FirstOrDefault(m => m.Id == h.MailboxId);
+                    <div class="holdrow">
+                        <b>@(held is null ? h.MailboxId.ToString() : NameOf(held))</b>
+                        <span>@L["held since {date} by {who}. Reason: {why}"].Replace("{date}", clock.Date(h.Since), StringComparison.Ordinal).Replace("{who}", h.By, StringComparison.Ordinal).Replace("{why}", h.Reason, StringComparison.Ordinal)</span>
+                        <form method="post" action="/org/people/@h.MailboxId/unhold" class="inline">
+                            <AntiforgeryToken />
+                            <button type="submit" class="btn btn-s btn-sm">@L["Lift"]</button>
+                        </form>
+                    </div>
+                }
+                @if (holds.Count == 0)
+                {
+                    <p class="orgempty">@L["No mailbox is held."]</p>
+                }
+            </section>
+            break;
+
+        case "sending":
+            @* rc.15 (item 64, owner 7 Oct): the daily limit for Send one each - Anjal's ceiling 500 a person a day, 200 to start. *@
+            <form id="sendingform" method="post" action="/org/sending" class="formcard orgcard">
+                <AntiforgeryToken />
+                <h2>@L["Sending"]</h2>
+                <p class="hint orglead">@L["Limits on mail people send. Anjal sets the ceiling; {org} may only set it lower."].Replace("{org}", OrgName, StringComparison.Ordinal)</p>
+                <table class="orgtable rules">
+                    <thead><tr><th>@L["What"]</th><th>Anjal</th><th>@OrgName</th></tr></thead>
+                    <tbody>
+                        <tr><th scope="row">@L["Send one each (mail merge)"]<span>@L["Separate copies one person may send a day"]</span></th>
+                            <td>@L["Up to {n} a day"].Replace("{n}", MailboxService.MergeCeiling.ToString(Inv), StringComparison.Ordinal)</td>
+                            <td><select class="setsel" name="limit" aria-label="@L["Send one each (mail merge)"]">@foreach (int n in MergeChoices){<option value="@n" selected="@(mergeLimit == n)">@L["{n} a day"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal)</option>}</select></td></tr>
+                    </tbody>
+                </table>
+            </form>
+            break;
+
+        case "figures":
+            @* rc.15 (item 60; owner, 7 Oct 2026): off by default; on only with a purpose; everyone told; logged. *@
+            <section class="formcard orgcard">
+                <h2>@L["Figures per person"]</h2>
+                <p class="hint orglead">@L["When this is on, {org}'s dashboard shows for each person how many messages they received, sent and had filed in Junk. Never what mail says, who it is from or to, or its subjects."].Replace("{org}", OrgName, StringComparison.Ordinal)</p>
+                <table class="orgtable rules">
+                    <tbody>
+                        <tr><th scope="row">@L["Status"]</th><td>@if (figures.On) {<span class="pill pill-warn">@L["On"]</span>} else {<span class="pill pill-info">@L["Off"]</span>}</td></tr>
+                        @if (figures.On)
+                        {
+                            <tr><th scope="row">@L["Why"]</th><td>@figures.Purpose</td></tr>
+                            <tr><th scope="row">@L["Counted from"]</th><td>@(figures.FromAt is DateTimeOffset f ? clock.Date(f) : L["All mail kept"])</td></tr>
+                            <tr><th scope="row">@L["Turned on by"]</th><td>@figures.By@(figures.ChangedAt is DateTimeOffset c ? ", " + clock.Date(c) : string.Empty)</td></tr>
+                        }
+                        else if (figures.ChangedAt is DateTimeOffset off)
+                        {
+                            <tr><th scope="row">@L["Turned off by"]</th><td>@figures.By, @clock.Date(off)</td></tr>
+                        }
+                    </tbody>
+                </table>
+                @if (figures.On)
+                {
+                    <p class="hint"><a href="/dashboard/org#o-people">@L["See the figures on the dashboard"]</a></p>
+                }
+            </section>
+            break;
+
+        case "apps":
+            <section class="formcard orgcard">
+                <header class="orghead">
+                    <h2>@L["Applications"]</h2>
+                    <a class="btn btn-p" href="/org/apps?new=1"><LipiIcon Name="plus" Size="16" />@L["Add an application"]</a>
+                </header>
+                <p class="hint orglead">@L["Each application gets its own send-only keys, limited to its own address. Keys can be rotated or revoked one by one."]</p>
+                <table class="orgtable">
+                    <thead><tr><th>@L["Application"]</th><th>@L["Sends as"]</th><th>@L["Receives"]</th><th>@L["Keys"]</th><th>@L["Status"]</th></tr></thead>
+                    <tbody>
+                    @foreach (OrgApp a in apps)
+                    {
+                        <tr class="@(SelText == a.Id ? "on" : null)">
+                            <td><a class="rowlink" href="/org/apps?sel=@Uri.EscapeDataString(a.Id)"><b>@a.Name</b><span>@a.Description</span></a></td>
+                            <td>@a.SendsAs</td>
+                            <td>@(a.Receives.Length > 0 ? a.Receives : "-")</td>
+                            <td><span class="pill pill-mute">@(a.Keys.Count == 1 ? L["1 key"] : L["{n} keys"].Replace("{n}", a.Keys.Count.ToString(Inv), StringComparison.Ordinal))</span></td>
+                            <td>@if (a.Keys.Count == 0) {<span class="pill pill-bad">@L["No key"]</span>} else if (a.Keys.Any(k => k.EndsAt is not null)) {<span class="pill pill-warn">@L["Rotating"]</span>} else {<span class="pill pill-info">@L["Healthy"]</span>}</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                @if (apps.Count == 0)
+                {
+                    <p class="orgempty">@L["No application yet. Add one for each system that sends mail, such as a hospital information system or a payroll system."]</p>
+                }
+            </section>
+            break;
+
+        case "log":
+            <section class="formcard orgcard">
+                <header class="orghead">
+                    <h2>@L["Activity log"]</h2>
+                    <a class="btn btn-s" href="@LogCsv" download><LipiIcon Name="download" Size="16" />@L["Export (CSV)"]</a>
+                </header>
+                <form method="get" action="/org/log" class="orgfilters">
+                    <span class="orgsearch"><LipiIcon Name="search" Size="16" /><input type="search" name="q" value="@Q" placeholder="@L["Find a person or action"]" aria-label="@L["Find a person or action"]" /></span>
+                    <select class="setsel" name="who" aria-label="@L["Who"]" data-autosubmit>
+                        <option value="">@L["Everyone"]</option>
+                        @foreach (MailboxRow m in everyone.OrderBy(m => NameOf(m), StringComparer.OrdinalIgnoreCase))
+                        {
+                            <option value="@m.Address" selected="@(string.Equals(Who, m.Address, StringComparison.OrdinalIgnoreCase))">@NameOf(m)</option>
+                        }
+                    </select>
+                    <select class="setsel" name="kind" aria-label="@L["Actions"]" data-autosubmit>
+                        <option value="">@L["All actions"]</option>
+                        <option value="sign-in" selected="@(Kind == "sign-in")">@L["Sign-ins"]</option>
+                        <option value="admin" selected="@(Kind == "admin")">@L["Administrator actions"]</option>
+                        <option value="account" selected="@(Kind == "account")">@L["Account changes"]</option>
+                    </select>
+                    <select class="setsel" name="days" aria-label="@L["Period"]" data-autosubmit>
+                        @foreach ((int n, string word) in LogPeriods)
+                        {
+                            <option value="@n" selected="@(Days == n)">@L[word]</option>
+                        }
+                    </select>
+                    <noscript><button type="submit" class="btn btn-s">@L["Show"]</button></noscript>
+                </form>
+                <table class="orgtable logtable">
+                    <thead><tr><th>@L["Time ({zone})"].Replace("{zone}", clock.ZoneName(DateTimeOffset.UtcNow), StringComparison.Ordinal)</th><th>@L["Who"]</th><th>@L["Action"]</th><th>@L["On"]</th><th>@L["From"]</th><th>@L["Result"]</th></tr></thead>
+                    <tbody>
+                    @foreach (AuditEvent e in events.Take(200))
+                    {
+                        <tr class="@(SelText == e.Seq.ToString(Inv) ? "on" : null)">
+                            <td><a class="rowlink" href="@LogLink(e.Seq)">@When(e.At)</a></td>
+                            <td><b>@Person(e.Actor)</b></td>
+                            <td>@L[OrgLog.Describe(e.Action)]</td>
+                            <td><span class="logon" title="@On(e)">@On(e)</span></td>
+                            <td>@e.RemoteAddress</td>
+                            <td>@if (OrgLog.Refused(e.Action)) {<span class="pill pill-bad">@L["Refused"]</span>} else {<span class="pill pill-info">@L["Done"]</span>}</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                @if (events.Count == 0)
+                {
+                    <p class="orgempty">@L["Nothing in this period."]</p>
+                }
+                <footer class="orgfoot">
+                    <span>@L["Entries cannot be edited or deleted, by anyone. Each is chained to the one before, so a removed entry would show."]</span>
+                    <form method="post" action="/org/log/verify" class="inline">
+                        <AntiforgeryToken />
+                        <button type="submit" class="btn btn-s btn-sm">@L["Check the chain"]</button>
+                    </form>
+                </footer>
+            </section>
+            break;
+
+        case "branding":
+            <form id="brandingform" method="post" action="/org/branding" enctype="multipart/form-data" class="formcard orgcard">
+                <AntiforgeryToken />
+                <h2>@L["Branding"]</h2>
+                <div class="setrow">
+                    <span class="setlbl">@L["Logo"]</span>
+                    <div class="logorow">
+                        <span class="logobox">@if (branding.Logo.Length > 0) {<img src="@branding.Logo" alt="@L["Your logo"]" />} else {<span>@L["logo"]</span>}</span>
+                        <label class="btn btn-s filebtn"><LipiIcon Name="upload" Size="16" />@L["Upload logo"]<input type="file" name="logo" accept="image/png,image/jpeg,image/webp,image/svg+xml" /></label>
+                        <span class="hint">@L["Square, SVG or PNG, at least 256 px, up to 256 KB"]</span>
+                        @if (branding.Logo.Length > 0)
+                        {
+                            <label class="checkline"><input type="checkbox" name="removeLogo" value="1" /> @L["Remove the logo"]</label>
+                        }
+                    </div>
+                </div>
+                <div class="setrow">
+                    <label class="setlbl" for="btitle">@L["Name shown to people"]</label>
+                    <input id="btitle" class="inp orginp" name="title" maxlength="80" value="@branding.Title" placeholder="@L["{org} mail"].Replace("{org}", tenant.DisplayName.Length > 0 ? tenant.DisplayName : tenant.Slug, StringComparison.Ordinal)" />
+                </div>
+                <fieldset class="setrow setgroup">
+                    <legend class="setlbl">@L["Default theme"]</legend>
+                    <div class="swatches">
+                        @foreach (string c in MailboxRow.ThemeColours)
+                        {
+                            <label class="swatch" title="@L[Title(c)]">
+                                <input type="radio" name="theme" value="@c" checked="@(branding.DefaultTheme == c)" data-default data-was="@branding.DefaultTheme" />
+                                <span class="sw swatch-@c" aria-hidden="true"></span>
+                                <span class="swname">@L[Title(c)]</span>
+                            </label>
+                        }
+                    </div>
+                    <p class="hint">@L["People can still choose their own."]</p>
+                </fieldset>
+                <div class="setrow">
+                    <label class="setlbl" for="blang">@L["Default language"]</label>
+                    <select id="blang" class="setsel" name="language" data-default data-was="@branding.DefaultLanguage">
+                        @foreach (string lc in MailboxPreferences.Languages.Where(Words.IsEnabled))
+                        {
+                            <option value="@lc" selected="@(branding.DefaultLanguage == lc)">@Words.NativeName(lc)</option>
+                        }
+                    </select>
+                </div>
+                @* Owner, 8 Oct 2026: the organisation's clock, followed by everyone who has not chosen their own. *@
+                <div class="setrow">
+                    <label class="setlbl" for="bclock">@L["Clock"]</label>
+                    <select id="bclock" class="setsel" name="clock" data-default data-was="@(branding.DefaultClock == Clocks.Twelve ? "12" : "24")">
+                        <option value="24" selected="@(branding.DefaultClock != Clocks.Twelve)">@L["24-hour (14:30)"]</option>
+                        <option value="12" selected="@(branding.DefaultClock == Clocks.Twelve)">@L["12-hour (2:30 pm)"]</option>
+                    </select>
+                    <p class="hint">@L["Everyone who has not chosen their own clock follows this, including later changes."]</p>
+                </div>
+                <WhoGetsIt L="L" What="@L["Who should get a changed colour, language or clock?"]" Retention="false" />
+                <div class="setrow">
+                    <label class="setlbl" for="bmsg">@L["Message on the sign-in page"]</label>
+                    <input id="bmsg" class="inp orginp wide" name="message" maxlength="140" value="@branding.Message" placeholder="@L["For {org} staff only. Activity is logged."].Replace("{org}", tenant.DisplayName.Length > 0 ? tenant.DisplayName : tenant.Slug, StringComparison.Ordinal)" />
+                    <p class="hint">@L["Optional, one line."]</p>
+                </div>
+            </form>
+            <section class="formcard orgcard holdcard">
+                <h3>@L["Templates for everyone"]</h3>
+                <p class="hint">@L["Templates an administrator saves for everyone appear first in each person's Templates. To add one, write it in Compose and choose Save as template for everyone."]</p>
+                @foreach (MailTemplate t in orgTemplates)
+                {
+                    <div class="holdrow">
+                        <b>@t.Name</b>
+                        <span>@(t.Subject.Length > 0 ? t.Subject : L["(no subject)"])</span>
+                        <form method="post" action="/org/templates/delete" class="inline">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="key" value="@t.Key" />
+                            <button type="submit" class="btn btn-s btn-sm">@L["Remove"]</button>
+                        </form>
+                    </div>
+                }
+                @if (orgTemplates.Count == 0)
+                {
+                    <p class="orgempty">@L["None yet."]</p>
+                }
+            </section>
+            break;
+    }
+    </div>
+
+    <aside class="setaside" aria-label="@L["About this section"]">
+    @switch (Current)
+    {
+        case "people":
+            @if (Invite == "1")
+            {
+                <h2 class="asidehead">@L["Invite a person"]</h2>
+                <form method="post" action="/org/people/invite" class="asideform">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="iname">@L["Name"]</label>
+                    <input id="iname" class="inp" name="name" maxlength="100" required />
+                    <label class="setlbl" for="ilocal">@L["Their new address"]</label>
+                    <span class="addrline"><input id="ilocal" class="inp" name="local" maxlength="64" required autocomplete="off" /><span>@@</span>
+                        <select class="setsel" name="domain" aria-label="@L["Domain"]">@foreach (TenantDomainRow d in domains){<option value="@d.Domain">@d.Domain</option>}</select></span>
+                    <label class="setlbl" for="ipersonal">@L["Personal address, to send the invitation to"]</label>
+                    <input id="ipersonal" class="inp" name="personal" type="email" maxlength="200" />
+                    <p class="hint">@L["Optional. The invitation link is also shown to you once, to give them yourself."]</p>
+                    <label class="checkline"><input type="checkbox" name="role" value="admin" /> @L["Make them an administrator"]</label>
+                    <div class="setactions"><button type="submit" class="btn btn-p">@L["Invite"]</button><a class="btn btn-s" href="/org/people">@L["Cancel"]</a></div>
+                </form>
+            }
+            else if (Import == "1")
+            {
+                <h2 class="asidehead">@L["Import a list"]</h2>
+                <form method="post" action="/org/people/import" enctype="multipart/form-data" class="asideform">
+                    <AntiforgeryToken />
+                    <p class="asidetext">@L["A CSV file with a Name and an Address column, and optionally Personal (where to send the invitation) and Role (admin or member). Each person is invited; nothing is changed for addresses already taken."]</p>
+                    <input type="file" name="list" accept=".csv,text/csv" required aria-label="@L["List of people (CSV)"]" />
+                    <div class="setactions"><button type="submit" class="btn btn-p">@L["Import and invite"]</button><a class="btn btn-s" href="/org/people">@L["Cancel"]</a></div>
+                </form>
+            }
+            else if (selPerson is not null)
+            {
+                <h2 class="asidehead">@L["Selected person"]</h2>
+                <div class="asideperson">
+                    <h3>@NameOf(selPerson.Mailbox)</h3>
+                    <span class="asidesub">@selPerson.Mailbox.Address</span>
+                    <span class="pill wide @StatusPill(selPerson.Status)">@L[StatusWord(selPerson.Status)]</span>
+                </div>
+                <p class="asideline"><b>@L["Role"]</b>: @(selPerson.Admin ? L["Administrator"] : L["Member"])</p>
+                <p class="asideline"><b>@L["Two-step"]</b>: @(selPerson.TwoStep.Length > 0 ? selPerson.TwoStep : L["not set up"])</p>
+                <p class="asideline"><b>@L["Devices"]</b>: @DevicesWords(selPerson)</p>
+                <p class="asideline"><b>@L["Shared mailboxes"]</b>: @(selPerson.Shared.Length > 0 ? selPerson.Shared : L["none"])</p>
+                @* Owner, 8 Oct 2026: Send one each only for the people the organisation chooses. *@
+                <p class="asideline"><b>@L["Send one each"]</b>: @(mergePeople.Contains(selPerson.Mailbox.Id) ? L["allowed"] : L["not allowed"])</p>
+                @* DES-11 D2: the person's use against their own limit (if any); "over" when a lowered plan or limit left them above it. *@
+                <p class="asideline"><b>@L["Storage"]</b>: @Layout.MainLayout.Size(selPerson.Mailbox.UsedBytes) @(selPerson.Mailbox.QuotaBytes > 0 ? L["of"] + " " + Layout.MainLayout.Size(selPerson.Mailbox.QuotaBytes) : L["from the shared total"])
+                    @if (selPerson.Mailbox.QuotaBytes > 0 && selPerson.Mailbox.UsedBytes > selPerson.Mailbox.QuotaBytes)
+                    {
+                        <span class="pill pill-bad" title="@L["Above its limit: it keeps its mail, and receives nothing until it is back under."]">@L["over"]</span>
+                    }
+                </p>
+                @* DES-11 D2: the administrator may give a smaller limit, never a larger one. *@
+                <form method="post" action="/org/people/@selPerson.Mailbox.Id/storage" class="asideform">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="pcap">@L["Smaller storage limit, GB (empty for the plan's)"]</label>
+                    <input id="pcap" class="inp" name="value" type="number" min="0.01" step="0.01" value="@CapOf(selPerson.Mailbox.Id)" />
+                    <div class="setactions"><button type="submit" class="btn btn-s btn-sm">@L["Set limit"]</button></div>
+                </form>
+                @if (selPerson.Held)
+                {
+                    <p class="asideline"><b>@L["Legal hold"]</b>: @L["nothing is deleted from this mailbox"]</p>
+                }
+                @if (selPerson.Status != "disabled")
+                {
+                    <form method="post" action="/org/people/@selPerson.Mailbox.Id/reset"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn">@(selPerson.Status == "invited" ? L["Make a new invitation link"] : L["Reset password"])</button></form>
+                    <form method="post" action="/org/people/@selPerson.Mailbox.Id/signout"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn">@L["Sign out all devices"]</button></form>
+                }
+                <form method="post" action="/org/people/@selPerson.Mailbox.Id/role" class="asiderole">
+                    <AntiforgeryToken />
+                    <select class="setsel" name="value" aria-label="@L["Role"]">
+                        <option value="member" selected="@(!selPerson.Admin)">@L["Member"]</option>
+                        <option value="admin" selected="@selPerson.Admin">@L["Administrator"]</option>
+                    </select>
+                    <button type="submit" class="btn btn-s">@L["Change role"]</button>
+                </form>
+                <a class="btn btn-s asidebtn" href="/org/shared">@L["Change shared mailboxes"]</a>
+                <form method="post" action="/org/people/@selPerson.Mailbox.Id/merge"><AntiforgeryToken />
+                    <input type="hidden" name="value" value="@(mergePeople.Contains(selPerson.Mailbox.Id) ? "off" : "on")" />
+                    <button type="submit" class="btn btn-s asidebtn">@(mergePeople.Contains(selPerson.Mailbox.Id) ? L["Stop Send one each"] : L["Allow Send one each"])</button>
+                </form>
+                @if (selPerson.TwoStep.Length > 0)
+                {
+                    <form method="post" action="/org/people/@selPerson.Mailbox.Id/twostep-off"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn" title="@L["For a person who has lost their phone and backup codes. They will be asked to set two-step up again if it is required."]">@L["Turn off two-step"]</button></form>
+                }
+                @if (selPerson.Mailbox.Id != me!.Id)
+                {
+                    @if (selPerson.Status == "disabled")
+                    {
+                        <form method="post" action="/org/people/@selPerson.Mailbox.Id/enable"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn">@L["Enable this person"]</button></form>
+                    }
+                    else
+                    {
+                        <form method="post" action="/org/people/@selPerson.Mailbox.Id/disable"><AntiforgeryToken /><button type="submit" class="btn btn-danger-q asidebtn">@L["Disable this person"]</button></form>
+                    }
+                }
+                <p class="asidetext">@L["Disabling signs them out everywhere; their mail is kept and still received. Administrators cannot read anyone's mail. Every action here is written to the activity log."]</p>
+            }
+            else
+            {
+                <h2 class="asidehead">@L["People"]</h2>
+                <p class="asidetext">@L["Choose a person to see how they sign in and to reset, sign out or disable them. Administrators cannot read anyone's mail. Every action here is written to the activity log."]</p>
+            }
+            break;
+
+        case "signin":
+            <h2 class="asidehead">@L["Effect"]</h2>
+            <div class="asidecard"><b>@L["Who this affects"]</b><span class="asidebody">@AffectsText</span></div>
+            <div class="asidecard"><b>@L["Not offered"]</b><span class="asidebody">@L["SMS and WhatsApp codes: they cost per message and tell an outside party who signs in."]</span></div>
+            @if (adminsWithoutKey > 0)
+            {
+                <div class="asidecard warn"><b>@(adminsWithoutKey == 1 ? L["1 administrator without a passkey or hardware key"] : L["{n} administrators without a passkey or hardware key"].Replace("{n}", adminsWithoutKey.ToString(Inv), StringComparison.Ordinal))</b><span class="asidebody">@L["Recommended for every administrator."]</span></div>
+            }
+            <button type="submit" form="signinform" class="btn btn-p asidebtn big">@L["Save changes"]</button>
+            <p class="asidetext">@L["Changes apply at each person's next sign-in and are written to the activity log."]</p>
+            break;
+
+        case "domains":
+            <h2 class="asidehead">@L["Domains"]</h2>
+            <h3 class="asidetitle">@L["Add a domain"]</h3>
+            <ol class="asidesteps">
+                <li><span>1</span>@L["Type the domain you own"]</li>
+                <li><span>2</span>@L["Prove it is yours with one TXT record"]</li>
+                <li><span>3</span>@L["Copy the six records into your DNS"]</li>
+                <li><span>4</span>@L["Anjal checks them and starts receiving"]</li>
+            </ol>
+            <form method="post" action="/org/domains/add" class="asideform inlineform">
+                <AntiforgeryToken />
+                <input class="inp" name="domain" placeholder="example.in" aria-label="@L["Domain"]" required maxlength="253" autocomplete="off" />
+                <button type="submit" class="btn btn-p"><LipiIcon Name="plus" Size="16" />@L["Add a domain"]</button>
+            </form>
+            @if (records.Any(r => r.Kind == "MTA-STS" && r.Status == "testing"))
+            {
+                <div class="asidecard warn"><span class="asidebody"><b>@L["MTA-STS is in testing."]</b> @L["Switch to enforce once the TLS reports show every delivery encrypted."]</span></div>
+            }
+            @if (records.Any(r => r.Kind == "DKIM" && !r.Value.StartsWith("v=DKIM1", StringComparison.Ordinal)))
+            {
+                <div class="asidecard warn"><span class="asidebody"><b>@L["No DKIM key yet."]</b> @L["Ask the Anjal operator to make one; until then mail you send may be refused."]</span></div>
+            }
+            break;
+
+        case "shared":
+            @if (New == "1")
+            {
+                <h2 class="asidehead">@L["New shared mailbox"]</h2>
+                <form method="post" action="/org/shared/new" class="asideform">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="slocal">@L["Address"]</label>
+                    <span class="addrline"><input id="slocal" class="inp" name="local" maxlength="64" required autocomplete="off" placeholder="enquiries" /><span>@@</span>
+                        <select class="setsel" name="domain" aria-label="@L["Domain"]">@foreach (TenantDomainRow d in domains){<option value="@d.Domain">@d.Domain</option>}</select></span>
+                    <label class="setlbl" for="sname">@L["Name shown on mail"]</label>
+                    <input id="sname" class="inp" name="name" maxlength="100" required placeholder="@L["Enquiries"]" />
+                    <div class="setactions"><button type="submit" class="btn btn-p">@L["Make it"]</button><a class="btn btn-s" href="/org/shared">@L["Cancel"]</a></div>
+                </form>
+            }
+            else if (selShared is { } s)
+            {
+                <h2 class="asidehead">@L["Selected mailbox"]</h2>
+                <h3 class="asidetitle">@s.Mailbox.Address</h3>
+                <p class="asidetext">@SharedSummary(s)</p>
+                <ul class="memberlist">
+                    @foreach ((Guid pid, string right) in s.Info.Members.OrderBy(kv => NameOf(everyone.FirstOrDefault(m => m.Id == kv.Key)), StringComparer.OrdinalIgnoreCase))
+                    {
+                        <li>
+                            <b>@NameOf(everyone.FirstOrDefault(m => m.Id == pid))</b>
+                            <form method="post" action="/org/shared/@s.Mailbox.Id/member" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="person" value="@pid" />
+                                <select class="setsel sm" name="right" aria-label="@L["Rights"]" data-autosubmit>
+                                    <option value="manage" selected="@(right == "manage")">@L["Manage"]</option>
+                                    <option value="send" selected="@(right == "send")">@L["Read and send"]</option>
+                                    <option value="read" selected="@(right == "read")">@L["Read only"]</option>
+                                    <option value="none">@L["Remove"]</option>
+                                </select>
+                                <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                            </form>
+                        </li>
+                    }
+                </ul>
+                <form method="post" action="/org/shared/@s.Mailbox.Id/member" class="asideform addmember">
+                    <AntiforgeryToken />
+                    <select class="setsel" name="person" aria-label="@L["Person"]" required>
+                        <option value="">@L["Add a person…"]</option>
+                        @foreach (PersonView p in people.Where(p => !s.Info.Members.ContainsKey(p.Mailbox.Id) && p.Status != "disabled"))
+                        {
+                            <option value="@p.Mailbox.Id">@NameOf(p.Mailbox)</option>
+                        }
+                    </select>
+                    <select class="setsel" name="right" aria-label="@L["Rights"]">
+                        <option value="send">@L["Read and send"]</option>
+                        <option value="read">@L["Read only"]</option>
+                        <option value="manage">@L["Manage"]</option>
+                    </select>
+                    <button type="submit" class="btn btn-s asidebtn"><LipiIcon Name="plus" Size="16" />@L["Add people"]</button>
+                </form>
+                <form method="post" action="/org/shared/@s.Mailbox.Id/sending" class="asideform">
+                    <AntiforgeryToken />
+                    <span class="setlbl">@L["Sending"]</span>
+                    <label class="radioline"><input type="radio" name="mode" value="as" checked="@(s.Info.SendMode != "behalf")" data-autosubmit /> @L["Send as: the mail is from {box}"].Replace("{box}", s.Mailbox.LocalPart + "@", StringComparison.Ordinal)</label>
+                    <label class="radioline"><input type="radio" name="mode" value="behalf" checked="@(s.Info.SendMode == "behalf")" data-autosubmit /> @L["On behalf: \"{person} on behalf of {box}\""].Replace("{person}", NameOf(me), StringComparison.Ordinal).Replace("{box}", s.Mailbox.DisplayName.Length > 0 ? s.Mailbox.DisplayName : s.Mailbox.Address, StringComparison.Ordinal)</label>
+                    <label class="mtoggle"><input type="checkbox" name="keep" value="1" checked="@s.Info.KeepSentCopy" data-autosubmit role="switch" /><span class="toggle" aria-hidden="true"><i></i></span><span>@L["Keep a copy of sent mail in this mailbox"]</span></label>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+            }
+            else
+            {
+                <h2 class="asidehead">@L["Shared mailboxes"]</h2>
+                <p class="asidetext">@L["Choose a mailbox to give people rights on it and to choose how it sends. Read only cannot send or delete; Read and send can; Manage can also file and delete."]</p>
+            }
+            break;
+
+        case "retention":
+            @if (Hold == "1")
+            {
+                <h2 class="asidehead">@L["Place a legal hold"]</h2>
+                <form method="post" action="/org/retention/hold" class="asideform">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="hperson">@L["Mailbox"]</label>
+                    <select id="hperson" class="setsel setsel-fit" name="mailbox" required>
+                        @foreach (MailboxRow m in everyone.Where(m => !holds.Any(h => h.MailboxId == m.Id)).OrderBy(m => NameOf(m), StringComparer.OrdinalIgnoreCase))
+                        {
+                            @* rc.15: in a one-domain organisation the part before the @ is enough, so the choice fits the panel. *@
+                            <option value="@m.Id">@NameOf(m) (@(domains.Count == 1 ? m.LocalPart : m.Address))</option>
+                        }
+                    </select>
+                    <label class="setlbl" for="hreason">@L["Reason"]</label>
+                    <input id="hreason" class="inp" name="value" maxlength="300" required />
+                    <p class="hint">@L["Kept with the hold and in the activity log."]</p>
+                    <div class="setactions"><button type="submit" class="btn btn-p">@L["Place the hold"]</button><a class="btn btn-s" href="/org/retention">@L["Cancel"]</a></div>
+                </form>
+            }
+            else
+            {
+                <h2 class="asidehead">@L["What this means"]</h2>
+                <div class="asidecard"><b>@L["Storage today"]</b><span class="asidebody">@StorageText</span></div>
+                <div class="asidecard"><span class="asidebody"><b>@L["Deleted addresses"]</b> @L["are locked for ever and never given to anyone else."]</span></div>
+                <div class="asidecard"><span class="asidebody"><b>@L["Evidence"]</b> @L["is removed only when its period ends, and the removal itself is logged."]</span></div>
+                <div class="asidecard warn"><span class="asidebody"><b>@L["Records the law requires"]</b> @L["belong in your own record system. Anjal never deletes an account on its own; export what you must keep before you remove one."]</span></div>
+                <button type="submit" form="retentionform" class="btn btn-p asidebtn big">@L["Save changes"]</button>
+            }
+            break;
+
+        case "sending":
+            <h2 class="asidehead">@L["What this means"]</h2>
+            <div class="asidecard"><b>@L["Who may use it"]</b><span class="asidebody">@(mergePeople.Count == 0 ? L["No one yet. Choose a person under People and allow Send one each."] : mergePeople.Count == 1 ? L["1 person. Change this under People."] : L["{n} people. Change this under People."].Replace("{n}", mergePeople.Count.ToString(Inv), StringComparison.Ordinal))</span></div>
+            <div class="asidecard"><span class="asidebody">@L["Large merges go out gradually, a few seconds apart, so receiving servers do not mistake them for spam."]</span></div>
+            <div class="asidecard"><span class="asidebody">@L["The limit counts every copy, inside and outside {org}. The person is told before sending if a merge would pass it."].Replace("{org}", OrgName, StringComparison.Ordinal)</span></div>
+            <button type="submit" form="sendingform" class="btn btn-p asidebtn big">@L["Save changes"]</button>
+            break;
+
+        case "figures":
+            <h2 class="asidehead">@L[figures.On ? "Turn off" : "Turn on"]</h2>
+            @if (figures.On)
+            {
+                <div class="asidecard"><span class="asidebody">@L["Everyone in {org} is told by mail when this is turned off. It is written to the activity log."].Replace("{org}", OrgName, StringComparison.Ordinal)</span></div>
+                <form method="post" action="/org/figures" class="asideform">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="action" value="off" />
+                    <button type="submit" class="btn btn-p asidebtn big">@L["Turn off and tell everyone"]</button>
+                </form>
+            }
+            else
+            {
+                <form method="post" action="/org/figures" class="asideform">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="action" value="on" />
+                    <label class="setlbl" for="fwhy">@L["Why are the figures needed?"]</label>
+                    <textarea id="fwhy" class="inp" name="purpose" rows="3" minlength="10" maxlength="300" required placeholder="@L["For example: to plan the front desk's workload"]"></textarea>
+                    <label class="setlbl" for="ffrom">@L["Count mail from"]</label>
+                    <select id="ffrom" class="setsel" name="from">
+                        @foreach ((string key, string label) in MailboxService.PersonFiguresStarts)
+                        {
+                            <option value="@key">@L[label]</option>
+                        }
+                    </select>
+                    <div class="asidecard"><span class="asidebody">@L["Everyone in {org} gets a mail saying why, what is counted and from when, and sees it in their Settings. It is written to the activity log."].Replace("{org}", OrgName, StringComparison.Ordinal)</span></div>
+                    <button type="submit" class="btn btn-p asidebtn big">@L["Turn on and tell everyone"]</button>
+                </form>
+            }
+            break;
+
+        case "apps":
+            @if (New == "1")
+            {
+                <h2 class="asidehead">@L["Add an application"]</h2>
+                <form method="post" action="/org/apps/new" class="asideform">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="aname">@L["Name"]</label>
+                    <input id="aname" class="inp" name="name" maxlength="100" required placeholder="@L["Hospital information system"]" />
+                    <label class="setlbl" for="adesc">@L["What it does"]</label>
+                    <input id="adesc" class="inp" name="description" maxlength="200" placeholder="@L["Sends notifications"]" />
+                    <label class="setlbl" for="asends">@L["The one address it sends as"]</label>
+                    <input id="asends" class="inp" name="sendsAs" type="email" maxlength="200" required placeholder="notifications@@@(domains.FirstOrDefault()?.Domain ?? "example.in")" />
+                    <label class="setlbl" for="arecv">@L["What it receives (a note)"]</label>
+                    <input id="arecv" class="inp" name="receives" maxlength="200" />
+                    <div class="setactions"><button type="submit" class="btn btn-p">@L["Add and make a key"]</button><a class="btn btn-s" href="/org/apps">@L["Cancel"]</a></div>
+                </form>
+            }
+            else if (selApp is not null)
+            {
+                <h2 class="asidehead">@L["Selected application"]</h2>
+                <h3 class="asidetitle">@selApp.Name</h3>
+                <p class="asidetext">@L["Sends as {address}, and only as it."].Replace("{address}", selApp.SendsAs, StringComparison.Ordinal) @(selApp.Receives.Length > 0 ? L["Receives: {what}."].Replace("{what}", selApp.Receives, StringComparison.Ordinal) : string.Empty)</p>
+                @if (revealed is { Count: > 0 } && revealed[0].Split('|') is [string user, string secret])
+                {
+                    <div class="asidecard keynew" role="status">
+                        <b>@L["The new key, shown once"]</b>
+                        <dl class="keyvals">
+                            <dt>@L["SMTP server"]</dt><dd><code>@Host.Name</code><span>@L["port 587, STARTTLS"]</span></dd>
+                            <dt>@L["User name"]</dt><dd><code>@user</code><button type="button" class="iconbtn sqbtn" data-copy="@user" title="@L["Copy"]" aria-label="@L["Copy the user name"]"><LipiIcon Name="copy" Size="14" /></button></dd>
+                            <dt>@L["Password"]</dt><dd><code>@secret</code><button type="button" class="iconbtn sqbtn" data-copy="@secret" title="@L["Copy"]" aria-label="@L["Copy the password"]"><LipiIcon Name="copy" Size="14" /></button></dd>
+                        </dl>
+                    </div>
+                }
+                @foreach (AppKey k in selApp.Keys.OrderBy(k => k.EndsAt is null ? 0 : 1).ThenByDescending(k => k.Created))
+                {
+                    <div class="keycard">
+                        <div class="keyhead"><LipiIcon Name="lock" Size="16" /><b>@(k.EndsAt is null ? L["Live key"] : L["Old key"])</b>
+                            @if (k.EndsAt is DateTimeOffset ends) {<span class="pill pill-warn">@L["Ends {date}"].Replace("{date}", clock.Local(ends).ToString("d MMM", Inv), StringComparison.Ordinal)</span>} else {<span class="pill pill-info">@L["In use"]</span>}</div>
+                        <p>@L["Made {date}. Fingerprint {fp}."].Replace("{date}", clock.Date(k.Created), StringComparison.Ordinal).Replace("{fp}", k.Fingerprint, StringComparison.Ordinal) <span class="mono">@k.Username</span></p>
+                        <div class="keybtns">
+                            @if (k.EndsAt is null)
+                            {
+                                <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/key" class="inline"><AntiforgeryToken /><input type="hidden" name="rotate" value="1" /><button type="submit" class="btn btn-s btn-sm" title="@L["A new key now; this one stops working in 14 days."]">@L["Rotate"]</button></form>
+                            }
+                            <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/revoke" class="inline"><AntiforgeryToken /><input type="hidden" name="key" value="@k.Id" /><button type="submit" class="btn btn-danger-q btn-sm">@L["Revoke"]</button></form>
+                        </div>
+                    </div>
+                }
+                <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/key"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn"><LipiIcon Name="plus" Size="16" />@L["New key"]</button></form>
+                <p class="asidetext">@L["A new key is shown once, when it is made. Anjal keeps only a fingerprint of it."]</p>
+            }
+            else
+            {
+                <h2 class="asidehead">@L["Applications"]</h2>
+                <p class="asidetext">@L["Choose an application to see its keys. A key can only send, only as its application's address; it cannot read any mail."]</p>
+            }
+            break;
+
+        case "log":
+            @if (chainNote is not null)
+            {
+                <div class="asidecard @(Chain == "ok" ? null : "bad")"><b>@(Chain == "ok" ? L["The chain is intact"] : L["The chain is broken"])</b><span class="asidebody">@chainNote</span></div>
+            }
+            @if (selEvent is not null)
+            {
+                <h2 class="asidehead">@L["Selected entry"]</h2>
+                <h3 class="asidetitle">@L[OrgLog.Describe(selEvent.Action)]</h3>
+                <span class="pill wide @(OrgLog.Refused(selEvent.Action) ? "pill-bad" : "pill-info")">@(OrgLog.Refused(selEvent.Action) ? L["Refused"] : L["Done"])</span>
+                <p class="asideline"><b>@L["When"]</b>: @clock.Full(selEvent.At)</p>
+                <p class="asideline"><b>@L["Who"]</b>: @Person(selEvent.Actor)</p>
+                <p class="asideline"><b>@L["On"]</b>: @On(selEvent)</p>
+                <p class="asideline"><b>@L["From"]</b>: @selEvent.RemoteAddress</p>
+                @if (selEvent.Detail.Length > 0)
+                {
+                    <p class="asideline"><b>@L["Detail"]</b>: @selEvent.Detail</p>
+                }
+                <p class="asideline"><b>@L["Entry"]</b>: <span class="mono">#@selEvent.Seq.ToString(Inv), @L["chained"]</span></p>
+                @if (OrgLog.Refused(selEvent.Action) && selEvent.Action.Contains("second-step", StringComparison.Ordinal) && SubjectPerson(selEvent) is MailboxRow victim)
+                {
+                    <div class="asidecard bad"><b>@L["The password is known to someone else."]</b><span class="asidebody">@L["Change it now and review signed-in devices."]</span></div>
+                    <form method="post" action="/org/people/@victim.Id/reset"><AntiforgeryToken /><button type="submit" class="btn btn-p asidebtn">@L["Reset this password"]</button></form>
+                    <form method="post" action="/org/people/@victim.Id/signout"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn">@L["Sign out all devices"]</button></form>
+                }
+            }
+            else
+            {
+                <h2 class="asidehead">@L["Activity log"]</h2>
+                <p class="asidetext">@L["Every sign-in, every refused sign-in and every administrator action in {org}. Choose an entry to see it in full."].Replace("{org}", OrgName, StringComparison.Ordinal)</p>
+            }
+            break;
+
+        case "branding":
+            <h2 class="asidehead">@L["Sign-in page preview"]</h2>
+            <div class="brandpreview" aria-hidden="true">
+                <span class="bp-side"><span class="mark-tile bp-mark"><svg viewBox="0 0 148 148" width="34" height="34"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg><span class="mt-letter" lang="@L.Language">@Words.MarkLetter(L.Language)</span></span><b>Anjal</b></span>
+                <span class="bp-form">
+                    <span class="bp-head">@if (branding.Logo.Length > 0) {<img src="@branding.Logo" alt="" />} else {<i></i>}<b>@(branding.Title.Length > 0 ? branding.Title : OrgName + " mail")</b></span>
+                    <i class="bp-in"></i><i class="bp-in"></i><i class="bp-btn swatch-@branding.DefaultTheme"></i>
+                    @if (branding.Message.Length > 0)
+                    {
+                        <small>@branding.Message</small>
+                    }
+                </span>
+            </div>
+            <p class="asidetext">@L["The sign-in page, as your people will see it. The Anjal mark always stays; your logo and name sit above the form."]</p>
+            <button type="submit" form="brandingform" class="btn btn-p asidebtn big">@L["Save changes"]</button>
+            break;
+    }
+    </aside>
+</div>
+}
+
+@code {
+    /// <summary>The section in the address, e.g. /org/people.</summary>
+    [Parameter] public string? Section { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    private static readonly (string Key, string Label, string Icon)[] Sections =
+    {
+        ("people", "People", "users"),
+        ("signin", "Sign-in and sessions", "security"),
+        ("domains", "Domains", "world-route"),
+        ("shared", "Shared mailboxes", "box"),
+        ("retention", "Retention", "clock"),
+        ("sending", "Sending", "referral-out"),
+        ("figures", "Figures per person", "chart-bar"),
+        ("apps", "Applications", "grid-view"),
+        ("log", "Activity log", "log"),
+        ("branding", "Branding", "edit"),
+    };
+
+    private static readonly (string Key, string Word)[] PeopleFilters = { ("all", "All"), ("active", "Active"), ("invited", "Invited"), ("disabled", "Disabled") };
+    private static readonly int[] JunkChoices = { 7, 14, 30, 60, 90 };
+    private static readonly int[] CopyChoices = { 1, 7, 14, 30 };
+    private static readonly int[] MergeChoices = { 25, 50, 100, 200, 300, 400, 500 };
+    private int mergeLimit = MailboxService.DefaultDailyMergeLimit;
+    private IReadOnlyList<Guid> mergePeople = Array.Empty<Guid>();
+    private Anjal.Store.StoragePlan storagePlan = new();
+
+    // The administrator's smaller limit for a person, in GB for the form; empty when none (DES-11 D2).
+    private string CapOf(Guid person) =>
+        storagePlan.Caps.TryGetValue(person, out long cap) && cap > 0 ? (cap / (double)Sizes.GB).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
+    private static readonly int[] EvidenceChoices = { 1, 2, 3, 5, 7, 10 };
+    private static readonly (int Days, string Word)[] LogPeriods = { (1, "Today"), (7, "Last 7 days"), (30, "Last 30 days"), (90, "Last 90 days"), (365, "Last year") };
+
+    [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
+    [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
+    [SupplyParameterFromQuery(Name = "sel")] private string? Sel { get; set; }
+    [SupplyParameterFromQuery(Name = "links")] private string? Links { get; set; }
+    [SupplyParameterFromQuery(Name = "key")] private string? KeyShown { get; set; }
+    [SupplyParameterFromQuery(Name = "invite")] private string? Invite { get; set; }
+    [SupplyParameterFromQuery(Name = "import")] private string? Import { get; set; }
+    [SupplyParameterFromQuery(Name = "new")] private string? New { get; set; }
+    [SupplyParameterFromQuery(Name = "hold")] private string? Hold { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] private string? QText { get; set; }
+    [SupplyParameterFromQuery(Name = "f")] private string? FilterText { get; set; }
+    [SupplyParameterFromQuery(Name = "p")] private int? PageText { get; set; }
+    [SupplyParameterFromQuery(Name = "domain")] private string? DomainText { get; set; }
+    [SupplyParameterFromQuery(Name = "check")] private string? Check { get; set; }
+    [SupplyParameterFromQuery(Name = "who")] private string? Who { get; set; }
+    [SupplyParameterFromQuery(Name = "kind")] private string? Kind { get; set; }
+    [SupplyParameterFromQuery(Name = "days")] private int? DaysText { get; set; }
+    [SupplyParameterFromQuery(Name = "chain")] private string? Chain { get; set; }
+    [SupplyParameterFromQuery(Name = "n")] private long? ChainChecked { get; set; }
+    [SupplyParameterFromQuery(Name = "at")] private long? ChainAt { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private TenantRow? tenant;
+    private MailboxRow? me;
+    private string? note;
+    private string? chainNote;
+    private IReadOnlyList<string>? revealed;
+    private int pageSize = MailboxPreferences.DefaultPageSize;
+    private (int People, int Invited, int Domains, IReadOnlyList<string> Shared, int Apps, int Keys) counts = (0, 0, 0, Array.Empty<string>(), 0, 0);
+    private IReadOnlyList<PersonView> people = Array.Empty<PersonView>();
+    private IReadOnlyList<MailboxRow> everyone = Array.Empty<MailboxRow>();
+    private PersonView? selPerson;
+    private SignInPolicy policy = new();
+    private int adminsWithoutKey;
+    private IReadOnlyList<TenantDomainRow> domains = Array.Empty<TenantDomainRow>();
+    private Dictionary<string, string> pending = new();
+    private IReadOnlyList<DnsRecordCheck> records = Array.Empty<DnsRecordCheck>();
+    private IReadOnlyList<(MailboxRow Mailbox, SharedMailbox Info, long Unread)> shared = Array.Empty<(MailboxRow, SharedMailbox, long)>();
+    private (MailboxRow Mailbox, SharedMailbox Info, long Unread)? selShared;
+    private RetentionPolicy retention = new();
+    private IReadOnlyList<LegalHold> holds = Array.Empty<LegalHold>();
+    private IReadOnlyList<OrgApp> apps = Array.Empty<OrgApp>();
+    private OrgApp? selApp;
+    private IReadOnlyList<AuditEvent> events = Array.Empty<AuditEvent>();
+    private AuditEvent? selEvent;
+    private Branding branding = new();
+    private PersonFiguresSetting figures = new();
+    private IReadOnlyList<MailTemplate> orgTemplates = Array.Empty<MailTemplate>();
+
+    private string Current => Sections.Any(s => s.Key == Section) ? Section! : "people";
+    private string OrgName => tenant is null ? string.Empty : tenant.DisplayName.Length > 0 ? tenant.DisplayName : tenant.Slug;
+    private string Q => (QText ?? string.Empty).Trim();
+    private string Filter => PeopleFilters.Any(f => f.Key == FilterText) ? FilterText! : "all";
+    private int Days => LogPeriods.Any(p => p.Days == DaysText) ? DaysText!.Value : 7;
+    private string? SelText => Sel;
+    private Guid? SelGuid => Guid.TryParse(Sel, out Guid g) ? g : null;
+    private string? SelDomain => DomainText is { Length: > 0 } d && (domains.Any(x => x.Domain == d) || pending.ContainsKey(d)) ? d : domains.FirstOrDefault()?.Domain ?? pending.Keys.FirstOrDefault();
+
+    private List<PersonView> PeopleShown => people
+        .Where(p => Filter switch { "active" => p.Status is "active" or "must-change", "invited" => p.Status == "invited", "disabled" => p.Status == "disabled", _ => true })
+        .Where(p => Q.Length == 0 || NameOf(p.Mailbox).Contains(Q, StringComparison.CurrentCultureIgnoreCase) || p.Mailbox.Address.Contains(Q, StringComparison.OrdinalIgnoreCase))
+        .ToList();
+
+    private int PageCount => Math.Max(1, (PeopleShown.Count + pageSize - 1) / pageSize);
+    private int PageNo => Math.Clamp(PageText ?? 1, 1, PageCount);
+    private List<PersonView> PeoplePage => PeopleShown.Skip((PageNo - 1) * pageSize).Take(pageSize).ToList();
+
+    private string PeopleCount(string filter) => people.Count(p => filter switch { "active" => p.Status is "active" or "must-change", "invited" => p.Status == "invited", "disabled" => p.Status == "disabled", _ => true }).ToString(Inv);
+
+    private string PeopleLink(string filter, Guid? sel = null, int? page = null)
+    {
+        var parts = new List<string>();
+        if (filter != "all")
+        {
+            parts.Add("f=" + filter);
+        }
+        if (Q.Length > 0)
+        {
+            parts.Add("q=" + Uri.EscapeDataString(Q));
+        }
+        if ((page ?? (sel is null ? 1 : PageNo)) is int pg && pg > 1)
+        {
+            parts.Add("p=" + pg.ToString(Inv));
+        }
+        if (sel is Guid s)
+        {
+            parts.Add("sel=" + s);
+        }
+        return "/org/people" + (parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty);
+    }
+
+    private string LogQuery => string.Join("&", new[]
+    {
+        Q.Length > 0 ? "q=" + Uri.EscapeDataString(Q) : null,
+        Who is { Length: > 0 } ? "who=" + Uri.EscapeDataString(Who) : null,
+        Kind is { Length: > 0 } ? "kind=" + Uri.EscapeDataString(Kind) : null,
+        Days != 7 ? "days=" + Days.ToString(Inv) : null,
+    }.Where(x => x is not null));
+
+    private string LogCsv => "/org/log.csv" + (LogQuery.Length > 0 ? "?" + LogQuery : string.Empty);
+
+    private string LogLink(long seq) => "/org/log?" + (LogQuery.Length > 0 ? LogQuery + "&" : string.Empty) + "sel=" + seq.ToString(Inv);
+
+    private string NavSub(string key) => key switch
+    {
+        "people" => counts.People == 1 ? L["1 person"] : L["{n} people, {i} invited"].Replace("{n}", counts.People.ToString(Inv), StringComparison.Ordinal).Replace("{i}", counts.Invited.ToString(Inv), StringComparison.Ordinal),
+        "signin" => L["Passwords, two-step, idle limits"],
+        "domains" => counts.Domains == 1 ? L["1 domain"] : L["{n} domains"].Replace("{n}", counts.Domains.ToString(Inv), StringComparison.Ordinal),
+        "shared" => counts.Shared.Count == 0 ? L["None yet"] : counts.Shared.Count <= 2 ? string.Join(", ", counts.Shared) : string.Join(", ", counts.Shared.Take(2)) + ", " + L["{n} more"].Replace("{n}", (counts.Shared.Count - 2).ToString(Inv), StringComparison.Ordinal),
+        "retention" => L["Trash, Junk, evidence"],
+        "apps" => (counts.Apps == 1 ? L["1 application"] : L["{n} applications"].Replace("{n}", counts.Apps.ToString(Inv), StringComparison.Ordinal))
+            + ", " + (counts.Keys == 1 ? L["1 key"] : L["{n} keys"].Replace("{n}", counts.Keys.ToString(Inv), StringComparison.Ordinal)),
+        "log" => L["Every administrator action"],
+        "figures" => figures.On ? L["On, everyone told"] : L["Off"],
+        "branding" => L["Logo, default theme, language"],
+        _ => string.Empty,
+    };
+
+    private string SavedMessage => Saved switch
+    {
+        "1" when Current == "signin" => L["Sign-in rules saved. They apply at each person's next sign-in."],
+        "1" when Current == "retention" => L["Retention saved."],
+        "1" when Current == "branding" => L["Branding saved. The sign-in page shows it now."],
+        "1" when Current == "figures" => figures.On ? L["Figures per person are on. Everyone in your organisation has been told by mail."] : L["Figures per person are off. Everyone in your organisation has been told by mail."],
+        "reset" => L["Their password no longer works. Give them the link below to choose a new one; they were signed out everywhere."],
+        "signout" => L["They are signed out on every device, and their trusted devices are forgotten."],
+        "disable" => L["Disabled. They are signed out everywhere and cannot sign in; their mail is kept."],
+        "enable" => L["Enabled. They can sign in again."],
+        "role" => L["Role changed."],
+        "twostep-off" => L["Two-step is off for them. They sign in with their password alone until they set it up again."],
+        "hold" => L["Hold placed. Nothing is deleted from that mailbox until it is lifted."],
+        "unhold" => L["Hold lifted. The retention rules apply to that mailbox again."],
+        "proved" => L["Domain proved and added. Publish its records below."],
+        "template" => L["Template removed."],
+        _ => L["Saved."],
+    };
+
+    private string AffectsText
+    {
+        get
+        {
+            return people.Count == 1 ? L["1 person."] : L["{n} people."].Replace("{n}", people.Count.ToString(Inv), StringComparison.Ordinal);
+        }
+    }
+
+    private string StorageText
+    {
+        get => L["{n} mailboxes, using {used} together."].Replace("{n}", everyone.Count.ToString(Inv), StringComparison.Ordinal).Replace("{used}", Layout.MainLayout.Size(everyone.Sum(m => m.UsedBytes)), StringComparison.Ordinal);
+    }
+
+    private static string Title(string t) => t.Length == 0 ? t : char.ToUpperInvariant(t[0]) + t[1..];
+
+    private static string NameOf(MailboxRow? m) => m is null ? "?" : m.DisplayName.Trim().Length > 0 ? m.DisplayName.Trim() : m.Address;
+
+    private static string StatusPill(string status) => status switch { "active" => "pill-info", "must-change" => "pill-warn", "disabled" => "pill-bad", _ => "pill-mute" };
+
+    private static string StatusWord(string status) => status switch { "active" => "Active", "must-change" => "Must change password", "invited" => "Invited", "disabled" => "Disabled", _ => status };
+
+    private static string RecordPill(string status) => status switch { "pass" => "pill-info", "testing" => "pill-warn", "missing" or "different" => "pill-bad", _ => "pill-mute" };
+
+    private static string RecordWord(string status) => status switch { "pass" => "Pass", "testing" => "Testing", "missing" => "Missing", "different" => "Different", _ => "Not checked" };
+
+    private RenderFragment Compared(bool stricter) => __builder =>
+    {
+        <span class="pill @(stricter ? "pill-info" : "pill-mute")">@(stricter ? L["Stricter"] : L["Same"])</span>
+    };
+
+    private string DevicesWords(PersonView p) =>
+        p.Devices == 0 ? L["none signed in"]
+        : (p.Devices == 1 ? L["1 signed in"] : L["{n} signed in"].Replace("{n}", p.Devices.ToString(Inv), StringComparison.Ordinal))
+          + (p.SharedDevices == 0 ? string.Empty : p.SharedDevices == 1 ? L[", one a shared computer"] : L[", {n} on shared computers"].Replace("{n}", p.SharedDevices.ToString(Inv), StringComparison.Ordinal));
+
+    private string SharedSummary((MailboxRow Mailbox, SharedMailbox Info, long Unread) s) =>
+        (s.Info.Members.Count == 1 ? L["1 person."] : L["{n} people."].Replace("{n}", s.Info.Members.Count.ToString(Inv), StringComparison.Ordinal))
+        + " " + L["Mail sent from it shows as \"{name}\"."].Replace("{name}", s.Mailbox.DisplayName.Length > 0 ? s.Mailbox.DisplayName : s.Mailbox.Address, StringComparison.Ordinal);
+
+    private string When(DateTimeOffset at)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        string time = clock.Time(at);
+        string day = clock.List(at, now);
+        return day == time ? time : L.Heading(day) + " " + time;
+    }
+
+    private string Person(string address)
+    {
+        MailboxRow? m = everyone.FirstOrDefault(x => string.Equals(x.Address, address, StringComparison.OrdinalIgnoreCase));
+        return m is not null ? NameOf(m) : address.Length == 0 ? L["Unknown"] : address;
+    }
+
+    private string On(AuditEvent e) => e.Subject.Contains('@', StringComparison.Ordinal) && everyone.FirstOrDefault(x => string.Equals(x.Address, e.Subject, StringComparison.OrdinalIgnoreCase)) is MailboxRow m && e.Action.StartsWith("org.person", StringComparison.Ordinal)
+        ? NameOf(m)
+        : e.Subject + (e.Detail.Length > 0 && e.Action.StartsWith("org.", StringComparison.Ordinal) ? ": " + e.Detail : string.Empty);
+
+    private MailboxRow? SubjectPerson(AuditEvent e) =>
+        everyone.FirstOrDefault(x => string.Equals(x.Address, e.Subject, StringComparison.OrdinalIgnoreCase) || string.Equals(x.Address, e.Actor, StringComparison.OrdinalIgnoreCase));
+
+    private bool ready;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        ready = false;
+        await this.LoadAsync();
+        ready = true;
+    }
+
+    // Loaded whole before it is drawn: the page is drawn once while this waits.
+    private async Task LoadAsync()
+    {
+        tenant = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        if (WebmailAuthService.PersonIdOf(user) is not Guid person || !await Mail.IsOrgAdminAsync(person))
+        {
+            return;
+        }
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(person);
+        if (context is null)
+        {
+            return;
+        }
+        tenant = context.Value.Tenant;
+        me = context.Value.Mailbox;
+        pageSize = MailboxPreferences.Of(me).Normalized().PageSize;
+        note = AuthEndpoints.ReadNote(Protection, E);
+        string? sid = SessionRegistry.SessionOf(user);
+        revealed = Links == "1" || KeyShown == "1" ? Sessions.TakeReveal(sid) : null;
+        counts = await Mail.OrgCountsAsync(tenant);
+        domains = await Mail.TenantDomainsAsync(tenant.Id);
+        people = await Mail.ListPeopleAsync(tenant, Sessions);
+        everyone = people.Select(p => p.Mailbox).ToList();
+        figures = await Mail.PersonFiguresOfAsync(tenant.Id);
+
+        switch (Current)
+        {
+            case "people":
+            case "shared":
+                selPerson = SelGuid is Guid g ? people.FirstOrDefault(p => p.Mailbox.Id == g) : null;
+                mergePeople = await Mail.MergePeopleOfAsync(tenant.Id);
+                storagePlan = await Mail.StoragePlanOfAsync(tenant.Id);
+                if (Current == "shared")
+                {
+                    shared = await Mail.SharedListAsync(tenant.Id);
+                    selShared = shared.FirstOrDefault(s => s.Mailbox.Id == SelGuid) is { Mailbox: not null } found ? found : null;
+                }
+                break;
+            case "signin":
+                policy = await Mail.SignInPolicyOfAsync(tenant.Id);
+                adminsWithoutKey = 0;
+                foreach (Guid admin in await Mail.AdminsOfAsync(tenant))
+                {
+                    if ((await Mail.GetSecurityAsync(admin)).Passkeys.Count == 0)
+                    {
+                        adminsWithoutKey++;
+                    }
+                }
+                break;
+            case "domains":
+                pending = await Mail.ReadTenantDocumentAsync<Dictionary<string, string>>(tenant.Id, OrgEndpoints.PendingDomainsKind) ?? new Dictionary<string, string>();
+                if (SelDomain is string d && !pending.ContainsKey(d))
+                {
+                    records = await Mail.DomainRecordsAsync(d, Check == "1" ? name => DnsLookup.TxtAsync(name, CancellationToken.None) : null);
+                }
+                break;
+            case "sending":
+                mergeLimit = await Mail.MergeLimitOfAsync(tenant.Id);
+                mergePeople = await Mail.MergePeopleOfAsync(tenant.Id);
+                storagePlan = await Mail.StoragePlanOfAsync(tenant.Id);
+                break;
+            case "retention":
+                retention = await Mail.RetentionOfAsync(tenant);
+                holds = await Mail.HoldsOfAsync(tenant.Id);
+                break;
+            case "apps":
+                apps = await Mail.AppsOfAsync(tenant.Id);
+                selApp = apps.FirstOrDefault(a => a.Id == Sel);
+                break;
+            case "log":
+                events = await OrgLog.ForAsync(tenant, Mail, Store, Who, Kind, Days, Q, CancellationToken.None);
+                selEvent = long.TryParse(Sel, System.Globalization.NumberStyles.Integer, Inv, out long seq) ? events.FirstOrDefault(e => e.Seq == seq) : null;
+                if (Chain is not null)
+                {
+                    chainNote = Chain == "ok"
+                        ? L["{n} entries checked; none is missing or changed."].Replace("{n}", (ChainChecked ?? 0).ToString("N0", Inv), StringComparison.Ordinal)
+                        : L["Entry #{at} does not match the one before it. Tell the Anjal operator."].Replace("{at}", (ChainAt ?? 0).ToString(Inv), StringComparison.Ordinal);
+                }
+                break;
+            case "branding":
+                branding = await Mail.ReadTenantDocumentAsync<Branding>(tenant.Id, MailboxService.BrandingKind) ?? new Branding();
+                orgTemplates = await Mail.OrgTemplatesAsync(tenant.Id);
+                break;
+        }
+    }
+}

@@ -10,6 +10,7 @@ Context for a delivery attempt. Captures the SMTP envelope and the fully-receive
 - **#ctor** *(method)* - The one copy of every property (v1.0.0-rc.9, DEF-077). A property added to this class is added here, and every With- method keeps it; the guard test fails otherwise. Hand-written copies lost TransportTls once (DEF-065) and the evidence link once (DEF-077).
 - **WithRawBytes** *(method)* - A copy with every property kept and only the message bytes replaced - for a sink that rewrites the message (for example to add headers) before passing it on (DEF-065).
 - **WithRecipients** *(method)* - A copy with every property kept and only the recipients replaced (v1.0.0-rc.9, DEF-077).
+- **AnjalSecurityMail** *(property)* - True only for Anjal's own security mail, delivered in-process by the webmail (DES-11 D2): it arrives even in a full mailbox, so a full mailbox never hides a warning that someone is in the account. Mail from the network never carries it.
 - **AuthResults** *(property)* - Authentication detail (SPF/DKIM/DMARC verdicts) if an authenticator was configured. Null if inbound auth is disabled. The concrete type is Anjal.Auth.AuthenticationResults when populated.
 - **AuthenticatedUser** *(property)* - Username that authenticated on the submission port, or null for unauthenticated (MTA) deliveries. Authenticated mail is never scored for spam.
 - **ClientHostName** *(property)* - The EHLO/HELO hostname the client claimed.

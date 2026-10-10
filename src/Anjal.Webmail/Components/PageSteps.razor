@@ -1,0 +1,59 @@
+@* rc.15 (owner, 7 Oct; again 8 Oct, after the search results lost it): one set of page steps for
+   every list - previous to the left of the numbers, next to the right, both always drawn so
+   nothing moves; the one that cannot go anywhere shown faint. Every list with pages uses this. *@
+@if (Index > 0)
+{
+    <a class="iconbtn pgbtn" href="@Link(Index - 1)" aria-label="@L[Previous]" title="@L[Previous]"><LipiIcon Name="chevron-left" Size="17" /></a>
+}
+else
+{
+    <span class="iconbtn pgbtn off" aria-hidden="true"><LipiIcon Name="chevron-left" Size="17" /></span>
+}
+<span class="of">@RangeText</span>
+@if ((Index + 1) * (long)Size < Total)
+{
+    <a class="iconbtn pgbtn" href="@Link(Index + 1)" aria-label="@L[Next]" title="@L[Next]"><LipiIcon Name="chevron-right" Size="17" /></a>
+}
+else
+{
+    <span class="iconbtn pgbtn off" aria-hidden="true"><LipiIcon Name="chevron-right" Size="17" /></span>
+}
+
+@code {
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The page shown, from 0.</summary>
+    [Parameter] public int Index { get; set; }
+
+    /// <summary>How many items one page holds.</summary>
+    [Parameter] public int Size { get; set; }
+
+    /// <summary>How many items there are in all.</summary>
+    [Parameter] public long Total { get; set; }
+
+    /// <summary>The word for the page before: "Newer" in a list of mail, "Previous" elsewhere.</summary>
+    [Parameter] public string Previous { get; set; } = "Newer";
+
+    /// <summary>The word for the page after: "Older" in a list of mail, "Next" elsewhere.</summary>
+    [Parameter] public string Next { get; set; } = "Older";
+
+    /// <summary>The address of a page, by its number from 0.</summary>
+    [Parameter] public Func<int, string> Link { get; set; } = _ => string.Empty;
+
+    private string RangeText
+    {
+        get
+        {
+            if (Total == 0)
+            {
+                return string.Empty;
+            }
+            long first = (Index * (long)Size) + 1;
+            long last = Math.Min(Total, (Index + 1) * (long)Size);
+            return L["{first}–{last} of {total}"].Replace("{first}", first.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("{last}", last.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("{total}", Total.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        }
+    }
+}

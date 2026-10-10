@@ -1,0 +1,67 @@
+@* DES-11 D8 (owner, 10 Oct 2026): the last 30 days of the whole service, four lines on one
+   scale - received, sent, refused by the mail server, bounced - each day opening that day's
+   figures. Every number is repeated in a plain table for screen readers. *@
+<div class="tlegend alegend">
+    <span><i class="al-r"></i>@L["Received"] @Total(d => d.Received)</span>
+    <span><i class="al-s"></i>@L["Sent"] @Total(d => d.Sent)</span>
+    <span><i class="al-x"></i>@L["Refused"] @Total(d => d.Refused)</span>
+    <span><i class="al-b"></i>@L["Bounced"] @Total(d => d.Bounced)</span>
+</div>
+<div class="achart" aria-hidden="true">
+    <svg class="alines" viewBox="0 0 @(Days.Count * 10) 100" preserveAspectRatio="none" focusable="false">
+        <polyline class="al-r" points="@Points(d => d.Received)"></polyline>
+        <polyline class="al-s" points="@Points(d => d.Sent)"></polyline>
+        <polyline class="al-x" points="@Points(d => d.Refused)"></polyline>
+        <polyline class="al-b" points="@Points(d => d.Bounced)"></polyline>
+    </svg>
+    <div class="acols">
+        @for (int i = 0; i < Days.Count; i++)
+        {
+            ActivityDay d = Days[i];
+            <a class="acol" href="@Link(d)" tabindex="-1" title="@Title(d)">
+                <span class="alabel">@(Show(i) ? d.Day.ToString("d MMM", Inv) : " ")</span>
+            </a>
+        }
+    </div>
+</div>
+@* For screen readers. A table cannot be shrunk to the one pixel "sr-only" asks (it grows to its rows),
+   so it sits in a box that can: on its own it made the Anjal console page scroll (owner, 10 Oct 2026). *@
+<div class="sr-only">
+    <table>
+        <caption>@L["Last 30 days, whole service"]</caption>
+        <thead><tr><th scope="col">@L["Day"]</th><th scope="col">@L["Received"]</th><th scope="col">@L["Sent"]</th><th scope="col">@L["Refused"]</th><th scope="col">@L["Bounced"]</th></tr></thead>
+        <tbody>
+            @foreach (ActivityDay d in Days)
+            {
+                <tr><th scope="row"><a href="@Link(d)">@d.Day.ToString("d MMM yyyy", Inv)</a></th><td>@d.Received.ToString("N0", Inv)</td><td>@d.Sent.ToString("N0", Inv)</td><td>@d.Refused.ToString("N0", Inv)</td><td>@d.Bounced.ToString("N0", Inv)</td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    /// <summary>The days, oldest first.</summary>
+    [Parameter] public IReadOnlyList<ActivityDay> Days { get; set; } = Array.Empty<ActivityDay>();
+
+    /// <summary>Where a day opens.</summary>
+    [Parameter] public Func<ActivityDay, string> Link { get; set; } = _ => "/ops";
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private long Peak => Math.Max(1, Days.Count == 0 ? 0 : Days.Max(d => Math.Max(Math.Max(d.Received, d.Sent), Math.Max(d.Refused, d.Bounced))));
+
+    private string Total(Func<ActivityDay, long> pick) => Days.Sum(pick).ToString("N0", Inv);
+
+    // Each day's point sits in the middle of its column; 100 is the top, kept 4 from the edges.
+    private string Points(Func<ActivityDay, long> pick) => string.Join(" ", Days.Select((d, i) =>
+        (i * 10 + 5).ToString(Inv) + "," + (96 - (pick(d) * 92.0 / Peak)).ToString("0.##", Inv)));
+
+    private string Title(ActivityDay d) => d.Day.ToString("d MMM yyyy", Inv) + ": "
+        + L["received"] + " " + d.Received.ToString("N0", Inv) + ", " + L["sent"] + " " + d.Sent.ToString("N0", Inv) + ", "
+        + L["refused"] + " " + d.Refused.ToString("N0", Inv) + ", " + L["bounced"] + " " + d.Bounced.ToString("N0", Inv);
+
+    private bool Show(int i) => i % 5 == 0 || i == Days.Count - 1;
+}

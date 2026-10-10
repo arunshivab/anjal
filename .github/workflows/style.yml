@@ -34,3 +34,34 @@ jobs:
             fi
           done
           exit $missing
+
+      # rc.15 (owner, 7 Oct 2026): the word list and the colours are checked on
+      # every change, not only in the local PowerShell block. The generated
+      # files must match what the owner's sheet and tokens make, every word a
+      # screen shows must come from the list, and every colour pairing must
+      # meet its contrast minimum.
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      # Owner, 11 Oct 2026: line endings and byte-order marks checked on every
+      # change, so a new file type, a disagreeing .editorconfig or a stray CR
+      # fails here with the file named, instead of surfacing later as a
+      # formatting failure or a "different" file in a release check.
+      - name: Line endings
+        run: python tools/check_eol.py
+
+      - name: Words and colours
+        run: |
+          set -euo pipefail
+          pip install --quiet openpyxl
+          python tools/gen_tokens_css.py
+          python tools/check_contrast.py
+          python tools/gen_words.py
+          if [ -n "$(git status --porcelain src/Anjal.Webmail/wwwroot/tokens.css src/Anjal.Webmail/Resources/Words)" ]; then
+            echo "::error::tokens.css or the word files do not match tools/design. Run gen_tokens_css.py and gen_words.py locally and commit the result."
+            git status --porcelain
+            exit 1
+          fi
+          python tools/check_words.py

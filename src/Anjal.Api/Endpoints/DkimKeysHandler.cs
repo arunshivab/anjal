@@ -50,10 +50,12 @@ public sealed class DkimKeysHandler
             await ctx.WriteErrorAsync(400, "invalid_request", "selector is required.").ConfigureAwait(false);
             return;
         }
+        // DES-11 S6: with the mail server's seal key published, the key is locked with it.
+        SealRecord? seal = await KeySeal.ReadRecordAsync(this.store).ConfigureAwait(false);
         // Fail closed: without a key-encryption key the private key would sit
         // in the database in plaintext. Refuse unless that was chosen
         // deliberately.
-        if (System.Environment.GetEnvironmentVariable("ANJAL_KEK") is not { Length: > 0 } &&
+        if (seal is null && System.Environment.GetEnvironmentVariable("ANJAL_KEK") is not { Length: > 0 } &&
             !string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_ALLOW_PLAINTEXT_KEYS"), "true", System.StringComparison.OrdinalIgnoreCase) &&
             this.store is PostgresMessageStore)
         {
@@ -84,7 +86,7 @@ public sealed class DkimKeysHandler
         {
             Domain = req.Domain,
             Selector = req.Selector,
-            PrivateKeyPem = req.PrivateKeyPem,
+            PrivateKeyPem = seal is null ? req.PrivateKeyPem : KeySeal.Seal(req.PrivateKeyPem, System.Convert.FromBase64String(seal.PublicKey), req.Domain, req.Selector),
         }).ConfigureAwait(false);
 
         await ctx.WriteJsonAsync(200, ToResponse(saved)).ConfigureAwait(false);

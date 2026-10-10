@@ -2,40 +2,185 @@
 @page "/folder/{FolderName}"
 @attribute [Authorize]
 @inject MailboxService Mail
+@inject Words Words
 
-<PageTitle>@Name — Anjal</PageTitle>
+<PageTitle>@(Writing ? L["New message"] : FolderLabel) — Anjal</PageTitle>
 
-<div class="pagehead">
-    <h1>@Name</h1>
-    <span class="cnt" data-count data-total="@total">@total message@(total == 1 ? "" : "s")@(unread > 0 ? $" · {unread} unread" : "")</span>
+<div class="@ViewClass" data-layout="@viewLayout">
+@if (Writing)
+{
+    @* rc.12 (the board ComposeLetter): compose in the letter and envelope panes,
+       the list still beside it. First in the page, so it is what is read first. *@
+    <section class="readcol writecol">
+        <div class="focusbar phoneonly"><a class="linkbtn" href="@PageLink(pageIndex)" data-cancel><LipiIcon Name="chevron-left" Size="15" />@L.Folder(Name)</a></div>
+        <ComposeForm DraftId="WriteDraft" Back="@PageLink(pageIndex)" />
+    </section>
+}
+<section class="listcol">
+<div class="listhead">
+    <div class="lh-row">
+        <h1>@FolderLabel</h1>
+        <span class="cnt" data-count data-total="@total">@CountText</span>
+        <span class="lh-grow"></span>
+        <form method="post" action="/settings/layout" class="inline seg segicons" aria-label="@L["Layout"]">
+            <AntiforgeryToken />
+            <input type="hidden" name="back" value="@BackLink" />
+            @foreach ((string key, string icon, string word) in LayoutChoices)
+            {
+                <button type="submit" name="layout" value="@key" class="iconbtn" aria-pressed="@(viewLayout == key ? "true" : "false")" title="@L[word]" aria-label="@L[word]" data-needs-server><LipiIcon Name="@icon" Size="16" /></button>
+            }
+        </form>
+        @if (Name == "Trash" || Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+        {
+            @* rc.15 (owner, 7 Oct: "where is the Empty button"): item 25 as a real button in the folder's
+               own head, always there in Trash and Junk (faint when there is nothing to empty), asking first. *@
+            <form method="post" action="/folder/@(Name == "Trash" ? "Trash" : "Junk")/empty" class="inline">
+                <AntiforgeryToken />
+                <details class="confirm pmenu pmenu-right lhempty">
+                    <summary class="btn btn-s btn-sm @(total == 0 ? "off" : null)" aria-disabled="@(total == 0 ? "true" : null)"><LipiIcon Name="trash" Size="15" />@(Name == "Trash" ? L["Empty Trash"] : L["Empty Junk"])</summary>
+                    <div class="pmenu-body">
+                        @if (total == 0)
+                        {
+                            <p class="pm-note">@L["Nothing to empty."]</p>
+                        }
+                        else
+                        {
+                            <p class="pm-note">@L["Delete all {n} messages here for good? This cannot be undone."].Replace("{n}", total.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+                            <button type="submit" class="btn btn-d btn-sm" formnovalidate data-needs-server>@L["Yes, delete all {n} for good"].Replace("{n}", total.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</button>
+                        }
+                    </div>
+                </details>
+            </form>
+        }
+        @* rc.15 (owner, 7 Oct: "congested"): the folder-wide actions wait in one menu instead of
+           three more icons. Each is still its own small form - it needs no selection, and
+           buttons never reach into another form (the bulk-form rule). *@
+        @* Owner, 9 Oct 2026: sort any folder; the choice is remembered for this folder. *@
+        <SortMenu L="L" Folder="@Name" Sort="@sort" Outgoing="IsOutgoing" Back="@SortBack" />
+        <details class="pmenu lhmore">
+            <summary class="iconbtn" title="@L["More"]" aria-label="@L["More"]"><LipiIcon Name="more-horizontal" Size="16" /></summary>
+            <div class="pmenu-body">
+                <form method="post" action="/folder/@Uri.EscapeDataString(Name)/readall" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="show" value="@Show" />
+                    <button type="submit" class="pmi" data-markallread-btn data-needs-server><LipiIcon Name="check" Size="15" />@L["Mark all as read"]</button>
+                </form>
+                <form method="post" action="/folder/@Uri.EscapeDataString(Name)/unreadall" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="show" value="@Show" />
+                    <button type="submit" class="pmi" data-needs-server><LipiIcon Name="email" Size="15" />@L["Mark all as unread"]</button>
+                </form>
+                <form method="post" action="/settings/sound" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="on" value="@(sound ? "0" : "1")" />
+                    <input type="hidden" name="back" value="@BackLink" />
+                    <button type="submit" class="pmi" data-needs-server aria-pressed="@(sound ? "true" : "false")">
+                        <LipiIcon Name="@(sound ? "bell" : "mute")" Size="15" />@(sound ? L["New mail sound: on"] : L["New mail sound: off"])
+                    </button>
+                </form>
+            </div>
+        </details>
+    </div>
+    @* Your instruction (6 Oct): the search on the same row as All, Unread, Read. *@
+    <div class="lh-row lh-find">
+        <SearchBox Folders="folders" L="L" />
+        <nav class="seg" aria-label="@L["Show"]">
+            <a href="@FilterLink("all")" aria-current="@(Show == "all" ? "page" : null)">@L["All"]</a>
+            <a href="@FilterLink("unread")" aria-current="@(Show == "unread" ? "page" : null)">@L["Unread"]</a>
+            <a href="@FilterLink("read")" aria-current="@(Show == "read" ? "page" : null)">@L["Read"]</a>
+        </nav>
+    </div>
+    <SortHeadings L="L" Folder="@Name" Sort="@sort" Outgoing="IsOutgoing" Back="@SortBack" />
 </div>
 
-@if (Sent is not null)
+<div class="newbar" data-newbar hidden role="status">
+    <span data-newbar-text></span>
+    <a href="@PageLink(0)" data-newbar-show>@L["Show"]</a>
+</div>
+
+@if (ReadOnlyText is not null)
 {
-    <div style="padding:12px 12px 0">
-        <div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>Message queued for delivery. A copy is in Sent.</span></div>
-    </div>
+    <div class="notice-wrap"><div class="notice n-warn"><LipiIcon Name="lock" Size="16" /><span>@L["You can read this shared mailbox, but not change or send from it."]</span></div></div>
 }
-@if (Saved is not null)
+@if (SharedClosed is not null)
 {
-    <div style="padding:12px 12px 0">
-        <div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>Draft saved.</span></div>
-    </div>
+    <div class="notice-wrap"><div class="notice n-warn"><LipiIcon Name="users" Size="16" /><span>@L["That shared mailbox is no longer open to you. This is your own mailbox."]</span></div></div>
+}
+@foreach (string notice in notices)
+{
+    <div class="notice-wrap"><div class="notice n-err"><LipiIcon Name="warning" Size="16" /><span>@notice</span></div></div>
+}
+@if (OfferDmarcRule)
+{
+    @* Item 31: the first DMARC report brings the ready-made rule. *@
+    <div class="notice-wrap"><div class="notice n-info">
+        <LipiIcon Name="info" Size="16" />
+        <span>@L["DMARC reports have arrived. File them in their own folder, marked read, as they come?"]</span>
+        <form method="post" action="/settings/rules/dmarc" class="inline act">
+            <AntiforgeryToken />
+            <button type="submit" class="btn btn-s btn-sm" data-needs-server>@L["Create the rule"]</button>
+        </form>
+    </div></div>
+}
+@if (HeldId is Guid held)
+{
+    @* UX-02: Send waits as long as the person chose (rc.13); Undo puts it back to edit. The script counts down. *@
+    <form method="post" action="/held/@held/undo" class="undobar" role="status" data-heldbar data-seconds="@HeldSeconds"
+          data-word-sending="@L["Sending in {n} seconds"]" data-word-sent="@L["Sent"]">
+        <AntiforgeryToken />
+        <span data-heldtext>@L["Sending in {n} seconds"].Replace("{n}", MailboxService.Count(HeldSeconds), StringComparison.Ordinal)</span>
+        <button type="submit" class="linkbtn" data-heldundo><LipiIcon Name="undo" Size="15" />@L["Undo"]</button>
+    </form>
+}
+@if (Merged is not null && !Writing)
+{
+    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="users" Size="16" /><span>@L["{n} separate messages wait here and go out one by one over the next few minutes. Each person gets their own copy."].Replace("{n}", Merged, StringComparison.Ordinal)</span></div></div>
+}
+@if (Scheduled is not null && !Writing)
+{
+    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="clock" Size="16" /><span>@L["Scheduled. It waits here until its send time; you can change or cancel it until then."]</span></div></div>
+}
+@if (Cancelled is not null && !Writing)
+{
+    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Not sent. It is in Drafts."]</span></div></div>
+}
+@if (Sent is not null && !Writing)
+{
+    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Message queued for delivery. A copy is in Sent."]</span></div></div>
+}
+@if (Saved is not null && !Writing)
+{
+    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Draft saved."]</span></div></div>
+}
+@if (UndoToken is Guid token && Moved > 0)
+{
+    <form method="post" action="/folder/undo" class="undobar" role="status">
+        <AntiforgeryToken />
+        <input type="hidden" name="token" value="@token" />
+        <input type="hidden" name="back" value="@BackLink" />
+        <span>@MovedText</span>
+        <button type="submit" class="linkbtn" data-needs-server><LipiIcon Name="undo" Size="15" />@L["Undo"]</button>
+    </form>
+}
+@if (Undone is not null && !Writing)
+{
+    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Put back where they were."]</span></div></div>
 }
 
 @if (folder is null)
 {
-    <p class="empty">No folder called @Name.</p>
+    <p class="empty">@L["No folder called {name}."].Replace("{name}", Name, StringComparison.Ordinal)</p>
 }
 else
 {
     @if (Name == Anjal.Mailbox.MailboxSink.JunkFolder)
     {
-        <div style="padding:12px 12px 0">
+        <div class="notice-wrap">
             <div class="notice n-info">
                 <LipiIcon Name="info" Size="16" />
-                <span>Messages here scored at or above @threshold. Anjal accepted them and filed them in Junk; none was rejected.
-                      Open one and choose <b>Not spam</b> to move it to INBOX and allow the sender.</span>
+                @{ string junkNote = L["Messages here scored at or above {n}. Anjal accepted them and filed them in Junk; none was rejected. Open one and choose {action} to move it to Inbox and allow the sender."].Replace("{n}", threshold.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+                   int at = junkNote.IndexOf("{action}", StringComparison.Ordinal); }
+                <span>@(at < 0 ? junkNote : junkNote[..at])<b>@L["Not junk"]</b>@(at < 0 ? string.Empty : junkNote[(at + 8)..])</span>
             </div>
         </div>
     }
@@ -43,176 +188,164 @@ else
     <form method="post" action="/folder/@Uri.EscapeDataString(Name)/bulk" data-bulkform>
         <AntiforgeryToken />
         <input type="hidden" name="page" value="@pageIndex" />
-        <div class="bulk">
-            <span class="lbl" data-bulklabel>With selected:</span>
-            @if (Name == "Trash")
-            {
-                @* Trash offers what makes sense there: put back, or delete for good (DEF-023). *@
-                <button class="btn btn-s btn-sm" name="action" value="restore" type="submit" data-bulkaction>Restore to INBOX</button>
-                <details class="confirm">
-                    <summary class="btn btn-s btn-sm">Delete permanently…</summary>
-                    <button class="btn btn-d btn-sm" name="action" value="purge" type="submit" data-bulkaction>Yes, delete the selected messages for good</button>
-                </details>
-            }
-            else
-            {
-                <button class="btn btn-s btn-sm" name="action" value="trash" type="submit" data-bulkaction>Trash</button>
-            }
-            <button class="btn btn-s btn-sm" name="action" value="read" type="submit" data-bulkaction>Mark read</button>
-            <button class="btn btn-s btn-sm" name="action" value="unread" type="submit" data-bulkaction>Mark unread</button>
-            @if (Name == Anjal.Mailbox.MailboxSink.JunkFolder)
-            {
-                <button class="btn btn-s btn-sm" name="action" value="notspam" type="submit" data-bulkaction>Not spam</button>
-            }
-            @* Categories are for mail you keep: not offered in Drafts, Junk or Trash. *@
-            @if (categories.Count > 0 && Name != "Drafts" && Name != Anjal.Mailbox.MailboxSink.JunkFolder && Name != "Trash")
-            {
-                <span class="bulkcat">
-                    <select name="categoryId" class="scope" aria-label="Category to apply" data-bulkaction>
-                        <option value="">Category…</option>
-                        @foreach (CategoryView c in categories)
-                        {
-                            <option value="@c.Row.Id">@c.Row.Name</option>
-                        }
-                        <option value="clear">Remove category</option>
-                    </select>
-                    <button class="btn btn-s btn-sm" name="action" value="categorise" type="submit" data-bulkaction>Apply</button>
-                </span>
-            }
-            @* Independent of categories: it used to sit in their else branch, so it
-               vanished whenever a mailbox had any category (DEF-030). *@
-            @if (Name != "Sent" && Name != "Drafts" && Name != Anjal.Mailbox.MailboxSink.JunkFolder)
-            {
-                <button class="btn btn-s btn-sm" name="action" value="spam" type="submit" data-bulkaction>Report spam</button>
-            }
-            <span style="margin-left:auto">
-                @if (Name == "Trash" && total > 0)
+        <input type="hidden" name="show" value="@Show" />
+        <input type="hidden" name="all" value="" data-selectall-folder />
+        @* The approved board: nothing until a message is ticked; then "3 selected" and the actions. *@
+        <div class="selbar" data-selbar>
+            <div class="sel-row">
+                <input type="checkbox" data-selectall aria-label="@L["Select all on this page"]" />
+                <span class="sel-count" data-bulklabel data-word-selected="@L["{n} selected"]">@L["Select"]</span>
+                <button type="button" class="linkbtn" data-selectall-folder-btn hidden
+                        data-word="@L["Select all {n} in {folder}"].Replace("{folder}", FolderLabel, StringComparison.Ordinal)" data-total="@total">@L["Select all {n} in {folder}"].Replace("{folder}", FolderLabel, StringComparison.Ordinal).Replace("{n}", total.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</button>
+                <span class="sel-grow"></span>
+                <button type="button" class="linkbtn sel-clear" data-selclear>@L["Clear"]</button>
+            </div>
+            <div class="sel-row sel-actions">
+                @if (Name == "Trash")
                 {
-                    <details class="confirm">
-                        <summary class="btn btn-q btn-sm">Empty Trash…</summary>
-                        <button type="submit" class="btn btn-d btn-sm" formaction="/folder/Trash/empty" formnovalidate>Yes, delete all @total for good</button>
+                    @* Trash offers what makes sense there: put back, or delete for good (DEF-023). *@
+                    <button class="pbtn" name="action" value="restore" type="submit" data-bulkaction data-needs-server><LipiIcon Name="undo" Size="15" />@L["Restore to INBOX"]</button>
+                    <button class="pbtn" name="action" value="read" type="submit" data-bulkaction data-needs-unread data-needs-server><LipiIcon Name="check" Size="15" />@L["Mark as read"]</button>
+                    <button class="pbtn" name="action" value="unread" type="submit" data-bulkaction data-needs-read data-needs-server><LipiIcon Name="email" Size="15" />@L["Mark as unread"]</button>
+                    <details class="confirm pmenu">
+                        <summary class="pbtn"><LipiIcon Name="trash" Size="15" />@L["Delete permanently…"]</summary>
+                        <div class="pmenu-body">
+                            <button class="btn btn-d btn-sm" name="action" value="purge" type="submit" data-bulkaction data-needs-server>@L["Yes, delete the selected messages for good"]</button>
+                        </div>
                     </details>
                 }
-                <button type="submit" class="btn btn-q btn-sm" formaction="/folder/@Uri.EscapeDataString(Name)/readall"
-                        formnovalidate data-markallread-btn>Mark all read</button>
-            </span>
-        </div>
-
-    @if (items is null || items.Count == 0)
-    {
-        <p class="empty">No messages in @Name.</p>
-    }
-    else
-    {
-        <table class="ml @(ShowFlag ? "" : "noflag")">
-            <thead>
-                <tr>
-                    <th class="c-cb">
-                        <input type="checkbox" data-selectall aria-label="Select all on this page" />
-                    </th>
-                    @if (ShowFlag)
-                    {
-                        <th class="c-fl"><span class="sr">Flag</span></th>
-                    }
-                    <th class="c-from withdot">@(IsOutgoing ? "To" : "From")</th>
-                    <th class="c-att"><span class="sr-only">Attachments</span></th>
-                    <th>Subject</th>
-                    <th class="c-cat">Category</th>
-                    <th class="c-time right">Received</th>
-                    <th class="c-size right">Size</th>
-                    <th class="c-score" title="Spam score">Score</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (MessageRow m in items)
+                else
                 {
-                    <tr class="@(m.Seen ? "" : "unread")" data-message="@m.Id" data-reply="/compose?reply=@m.Id">
-                        <td class="c-cb">
-                            <input type="checkbox" name="id" value="@m.Id" data-rowcheck aria-label="Select message from @Sender(m)" />
-                        </td>
-                        @if (ShowFlag)
-                        {
-                            <td class="c-fl">
-                                <button type="submit" class="fav @(m.Flagged ? "on" : "")"
-                                        formaction="/message/@m.Id/flag" formnovalidate
-                                        name="back" value="@BackLink"
-                                        title="@(m.Flagged ? "Remove flag" : "Flag")"
-                                        aria-label="@(m.Flagged ? "Remove flag" : "Flag")">அ</button>
-                            </td>
-                        }
-                        <td class="c-from">
-                            <span class="from">
-                                @if (m.Seen)
-                                {
-                                    <span class="udot off" aria-hidden="true"></span>
-                                }
-                                else
-                                {
-                                    <span class="udot" aria-label="Unread"></span>
-                                }
-                                <span class="sname">@(IsOutgoing ? Recipient(m) : Sender(m))</span>
-                            </span>
-                        </td>
-<td class="c-att">
-                            @if (m.HasAttachments)
-                            {
-                                <span data-attachment title="Has attachments" aria-label="Has attachments"><LipiIcon Name="attachment" Size="14" /></span>
-                            }
-                        </td>
-                        <td class="c-subject">
-                            <span class="subj">
-                                @if (MailboxService.ShowsUnencryptedWarning(m, trusted))
-                                {
-                                    <span class="unenc" data-unencrypted title="Arrived unencrypted: anyone on the network path could have read it" aria-label="Arrived unencrypted"><LipiIcon Name="unlock" Size="13" /></span>
-                                }
-                                <a href="@OpenLink(m)" data-open>@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a>
-                            </span>
-                        </td>
-                        <td class="c-cat">
-                            @if (m.CategoryId is Guid cid && Lookup(cid) is CategoryView cat)
-                            {
-                                <span class="chip slot-@cat.Row.Slot"><i></i>@cat.Row.Name</span>
-                            }
-                        </td>
-                        <td class="c-time num">@MainLayout.When(m.ReceivedAt)</td>
-                        <td class="c-size num">@MainLayout.Size(m.SizeBytes)</td>
-                        <td class="c-score">
-                            @* Decision 1B: 0 means checked and clean; a dash means never checked. *@
-                            @if (!Anjal.Webmail.Services.SpamCheck.WasChecked(m, Name))
-                            {
-                                <span class="score s-none" title="Not checked: your own mail or mail from this server">&ndash;</span>
-                            }
-                            else if (m.SpamScore > 0)
-                            {
-                                <span class="score @(m.SpamScore >= threshold ? "s-hi" : "s-mid")" title="Checked on arrival: spam score @m.SpamScore">@m.SpamScore</span>
-                            }
-                            else
-                            {
-                                <span class="score s-zero" title="Checked on arrival: nothing suspicious">0</span>
-                            }
-                        </td>
-                    </tr>
+                    @* rc.15 (owner, 7 Oct): Mark as read and Mark as unread side by side, in every folder. *@
+                    <button class="pbtn" name="action" value="read" type="submit" data-bulkaction data-needs-unread data-needs-server><LipiIcon Name="check" Size="15" />@L["Mark as read"]</button>
+                    <button class="pbtn" name="action" value="unread" type="submit" data-bulkaction data-needs-read data-needs-server><LipiIcon Name="email" Size="15" />@L["Mark as unread"]</button>
+                    @if (Name != "Archive" && Name != Anjal.Mailbox.MailboxSink.JunkFolder && Name != "Drafts")
+                    {
+                        <button class="pbtn" name="action" value="archive" type="submit" data-bulkaction data-needs-server><LipiIcon Name="archive" Size="15" />@L["Archive"]</button>
+                    }
+                    @if (Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+                    {
+                        <button class="pbtn" name="action" value="notspam" type="submit" data-bulkaction data-needs-server>@L["Not junk"]</button>
+                    }
+                    @* rc.15 (owner, 7 Oct): Report junk is a button in the bar, not hidden in the menu. *@
+                    @if (Name != "Sent" && Name != "Drafts" && Name != Anjal.Mailbox.MailboxSink.JunkFolder)
+                    {
+                        <button class="pbtn" name="action" value="spam" type="submit" data-bulkaction data-needs-server><LipiIcon Name="minus-circle" Size="15" />@L["Report junk"]</button>
+                    }
+                    <button class="pbtn picon" name="action" value="trash" type="submit" data-bulkaction data-needs-server title="@L["Delete"]" aria-label="@L["Delete"]"><LipiIcon Name="trash" Size="15" /></button>
                 }
-            </tbody>
-        </table>
+                <details class="pmenu">
+                    <summary class="pbtn picon" title="@L["More"]" aria-label="@L["More"]"><LipiIcon Name="more-horizontal" Size="15" /></summary>
+                    <div class="pmenu-body">
+                        @if (MoveTargets.Count > 0)
+                        {
+                            <div class="pmi-row">
+                                <LipiIcon Name="folder" Size="15" />
+                                <select name="to" class="scope" aria-label="@L["Move to"]" data-bulkaction>
+                                    @foreach (string target in MoveTargets)
+                                    {
+                                        <option value="@target">@L.Folder(target)</option>
+                                    }
+                                </select>
+                                <button class="btn btn-s btn-sm" name="action" value="move" type="submit" data-bulkaction data-needs-server>@L["Move to"]</button>
+                            </div>
+                        }
+                        @* Categories are for mail you keep: not offered in Drafts, Junk or Trash. *@
+                        @if (categories.Count > 0 && Name != "Drafts" && Name != Anjal.Mailbox.MailboxSink.JunkFolder && Name != "Trash")
+                        {
+                            <div class="pmi-row">
+                                <LipiIcon Name="tag" Size="15" />
+                                <select name="categoryId" class="scope" aria-label="@L["Category"]" data-bulkaction>
+                                    <option value="">@L["Category"]…</option>
+                                    @foreach (CategoryView c in categories)
+                                    {
+                                        <option value="@c.Row.Id">@c.Row.Name</option>
+                                    }
+                                    <option value="clear">@L["Remove category"]</option>
+                                </select>
+                                <button class="btn btn-s btn-sm" name="action" value="categorise" type="submit" data-bulkaction data-needs-server>@L["Apply"]</button>
+                            </div>
+                        }
+                    </div>
+                </details>
+            </div>
+        </div>
 
-        <div class="pg">
-            @if (pageIndex > 0)
-            {
-                <a href="@PageLink(pageIndex - 1)">&laquo; Newer</a>
-            }
-            @if ((pageIndex + 1) * MailboxService.PageSize < total)
-            {
-                <a href="@PageLink(pageIndex + 1)">Older &raquo;</a>
-            }
-            <span class="of">Page @(pageIndex + 1) of @Math.Max(1, (total + MailboxService.PageSize - 1) / MailboxService.PageSize)</span>
-        </div>
-        <div class="kb" data-kbhint hidden>
-            <b>j</b><b>k</b> move <b>Enter</b> open <b>r</b> reply <b>#</b> trash
-        </div>
-    }
+        @if (items is null || items.Count == 0)
+        {
+            <p class="empty">@(Show == "unread" ? L["No unread messages."] : L["No messages here."])</p>
+        }
+        else
+        {
+            <div class="mlist @(ShowFlag ? "" : "noflag")" data-list data-newest="@Newest" data-folder="@Name" data-page="@pageIndex">
+                @foreach (IGrouping<string, MessageRow> group in Groups)
+                {
+                    <section class="mgroup" aria-label="@(Dated ? L.Heading(group.Key) : null)">
+                        @if (Dated)
+                        {
+                            <h2 class="mgroup-day">@L.Heading(group.Key)</h2>
+                        }
+                        @foreach (MessageRow m in group)
+                        {
+                            <MessageListRow M="m" L="L" Clock="clock" FolderName="@Name" Threshold="threshold" Trusted="trusted" Sends="@SendsLabel(m)" Conversation="@conversationOf(m)"
+                                            Category="@(m.CategoryId is Guid cid ? Lookup(cid) : null)" Who="@(IsOutgoing ? Recipient(m) : Sender(m))"
+                                            Outgoing="IsOutgoing" Selectable="true" ShowFlag="ShowFlag" OpenLink="@OpenLink(m)" BackLink="@BackLink" IsOpen="@(m.Id == OpenId)"
+                                            QuickUrl="@($"/folder/{Uri.EscapeDataString(Name)}/bulk")" />
+                        }
+                    </section>
+                }
+            </div>
+            <div class="kb" data-kbhint hidden>
+                <b>j</b><b>k</b> @L["move"] <b>Enter</b> @L["open"] <b>r</b> @L["reply"] <b>#</b> @L["trash"]
+            </div>
+        }
     </form>
+
+    <div class="pager">
+        <form method="post" action="/settings/pagesize" class="inline">
+            <AntiforgeryToken />
+            <input type="hidden" name="back" value="@PageLink(0)" />
+            <label>@L["Per page"]
+                <select name="size" class="scope" data-autosubmit>
+                    @foreach (int size in MailboxPreferences.PageSizes)
+                    {
+                        <option value="@size" selected="@(size == pageSize)">@size</option>
+                    }
+                </select>
+            </label>
+            <noscript><button type="submit" class="btn btn-q btn-sm">@L["Apply"]</button></noscript>
+        </form>
+        <span class="pg-grow"></span>
+        <PageSteps L="L" Index="pageIndex" Size="pageSize" Total="total" Link="PageLink" />
+    </div>
 }
+</section>
+@if (OpenId is Guid openId && viewLayout != "list" && !Writing)
+{
+    @if (viewLayout == "three")
+    {
+        @* DES-11 D9 (owner, 10 Oct 2026, B2): the marigold flap points from the open card into the
+           letter - three panes side by side only; the script keeps it at the open card as the list
+           scrolls and hides it when the card is out of view. Decoration: nothing without the script. *@
+        <span class="flapmark" data-flapmark hidden aria-hidden="true"><svg viewBox="0 0 16 24" width="16" height="24" focusable="false"><path d="M4 4 L12 12 L4 20"></path></svg></span>
+    }
+    <section class="readcol">
+        @* The way back: in focus always; on the phone in every layout (A11). *@
+        <div class="focusbar phoneonly"><a class="linkbtn" href="@PageLink(pageIndex)"><LipiIcon Name="chevron-left" Size="15" />@L.Folder(Name)</a></div>
+        <MessageReader Id="openId" Images="@Images" Blocked="@Blocked" BackLink="@OpenHere(openId)" DockBase="@OpenHere(openId)" Preview="@PreviewIndex" ShowBack="@(viewLayout == "focus")" ReturnTo="@PageLink(pageIndex)" />
+        @if (DockKind is string kind)
+        {
+            @* Item 48: a quick reply docked over the message it answers. *@
+            <ComposeForm Docked="true" ReplyId="openId" ReplyKind="@kind" Back="@OpenHere(openId)" />
+        }
+    </section>
+}
+@if (WriteDock is Guid docked && !Writing && DockKind is null)
+{
+    @* rc.15 (owner, 7 Oct; item 48): a new message in a small window over the list. *@
+    <ComposeForm Docked="true" DraftId="docked" Back="@PageLink(pageIndex)" />
+}
+</div>
 
 @code {
     [Parameter] public string? FolderName { get; set; }
@@ -223,7 +356,124 @@ else
     private int? PageQuery => int.TryParse(PageText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int page) ? page : null;
     [SupplyParameterFromQuery(Name = "sent")] private string? Sent { get; set; }
     [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
+    [SupplyParameterFromQuery(Name = "show")] private string? ShowQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "undo")] private string? UndoText { get; set; }
+    [SupplyParameterFromQuery(Name = "moved")] private string? MovedQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "to")] private string? ToQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "undone")] private string? Undone { get; set; }
+    [SupplyParameterFromQuery(Name = "open")] private string? OpenText { get; set; }
+    [SupplyParameterFromQuery(Name = "images")] private string? Images { get; set; }
+    [SupplyParameterFromQuery(Name = "blocked")] private string? Blocked { get; set; }
+    [SupplyParameterFromQuery(Name = "held")] private string? HeldText { get; set; }
+    [SupplyParameterFromQuery(Name = "readonly")] private string? ReadOnlyText { get; set; }
+    [SupplyParameterFromQuery(Name = "sharedclosed")] private string? SharedClosed { get; set; }
+    [SupplyParameterFromQuery(Name = "wait")] private int? Wait { get; set; }
+
+    private int HeldSeconds => Math.Clamp(Wait ?? (int)MailboxService.UndoWindow.TotalSeconds, 1, 30);
+    [SupplyParameterFromQuery(Name = "preview")] private string? PreviewText { get; set; }
+
+    private int? PreviewIndex => int.TryParse(PreviewText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int i) ? i : null;
+    [SupplyParameterFromQuery(Name = "scheduled")] private string? Scheduled { get; set; }
+    [SupplyParameterFromQuery(Name = "merged")] private string? MergedText { get; set; }
+
+    private string? Merged => int.TryParse(MergedText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n) ? MailboxService.Count(n) : null;
+    [SupplyParameterFromQuery(Name = "cancelled")] private string? Cancelled { get; set; }
+    [SupplyParameterFromQuery(Name = "reply")] private string? DockReply { get; set; }
+    [SupplyParameterFromQuery(Name = "write")] private string? WriteText { get; set; }
+    private Guid? WriteDock => Guid.TryParse(WriteText, out Guid id) ? id : null;
+    [SupplyParameterFromQuery(Name = "replyall")] private string? DockReplyAll { get; set; }
+    [SupplyParameterFromQuery(Name = "forward")] private string? DockForward { get; set; }
+
+    /// <summary>rc.12: compose in this view (the /compose and /draft pages use this page with it set).</summary>
+    [Parameter] public bool Writing { get; set; }
+
+    /// <summary>rc.12: the draft being edited, when <see cref="Writing"/>.</summary>
+    [Parameter] public Guid? WriteDraft { get; set; }
+
+    private Guid? HeldId => Guid.TryParse(HeldText, out Guid g) ? g : null;
+
+    /// <summary>Which docked compose is open over the message, if any (item 48).</summary>
+    private string? DockKind => OpenId is null ? null
+        : Guid.TryParse(DockReply, out _) ? "reply"
+        : Guid.TryParse(DockReplyAll, out _) ? "replyall"
+        : Guid.TryParse(DockForward, out _) ? "forward"
+        : null;
+
+    private IReadOnlyList<string> notices = Array.Empty<string>();
+    private bool OfferDmarcRule;
+    private Func<MessageRow, int> conversationOf = _ => 1;
+
+    /// <summary>In Scheduled, each row says when it goes (the board ListScheduled).</summary>
+    private string? SendsLabel(MessageRow m) =>
+        Name == MailboxService.ScheduledFolder && MailboxService.SendTimeOf(m) is DateTimeOffset at
+            ? L["Sends {time}"].Replace("{time}", clock.Full(at), StringComparison.Ordinal)
+            : null;
+
+    /// <summary>The message open beside the list (three panes) or alone (focus); item 45.</summary>
+    private Guid? OpenId => Guid.TryParse(OpenText, out Guid g) ? g : null;
+
+    private string viewLayout = MailboxPreferences.DefaultLayout;
+
+    private string ViewClass => "fview layout-" + viewLayout
+        + (Writing ? " has-open writing" : OpenId is not null && viewLayout != "list" ? " has-open" : string.Empty);
+
+    private static readonly (string Key, string Icon, string Word)[] LayoutChoices =
+    {
+        ("three", "columns", "Three panes"),
+        ("focus", "expand", "Focus"),
+        ("list", "list-view", "List only"),
+    };
+
+    /// <summary>This folder view with a message open in it.</summary>
+    private string OpenHere(Guid id) => PageLink(pageIndex) + "&open=" + id;
+
+    /// <summary>all, unread or read (item 7); anything else is all.</summary>
+    private string Show => ShowQuery is "unread" or "read" ? ShowQuery : "all";
+
+    private Guid? UndoToken => Guid.TryParse(UndoText, out Guid g) ? g : null;
+
+    private int Moved => int.TryParse(MovedQuery, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n) ? n : 0;
+
+    private int pageSize = MailboxPreferences.DefaultPageSize;
+    private bool sound = true;
+    private string weekStart = MailboxPreferences.DefaultWeekStart;
+
+    private string FolderLabel => L.Folder(Name);
+
+
+    private string CountText => L["{n} messages"].Replace("{n}", total.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+        + (unread > 0 ? " · " + L["{n} unread"].Replace("{n}", unread.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) : string.Empty);
+
+    private string MovedText => L["{n} moved to {folder}."].Replace("{n}", Moved.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{folder}", L.Folder(ToQuery ?? "Trash"), StringComparison.Ordinal);
+
+    /// <summary>Where messages here may be moved: the person's other folders, never Drafts or this one.</summary>
+    private IReadOnlyList<string> MoveTargets => folders is null
+        ? Array.Empty<string>()
+        : folders.Select(f => f.Name).Where(n => n != Name && n != "Drafts").ToList();
+
+    /// <summary>The page's messages in day groups, decided in the person's zone (item 50).</summary>
+    private IEnumerable<IGrouping<string, MessageRow>> Groups =>
+        (items ?? Array.Empty<MessageRow>()).GroupBy(m => Dated ? clock.DayGroup(m.ReceivedAt, DateTimeOffset.UtcNow, weekStart) : string.Empty);
+
+    // Owner, 9 Oct 2026: the folder's order, remembered for it; a list not in date order has no day headings.
+    private string sort = MailboxService.NewestFirst;
+
+    private bool Dated => MailboxService.SortsByDate(sort);
+
+    private string SortBack => FilterLink(Show);
+
+    /// <summary>The newest arrival on the page, for live update to compare against.</summary>
+    private long Newest => items is null || items.Count == 0 ? 0 : items.Max(m => m.ReceivedAt).ToUnixTimeMilliseconds();
+
+    /// <summary>The preview on one line: line breaks and runs of spaces shown as single spaces.</summary>
+    private string FilterLink(string show) => show == "all"
+        ? $"/folder/{Uri.EscapeDataString(Name)}"
+        : $"/folder/{Uri.EscapeDataString(Name)}?show={show}";
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private ZonedClock clock = ZonedClock.Default;
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private IReadOnlyList<FolderView>? folders;
     [CascadingParameter] private HttpContext? Http { get; set; }
 
     private IReadOnlyList<MessageRow>? items;
@@ -260,19 +510,22 @@ else
 
     private string BackLink => PageLink(pageIndex);
 
-    private string PageLink(int p) => $"/folder/{Uri.EscapeDataString(Name)}?page={p}";
+    private string PageLink(int p) => $"/folder/{Uri.EscapeDataString(Name)}?page={p}" + (Show == "all" ? string.Empty : "&show=" + Show);
 
+    /// <summary>Drafts open in compose; otherwise as the layout says (item 45): beside the list, alone, or on their own page.</summary>
     private string OpenLink(MessageRow m) =>
-        Name == "Drafts" ? $"/draft/{m.Id}" : $"/message/{m.Id}";
+        Name == "Drafts" ? $"/draft/{m.Id}"
+        : viewLayout == "list" ? $"/message/{m.Id}"
+        : OpenHere(m.Id);
 
     /// <summary>
     /// Sent and Drafts are about who a message went to; the list shows the
     /// recipient there, not the owner's own name on every row (DEF-009).
     /// </summary>
-    private bool IsOutgoing => Name == "Sent" || Name == "Drafts";
+    private bool IsOutgoing => Name == "Sent" || Name == "Drafts" || Name == MailboxService.ScheduledFolder;
 
-    private static bool IsSystemFolder(string name) =>
-        name == FolderRow.Inbox || name == "Sent" || name == "Drafts" || name == Anjal.Mailbox.MailboxSink.JunkFolder || name == "Trash";
+    // DES-11 F8: every standard folder, from the one list (Archive and Scheduled were left out).
+    private static bool IsSystemFolder(string name) => MailboxService.DefaultFolders.Contains(name, StringComparer.Ordinal);
 
     private static string Recipient(MessageRow m)
     {
@@ -306,12 +559,15 @@ else
         {
             return;
         }
+        clock = WebmailAuthService.ClockOf((await AuthState).User);
+        L = Words.For(WebmailAuthService.LanguageOf((await AuthState).User, Words));
         Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
         if (mailboxId is null)
         {
             return;
         }
-        await Mail.ListFoldersAsync(mailboxId.Value);
+        folders = await Mail.ListFoldersAsync(mailboxId.Value);
+        notices = await Mail.TakeNoticesAsync(mailboxId.Value);
         folder = await Mail.GetFolderAsync(mailboxId.Value, Name);
         if (folder is null)
         {
@@ -334,9 +590,42 @@ else
         (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);
         threshold = context?.Tenant.SpamThreshold is int t && t > 0 ? t : TenantRow.DefaultSpamThreshold;
         pageIndex = Math.Max(0, PageQuery ?? 0);
-        (items, total) = await Mail.ListMessagesAsync(mailboxId.Value, folder.Id, pageIndex, MailboxService.PageSize);
+        // rc.14: in a shared mailbox the view follows the person's own preferences.
+        MailboxRow? prefs = WebmailAuthService.PersonIdOf((await AuthState!).User) is Guid me && me != mailboxId.Value
+            ? (await Mail.GetContextAsync(me))?.Mailbox
+            : context?.Mailbox;
+        if (prefs is not null)
+        {
+            pageSize = prefs.PageSize;
+            viewLayout = prefs.Layout;
+            sound = prefs.NewMailSound;
+            weekStart = prefs.WeekStart;
+        }
+        sort = await Mail.SortForAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value, Name);
+        (items, total) = await Mail.ListSortedAsync(mailboxId.Value, folder.Id, Show, sort, IsOutgoing, pageIndex, pageSize);
+        // rc.15: a page past the end (an old link, or fewer messages now) shows the last page.
+        if (items.Count == 0 && total > 0 && pageIndex > 0)
+        {
+            pageIndex = (int)((total - 1) / pageSize);
+            (items, total) = await Mail.ListSortedAsync(mailboxId.Value, folder.Id, Show, sort, IsOutgoing, pageIndex, pageSize);
+        }
+        // The reader marks the open message read after the list has loaded; show it read here too.
+        bool openedNow = false;
+        if (OpenId is Guid shownId && items.FirstOrDefault(m => m.Id == shownId) is MessageRow opened && !opened.Seen)
+        {
+            opened.Seen = true;
+            openedNow = true;
+        }
         unread = await Mail.UnreadInFolderAsync(mailboxId.Value, folder.Id);
+        if (openedNow)
+        {
+            unread = Math.Max(0, unread - 1);
+        }
         categories = await Mail.ListCategoriesAsync(mailboxId.Value);
         trusted = await Mail.TrustedSendersAsync(mailboxId.Value);
+        conversationOf = await Mail.ConversationCountsAsync(mailboxId.Value);
+        OfferDmarcRule = Name == FolderRow.Inbox && !Writing
+            && items.Any(m => m.Subject.TrimStart().StartsWith("Report domain:", StringComparison.OrdinalIgnoreCase))
+            && !(await Mail.ListRulesAsync(mailboxId.Value)).Any(r => r.MoveTo == MailboxService.DmarcRule().MoveTo);
     }
 }

@@ -358,29 +358,59 @@ WHERE id = @id;";
     public async Task<AuditEvent> AppendAuditAsync(AuditEvent audit, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(audit);
-        const string sql = @"
-INSERT INTO audit_events (actor, action, subject, detail, remote_address)
-VALUES (@actor, @action, @subject, @detail, @remote)
-RETURNING id, at, actor, action, subject, detail, remote_address;";
+        // rc.13: each entry is chained to the one before. Writers from every
+        // process take the same advisory lock, so the chain has one order.
+        System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
+        var row = new AuditEvent
+        {
+            At = new System.DateTimeOffset(now.UtcTicks - (now.UtcTicks % 10), System.TimeSpan.Zero),
+            Actor = Clip(audit.Actor, 320),
+            Action = Clip(audit.Action, 200),
+            Subject = Clip(audit.Subject, 500),
+            Detail = Clip(audit.Detail, 1000),
+            RemoteAddress = Clip(audit.RemoteAddress, 64),
+        };
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
-        await using var cmd = new NpgsqlCommand(sql, conn);
-        cmd.Parameters.AddWithValue("actor", Clip(audit.Actor, 320));
-        cmd.Parameters.AddWithValue("action", Clip(audit.Action, 200));
-        cmd.Parameters.AddWithValue("subject", Clip(audit.Subject, 500));
-        cmd.Parameters.AddWithValue("detail", Clip(audit.Detail, 1000));
-        cmd.Parameters.AddWithValue("remote", Clip(audit.RemoteAddress, 64));
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        await reader.ReadAsync(ct).ConfigureAwait(false);
-        return ReadAudit(reader);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        await using (var lockCmd = new NpgsqlCommand("SELECT pg_advisory_xact_lock(4213001);", conn, tx))
+        {
+            await lockCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        string previous;
+        await using (var last = new NpgsqlCommand("SELECT chain FROM audit_events ORDER BY seq DESC LIMIT 1;", conn, tx))
+        {
+            previous = await last.ExecuteScalarAsync(ct).ConfigureAwait(false) as string ?? string.Empty;
+        }
+        row.Chain = AuditEvent.ComputeChain(previous, row);
+        const string sql = @"
+INSERT INTO audit_events (at, actor, action, subject, detail, remote_address, chain)
+VALUES (@at, @actor, @action, @subject, @detail, @remote, @chain)
+RETURNING id, at, actor, action, subject, detail, remote_address, seq, chain;";
+        await using var cmd = new NpgsqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("at", row.At);
+        cmd.Parameters.AddWithValue("actor", row.Actor);
+        cmd.Parameters.AddWithValue("action", row.Action);
+        cmd.Parameters.AddWithValue("subject", row.Subject);
+        cmd.Parameters.AddWithValue("detail", row.Detail);
+        cmd.Parameters.AddWithValue("remote", row.RemoteAddress);
+        cmd.Parameters.AddWithValue("chain", row.Chain);
+        AuditEvent saved;
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            await reader.ReadAsync(ct).ConfigureAwait(false);
+            saved = ReadAudit(reader);
+        }
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return saved;
     }
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<AuditEvent>> ListAuditAsync(int limit, System.DateTimeOffset? before = null, CancellationToken ct = default)
     {
         const string sql = @"
-SELECT id, at, actor, action, subject, detail, remote_address FROM audit_events
+SELECT id, at, actor, action, subject, detail, remote_address, seq, chain FROM audit_events
 WHERE (@before IS NULL OR at < @before)
-ORDER BY at DESC, id DESC
+ORDER BY seq DESC
 LIMIT @limit;";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -395,6 +425,33 @@ LIMIT @limit;";
         return result;
     }
 
+    /// <inheritdoc/>
+    public async Task<AuditChainCheck> VerifyAuditChainAsync(CancellationToken ct = default)
+    {
+        const string sql = "SELECT id, at, actor, action, subject, detail, remote_address, seq, chain FROM audit_events ORDER BY seq;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        string previous = string.Empty;
+        long count = 0;
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            AuditEvent e = ReadAudit(reader);
+            count++;
+            if (e.Chain.Length == 0)
+            {
+                // Written before rc.13: the chain starts after it.
+                continue;
+            }
+            if (e.Chain != AuditEvent.ComputeChain(previous, e))
+            {
+                return new AuditChainCheck(count, false, e.Seq);
+            }
+            previous = e.Chain;
+        }
+        return new AuditChainCheck(count, true, null);
+    }
+
     private static AuditEvent ReadAudit(NpgsqlDataReader r) => new()
     {
         Id = r.GetGuid(0),
@@ -404,6 +461,8 @@ LIMIT @limit;";
         Subject = r.GetString(4),
         Detail = r.GetString(5),
         RemoteAddress = r.GetString(6),
+        Seq = r.GetInt64(7),
+        Chain = r.GetString(8),
     };
 
     private static string Clip(string value, int max) =>
@@ -640,7 +699,8 @@ RETURNING id, domain, selector, private_key_pem, updated_at;";
         cmd.Parameters.AddWithValue("domain", key.Domain ?? string.Empty);
         cmd.Parameters.AddWithValue("selector", key.Selector ?? string.Empty);
         string pem = key.PrivateKeyPem ?? string.Empty;
-        cmd.Parameters.AddWithValue("pem", this.Secrets is null || pem.Length == 0 ? pem : this.Secrets.Seal(pem, DkimContext(key.Domain ?? string.Empty, key.Selector ?? string.Empty)));
+        // DES-11 S6: a key already sealed with the mail server's seal key is kept as it is.
+        cmd.Parameters.AddWithValue("pem", this.Secrets is null || pem.Length == 0 || KeySeal.IsSealed(pem) ? pem : this.Secrets.Seal(pem, DkimContext(key.Domain ?? string.Empty, key.Selector ?? string.Empty)));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -706,6 +766,11 @@ LIMIT 1;";
         string domain = r.GetString(1);
         string selector = r.GetString(2);
         string stored = r.GetString(3);
+        if (KeySeal.IsSealed(stored))
+        {
+            // DES-11 S6: sealed with the mail server's seal key - returned sealed; only the signer opens it.
+            return new DkimKeyRow { Id = r.GetGuid(0), Domain = domain, Selector = selector, PrivateKeyPem = stored, UpdatedAt = r.GetFieldValue<System.DateTimeOffset>(4) };
+        }
         if (SecretProtector.IsSealed(stored) && this.Secrets is null)
         {
             // Sealed in the database but no KEK in this process: refuse

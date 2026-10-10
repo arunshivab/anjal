@@ -50,8 +50,8 @@ public sealed partial class MailboxService
     /// <summary>Page size used by the folder and search views.</summary>
     public const int PageSize = 50;
 
-    /// <summary>Themes a mailbox may choose.</summary>
-    public static readonly IReadOnlyList<string> Themes = new[] { "paper", "ink", "postcard", "midnight" };
+    /// <summary>Themes a mailbox may choose: the house colour and each of the twenty named colours, light, dark or following the device (DES-11 D4).</summary>
+    public static readonly IReadOnlyList<string> Themes = MailboxRow.ThemeColours.SelectMany(c => MailboxRow.ThemeModes.Select(m => c + "-" + m)).ToArray();
 
     /// <summary>Minimum length of a new password.</summary>
     /// <summary>Kept for callers; the rule itself lives in <see cref="Anjal.Smtp.PasswordPolicy"/>.</summary>
@@ -67,14 +67,75 @@ public sealed partial class MailboxService
     /// <param name="folderId">Folder to search, or null for all folders.</param>
     /// <param name="query">Case-insensitive substring; empty matches everything.</param>
     /// <param name="page">Zero-based page.</param>
+    /// <param name="pageSize">Messages per page: the person's own choice (rc.11, item 14).</param>
     /// <param name="ct">Cancellation.</param>
-    public async Task<(IReadOnlyList<MessageRow> Items, long Total)> SearchAsync(Guid mailboxId, Guid? folderId, string query, int page, CancellationToken ct = default)
+    public async Task<(IReadOnlyList<MessageRow> Items, long Total)> SearchAsync(Guid mailboxId, Guid? folderId, string query, int page, int pageSize = PageSize, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(query);
-        int offset = Math.Max(0, page) * PageSize;
-        IReadOnlyList<MessageRow> items = await this.store.SearchMessagesAsync(mailboxId, folderId, query, PageSize, offset, ct).ConfigureAwait(false);
+        int size = Math.Clamp(pageSize, 1, 200);
+        int offset = Math.Max(0, page) * size;
+        IReadOnlyList<MessageRow> items = await this.store.SearchMessagesAsync(mailboxId, folderId, query, size, offset, ct).ConfigureAwait(false);
         long total = await this.store.CountSearchAsync(mailboxId, folderId, query, ct).ConfigureAwait(false);
         return (items, total);
+    }
+
+    /// <summary>
+    /// Search with the filters of UX-05: sender, a date range in the person's
+    /// own zone, and "has an attachment". The words are matched as by
+    /// <see cref="SearchAsync"/>; the filters narrow the result.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folderId">Folder to search, or null for all folders.</param>
+    /// <param name="query">Words; empty matches everything.</param>
+    /// <param name="sender">Part of the sender's name or address; empty for anyone.</param>
+    /// <param name="after">Received on or after this instant, or null.</param>
+    /// <param name="before">Received before this instant, or null.</param>
+    /// <param name="withAttachment">Only messages with an attachment.</param>
+    /// <param name="page">Zero-based page.</param>
+    /// <param name="pageSize">Messages per page.</param>
+    /// <param name="score">Only checked messages with this spam score (10 is 10 and above), or null (rc.15: a dashboard bar opens its messages).</param>
+    /// <param name="narrow">rc.15 (items 56, 58): a category, the messages rescued from Junk, or the biggest first; null for none.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<(IReadOnlyList<MessageRow> Items, long Total)> SearchFilteredAsync(Guid mailboxId, Guid? folderId, string query, string sender, DateTimeOffset? after, DateTimeOffset? before, bool withAttachment, int page, int pageSize = PageSize, int? score = null, SearchNarrowing? narrow = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(sender);
+        SearchNarrowing n = narrow ?? SearchNarrowing.None;
+        if (sender.Trim().Length == 0 && after is null && before is null && !withAttachment && score is null && n.IsNone)
+        {
+            return await this.SearchAsync(mailboxId, folderId, query, page, pageSize, ct).ConfigureAwait(false);
+        }
+        int size = Math.Clamp(pageSize, 1, 200);
+        string who = sender.Trim();
+        var matched = new List<MessageRow>();
+        // The newest 5,000 word matches are filtered here: enough for a person's mailbox.
+        for (int offset = 0; offset < 5000; offset += 500)
+        {
+            IReadOnlyList<MessageRow> chunk = await this.store.SearchMessagesAsync(mailboxId, folderId, query, 500, offset, ct).ConfigureAwait(false);
+            matched.AddRange(chunk.Where(m =>
+                (who.Length == 0 || EncodedWordDecoder.Decode(m.FromHeader).Contains(who, StringComparison.OrdinalIgnoreCase) || m.EnvelopeFrom.Contains(who, StringComparison.OrdinalIgnoreCase))
+                && (after is null || m.ReceivedAt >= after.Value)
+                && (before is null || m.ReceivedAt < before.Value)
+                && (!withAttachment || m.HasAttachments)
+                && (score is null || (m.SpamChecked == true && Math.Clamp(m.SpamScore, 0, MailFigures.TopScore) == score.Value))
+                && (n.Category is null || m.CategoryId == n.Category)
+                && (!n.Uncategorised || m.CategoryId is null)
+                && (n.Only is null || n.Only.Contains(m.Id))));
+            if (chunk.Count < 500)
+            {
+                break;
+            }
+        }
+        if (n.BiggestFirst)
+        {
+            matched = matched.OrderByDescending(m => m.SizeBytes).ToList();
+        }
+        else
+        {
+            matched = Sorted(matched, n.Sort).ToList();
+        }
+        IReadOnlyList<MessageRow> items = matched.Skip(Math.Max(0, page) * size).Take(size).ToList();
+        return (items, matched.Count);
     }
 
     /// <summary>Name the folder a message is in, for the search results' Folder column.</summary>
@@ -112,13 +173,11 @@ public sealed partial class MailboxService
     {
         ArgumentNullException.ThrowIfNull(query);
         FolderRow? sent = await this.GetFolderAsync(mailboxId, "Sent", ct).ConfigureAwait(false);
-        if (sent is null)
-        {
-            return Array.Empty<ContactSuggestion>();
-        }
 
         // 500 most recent sent messages is plenty to learn who you write to.
-        IReadOnlyList<MessageRow> rows = await this.store.ListMessagesAsync(mailboxId, sent.Id, 500, 0, ct).ConfigureAwait(false);
+        IReadOnlyList<MessageRow> rows = sent is null
+            ? Array.Empty<MessageRow>()
+            : await this.store.ListMessagesAsync(mailboxId, sent.Id, 500, 0, ct).ConfigureAwait(false);
         var byAddress = new Dictionary<string, (string Name, int Count)>(StringComparer.OrdinalIgnoreCase);
         foreach (MessageRow row in rows)
         {
@@ -130,6 +189,39 @@ public sealed partial class MailboxService
                 string name = existingName.Length > 0 ? existingName : a.DisplayName ?? string.Empty;
                 byAddress[key] = (name, existing.Count + 1);
             }
+        }
+
+        // rc.12: people who wrote to you are offered too, after those you wrote to.
+        FolderRow? inbox = await this.GetFolderAsync(mailboxId, FolderRow.Inbox, ct).ConfigureAwait(false);
+        if (inbox is not null)
+        {
+            foreach (MessageRow row in await this.store.ListMessagesAsync(mailboxId, inbox.Id, 300, 0, ct).ConfigureAwait(false))
+            {
+                foreach (MailAddress a in AddressParser.Parse(EncodedWordDecoder.Decode(row.FromHeader)))
+                {
+                    string key = a.Address.ToLowerInvariant();
+                    if (byAddress.ContainsKey(key))
+                    {
+                        continue;
+                    }
+                    byAddress[key] = (a.DisplayName ?? string.Empty, 0);
+                }
+            }
+        }
+
+        // rc.12 (items 28-30): saved contacts come first and give the name;
+        // then colleagues in the organisation; then the people written to.
+        foreach ((string address, string name) in await this.ColleaguesAsync(mailboxId, ct).ConfigureAwait(false))
+        {
+            string key = address.ToLowerInvariant();
+            byAddress.TryGetValue(key, out (string Name, int Count) existing);
+            byAddress[key] = (name.Length > 0 ? name : existing.Name ?? string.Empty, existing.Count + 100);
+        }
+        foreach (Contact c in await this.ListContactsAsync(mailboxId, ct).ConfigureAwait(false))
+        {
+            string key = c.Address.ToLowerInvariant();
+            byAddress.TryGetValue(key, out (string Name, int Count) existing);
+            byAddress[key] = (c.DisplayName != c.Address ? c.DisplayName : existing.Name ?? string.Empty, existing.Count + 1000);
         }
 
         string q = query.Trim();
@@ -162,7 +254,21 @@ public sealed partial class MailboxService
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="request">The compose form.</param>
     /// <param name="ct">Cancellation.</param>
-    public async Task<Guid?> SaveDraftAsync(Guid mailboxId, ComposeRequest request, CancellationToken ct = default)
+    public Task<Guid?> SaveDraftAsync(Guid mailboxId, ComposeRequest request, CancellationToken ct = default) =>
+        this.SaveComposeCopyAsync(mailboxId, request, "Drafts", DateTimeOffset.UtcNow, ct);
+
+    /// <summary>
+    /// Keep a compose form as a message in a folder: Drafts for a draft, or
+    /// Scheduled for mail waiting for its send time (rc.12, items 8 and UX-02),
+    /// whose Date line is then the time it will be sent. Replaces the version
+    /// named by <see cref="ComposeRequest.DraftId"/>.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="request">The compose form.</param>
+    /// <param name="folderName">Drafts or Scheduled.</param>
+    /// <param name="dated">The Date line: now for a draft, the send time for scheduled mail.</param>
+    /// <param name="ct">Cancellation.</param>
+    internal async Task<Guid?> SaveComposeCopyAsync(Guid mailboxId, ComposeRequest request, string folderName, DateTimeOffset dated, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
@@ -174,7 +280,7 @@ public sealed partial class MailboxService
 
         // Addresses in a draft may be half-typed; keep the text as written.
         byte[] raw = BuildMessage(mailbox, request, AddressParser.Parse(request.To), AddressParser.Parse(request.Cc), draftHeaders: request);
-        FolderRow drafts = await this.store.EnsureFolderAsync(mailbox.Id, "Drafts", ct).ConfigureAwait(false);
+        FolderRow drafts = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
         MaildirWriteResult written = await this.maildir.WriteAsync(tenant.Slug, mailbox.Address, drafts.Name, raw, ct).ConfigureAwait(false);
         string? seenPath = this.maildir.SetFlags(tenant.Slug, mailbox.Address, drafts.Name, written.RelativePath, seen: true, flagged: false, answered: false);
 
@@ -189,7 +295,7 @@ public sealed partial class MailboxService
             FromHeader = FormatFrom(mailbox),
             ToHeader = request.To.Trim(),
             Subject = request.Subject.Trim(),
-            DateHeader = FormatDate(DateTimeOffset.UtcNow),
+            DateHeader = FormatDate(dated),
             SizeBytes = written.SizeBytes,
             Seen = true,
             SpamChecked = false,
@@ -205,16 +311,48 @@ public sealed partial class MailboxService
     }
 
     /// <summary>
+    /// Discard a draft for good: the "Discard" of "Keep this draft?" (rc.12,
+    /// item 17). Only ever removes a message that is in Drafts, so a forged
+    /// or mistaken request cannot delete any other mail. Returns true when
+    /// a draft was removed.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="draftId">The draft.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<bool> DiscardDraftAsync(Guid mailboxId, Guid draftId, CancellationToken ct = default)
+    {
+        MessageRow? row = await this.GetOwnedRowAsync(mailboxId, draftId, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return false;
+        }
+        FolderRow? folder = await this.FolderByIdAsync(mailboxId, row.FolderId, ct).ConfigureAwait(false);
+        if (folder is null || !string.Equals(folder.Name, "Drafts", StringComparison.Ordinal))
+        {
+            return false;
+        }
+        return await this.DeleteAsync(mailboxId, draftId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// Load a draft back into a compose form. Returns null if the message
     /// is not a draft of this mailbox.
     /// </summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="draftId">The draft.</param>
     /// <param name="ct">Cancellation.</param>
-    public async Task<ComposeRequest?> LoadDraftAsync(Guid mailboxId, Guid draftId, CancellationToken ct = default)
+    public Task<ComposeRequest?> LoadDraftAsync(Guid mailboxId, Guid draftId, CancellationToken ct = default) =>
+        this.LoadComposeCopyAsync(mailboxId, draftId, "Drafts", ct);
+
+    /// <summary>Load a kept compose form back from Drafts or Scheduled; null when it is not in that folder.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="draftId">The kept message.</param>
+    /// <param name="folderName">The folder it must be in.</param>
+    /// <param name="ct">Cancellation.</param>
+    internal async Task<ComposeRequest?> LoadComposeCopyAsync(Guid mailboxId, Guid draftId, string folderName, CancellationToken ct = default)
     {
         (MessageRow Row, FolderRow Folder, byte[] Raw)? loaded = await this.ReadRawAsync(mailboxId, draftId, ct).ConfigureAwait(false);
-        if (loaded is null || !string.Equals(loaded.Value.Folder.Name, "Drafts", StringComparison.Ordinal))
+        if (loaded is null || !string.Equals(loaded.Value.Folder.Name, folderName, StringComparison.Ordinal))
         {
             return null;
         }
@@ -233,6 +371,7 @@ public sealed partial class MailboxService
             Body = FirstPlainText(parsed.Body),
             BodyHtml = FirstHtml(parsed.Body),
             InReplyTo = parsed.Headers.Get("In-Reply-To")?.Trim('<', '>', ' ') ?? string.Empty,
+            Sender = EncodedWordDecoder.Decode(parsed.Headers.Get("Sender") ?? string.Empty),
         };
         return request;
     }
@@ -376,6 +515,15 @@ public sealed partial class MailboxService
         {
             foreach (int index in request.CarryIndexes.Distinct())
             {
+                // rc.12 (item 23): -1 is the whole message, forwarded as an attachment.
+                if (index == WholeMessage)
+                {
+                    if (await this.WholeMessageAttachmentAsync(mailboxId, source, ct).ConfigureAwait(false) is (AttachmentView whole, byte[] raw))
+                    {
+                        request.Attachments.Add((whole.FileName, whole.ContentType, raw));
+                    }
+                    continue;
+                }
                 (AttachmentView View, byte[] Bytes)? found = await this.GetAttachmentAsync(mailboxId, source, index, ct).ConfigureAwait(false);
                 if (found is not null)
                 {
@@ -391,6 +539,52 @@ public sealed partial class MailboxService
         return total > MaxAttachmentBytes
             ? "The attachments add up to more than 18 MB. Remove some, or send them in more than one message."
             : null;
+    }
+
+    /// <summary>
+    /// The type to preview an attachment as (rc.12, UX-06): PNG, JPEG, GIF,
+    /// WebP or PDF, judged by its declared type and its name; null when it
+    /// is not shown in the page (SVG and HTML never are).
+    /// </summary>
+    /// <param name="a">The attachment.</param>
+    public static string? PreviewType(AttachmentView a)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        string ct = a.ContentType.ToLowerInvariant();
+        string ext = Path.GetExtension(a.FileName).ToLowerInvariant();
+        return (ct, ext) switch
+        {
+            (_, ".png") or ("image/png", _) => "image/png",
+            (_, ".jpg" or ".jpeg") or ("image/jpeg", _) => "image/jpeg",
+            (_, ".gif") or ("image/gif", _) => "image/gif",
+            (_, ".webp") or ("image/webp", _) => "image/webp",
+            (_, ".pdf") or ("application/pdf", _) => "application/pdf",
+            _ => null,
+        };
+    }
+
+    /// <summary>The carry index that means "the whole message, as an .eml attachment" (rc.12, item 23).</summary>
+    public const int WholeMessage = -1;
+
+    /// <summary>
+    /// A whole message as an attachment: its original bytes, named after
+    /// its subject. Sent as application/octet-stream: the attachment is base64,
+    /// which RFC 2046 5.2.1 does not allow for message/rfc822, and every mail
+    /// program opens an .eml file. Null when it is not this mailbox's.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The message.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<(AttachmentView View, byte[] Raw)?> WholeMessageAttachmentAsync(Guid mailboxId, Guid messageId, CancellationToken ct = default)
+    {
+        (MessageRow Row, FolderRow Folder, byte[] Raw)? loaded = await this.ReadRawAsync(mailboxId, messageId, ct).ConfigureAwait(false);
+        if (loaded is null)
+        {
+            return null;
+        }
+        string subject = EncodedWordDecoder.Decode(loaded.Value.Row.Subject).Trim();
+        string name = SafeFileName((subject.Length > 0 ? subject : "message") + ".eml");
+        return (new AttachmentView { Index = WholeMessage, FileName = name, ContentType = "application/octet-stream", SizeBytes = loaded.Value.Raw.LongLength }, loaded.Value.Raw);
     }
 
     /// <summary>
@@ -453,7 +647,7 @@ public sealed partial class MailboxService
             To = toField,
             Cc = ccField,
             Subject = newSubject,
-            Body = QuoteForReply(from, date, body, kind == PrefillKind.Forward, to, cc, subject),
+            Body = QuoteForReply(from, date, body, kind == PrefillKind.Forward, to, cc, subject, ZonedClock.For(context.Value.Mailbox.TimeZone, context.Value.Mailbox.DateFormat)),
             InReplyTo = parsed?.MessageId ?? loaded.Value.Row.MessageId,
         };
     }
@@ -471,7 +665,8 @@ public sealed partial class MailboxService
     /// <param name="to">Original To (forwards only).</param>
     /// <param name="cc">Original Cc (forwards only).</param>
     /// <param name="subject">Original subject (forwards only).</param>
-    public static string QuoteForReply(string from, string date, string body, bool forward, string to = "", string cc = "", string subject = "")
+    /// <param name="clock">The person's clock for the line above a reply; India time when absent.</param>
+    public static string QuoteForReply(string from, string date, string body, bool forward, string to = "", string cc = "", string subject = "", ZonedClock? clock = null)
     {
         ArgumentNullException.ThrowIfNull(from);
         ArgumentNullException.ThrowIfNull(date);
@@ -504,7 +699,7 @@ public sealed partial class MailboxService
             return sb.ToString();
         }
 
-        sb.Append(AttributionLine(from, date)).Append('\n');
+        sb.Append(AttributionLine(from, date, clock)).Append('\n');
         foreach (string line in body.Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd().Split('\n'))
         {
             sb.Append(line.Length == 0 ? ">" : "> " + line).Append('\n');
@@ -513,12 +708,15 @@ public sealed partial class MailboxService
     }
 
     /// <summary>
-    /// The line above a quoted reply: <c>On 20 September 2026 at 14:32, Name wrote:</c>.
-    /// Falls back to just the name when the date cannot be parsed.
+    /// The line above a quoted reply, in the replying person's time zone with
+    /// the zone named, because the reply travels to people elsewhere (DEF-088):
+    /// <c>On 20 September 2026 at 14:32 IST, Name wrote:</c>. Falls back to just
+    /// the name when the date cannot be parsed.
     /// </summary>
     /// <param name="from">Original From header.</param>
     /// <param name="date">Original Date header.</param>
-    public static string AttributionLine(string from, string date)
+    /// <param name="clock">The person's clock; India time when absent.</param>
+    public static string AttributionLine(string from, string date, ZonedClock? clock = null)
     {
         ArgumentNullException.ThrowIfNull(from);
         ArgumentNullException.ThrowIfNull(date);
@@ -528,7 +726,7 @@ public sealed partial class MailboxService
             : from;
         if (TryParseRfc5322(date, out DateTimeOffset when))
         {
-            return $"On {when:d MMMM yyyy} at {when:HH:mm}, {who} wrote:";
+            return $"On {(clock ?? ZonedClock.Default).Written(when)}, {who} wrote:";
         }
         return $"{who} wrote:";
     }
@@ -606,6 +804,11 @@ public sealed partial class MailboxService
         FolderRow? trash = action == BulkAction.Purge
             ? await this.GetFolderAsync(mailboxId, "Trash", ct).ConfigureAwait(false)
             : null;
+        // rc.14: nothing is deleted from a mailbox under a legal hold.
+        if (action == BulkAction.Purge && await this.IsHeldAsync(mailboxId, ct).ConfigureAwait(false))
+        {
+            trash = null;
+        }
         foreach (Guid id in messageIds)
         {
             MessageRow? row = await this.GetOwnedRowAsync(mailboxId, id, ct).ConfigureAwait(false);
@@ -639,16 +842,81 @@ public sealed partial class MailboxService
     }
 
     /// <summary>
+    /// Move messages to a folder, noting where each was so the move can be
+    /// undone for ten minutes (rc.11, UX-07: undo after delete or move).
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageIds">The messages.</param>
+    /// <param name="toFolderName">Trash, INBOX, or a folder that exists.</param>
+    /// <param name="now">The present moment.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>How many moved, and the token that undoes it (null when none moved).</returns>
+    public async Task<(int Moved, Guid? UndoToken)> MoveWithUndoAsync(Guid mailboxId, IReadOnlyList<Guid> messageIds, string toFolderName, DateTimeOffset now, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(messageIds);
+        ArgumentNullException.ThrowIfNull(toFolderName);
+        var moves = new List<(Guid MessageId, string FromFolder)>();
+        foreach (Guid id in messageIds)
+        {
+            MessageRow? row = await this.GetOwnedRowAsync(mailboxId, id, ct).ConfigureAwait(false);
+            FolderRow? from = row is null ? null : await this.FolderByIdAsync(mailboxId, row.FolderId, ct).ConfigureAwait(false);
+            if (from is null || string.Equals(from.Name, toFolderName, StringComparison.Ordinal))
+            {
+                continue;
+            }
+            if (await this.MoveAsync(mailboxId, id, toFolderName, ct).ConfigureAwait(false) is not null)
+            {
+                moves.Add((id, from.Name));
+            }
+        }
+        return moves.Count == 0 ? (0, null) : (moves.Count, this.Undo.Record(mailboxId, moves, now));
+    }
+
+    /// <summary>Put messages back where they were before a move (rc.11, UX-07).</summary>
+    /// <param name="mailboxId">The mailbox asking.</param>
+    /// <param name="token">The token from <see cref="MoveWithUndoAsync"/>.</param>
+    /// <param name="now">The present moment.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>How many were put back; messages since deleted for good are skipped.</returns>
+    public async Task<int> UndoMoveAsync(Guid mailboxId, Guid token, DateTimeOffset now, CancellationToken ct = default)
+    {
+        int restored = 0;
+        foreach ((Guid messageId, string fromFolder) in this.Undo.Take(mailboxId, token, now))
+        {
+            if (await this.MoveAsync(mailboxId, messageId, fromFolder, ct).ConfigureAwait(false) is not null)
+            {
+                restored++;
+            }
+        }
+        return restored;
+    }
+
+    /// <summary>
     /// Delete everything in Trash permanently. Returns how many were deleted.
     /// Works through the folder in pages; each pass re-reads the first page,
     /// and stops if a pass deletes nothing, so it cannot loop.
     /// </summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="ct">Cancellation.</param>
-    public async Task<int> EmptyTrashAsync(Guid mailboxId, CancellationToken ct = default)
+    public Task<int> EmptyTrashAsync(Guid mailboxId, CancellationToken ct = default) =>
+        this.EmptyFolderAsync(mailboxId, "Trash", ct);
+
+    /// <summary>
+    /// Delete everything in Junk permanently (SPEC-11 item 25). Returns how
+    /// many were deleted. As with Trash, nothing is deleted from a mailbox
+    /// under a legal hold, and each message's evidence copy is kept for its
+    /// own period.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>How many were deleted.</returns>
+    public Task<int> EmptyJunkAsync(Guid mailboxId, CancellationToken ct = default) =>
+        this.EmptyFolderAsync(mailboxId, Anjal.Mailbox.MailboxSink.JunkFolder, ct);
+
+    private async Task<int> EmptyFolderAsync(Guid mailboxId, string name, CancellationToken ct)
     {
-        FolderRow? trash = await this.GetFolderAsync(mailboxId, "Trash", ct).ConfigureAwait(false);
-        if (trash is null)
+        FolderRow? trash = await this.GetFolderAsync(mailboxId, name, ct).ConfigureAwait(false);
+        if (trash is null || await this.IsHeldAsync(mailboxId, ct).ConfigureAwait(false))
         {
             return 0;
         }
@@ -675,7 +943,17 @@ public sealed partial class MailboxService
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="folderId">The folder.</param>
     /// <param name="ct">Cancellation.</param>
-    public async Task<int> MarkFolderReadAsync(Guid mailboxId, Guid folderId, CancellationToken ct = default)
+    public Task<int> MarkFolderReadAsync(Guid mailboxId, Guid folderId, CancellationToken ct = default) =>
+        this.MarkFolderAsync(mailboxId, folderId, seen: true, ct);
+
+    /// <summary>Mark every message in a folder unread (rc.12, item 23). Returns how many changed.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folderId">The folder.</param>
+    /// <param name="ct">Cancellation.</param>
+    public Task<int> MarkFolderUnreadAsync(Guid mailboxId, Guid folderId, CancellationToken ct = default) =>
+        this.MarkFolderAsync(mailboxId, folderId, seen: false, ct);
+
+    private async Task<int> MarkFolderAsync(Guid mailboxId, Guid folderId, bool seen, CancellationToken ct)
     {
         // One pass through the folder by offset. Marking a message seen does
         // not change its position, and the offset only ever grows, so this
@@ -689,7 +967,7 @@ public sealed partial class MailboxService
             IReadOnlyList<MessageRow> batch = await this.store.ListMessagesAsync(mailboxId, folderId, batchSize, offset, ct).ConfigureAwait(false);
             foreach (MessageRow m in batch)
             {
-                if (!m.Seen && await this.SetFlagsAsync(mailboxId, m.Id, true, m.Flagged, m.Answered, ct).ConfigureAwait(false) is not null)
+                if (m.Seen != seen && await this.SetFlagsAsync(mailboxId, m.Id, seen, m.Flagged, m.Answered, ct).ConfigureAwait(false) is not null)
                 {
                     changed++;
                 }
@@ -737,6 +1015,182 @@ public sealed partial class MailboxService
         return null;
     }
 
+    /// <summary>
+    /// One page of a folder: all messages, only unread, or only read (rc.11,
+    /// item 7), with the total for that choice.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folderId">The folder.</param>
+    /// <param name="show">all, unread or read; anything else means all.</param>
+    /// <param name="page">Zero-based page.</param>
+    /// <param name="pageSize">Messages per page.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The page and the total it is part of.</returns>
+    public async Task<(IReadOnlyList<MessageRow> Items, long Total)> ListFilteredAsync(Guid mailboxId, Guid folderId, string? show, int page, int pageSize, CancellationToken ct = default)
+    {
+        bool? seen = show switch
+        {
+            "unread" => false,
+            "read" => true,
+            _ => null,
+        };
+        if (seen is null)
+        {
+            return await this.ListMessagesAsync(mailboxId, folderId, page, pageSize, ct).ConfigureAwait(false);
+        }
+        int size = Math.Clamp(pageSize, 1, 200);
+        IReadOnlyList<MessageRow> items = await this.store.ListMessagesBySeenAsync(mailboxId, folderId, seen.Value, size, Math.Max(0, page) * size, ct).ConfigureAwait(false);
+        long unread = await this.store.CountUnreadAsync(mailboxId, folderId, ct).ConfigureAwait(false);
+        long total = seen.Value ? await this.store.CountMessagesAsync(mailboxId, folderId, ct).ConfigureAwait(false) - unread : unread;
+        return (items, total);
+    }
+
+    /// <summary>Remember how many messages the person sees per page (rc.11, item 14).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="pageSize">One of <see cref="MailboxPreferences.PageSizes"/>; anything else keeps 50.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when saved.</returns>
+    public Task<bool> SetPageSizeAsync(Guid mailboxId, int pageSize, CancellationToken ct = default) =>
+        this.ChangePreferencesAsync(mailboxId, p => p.PageSize = pageSize, ct);
+
+    /// <summary>
+    /// Save language, time zone, date format and week start (rc.11, items 36 and
+    /// 41). A language the owner has not switched on is refused and the current
+    /// one kept (D-92); anything else unknown falls back to its default.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="language">A language code.</param>
+    /// <param name="timeZone">An IANA time zone.</param>
+    /// <param name="dateFormat">One of <see cref="MailboxPreferences.DateFormats"/>.</param>
+    /// <param name="weekStart">monday or sunday.</param>
+    /// <param name="words">The languages switched on.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The preferences as saved, or null when the mailbox is unknown.</returns>
+    public async Task<MailboxPreferences?> SetLanguageAndTimeAsync(Guid mailboxId, string? language, string? timeZone, string? dateFormat, string? weekStart, Words words, CancellationToken ct = default) =>
+        await this.SetLanguageAndTimeAsync(mailboxId, language, timeZone, dateFormat, weekStart, words, false, ct).ConfigureAwait(false);
+
+    /// <summary>Save language and time, where an operator may also choose a language in preview (rc.15, item 41).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="language">A language code.</param>
+    /// <param name="timeZone">An IANA zone.</param>
+    /// <param name="dateFormat">A date format.</param>
+    /// <param name="weekStart">The first day of the week.</param>
+    /// <param name="words">The words built into the program.</param>
+    /// <param name="allowPreview">True for an operator: a language not yet switched on may be chosen.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The preferences as saved, or null when the mailbox is unknown.</returns>
+    public async Task<MailboxPreferences?> SetLanguageAndTimeAsync(Guid mailboxId, string? language, string? timeZone, string? dateFormat, string? weekStart, Words words, bool allowPreview, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(words);
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
+        if (context is null)
+        {
+            return null;
+        }
+        MailboxPreferences p = MailboxPreferences.Of(context.Value.Mailbox);
+        string languageBefore = p.Language;
+        if (language is not null && (words.IsEnabled(language.Trim().ToLowerInvariant()) || (allowPreview && words.IsPreview(language.Trim().ToLowerInvariant()))))
+        {
+            p.Language = language.Trim().ToLowerInvariant();
+        }
+        if (!string.Equals(languageBefore, p.Language, StringComparison.Ordinal))
+        {
+            // The person chose a language of their own: an organisation's later change of its
+            // default reaches them only when its administrator says "everyone" (D-131).
+            MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);
+            if (!s.LanguageChosen)
+            {
+                s.LanguageChosen = true;
+                await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
+            }
+        }
+        p.TimeZone = timeZone ?? p.TimeZone;
+        p.DateFormat = dateFormat ?? p.DateFormat;
+        p.WeekStart = weekStart ?? p.WeekStart;
+        MailboxPreferences saved = p.Normalized();
+        return await this.store.SetMailboxPreferencesAsync(mailboxId, saved, ct).ConfigureAwait(false) ? saved : null;
+    }
+
+    /// <summary>Save the layout (three, focus, list) and density (comfortable, compact) - each only when given (rc.11, item 45).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="layout">three, focus or list; null keeps the current one.</param>
+    /// <param name="density">comfortable or compact; null keeps the current one.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when saved.</returns>
+    public Task<bool> SetLayoutAsync(Guid mailboxId, string? layout, string? density, CancellationToken ct = default) =>
+        this.ChangePreferencesAsync(
+            mailboxId,
+            p =>
+            {
+                if (layout is not null)
+                {
+                    p.Layout = layout;
+                }
+                if (density is not null)
+                {
+                    p.Density = density;
+                }
+            },
+            ct);
+
+    /// <summary>Record that the welcome screen has been answered, so it is never shown again (rc.11, D-105).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when saved.</returns>
+    public Task<bool> SetWelcomeDoneAsync(Guid mailboxId, CancellationToken ct = default) =>
+        this.ChangePreferencesAsync(mailboxId, p => p.WelcomeDone = true, ct);
+
+    /// <summary>Turn the new-mail sound on or off for this person (rc.11, item 11).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="on">True to play the sound.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when saved.</returns>
+    public Task<bool> SetNewMailSoundAsync(Guid mailboxId, bool on, CancellationToken ct = default) =>
+        this.ChangePreferencesAsync(mailboxId, p => p.NewMailSound = on, ct);
+
+    /// <summary>
+    /// What the page checks every 30 seconds for live update (rc.11, item 11):
+    /// the INBOX unread count and when the newest INBOX message arrived.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The unread count and the newest arrival, if any.</returns>
+    public async Task<(long Unread, DateTimeOffset? Newest)> InboxStateAsync(Guid mailboxId, CancellationToken ct = default)
+    {
+        FolderRow? inbox = await this.GetFolderAsync(mailboxId, FolderRow.Inbox, ct).ConfigureAwait(false);
+        if (inbox is null)
+        {
+            return (0, null);
+        }
+        long unread = await this.store.CountUnreadAsync(mailboxId, inbox.Id, ct).ConfigureAwait(false);
+        IReadOnlyList<MessageRow> newest = await this.store.ListMessagesAsync(mailboxId, inbox.Id, 1, 0, ct).ConfigureAwait(false);
+        return (unread, newest.Count > 0 ? newest[0].ReceivedAt : null);
+    }
+
+    private async Task<bool> ChangePreferencesAsync(Guid mailboxId, Action<MailboxPreferences> change, CancellationToken ct)
+    {
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
+        if (context is null)
+        {
+            return false;
+        }
+        MailboxPreferences preferences = MailboxPreferences.Of(context.Value.Mailbox);
+        change(preferences);
+        return await this.store.SetMailboxPreferencesAsync(mailboxId, preferences, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Remember whether the person keeps the rail folded to icons (rc.11).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folded">True to show icons only.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when saved.</returns>
+    public Task<bool> SetRailFoldedAsync(Guid mailboxId, bool folded, CancellationToken ct = default) =>
+        this.ChangePreferencesAsync(mailboxId, p =>
+        {
+            p.RailFolded = folded;
+            p.RailChosen = true;
+        }, ct);
+
     /// <summary>Set the webmail theme for this mailbox. Returns the error to show, or null.</summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="theme">One of <see cref="Themes"/>.</param>
@@ -755,51 +1209,36 @@ public sealed partial class MailboxService
             return "Mailbox is not available.";
         }
         MailboxRow mailbox = context.Value.Mailbox;
+        string before = MailboxRow.NormalizeTheme(mailbox.Theme);
+        if (string.Equals(before, t, StringComparison.Ordinal))
+        {
+            return null;
+        }
         mailbox.Theme = t;
         mailbox.PasswordPbkdf2 = string.Empty;
         await this.store.UpsertMailboxAsync(mailbox, ct).ConfigureAwait(false);
+
+        // DES-11 D7: the person chose a colour of their own; an organisation's later change of
+        // its default reaches them only when its administrator says "everyone".
+        // Light or dark alone is not a colour of one's own.
+        MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);
+        if (!s.ThemeChosen && !string.Equals(ColourOf(before), ColourOf(t), StringComparison.Ordinal))
+        {
+            s.ThemeChosen = true;
+            await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
+        }
         return null;
     }
 
-    /// <summary>
-    /// Change the mailbox password after checking the current one. Returns
-    /// the error to show, or null on success. The session stays signed in.
-    /// </summary>
-    /// <param name="mailboxId">The mailbox.</param>
-    /// <param name="currentPassword">The current password.</param>
-    /// <param name="newPassword">The new password.</param>
-    /// <param name="confirmPassword">The new password again.</param>
-    /// <param name="ct">Cancellation.</param>
-    public async Task<string?> ChangePasswordAsync(Guid mailboxId, string currentPassword, string newPassword, string confirmPassword, CancellationToken ct = default)
+    /// <summary>The colour part of a theme ("rose" of "rose-dark").</summary>
+    /// <param name="theme">A theme.</param>
+    /// <returns>The colour.</returns>
+    public static string ColourOf(string theme)
     {
-        ArgumentNullException.ThrowIfNull(currentPassword);
-        ArgumentNullException.ThrowIfNull(newPassword);
-        ArgumentNullException.ThrowIfNull(confirmPassword);
-        (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
-        if (context is null)
-        {
-            return "Mailbox is not available.";
-        }
-        MailboxRow mailbox = context.Value.Mailbox;
-        if (mailbox.PasswordPbkdf2.Length == 0 || !Anjal.Smtp.Pbkdf2Hasher.Verify(currentPassword, mailbox.PasswordPbkdf2))
-        {
-            return "The current password is not correct.";
-        }
-        if (Anjal.Smtp.PasswordPolicy.Check(newPassword, mailbox.Address, mailbox.DisplayName) is string rejected)
-        {
-            return rejected;
-        }
-        if (!string.Equals(newPassword, confirmPassword, StringComparison.Ordinal))
-        {
-            return "The two new passwords do not match.";
-        }
-        if (string.Equals(newPassword, currentPassword, StringComparison.Ordinal))
-        {
-            return "The new password is the same as the current one.";
-        }
-        mailbox.PasswordPbkdf2 = Anjal.Smtp.Pbkdf2Hasher.Hash(newPassword);
-        await this.store.UpsertMailboxAsync(mailbox, ct).ConfigureAwait(false);
-        return null;
+        ArgumentNullException.ThrowIfNull(theme);
+        string t = MailboxRow.NormalizeTheme(theme);
+        int dash = t.LastIndexOf('-');
+        return dash > 0 ? t[..dash] : t;
     }
 
     /// <summary>The first text/plain part of a MIME tree, or empty.</summary>
@@ -823,4 +1262,19 @@ public sealed partial class MailboxService
         }
         return string.Empty;
     }
+}
+
+/// <summary>rc.15 (items 56 and 58): more ways a dashboard number narrows a search.</summary>
+/// <param name="Category">Only this category, or null.</param>
+/// <param name="Uncategorised">Only messages without a category.</param>
+/// <param name="BiggestFirst">The biggest messages first instead of the newest.</param>
+/// <param name="Only">Only these messages (those rescued from Junk), or null.</param>
+/// <param name="Sort">The order the person chose (owner, 9 Oct 2026); null or "newest" for newest first.</param>
+public sealed record SearchNarrowing(Guid? Category = null, bool Uncategorised = false, bool BiggestFirst = false, IReadOnlySet<Guid>? Only = null, string? Sort = null)
+{
+    /// <summary>No narrowing.</summary>
+    public static SearchNarrowing None { get; } = new();
+
+    /// <summary>True when nothing is narrowed.</summary>
+    public bool IsNone => this.Category is null && !this.Uncategorised && !this.BiggestFirst && this.Only is null && MailboxService.SortOf(this.Sort) == MailboxService.NewestFirst;
 }

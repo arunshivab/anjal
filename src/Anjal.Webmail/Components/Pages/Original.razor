@@ -1,0 +1,65 @@
+@page "/message/{Id:guid}/original"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+
+@* rc.11 (D-103): the message exactly as it arrived, shown as plain text. *@
+<PageTitle>@L["Show original"] - Anjal</PageTitle>
+
+<div class="original">
+    <div class="listhead">
+        <a class="iconbtn" href="/message/@Id" aria-label="@L["Back to the message"]" title="@L["Back to the message"]"><LipiIcon Name="chevron-left" Size="17" /></a>
+        <h1>@L["Show original"]</h1>
+        <span class="lh-grow"></span>
+        <a class="btn btn-s btn-sm" href="/message/@Id/raw.eml"><LipiIcon Name="download" Size="14" />@L["Download the original (.eml)"]</a>
+    </div>
+    @if (text is null)
+    {
+        <p class="empty">@L["That message is no longer here."]</p>
+    }
+    else
+    {
+        @if (shortened)
+        {
+            <div class="notice-wrap"><div class="notice n-info"><LipiIcon Name="info" Size="16" /><span>@L["Only the first 1 MB is shown here. Download the original to see all of it."]</span></div></div>
+        }
+        <pre class="rawtext">@text</pre>
+    }
+</div>
+
+@code {
+    /// <summary>Shown on screen up to this size; the download always has all of it.</summary>
+    private const int ShownBytes = 1024 * 1024;
+
+    [Parameter] public Guid Id { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private string? text;
+    private bool shortened;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        text = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        AuthenticationState state = await AuthState;
+        L = Words.For(WebmailAuthService.LanguageOf(state.User, Words));
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf(state.User);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        // The same ownership check as the download (ReadRawAsync).
+        (MessageRow Row, FolderRow Folder, byte[] Raw)? found = await Mail.ReadRawAsync(mailboxId.Value, Id);
+        if (found is null)
+        {
+            return;
+        }
+        byte[] raw = found.Value.Raw;
+        shortened = raw.Length > ShownBytes;
+        text = System.Text.Encoding.UTF8.GetString(raw, 0, Math.Min(raw.Length, ShownBytes));
+    }
+}

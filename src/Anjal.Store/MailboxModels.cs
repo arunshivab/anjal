@@ -132,8 +132,8 @@ public sealed class TenantDomainRow
 /// </summary>
 public sealed class MailboxRow
 {
-    /// <summary>Two gibibytes - the default per-mailbox quota.</summary>
-    public const long DefaultQuotaBytes = 2L * 1024 * 1024 * 1024;
+    /// <summary>One gibibyte - the default per-mailbox quota (owner, 10 Oct 2026, DES-11 D2).</summary>
+    public const long DefaultQuotaBytes = 1L * 1024 * 1024 * 1024;
 
     /// <summary>Identifier assigned by the store.</summary>
     public System.Guid Id { get; set; }
@@ -160,16 +160,86 @@ public sealed class MailboxRow
     /// <summary>Display name for the From header (e.g. "Arun Shiva B").</summary>
     public string DisplayName { get; set; } = string.Empty;
 
-    /// <summary>Default webmail theme.</summary>
-    public const string DefaultTheme = "paper";
+    /// <summary>Default webmail theme: Anjal, the house colour of the approved boards, light (rc.15).</summary>
+    public const string DefaultTheme = "anjal-light";
 
-    /// <summary>Webmail theme for this mailbox: paper, ink, postcard or midnight. Stored per mailbox, not per browser.</summary>
+    // DES-11 D4 (owner, 10 Oct 2026, "All are good... Add all of them"): eight more, 21 colours in all.
+    private static readonly string[] Colours = { "anjal", "teal", "ocean", "indigo", "violet", "plum", "forest", "olive", "crimson", "rust", "saffron", "slate", "graphite", "rose", "navy", "coffee", "emerald", "maroon", "sky", "lavender", "gold" };
+
+    private static readonly string[] Modes = { "light", "dark", "auto" };
+
+    /// <summary>The house colour, Anjal, then the twenty named colours, in the order Settings shows them.</summary>
+    public static IReadOnlyList<string> ThemeColours => Colours;
+
+    /// <summary>The theme modes: light, dark, or following the device's own setting.</summary>
+    public static IReadOnlyList<string> ThemeModes => Modes;
+
+    /// <summary>
+    /// The theme to use for a stored or remembered value: a known theme as
+    /// it is; a theme name from before rc.11 converted (ink and midnight were
+    /// dark, paper and postcard light); anything else the default.
+    /// </summary>
+    /// <param name="theme">A stored theme, a sign-in cookie's theme, or null.</param>
+    /// <returns>A theme that exists, such as <c>anjal-light</c>.</returns>
+    public static string NormalizeTheme(string? theme)
+    {
+        string t = (theme ?? string.Empty).Trim().ToLowerInvariant();
+        if (t is "ink" or "midnight")
+        {
+            return "anjal-dark";
+        }
+        if (t is "paper" or "postcard")
+        {
+            return DefaultTheme;
+        }
+        int dash = t.LastIndexOf('-');
+        if (dash > 0 && System.Array.IndexOf(Colours, t[..dash]) >= 0 && System.Array.IndexOf(Modes, t[(dash + 1)..]) >= 0)
+        {
+            return t;
+        }
+        return DefaultTheme;
+    }
+
+    /// <summary>Webmail theme for this mailbox: a colour and a mode, such as teal-light, teal-dark or teal-auto. Stored per mailbox, not per browser.</summary>
     public string Theme { get; set; } = DefaultTheme;
+
+    /// <summary>IANA time zone every date is shown in (rc.11). Saved through <see cref="IMailboxStore.SetMailboxPreferencesAsync"/>.</summary>
+    public string TimeZone { get; set; } = MailboxPreferences.DefaultTimeZone;
+
+    /// <summary>Webmail language (rc.11): one of <see cref="MailboxPreferences.Languages"/>.</summary>
+    public string Language { get; set; } = MailboxPreferences.DefaultLanguage;
+
+    /// <summary>Comfortable or compact (rc.11).</summary>
+    public string Density { get; set; } = MailboxPreferences.DefaultDensity;
+
+    /// <summary>Three panes, focus, or list only (rc.11).</summary>
+    public string Layout { get; set; } = MailboxPreferences.DefaultLayout;
+
+    /// <summary>True when the rail shows icons only (rc.11).</summary>
+    public bool RailFolded { get; set; }
+
+    /// <summary>True once the person has folded or opened the rail themselves (rc.15); until then it folds by itself on laptop screens.</summary>
+    public bool RailChosen { get; set; }
+
+    /// <summary>Date format (rc.11): one of <see cref="MailboxPreferences.DateFormats"/>.</summary>
+    public string DateFormat { get; set; } = MailboxPreferences.DefaultDateFormat;
+
+    /// <summary>First day of the week (rc.11): monday or sunday.</summary>
+    public string WeekStart { get; set; } = MailboxPreferences.DefaultWeekStart;
+
+    /// <summary>Messages per page (rc.11): one of <see cref="MailboxPreferences.PageSizes"/>.</summary>
+    public int PageSize { get; set; } = MailboxPreferences.DefaultPageSize;
+
+    /// <summary>Play a sound when new mail arrives (rc.11); on by default.</summary>
+    public bool NewMailSound { get; set; } = true;
+
+    /// <summary>The welcome screen has been answered (rc.11, D-105).</summary>
+    public bool WelcomeDone { get; set; }
 
     /// <summary>When false, delivery and authentication both fail.</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Soft quota in bytes. Exceeding it is logged; hard enforcement is a later release.</summary>
+    /// <summary>The mailbox's own size limit in bytes, enforced (DES-11 D2): a full mailbox receives nothing (452) and cannot send. 0 when it has none of its own, under a shared storage plan (see <see cref="StoragePlan"/>).</summary>
     public long QuotaBytes { get; set; } = DefaultQuotaBytes;
 
     /// <summary>Bytes currently stored in this mailbox, maintained by the store on each delivery.</summary>
@@ -306,6 +376,35 @@ public sealed class MessageRow
     /// so it is empty on rows loaded for display.
     /// </summary>
     public string BodyText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The first 160 characters of the readable text, for the preview line in
+    /// a message list (rc.11). Filled when messages are read for display; the
+    /// whole text is never loaded for a list.
+    /// </summary>
+    public string Preview { get; set; } = string.Empty;
+
+    /// <summary>The first 160 characters of a text, never splitting a character in two.</summary>
+    /// <param name="text">The message's readable text.</param>
+    /// <returns>At most 160 characters.</returns>
+    public static string PreviewOf(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return string.Empty;
+        }
+        var sb = new System.Text.StringBuilder();
+        int n = 0;
+        foreach (System.Text.Rune rune in text.EnumerateRunes())
+        {
+            if (n++ == 160)
+            {
+                break;
+            }
+            sb.Append(rune.ToString());
+        }
+        return sb.ToString();
+    }
 
     /// <summary>Spam score assigned at delivery (0 when scoring was not run).</summary>
     public int SpamScore { get; set; }

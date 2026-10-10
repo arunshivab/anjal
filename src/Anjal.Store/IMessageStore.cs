@@ -137,6 +137,31 @@ public interface IMessageStore
     System.Threading.Tasks.Task<long> CountOutboundAsync(OutboundStatus status, System.Threading.CancellationToken ct = default);
 
     /// <summary>
+    /// The Outbox (rc.12, item 9): one sender's outbound rows still waiting
+    /// or being sent, oldest first.
+    /// </summary>
+    /// <param name="envelopeFrom">The sender's address.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<OutboundMessage>> ListOutboundForSenderAsync(string envelopeFrom, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Stop a waiting outbound row of this sender: it is marked failed with
+    /// "Cancelled by the sender". Only a row still waiting can be cancelled.
+    /// </summary>
+    /// <param name="id">The outbound row.</param>
+    /// <param name="envelopeFrom">The sender, who must own the row.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when the row was cancelled.</returns>
+    System.Threading.Tasks.Task<bool> CancelOutboundAsync(System.Guid id, string envelopeFrom, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Make a waiting outbound row of this sender due now ("Try now").</summary>
+    /// <param name="id">The outbound row.</param>
+    /// <param name="envelopeFrom">The sender, who must own the row.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when the row was waiting and is now due.</returns>
+    System.Threading.Tasks.Task<bool> RetryOutboundNowAsync(System.Guid id, string envelopeFrom, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
     /// Append an entry to the audit trail. Entries are never updated or
     /// deleted; in PostgreSQL a trigger refuses any attempt to.
     /// </summary>
@@ -149,6 +174,54 @@ public interface IMessageStore
     /// <param name="before">Only entries strictly before this time, for paging; null for the newest.</param>
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<AuditEvent>> ListAuditAsync(int limit, System.DateTimeOffset? before = null, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Check the audit trail's chain from the first chained entry to the last
+    /// (rc.13): each entry's chain must follow from the one before it.
+    /// </summary>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<AuditChainCheck> VerifyAuditChainAsync(System.Threading.CancellationToken ct = default);
+
+    /// <summary>When the oldest message still waiting in the outbound queue was queued (rc.14); null when none waits.</summary>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.DateTimeOffset?> OldestPendingOutboundAsync(System.Threading.CancellationToken ct = default);
+
+    /// <summary>Outbound mail queued in a period from given envelope senders, by outcome (rc.15, the applications box).</summary>
+    /// <param name="senders">The addresses.</param>
+    /// <param name="periodStart">The period's start.</param>
+    /// <param name="periodEnd">The period's end (not included).</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SenderTraffic>> CountOutboundBySenderAsync(System.Collections.Generic.IReadOnlyCollection<string> senders, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Outbound mail queued in a period, by the sending domain and outcome (DES-11 D8: sudden rises and the 30-day activity chart).</summary>
+    /// <param name="periodStart">The period's start.</param>
+    /// <param name="periodEnd">The period's end (not included).</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<SenderDomainTraffic>> CountOutboundBySenderDomainAsync(System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, System.Threading.CancellationToken ct = default);
+
+    /// <summary>The database's size on disk (DES-11 D8: its own part of the disk bar), or null when it cannot be measured (the in-memory store).</summary>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<long?> DatabaseBytesAsync(System.Threading.CancellationToken ct = default);
+
+    /// <summary>Outbound mail queued in a period, by the receiving domain and outcome (rc.15, item 61: acceptance by the big receivers).</summary>
+    /// <param name="periodStart">The period's start.</param>
+    /// <param name="periodEnd">The period's end (not included).</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<RecipientDomainTraffic>> CountOutboundByRecipientDomainAsync(System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// A record the whole service keeps (rc.15, item 61): the operator's daily disk record,
+    /// restore drills and the mail server's refusal counts, as JSON. Null when none is kept yet.
+    /// </summary>
+    /// <param name="kind">What it is, for example "disk-history".</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<string?> GetServiceRecordAsync(string kind, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Keep a service record (rc.15, item 61), replacing the one of the same kind.</summary>
+    /// <param name="kind">What it is.</param>
+    /// <param name="json">The record, as JSON.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task SetServiceRecordAsync(string kind, string json, System.Threading.CancellationToken ct = default);
 
     /// <summary>
     /// Fetch a single inbound message by id. Returns <see langword="null"/>
