@@ -1,0 +1,38 @@
+@* rc.15: names with a bar and a number - by folder, by category, who wrote
+   most, organisations by mail. The number is always written; the bar only
+   helps the eye. *@
+@if (Items.Count == 0)
+{
+    <p class="dnote">@Empty</p>
+}
+else
+{
+    <ul class="hbars">
+        @foreach ((string name, long count, string? href, int slot) in Items)
+        {
+            <li>
+                <span class="hname" title="@name">@if (href is not null) {<a href="@href">@name</a>} else {@name}</span>
+                <span class="htrack"><i class="@(slot > 0 ? "slot-" + slot : Tone)" style="width:@Width(count)%"></i></span>
+                <span class="hval">@(Show is null ? count.ToString("N0", System.Globalization.CultureInfo.InvariantCulture) : Show(count))</span>
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    /// <summary>The names, counts, where each opens, and a category colour slot (0 for none).</summary>
+    [Parameter] public IReadOnlyList<(string Name, long Count, string? Href, int Slot)> Items { get; set; } = Array.Empty<(string, long, string?, int)>();
+
+    /// <summary>"h-brand" or "h-accent": the bars' colour.</summary>
+    [Parameter] public string Tone { get; set; } = "h-brand";
+
+    /// <summary>How a number is written (rc.15: sizes in MB); null for a count.</summary>
+    [Parameter] public Func<long, string>? Show { get; set; }
+
+    /// <summary>What to say when there is nothing.</summary>
+    [Parameter] public string Empty { get; set; } = string.Empty;
+
+    private long Max => Math.Max(1, Items.Count == 0 ? 0 : Items.Max(i => i.Count));
+
+    private string Width(long n) => Math.Max(2, n * 100 / Max).ToString(System.Globalization.CultureInfo.InvariantCulture);
+}

@@ -1,0 +1,252 @@
+@* rc.12 (items 24, 31; the board SetRules): the person's own folders, and
+   rules that file mail as it arrives. Rules run top first; the first that
+   matches acts. Each can be tried on the last 30 days before it is saved. *@
+@using Anjal.Mailbox
+@inject MailboxService Mail
+@inject Words Words
+
+@* rc.15 (owner, 7 Oct: one design for all of Settings): the page draws the list in its
+   middle column (Part "main") and the selected rule in its right-hand column (Part "edit"). *@
+@if (Part != "edit")
+{
+    <section class="formcard setcard rulesmain">
+        <h2>@L["Folders and rules"]</h2>
+        <p class="hint">@L["Your own folders, and rules that file mail as it arrives."]</p>
+        @if (Notice is not null)
+        {
+            <div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@Notice</span></div>
+        }
+        @if (Problem is not null)
+        {
+            <div class="notice n-err"><LipiIcon Name="warning" Size="16" /><span>@Problem</span></div>
+        }
+
+        <div class="rhead"><h3>@L["Rules"]</h3><span class="lh-grow"></span><a class="btn btn-s" href="/settings/rules?rule=new"><LipiIcon Name="plus" Size="15" />@L["New rule"]</a></div>
+        @if (rules.Count == 0)
+        {
+            <p class="sempty">@L["No rules yet. A rule moves, marks or flags mail as it arrives - for example, newsletters to a Reading folder."]</p>
+        }
+        @foreach ((MailRule r, int i) in rules.Select((r, i) => (r, i)))
+        {
+            <div class="@(Selected?.Id == r.Id ? "rcard on" : "rcard")">
+                <a class="rcard-main" href="/settings/rules?rule=@r.Id">
+                    <b>@r.Name</b>
+                    <span><b>@L["When"]</b> @Describe(r)</span>
+                    <span><b>@L["Then"]</b> @Actions(r)</span>
+                </a>
+                <div class="rcard-side">
+                    <form method="post" action="/settings/rules/@r.Id/toggle" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="on" value="@(r.Enabled ? "0" : "1")" />
+                        <button type="submit" class="toggle @(r.Enabled ? "on" : "")" role="switch" aria-checked="@(r.Enabled ? "true" : "false")" aria-label="@(r.Enabled ? L["On"] : L["Off"])" data-needs-server><i></i></button>
+                    </form>
+                    <form method="post" action="/settings/rules/@r.Id/move" class="inline rmove">
+                        <AntiforgeryToken />
+                        <button type="submit" name="up" value="1" class="iconbtn" disabled="@(i == 0)" title="@L["Move up"]" aria-label="@L["Move up"]"><LipiIcon Name="chevron-up" Size="14" /></button>
+                        <button type="submit" name="up" value="0" class="iconbtn" disabled="@(i == rules.Count - 1)" title="@L["Move down"]" aria-label="@L["Move down"]"><LipiIcon Name="chevron-down" Size="14" /></button>
+                    </form>
+                </div>
+            </div>
+        }
+        @if (rules.Count > 1)
+        {
+            <p class="hint">@L["Rules run in this order, top first."]</p>
+        }
+
+        <div class="rhead"><h3>@L["Your folders"]</h3><span class="lh-grow"></span>
+            <details class="pmenu pmenu-right">
+                <summary class="btn btn-s"><LipiIcon Name="plus" Size="15" />@L["New folder"]</summary>
+                <form method="post" action="/settings/folders/new" class="pmenu-body">
+                    <AntiforgeryToken />
+                    <input class="railinp" name="name" maxlength="100" required placeholder="@L["Folder name"]" aria-label="@L["Folder name"]" />
+                    <button type="submit" class="btn btn-p btn-sm" data-needs-server>@L["Create"]</button>
+                </form>
+            </details>
+        </div>
+        <div class="fchips">
+            @foreach (FolderView f in own)
+            {
+                <span class="fchip">
+                    <a href="/folder/@Uri.EscapeDataString(f.Name)"><LipiIcon Name="folder" Size="15" />@f.Name <span class="n">@f.Count</span></a>
+                    @if (f.Count == 0)
+                    {
+                        <form method="post" action="/settings/folders/delete" class="inline">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="name" value="@f.Name" />
+                            <button type="submit" class="chip-x" title="@L["Remove this empty folder"]" aria-label="@L["Remove this empty folder"]" data-needs-server><LipiIcon Name="close" Size="12" /></button>
+                        </form>
+                    }
+                </span>
+            }
+            @if (own.Count == 0)
+            {
+                <p class="sempty">@L["None yet."]</p>
+            }
+        </div>
+    </section>
+}
+@if (Part != "main" && (Selected is not null || IsNew))
+{
+        MailRule r = Selected ?? new MailRule();
+        <aside class="formcard rulesedit" aria-label="@L["Selected rule"]">
+            <span class="elabel">@(IsNew ? L["New rule"] : L["Selected rule"])</span>
+            <form method="post" action="/settings/rules/save">
+                <AntiforgeryToken />
+                <input type="hidden" name="id" value="@(Selected?.Id.ToString() ?? string.Empty)" />
+                <label class="cfl">@L["Name"]<input class="railinp" name="name" value="@r.Name" maxlength="100" required /></label>
+                <span class="elabel">@L["When the mail has"]</span>
+                @for (int k = 0; k < 3; k++)
+                {
+                    RuleCondition c = k < r.Conditions.Count ? r.Conditions[k] : new RuleCondition { Field = k == 0 ? "from" : string.Empty };
+                    <div class="rcond">
+                        <select name="field" class="railinp" aria-label="@L["What"]">
+                            @if (k > 0)
+                            {
+                                <option value="" selected="@(c.Field.Length == 0)">@L["(nothing more)"]</option>
+                            }
+                            @foreach ((string key, string word) in Fields)
+                            {
+                                <option value="@key" selected="@(c.Field == key)">@L[word]</option>
+                            }
+                        </select>
+                        <select name="op" class="railinp" aria-label="@L["How"]">
+                            @foreach ((string key, string word) in Ops)
+                            {
+                                <option value="@key" selected="@(c.Op == key)">@L[word]</option>
+                            }
+                        </select>
+                        <input name="value" class="railinp" value="@c.Value" aria-label="@L["Value"]" />
+                    </div>
+                }
+                <span class="elabel">@L["Then"]</span>
+                <label class="cfl">@L["Move to"]
+                    <select name="moveTo" class="railinp">
+                        <option value="" selected="@(r.MoveTo.Length == 0)">@L["(leave in Inbox)"]</option>
+                        <option value="Archive" selected="@(r.MoveTo == "Archive")">@L.Folder("Archive")</option>
+                        @foreach (FolderView f in own)
+                        {
+                            <option value="@f.Name" selected="@(r.MoveTo == f.Name)">@f.Name</option>
+                        }
+                        <option value="Trash" selected="@(r.MoveTo == "Trash")">@L.Folder("Trash")</option>
+                    </select>
+                </label>
+                <label class="cfl">@L["or a new folder"]<input class="railinp" name="newFolder" maxlength="100" /></label>
+                <label class="checkline"><input type="checkbox" name="markRead" value="1" checked="@r.MarkRead" /><span>@L["Mark it read"]</span></label>
+                <label class="checkline"><input type="checkbox" name="flag" value="1" checked="@r.Flag" /><span>@L["Flag it"]</span></label>
+                <label class="checkline"><input type="checkbox" name="enabled" value="1" checked="@r.Enabled" /><span>@L["Rule is on"]</span></label>
+                @if (trial is not null)
+                {
+                    <div class="rtrial">
+                        <b>@L["Tried on the last 30 days"]</b>
+                        <span>@TrialText</span>
+                    </div>
+                }
+                @if (trial is { Matches: > 0 })
+                {
+                    <label class="checkline"><input type="checkbox" name="applyExisting" value="1" /><span>@L["Also apply to the {n} existing messages"].Replace("{n}", MailboxService.Count(trial.Matches), StringComparison.Ordinal)</span></label>
+                }
+                <div class="cbtns">
+                    <button type="submit" class="btn btn-p" data-needs-server>@L["Save rule"]</button>
+                    <button type="submit" class="btn btn-s" name="trial" value="1" data-needs-server>@L["Try on the last 30 days"]</button>
+                </div>
+            </form>
+            @if (Selected is not null)
+            {
+                <form method="post" action="/settings/rules/@Selected.Id/delete">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-q rdelete" data-needs-server>@L["Delete rule"]</button>
+                </form>
+            }
+        </aside>
+}
+
+@code {
+    /// <summary>rc.15: "main" draws the rules and folders, "edit" the selected rule; anything else both.</summary>
+    [Parameter] public string Part { get; set; } = "all";
+
+    [SupplyParameterFromQuery(Name = "rule")] private string? RuleText { get; set; }
+    [SupplyParameterFromQuery(Name = "notice")] private string? NoticeText { get; set; }
+    [SupplyParameterFromQuery(Name = "problem")] private string? Problem { get; set; }
+    [SupplyParameterFromQuery(Name = "trial")] private string? TrialFlag { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private static readonly (string Key, string Word)[] Fields =
+    {
+        ("from", "From"), ("to", "To or Cc"), ("subject", "Subject"), ("body", "Text"), ("group", "From is in the group"),
+        ("attachment", "An attachment"), ("unsubscribe", "An unsubscribe link"), ("outside", "Sender outside the organisation"),
+    };
+
+    private static readonly (string Key, string Word)[] Ops =
+    {
+        ("contains", "contains"), ("is", "is"), ("startswith", "starts with"), ("notcontains", "does not contain"),
+    };
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private IReadOnlyList<MailRule> rules = Array.Empty<MailRule>();
+    private IReadOnlyList<FolderView> own = Array.Empty<FolderView>();
+    private RuleTrial? trial;
+
+    private bool IsNew => RuleText == "new";
+    private MailRule? Selected => Guid.TryParse(RuleText, out Guid id) ? rules.FirstOrDefault(r => r.Id == id) : null;
+    private string? Notice => NoticeText switch
+    {
+        "saved" => L["Rule saved."],
+        "deleted" => L["Rule deleted."],
+        "folder" => L["Folder created."],
+        "folderremoved" => L["Folder removed."],
+        _ => null,
+    };
+
+    private string TrialText => trial is null ? string.Empty
+        : trial.Matches == 0 ? L["It would not have moved any message."]
+        : L["It would have acted on {n} messages: {who}."].Replace("{n}", MailboxService.Count(trial.Matches), StringComparison.Ordinal)
+            .Replace("{who}", string.Join(", ", trial.BySender.Select(s => $"{s.Count} {L["from"]} {s.Sender}")), StringComparison.Ordinal);
+
+    private string Describe(MailRule r) => string.Join(" " + L["and"] + " ", r.Conditions.Select(c => c.Field switch
+    {
+        "attachment" => L["has an attachment"],
+        "unsubscribe" => L["has an unsubscribe link"],
+        "outside" => L["is from outside the organisation"],
+        "group" => L["From is in the group \"{name}\""].Replace("{name}", c.Value, StringComparison.Ordinal),
+        _ => L[Fields.FirstOrDefault(f => f.Key == c.Field).Word ?? c.Field] + " " + L[Ops.FirstOrDefault(o => o.Key == c.Op).Word ?? c.Op] + " \"" + c.Value + "\"",
+    }));
+
+    private string Actions(MailRule r)
+    {
+        var parts = new List<string>();
+        if (r.MoveTo.Length > 0)
+        {
+            parts.Add(L["Move to \"{folder}\""].Replace("{folder}", L.Folder(r.MoveTo), StringComparison.Ordinal));
+        }
+        if (r.MarkRead)
+        {
+            parts.Add(L["mark read"]);
+        }
+        if (r.Flag)
+        {
+            parts.Add(L["flag"]);
+        }
+        return string.Join(", ", parts);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        Guid? mailboxId = WebmailAuthService.PersonIdOf(user);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        rules = await Mail.ListRulesAsync(mailboxId.Value);
+        own = (await Mail.ListFoldersAsync(mailboxId.Value)).Where(f => !MailboxService.StandardFolders.Contains(f.Name)).ToList();
+        if (Selected is MailRule s && TrialFlag == "1")
+        {
+            trial = await Mail.TryRuleAsync(mailboxId.Value, s, apply: false);
+        }
+    }
+}

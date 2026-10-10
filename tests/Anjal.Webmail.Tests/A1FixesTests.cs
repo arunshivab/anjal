@@ -140,7 +140,8 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         await this.SignInAsync();
         Assert.Equal(HttpStatusCode.Redirect, (await this.ComposeAsync("Dr Rao <rao@hospital.example>", "Referral")).StatusCode);
         string html = await this.client.GetStringAsync("folder/Sent");
-        Assert.Contains("<th class=\"c-from withdot\">To</th>", html, StringComparison.Ordinal);
+        // rc.11: no column headings, so each row labels the name it shows (DEF-009).
+        Assert.Contains("<span class=\"sto\">To</span>", html, StringComparison.Ordinal);
         Assert.Contains("<span class=\"sname\">Dr Rao</span>", html, StringComparison.Ordinal);
         Assert.DoesNotContain("<span class=\"sname\">Arun</span>", html, StringComparison.Ordinal);
     }
@@ -157,7 +158,8 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         string html = await this.client.GetStringAsync("folder/INBOX");
         Match button = Regex.Match(html, "<button[^>]*class=\"fav[^\"]*\"[^>]*>(.*?)</button>", RegexOptions.Singleline | RegexOptions.CultureInvariant);
         Assert.True(button.Success);
-        Assert.Equal("அ", button.Groups[1].Value.Trim());
+        // The glyph stays (DEF-011), tagged as Tamil so screen readers pronounce it rightly (UX-09, item 41).
+        Assert.Equal("<span lang=\"ta\">அ</span>", button.Groups[1].Value.Trim());
     }
 
     [Fact]
@@ -273,13 +275,30 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task EmptyJunk_NeedsTheToken_AndRemovesOnlyJunk()
+    {
+        await this.SignInAsync();
+        MessageRow junk = await this.DeliverAsync("From: a@x.test\r\nSubject: Prize\r\n\r\nx\r\n");
+        MessageRow keep = await this.DeliverAsync("From: a@x.test\r\nSubject: Keep\r\n\r\nx\r\n");
+        string token = await this.TokenAsync("folder/INBOX");
+        await this.PostAsync("folder/INBOX/bulk", token, ("action", "spam"), ("id", junk.Id.ToString()));
+        Assert.Contains("Empty Junk", await this.client.GetStringAsync("folder/Junk"), StringComparison.Ordinal);
+
+        await this.client.PostAsync("folder/Junk/empty", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
+        Assert.Contains(this.store.MailboxMessages, m => m.Id == junk.Id);
+        await this.PostAsync("folder/Junk/empty", await this.TokenAsync("folder/Junk"));
+        Assert.DoesNotContain(this.store.MailboxMessages, m => m.Id == junk.Id);
+        Assert.Contains(this.store.MailboxMessages, m => m.Id == keep.Id);
+    }
+
+    [Fact]
     public async Task DEF016_ASentMessageWithAnAttachment_IsRecordedAsHavingOne()
     {
         await this.SignInAsync();
         await this.ComposeAsync("rao@hospital.example", "Scan", new byte[2048]);
         MessageRow sent = this.store.MailboxMessages.Single(m => m.Subject == "Scan");
         Assert.True(sent.HasAttachments);
-        MailboxActivity activity = await this.store.GetActivityAsync(this.mailbox.Id, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1));
+        MailboxActivity activity = await this.store.GetActivityAsync(this.mailbox.Id, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), "UTC");
         Assert.Equal(1, activity.SentWithAttachments);
     }
 
@@ -306,7 +325,7 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
     {
         await this.SignInAsync();
         string empty = await this.client.GetStringAsync("settings/senders");
-        Assert.Contains("No sender rules yet", empty, StringComparison.Ordinal);
+        Assert.Contains("None yet. Rules appear here when you use Report spam or Not spam", empty, StringComparison.Ordinal);
 
         MessageRow m = await this.DeliverAsync("From: news@spammer.test\r\nSubject: Offer\r\n\r\nbuy\r\n", envelopeFrom: "news@spammer.test");
         string token = await this.TokenAsync("folder/INBOX");
@@ -450,16 +469,17 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         await this.DeliverAsync(WithAttachment);
         await this.DeliverAsync("From: a@x.test\r\nSubject: No files\r\n\r\nx\r\n");
         string inbox = await this.client.GetStringAsync("folder/INBOX");
-        // A separate cell before the subject, so every subject starts at the same place.
-        Assert.Matches("<td class=\"c-att\">\\s*<span data-attachment[^>]*>.*?</span>\\s*</td>\\s*<td class=\"c-subject\">", inbox);
-        Assert.Matches("<td class=\"c-att\">\\s*</td>\\s*<td class=\"c-subject\">", inbox);   // empty slot on the other row
-        string subjectCells = string.Join("", Regex.Matches(inbox, "<td class=\"c-subject\">.*?</td>", RegexOptions.Singleline).Select(m => m.Value));
-        Assert.DoesNotContain("data-attachment", subjectCells, StringComparison.Ordinal);
-        Assert.Contains("<th class=\"c-att\"><span class=\"sr-only\">Attachments</span></th>", inbox, StringComparison.Ordinal);
-
-        string search = await this.client.GetStringAsync("search?q=Report&scope=all");
-        Assert.Matches("<td class=\"c-att\">\\s*<span data-attachment", search);
-        Assert.DoesNotMatch("<td class=\"c-time num\">\\d{1,2} \\w{3} \\d{4}</td>", search);
+        // rc.11: the clip sits on the sender's line, never inside the subject, so
+        // every subject starts at the same place; dates stay compact (reviews 1 and 2).
+        foreach (string page in new[] { inbox, await this.client.GetStringAsync("search?q=Report&scope=all") })
+        {
+            Assert.Matches("<div class=\"mline1\">(?:(?!</div>).)*data-attachment", page);
+            string subjects = string.Join("", Regex.Matches(page, "<a class=\"subj\"[^>]*>.*?</a>", RegexOptions.Singleline).Select(m => m.Value));
+            Assert.NotEmpty(subjects);
+            Assert.DoesNotContain("data-attachment", subjects, StringComparison.Ordinal);
+            Assert.DoesNotMatch("datetime=\"[^\"]*\">\\d{1,2} \\w{3} \\d{4}</time>", page);
+        }
+        Assert.Equal(1, Regex.Count(inbox, "<div class=\"mline1\">(?:(?!</div>).)*data-attachment", RegexOptions.Singleline));   // only the message with files
     }
 
     [Fact]
@@ -469,13 +489,15 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         foreach (string page in new[] { "compose", "settings/signature" })
         {
             string html = await this.client.GetStringAsync(page);
-            Match bar = Regex.Match(html, "<div class=\"rte-bar\"[^>]*data-rte-bar[^>]*hidden[^>]*>(.*?)</div>", RegexOptions.Singleline);
+            Match bar = Regex.Match(html, "<div class=\"rte-bar\"[^>]*data-rte-bar[^>]*hidden[^>]*>", RegexOptions.Singleline);
             Assert.True(bar.Success, "toolbar markup on " + page);
-            foreach (string label in new[] { "Bold", "Italic", "Underline", "Bulleted list", "Numbered list", "Insert a link", "Quote", "Clear formatting" })
+            // rc.12 (item 15): the bar holds pop-ups (divs) of its own, so read to its matching close.
+            string inner = InnerOfDiv(html, bar.Index);
+            foreach (string label in ToolbarLabels)
             {
-                Assert.Contains($"aria-label=\"{label}\"", bar.Groups[1].Value, StringComparison.Ordinal);
+                Assert.Contains($"aria-label=\"{label}\"", inner, StringComparison.Ordinal);
             }
-            Assert.Equal(3, Regex.Count(bar.Groups[1].Value, "class=\"rte-sep\""));
+            Assert.Equal(6, Regex.Count(inner, "class=\"rte-sep\""));
         }
         string js = await this.client.GetStringAsync("app.js");
         Assert.DoesNotContain("createElement(\"button\")", js, StringComparison.Ordinal);
@@ -484,17 +506,52 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         Assert.Contains(".rte-ed.rte-canvas { resize: none; border: 0; box-shadow: none;", css, StringComparison.Ordinal);
     }
 
+    private static readonly string[] ToolbarLabels =
+    {
+        "Text size", "Bold", "Italic", "Underline", "Strikethrough", "Text colour", "Highlight", "Align left", "Centre", "Align right",
+        "Bulleted list", "Numbered list", "Decrease indent", "Increase indent", "Insert a link", "Quote", "Emoji",
+        "Paragraph background", "Mail background", "Clear formatting",
+    };
+
+    // The content of the div starting at an index, up to its matching close.
+    private static string InnerOfDiv(string html, int start)
+    {
+        int open = html.IndexOf('>', start) + 1;
+        int depth = 1;
+        int i = open;
+        while (depth > 0 && i < html.Length)
+        {
+            int nextOpen = html.IndexOf("<div", i, StringComparison.Ordinal);
+            int nextClose = html.IndexOf("</div>", i, StringComparison.Ordinal);
+            if (nextClose < 0)
+            {
+                break;
+            }
+            if (nextOpen >= 0 && nextOpen < nextClose)
+            {
+                depth++;
+                i = nextOpen + 4;
+            }
+            else
+            {
+                depth--;
+                i = nextClose + 6;
+            }
+        }
+        return html[open..Math.Max(open, i - 6)];
+    }
+
     [Fact]
     public async Task Review6_HeadersAreAlignedWithTheirColumns()
     {
         await this.SignInAsync();
         await this.DeliverAsync("From: a@x.test\r\nSubject: One\r\n\r\nx\r\n");
         string html = await this.client.GetStringAsync("folder/INBOX");
-        Assert.Contains("<th class=\"c-from withdot\">From</th>", html, StringComparison.Ordinal);
-        Assert.Contains("<th class=\"c-time right\">Received</th>", html, StringComparison.Ordinal);
-        Assert.Contains("<th class=\"c-size right\">Size</th>", html, StringComparison.Ordinal);
-        string css = await this.client.GetStringAsync("app.css");
-        Assert.Contains("table.ml th.c-from.withdot { padding-left: 28px; }", css, StringComparison.Ordinal);
+        // rc.11: the approved list has no column headings, so there is nothing to
+        // misalign; each row carries its sender, time and score itself (review 6).
+        Assert.DoesNotContain("<th", html, StringComparison.Ordinal);
+        Assert.Contains("<div class=\"mline1\">", html, StringComparison.Ordinal);
+        Assert.Contains("class=\"score", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -505,6 +562,11 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         string inbox = await this.client.GetStringAsync("folder/INBOX");
         Assert.Contains("value=\"categorise\"", inbox, StringComparison.Ordinal);   // six defaults exist...
         Assert.Contains("value=\"spam\"", inbox, StringComparison.Ordinal);         // ...and Report spam is still there
+        // rc.15 (owner, 7 Oct): Report junk is a button in the selection bar, before its More menu.
+        int selbar = inbox.IndexOf("data-selbar", StringComparison.Ordinal);
+        int spam = inbox.IndexOf("value=\"spam\"", selbar, StringComparison.Ordinal);
+        int menu = inbox.IndexOf("class=\"pmenu-body\"", selbar, StringComparison.Ordinal);
+        Assert.True(spam > selbar && spam < menu, "Report junk sits in the bar, not inside its More menu");
         Assert.DoesNotContain("value=\"categorise\"", await this.client.GetStringAsync("folder/Junk"), StringComparison.Ordinal);
         Assert.DoesNotContain("value=\"categorise\"", await this.client.GetStringAsync("folder/Trash"), StringComparison.Ordinal);
     }
@@ -518,19 +580,22 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         CategoryRow clinical = (await this.store.ListCategoriesAsync(this.mailbox.TenantId, this.mailbox.Id)).First(c => c.Name == "Clinical");
         await this.store.SetMessageCategoryAsync(this.mailbox.Id, m.Id, clinical.Id);
         string html = await this.client.GetStringAsync($"message/{m.Id}");
-        int details = html.IndexOf(">Details</h2>", StringComparison.Ordinal);
-        int attachments = html.IndexOf(">1 attachment</h2>", StringComparison.Ordinal);
-        int checks = html.IndexOf(">Checks</h2>", StringComparison.Ordinal);
+        // rc.11: the envelope's order follows item 42 and the approved board -
+        // attachments, then the category chooser, then Details (with the checks).
+        int attachments = html.IndexOf(">Attachments · 1</h2>", StringComparison.Ordinal);
         int category = html.IndexOf(">Category</h2>", StringComparison.Ordinal);
-        Assert.True(details < attachments && attachments < checks && checks < category, $"order: {details} {attachments} {checks} {category}");
-        Assert.Matches("<p class=\"readcat\"><span class=\"chip slot-\\d+\"><i></i>Clinical</span></p>", html);
+        int details = html.IndexOf(">Details</summary>", StringComparison.Ordinal);
+        Assert.True(attachments > 0 && attachments < category && category < details, $"order: {attachments} {category} {details}");
+        // D-104 (owner, 5 Oct): the category shows under the subject (review 3), once.
+        Assert.Matches("<h1 class=\"lsubj\">[^<]*</h1>\\s*<p class=\"readcat\"><span class=\"chip slot-\\d+\"><i></i>Clinical</span></p>", html);
+        Assert.Equal(1, Regex.Count(html, "class=\"readcat\""));
     }
 
     [Fact]
     public async Task Review7_SenderRulesCanBeCreatedInSettings()
     {
         await this.SignInAsync();
-        string token = await this.TokenAsync("settings");
+        string token = await this.TokenAsync("settings/senders");
         CategoryRow billing = (await this.store.ListCategoriesAsync(this.mailbox.TenantId, this.mailbox.Id)).First(c => c.Name == "Billing");
 
         Assert.Contains("saved=senderadded", (await this.PostAsync("settings/senders/add", token, ("pattern", "@spam-domain.example"), ("rule", "block"))).Headers.Location!.ToString(), StringComparison.Ordinal);
@@ -551,23 +616,30 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
     public async Task Review8_SettingsHasSections_EachAtItsOwnAddress()
     {
         await this.SignInAsync();
-        string profile = await this.client.GetStringAsync("settings");
-        foreach (string s in new[] { "profile", "appearance", "categories", "senders", "signature", "password" })
+        // rc.13: the sections of the approved Settings boards, each at its own address.
+        string first = await this.client.GetStringAsync("settings");
+        foreach (string s in new[] { "appearance", "language", "mail", "security", "rules", "categories", "senders", "help" })
         {
-            Assert.Contains($"href=\"/settings/{s}\"", profile, StringComparison.Ordinal);
+            Assert.Contains($"href=\"/settings/{s}\"", first, StringComparison.Ordinal);
         }
-        Assert.Contains("<h2>Display name</h2>", profile, StringComparison.Ordinal);
-        Assert.DoesNotContain("<h2>Password</h2>", profile, StringComparison.Ordinal);
+        Assert.Contains("<h2>Appearance</h2>", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("<h2>Security</h2>", first, StringComparison.Ordinal);
+        // The addresses of before rc.13 still land where those settings now live.
+        string profile = await this.client.GetStringAsync("settings/profile");
+        Assert.Contains("<h2>Mail</h2>", profile, StringComparison.Ordinal);
+        Assert.Contains("name=\"displayName\"", profile, StringComparison.Ordinal);
         string signature = await this.client.GetStringAsync("settings/signature");
-        Assert.Contains("<h2>Signature</h2>", signature, StringComparison.Ordinal);
-        Assert.DoesNotContain("<h2>Display name</h2>", signature, StringComparison.Ordinal);
+        Assert.Contains("name=\"signatureHtml\"", signature, StringComparison.Ordinal);
+        string password = await this.client.GetStringAsync("settings/password");
+        Assert.Contains("<h2>Security</h2>", password, StringComparison.Ordinal);
+        Assert.DoesNotContain("<h2>Mail</h2>", password, StringComparison.Ordinal);
     }
 
     private async Task SaveSignatureAsync(string html, string text = "")
     {
         string token = await this.TokenAsync("settings/signature");
         HttpResponseMessage res = await this.PostAsync("settings/signature", token, ("signatureHtml", html), ("signatureText", text));
-        Assert.Equal("/settings/signature?saved=signature", res.Headers.Location!.ToString());
+        Assert.Equal("/settings/mail?saved=signature", res.Headers.Location!.ToString());
     }
 
     [Fact]

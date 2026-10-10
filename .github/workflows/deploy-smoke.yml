@@ -69,9 +69,9 @@ jobs:
           tables=$(PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'")
           echo "tables: $tables"
           # 20 up to rc.6; rc.7 adds mailbox_trusted_senders, greylist_entries, settings;
-          # rc.8 adds evidence, evidence_attempts, evidence_manifests.
-          test "$tables" -eq 26
-          for t in mailbox_trusted_senders greylist_entries settings evidence evidence_attempts evidence_manifests; do
+          # rc.8 adds evidence, evidence_attempts, evidence_manifests; rc.12 adds mailbox_documents; rc.13 tenant_documents.
+          test "$tables" -eq 28
+          for t in mailbox_trusted_senders greylist_entries settings evidence evidence_attempts evidence_manifests mailbox_documents tenant_documents; do
             PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select to_regclass('public.$t')" | grep -qx "$t"
           done
 
@@ -308,8 +308,13 @@ jobs:
           sudo touch -r "$f" /tmp/stamp
           printf '\xff' | sudo dd of="$f" bs=1 seek=2000 conv=notrunc status=none
           sudo touch -r /tmp/stamp "$f"
+          # D-88: a failed run is tried again (here after 1 s, not 2-16 minutes), then recorded.
+          echo 'ANJAL_BACKUP_RETRY_WAITS="1"' | sudo tee -a /etc/anjal/server.env >/dev/null
           if sudo systemctl start anjal-backup; then echo "::error::a damaged backup verified"; exit 1; fi
           log=$(blog); grep -q "hashes differ" <<< "$log"
+          grep -q "try 1 failed" <<< "$log"; grep -q "FAILED after 2 tries" <<< "$log"
+          status=$(sudo cat /var/lib/anjal/backup-status)
+          grep -q "^ok " <<< "$status"; grep -q "^failed .* after 2 tries" <<< "$status"
           test -z "$(sudo ls -A /var/lib/anjal/backup)"
 
       - name: HTTP/3 under the real unit (rc.7)

@@ -61,6 +61,125 @@ public interface IMailboxStore
     /// </summary>
     System.Threading.Tasks.Task<MailboxRow> UpsertMailboxAsync(MailboxRow mailbox, System.Threading.CancellationToken ct = default);
 
+    /// <summary>
+    /// Save a mailbox's own preferences (rc.11): time zone, language,
+    /// density, layout, folded rail, date format and week start. Only this
+    /// call changes them; <see cref="UpsertMailboxAsync"/> never does.
+    /// Values are checked first, and anything unknown is saved as its default.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="preferences">The new preferences.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>False when the mailbox does not exist.</returns>
+    System.Threading.Tasks.Task<bool> SetMailboxPreferencesAsync(System.Guid mailboxId, MailboxPreferences preferences, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Read one of a mailbox's own documents (rc.12): its contacts, contact
+    /// groups, templates or rules, each kept as one JSON document per kind.
+    /// Returns null when the mailbox has none of that kind yet.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="kind">The kind, for example "contacts".</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<string?> GetMailboxDocumentAsync(System.Guid mailboxId, string kind, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Create or replace one of a mailbox's own documents (rc.12).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="kind">The kind, for example "contacts".</param>
+    /// <param name="json">The whole document.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task SetMailboxDocumentAsync(System.Guid mailboxId, string kind, string json, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Read one of an organisation's own documents (rc.13): its sign-in
+    /// look, policies and defaults, each kept as one JSON document per kind.
+    /// Returns null when the organisation has none of that kind yet.
+    /// </summary>
+    /// <param name="tenantId">The organisation.</param>
+    /// <param name="kind">The kind, for example "branding".</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<string?> GetTenantDocumentAsync(System.Guid tenantId, string kind, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Create or replace one of an organisation's own documents (rc.13).</summary>
+    /// <param name="tenantId">The organisation.</param>
+    /// <param name="kind">The kind, for example "branding".</param>
+    /// <param name="json">The whole document.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task SetTenantDocumentAsync(System.Guid tenantId, string kind, string json, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// How many messages arrived in every mailbox, hour by hour, since a
+    /// moment (rc.14, the Anjal console's service health). Hours with none
+    /// are left out.
+    /// </summary>
+    /// <param name="since">The start.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<(System.DateTimeOffset Hour, long Count)>> CountArrivalsByHourAsync(System.DateTimeOffset since, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// A dashboard's figures for one period (rc.15): received, sent and
+    /// Junk; both step by step through the period in the given zone; and
+    /// checked mail by spam score. Totals only.
+    /// </summary>
+    /// <param name="scope">One mailbox, one organisation, or the whole service.</param>
+    /// <param name="periodStart">The period's start.</param>
+    /// <param name="periodEnd">The period's end (not included).</param>
+    /// <param name="timeZone">The viewer's zone, for the steps.</param>
+    /// <param name="stepBy">How the time chart steps.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<MailFigures> GetMailFiguresAsync(FigureScope scope, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, string timeZone, TimeStep stepBy, System.Threading.CancellationToken ct = default);
+
+    /// <summary>Messages received (Junk included) per organisation in a period (rc.15, the operator's dashboard). Organisations with none are left out.</summary>
+    /// <param name="periodStart">The period's start.</param>
+    /// <param name="periodEnd">The period's end (not included).</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<System.Guid, long>> CountReceivedByTenantAsync(System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Page through a folder's messages in a chosen order (owner, 9 Oct 2026): "oldest" first,
+    /// by "subject" A to Z (a leading Re: or Fwd: aside), "size" biggest first, "unread" first or
+    /// with "attachments" first; anything else is newest first. Ties are newest first.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folderId">The folder.</param>
+    /// <param name="seen">True for read messages only, false for unread only, null for all.</param>
+    /// <param name="sort">The order.</param>
+    /// <param name="limit">Maximum rows to return.</param>
+    /// <param name="offset">Rows to skip.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MessageRow>> ListMessagesSortedAsync(System.Guid mailboxId, System.Guid folderId, bool? seen, string sort, int limit, int offset, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Each message's sender and recipients only, for every message in a folder (owner, 9 Oct 2026):
+    /// enough to put them in order by name, which needs the names decoded first.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folderId">The folder.</param>
+    /// <param name="seen">True for read messages only, false for unread only, null for all.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MessageNames>> ListMessageNamesAsync(System.Guid mailboxId, System.Guid folderId, bool? seen, System.Threading.CancellationToken ct = default);
+
+    /// <summary>The messages of a mailbox with these ids, in no particular order (one page of a list put in order by name).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ids">The ids.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MessageRow>> ListMessagesByIdsAsync(System.Guid mailboxId, System.Collections.Generic.IReadOnlyList<System.Guid> ids, System.Threading.CancellationToken ct = default);
+
+    /// <summary>The space each of a mailbox's folders takes, in bytes (rc.15, item 58). Empty folders are left out.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyDictionary<System.Guid, long>> SumFolderBytesAsync(System.Guid mailboxId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Remove one of a mailbox's own folders, only when it holds no
+    /// messages (rc.12, item 24): nothing is ever deleted with a folder.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folderId">The folder.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when it was removed; false when it is not this mailbox's or not empty.</returns>
+    System.Threading.Tasks.Task<bool> DeleteEmptyFolderAsync(System.Guid mailboxId, System.Guid folderId, System.Threading.CancellationToken ct = default);
+
     /// <summary>Look up a mailbox by local-part and domain (case-insensitive). Null if none.</summary>
     System.Threading.Tasks.Task<MailboxRow?> GetMailboxAsync(string localPart, string domain, System.Threading.CancellationToken ct = default);
 
@@ -113,6 +232,18 @@ public interface IMailboxStore
     /// <param name="offset">Rows to skip.</param>
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MessageRow>> ListMessagesAsync(System.Guid mailboxId, System.Guid? folderId, int limit, int offset, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// Page through a folder's read messages, or its unread ones, newest first
+    /// (rc.11, item 7: the All, Unread and Read filter).
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folderId">The folder.</param>
+    /// <param name="seen">True for read messages, false for unread.</param>
+    /// <param name="limit">Maximum rows to return.</param>
+    /// <param name="offset">Rows to skip.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MessageRow>> ListMessagesBySeenAsync(System.Guid mailboxId, System.Guid folderId, bool seen, int limit, int offset, System.Threading.CancellationToken ct = default);
 
     /// <summary>Count messages in a folder (or the whole mailbox when <paramref name="folderId"/> is null).</summary>
     System.Threading.Tasks.Task<long> CountMessagesAsync(System.Guid mailboxId, System.Guid? folderId, System.Threading.CancellationToken ct = default);
@@ -199,8 +330,9 @@ public interface IMailboxStore
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="periodStart">Start, inclusive.</param>
     /// <param name="periodEnd">End, exclusive.</param>
+    /// <param name="timeZone">IANA time zone whose midnights divide the days (DEF-088); UTC when unknown.</param>
     /// <param name="ct">Cancellation.</param>
-    System.Threading.Tasks.Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, System.Threading.CancellationToken ct = default);
+    System.Threading.Tasks.Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, string timeZone, System.Threading.CancellationToken ct = default);
 
     // -------- Sender rules --------
 

@@ -291,16 +291,19 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore,
         System.ArgumentNullException.ThrowIfNull(audit);
         lock (this.gate)
         {
+            System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
             var row = new AuditEvent
             {
                 Id = System.Guid.NewGuid(),
-                At = System.DateTimeOffset.UtcNow,
+                At = new System.DateTimeOffset(now.UtcTicks - (now.UtcTicks % 10), System.TimeSpan.Zero),
                 Actor = audit.Actor,
                 Action = audit.Action,
                 Subject = audit.Subject,
                 Detail = audit.Detail,
                 RemoteAddress = audit.RemoteAddress,
+                Seq = this.audit.Count + 1,
             };
+            row.Chain = AuditEvent.ComputeChain(this.audit.Count > 0 ? this.audit[^1].Chain : string.Empty, row);
             this.audit.Add(row);
             return Task.FromResult(row);
         }
@@ -320,6 +323,24 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore,
                 }
             }
             return Task.FromResult<IReadOnlyList<AuditEvent>>(result);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<AuditChainCheck> VerifyAuditChainAsync(CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            string previous = string.Empty;
+            foreach (AuditEvent e in this.audit)
+            {
+                if (e.Chain != AuditEvent.ComputeChain(previous, e))
+                {
+                    return Task.FromResult(new AuditChainCheck(this.audit.Count, false, e.Seq));
+                }
+                previous = e.Chain;
+            }
+            return Task.FromResult(new AuditChainCheck(this.audit.Count, true, null));
         }
     }
 

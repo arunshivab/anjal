@@ -1,0 +1,35 @@
+@using Anjal.Webmail.Services
+@* Owner, 9 Oct 2026: the list's headings sort it too - From (To in Sent, Drafts and Scheduled)
+   by name, Subject A to Z, and Date newest or oldest first (pressed again, it turns round). *@
+<form method="post" action="/settings/sort" class="lh-row lh-sorthead" aria-label="@L["Sort"]">
+    <AntiforgeryToken />
+    <input type="hidden" name="folder" value="@Folder" />
+    <input type="hidden" name="back" value="@Back" />
+    <button type="submit" name="sort" value="sender" class="sorth @(Sort == "sender" ? "on" : null)" aria-pressed="@(Sort == "sender" ? "true" : "false")" title="@L[SortMenu.SortWord("sender", Outgoing)]" data-needs-server>
+        @L[Outgoing ? "To" : "From"]@if (Sort == "sender") {<LipiIcon Name="arrow-up" Size="12" />}
+    </button>
+    <button type="submit" name="sort" value="subject" class="sorth @(Sort == "subject" ? "on" : null)" aria-pressed="@(Sort == "subject" ? "true" : "false")" title="@L["Subject A to Z"]" data-needs-server>
+        @L["Subject"]@if (Sort == "subject") {<LipiIcon Name="arrow-up" Size="12" />}
+    </button>
+    <span class="lh-grow"></span>
+    <button type="submit" name="sort" value="@(Sort == MailboxService.NewestFirst ? "oldest" : MailboxService.NewestFirst)" class="sorth @(MailboxService.SortsByDate(Sort) ? "on" : null)" aria-pressed="@(MailboxService.SortsByDate(Sort) ? "true" : "false")" title="@L[Sort == MailboxService.NewestFirst ? "Oldest first" : "Newest first"]" data-needs-server>
+        @L["Date"]@if (Sort == MailboxService.NewestFirst) {<LipiIcon Name="arrow-down" Size="12" />} else if (Sort == "oldest") {<LipiIcon Name="arrow-up" Size="12" />}
+    </button>
+</form>
+
+@code {
+    /// <summary>The words in the person's language.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The folder's name, or the search key.</summary>
+    [Parameter] public string Folder { get; set; } = string.Empty;
+
+    /// <summary>The order now.</summary>
+    [Parameter] public string Sort { get; set; } = MailboxService.NewestFirst;
+
+    /// <summary>True in Sent, Drafts and Scheduled: the first heading is To.</summary>
+    [Parameter] public bool Outgoing { get; set; }
+
+    /// <summary>Where to come back to: the list's first page.</summary>
+    [Parameter] public string Back { get; set; } = "/folder/INBOX";
+}

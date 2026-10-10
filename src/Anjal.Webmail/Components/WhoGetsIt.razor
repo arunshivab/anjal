@@ -1,0 +1,27 @@
+@* DES-11 D7 (owner, 10 Oct 2026): changing an organisation default asks who should get it.
+   With the script, the question shows only once a default is changed, and "Everyone" is not
+   offered where it would keep mail longer than people chose; without it the question is always
+   there and the server refuses "Everyone" for a longer time. The answer is written to the
+   activity log. *@
+<fieldset class="setrow setgroup whogets" data-whogets>
+    <legend class="setlbl">@What</legend>
+    <label class="radioline"><input type="radio" name="who" value="@WhoGets.Joining" /> @L["Only people joining from today: everyone already here keeps what they have"]</label>
+    <label class="radioline"><input type="radio" name="who" value="@WhoGets.NotChosen" checked /> @L["Everyone who has not chosen their own"]</label>
+    <label class="radioline" data-whogets-everyone><input type="radio" name="who" value="@WhoGets.Everyone" /> @L["Everyone, their own choices included"]</label>
+    @if (Retention)
+    {
+        <p class="hint" data-whogets-note>@L["Keeping mail longer is never given to everyone: people who chose a shorter time keep it."]</p>
+    }
+    <p class="hint">@L["Your answer is written to the activity log."]</p>
+</fieldset>
+
+@code {
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The question, naming what changes.</summary>
+    [Parameter, EditorRequired] public string What { get; set; } = string.Empty;
+
+    /// <summary>True for Trash and Junk, where "everyone" is refused for a longer time.</summary>
+    [Parameter] public bool Retention { get; set; }
+}

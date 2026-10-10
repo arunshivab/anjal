@@ -1,0 +1,153 @@
+@page "/sign-in/two-step"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject SessionRegistry Sessions
+@inject NavigationManager Nav
+
+<PageTitle>@L["Two-step sign-in"] — Anjal</PageTitle>
+
+@* The approved two-step board (AuthTwoStep, rc.13): the authenticator's code in
+   six boxes; "Trust this device for 30 days", which a shared computer cannot;
+   and the other ways - a passkey, a backup code, another signed-in device. *@
+<AuthFrame L="L" Org="org">
+    @if (Waiting is not null)
+    {
+        <h1 class="authtitle">@L["Approve from another device"]</h1>
+        <div class="authwait" data-approval-wait data-status="/auth/two-step/status" data-approved-form="approvedform"
+             data-word-refused="@L["Your other device said no. Use another way."]"
+             data-word-expired="@L["Nobody answered in time. Try again, or use another way."]">
+            <span class="authspin" aria-hidden="true"></span>
+            <p>@L["Open Anjal on a device where you are signed in, and approve this sign-in there. This page carries on by itself."]</p>
+        </div>
+        <form method="post" action="/auth/two-step/approved" id="approvedform" class="authfields">
+            <AntiforgeryToken />
+            <button type="submit" class="authbtn btn-quiet-auth">@L["I have approved it"]</button>
+        </form>
+        <p class="authnote"><a class="authlink" href="/sign-in/two-step">@L["Use another way"]</a></p>
+    }
+    else if (Method == "backup" && policy.Methods != "no-backup")
+    {
+        <h1 class="authtitle">@L["Use a backup code"]</h1>
+        <p class="authlead">@L["Type one of the backup codes you saved when you set up two-step sign-in. Each works once."]</p>
+        @if (Error is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["That backup code is not right, or it has been used."]</span></div>
+        }
+        <form method="post" action="/auth/two-step" class="authfields">
+            <AntiforgeryToken />
+            <input type="hidden" name="method" value="backup" />
+            <label class="authlbl" for="code">@L["Backup code"]</label>
+            <div class="authinpwrap"><input class="authinp-in mono" id="code" name="code" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" required autofocus placeholder="abcd-2345" /></div>
+            <button type="submit" class="authbtn">@L["Verify"]</button>
+        </form>
+        <p class="authnote"><a class="authlink" href="/sign-in/two-step">@L["Use the authenticator app instead"]</a></p>
+    }
+    else if (Method == "lost")
+    {
+        <h1 class="authtitle">@L["Lost your phone?"]</h1>
+        <p class="authlead">@L["You can still sign in with a backup code, a passkey on another device, or by approving from a device where you are signed in. Then remove the lost phone in Settings, Security."]</p>
+        <p class="authlead">@L["If none of these is to hand, your administrator can turn off two-step sign-in for your account, so you can sign in and set it up again."]</p>
+        <div class="authways col">
+            @if (policy.Methods != "no-backup")
+            {
+                <a class="authlink" href="/sign-in/two-step?method=backup">@L["Use a backup code"]</a>
+            }
+            <a class="authlink" href="/sign-in/two-step">@L["Back to the code"]</a>
+        </div>
+    }
+    else
+    {
+        <h1 class="authtitle">@L["Enter the code"]</h1>
+        <p class="authlead">@(security.TotpSecret.Length > 0
+            ? L["Open your authenticator app and enter the 6-digit code for {organisation} mail."].Replace("{organisation}", org?.Name ?? L["your organisation's"], StringComparison.Ordinal)
+            : L["This account signs in with a passkey. Use the passkey on this device, or another way below."])</p>
+        @if (Error is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["That code did not match. Type the code the app shows now."]</span></div>
+        }
+        @if (Refused is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["That approval was not given, or has been used. Use another way."]</span></div>
+        }
+        <div class="err" role="alert" data-passkey-error hidden><LipiIcon Name="warning" Size="16" /><span></span></div>
+        @if (security.TotpSecret.Length > 0)
+        {
+            <form method="post" action="/auth/two-step" class="authfields">
+                <AntiforgeryToken />
+                <CodeBoxes L="L" Label="@L["Code from your authenticator app"]" Large="true" AutoSubmit="true" />
+                @if (policy.TrustDays > 0)
+                {
+                    <label class="authcheck @(pending!.Shared ? "off" : null)">
+                        <input type="checkbox" name="trust" value="1" disabled="@pending.Shared" />
+                        <span><span>@L["Trust this device for {n} days"].Replace("{n}", policy.TrustDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span>
+                            @if (pending.Shared)
+                            {
+                                <span class="authhint">@L["Not available on a shared computer"]</span>
+                            }
+                            else
+                            {
+                                <span class="authhint">@L["It will not ask for a code here again until then"]</span>
+                            }
+                        </span>
+                    </label>
+                }
+                <button type="submit" class="authbtn">@L["Verify"]</button>
+            </form>
+        }
+        else
+        {
+            <form method="post" class="authfields" data-passkey-signin>
+                <AntiforgeryToken />
+                <button type="button" class="authbtn" data-passkey-go><LipiIcon Name="biometric" Size="18" />@L["Use a passkey"]</button>
+            </form>
+        }
+        <div class="authways">
+            @if (security.Passkeys.Count > 0 && security.TotpSecret.Length > 0)
+            {
+                <form method="post" class="inline" data-passkey-signin>
+                    <AntiforgeryToken />
+                    <button type="button" class="authlink linkbtn" data-passkey-go>@L["Use a passkey instead"]</button>
+                </form>
+            }
+            @if (security.BackupCodes.Count > 0 && policy.Methods != "no-backup")
+            {
+                <a class="authlink" href="/sign-in/two-step?method=backup">@L["Use a backup code"]</a>
+            }
+            <form method="post" action="/auth/two-step/ask" class="inline">
+                <AntiforgeryToken />
+                <button type="submit" class="authlink linkbtn">@L["Approve from another signed-in device"]</button>
+            </form>
+            <a class="authlink" href="/sign-in/two-step?method=lost">@L["Lost your phone?"]</a>
+        </div>
+    }
+</AuthFrame>
+
+@code {
+    [SupplyParameterFromQuery] private string? Error { get; set; }
+    [SupplyParameterFromQuery] private string? Method { get; set; }
+    [SupplyParameterFromQuery] private string? Waiting { get; set; }
+    [SupplyParameterFromQuery] private string? Refused { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private PendingSignIn? pending;
+    private SecurityDocument security = new();
+    private SignInPolicy policy = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        pending = Sessions.Pending(Http.HttpContext?.Request.Cookies[AuthEndpoints.PendingCookie]);
+        if (pending is null)
+        {
+            Nav.NavigateTo("/sign-in?expired=1");
+            return;
+        }
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        security = await Mail.GetSecurityAsync(pending.MailboxId);
+        policy = await Mail.SignInPolicyForAsync(pending.MailboxId);
+    }
+}

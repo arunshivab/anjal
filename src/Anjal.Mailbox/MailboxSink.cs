@@ -326,6 +326,16 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                 continue;
             }
 
+            // DES-11 D2 (owner, 10 Oct 2026): a full mailbox receives nothing - the organisation's
+            // storage plan taken in - except Anjal's own security mail. Deferred, so a sender retries.
+            if (!ctx.AnjalSecurityMail && (await Anjal.Store.StoragePlan.StateOfAsync(this.store, mailbox, ct).ConfigureAwait(false)).Full)
+            {
+                this.log?.Invoke($"Mailbox: {mailbox.Address} is full; not delivered");
+                Anjal.Smtp.Counters.Increment("anjal_quota_refusals_total");
+                transient = true;
+                continue;
+            }
+
             try
             {
                 if (!rulesByTenant.TryGetValue(tenant.Id, out System.Collections.Generic.IReadOnlyList<Anjal.Store.SenderRuleRow>? rules))
@@ -353,16 +363,35 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                     folderName = tenant.UnencryptedFolder.Trim();
                 }
 
+                // rc.12 (items 24, 31): the person's own rules, for mail on its way to INBOX.
+                // Junk stays Junk: a rule never brings mail out of it.
+                RuleOutcome? ruled = null;
+                if (parsed is not null && string.Equals(folderName, Anjal.Store.FolderRow.Inbox, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    ruled = await this.RuleForAsync(tenant, mailbox, parsed, fromHeaderAddress, ct).ConfigureAwait(false);
+                    if (ruled is not null && IsRuleTarget(ruled.MoveTo))
+                    {
+                        folderName = ruled.MoveTo;
+                    }
+                }
+
                 Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
                 MaildirWriteResult written = await this.maildir
                     .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, WithReturnPath(ctx.RawBytes, ctx.EnvelopeFrom), ct)
                     .ConfigureAwait(false);
+                string storedFile = written.RelativePath;
+                if (ruled is not null && (ruled.MarkRead || ruled.Flag))
+                {
+                    storedFile = this.maildir.SetFlags(tenant.Slug, mailbox.Address, folder.Name, written.RelativePath, seen: ruled.MarkRead, flagged: ruled.Flag, answered: false) ?? written.RelativePath;
+                }
 
                 await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
                 {
                     MailboxId = mailbox.Id,
                     FolderId = folder.Id,
-                    MaildirFile = written.RelativePath,
+                    MaildirFile = storedFile,
+                    Seen = ruled?.MarkRead == true,
+                    Flagged = ruled?.Flag == true,
                     EnvelopeFrom = ctx.EnvelopeFrom,
                     MessageId = parsed?.MessageId ?? string.Empty,
                     FromHeader = parsed?.Headers.Get("From") ?? string.Empty,
@@ -389,8 +418,8 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                 long? used = await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
                 if (used is long u && mailbox.QuotaBytes > 0 && u > mailbox.QuotaBytes)
                 {
-                    // Soft quota: log only. Hard enforcement (reject at RCPT) is a later release.
-                    this.log?.Invoke($"Mailbox: {mailbox.Address} over quota ({u} of {mailbox.QuotaBytes} bytes)");
+                    // The message that filled it was let in whole; the next is refused (DES-11 D2).
+                    this.log?.Invoke($"Mailbox: {mailbox.Address} is now full ({u} of {mailbox.QuotaBytes} bytes)");
                 }
 
                 this.log?.Invoke($"Delivered {rcpt} -> {tenant.Slug}/{mailbox.Address}/{Anjal.Store.FolderRow.MaildirNameFor(folder.Name)}/{written.RelativePath} ({written.SizeBytes} bytes, spam score {spamScore})");
@@ -547,6 +576,56 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
     /// The category a mailbox's rules put this sender in, or null. An exact
     /// address beats a domain rule, the same precedence sender rules use.
     /// </summary>
+    /// <summary>
+    /// Whether a rule may file mail in a folder: never Drafts, Sent, Scheduled
+    /// or Junk (Junk is Anjal's own decision), and never an empty name.
+    /// </summary>
+    /// <param name="folder">The folder a rule names.</param>
+    public static bool IsRuleTarget(string folder)
+    {
+        string f = (folder ?? string.Empty).Trim();
+        return f.Length > 0 && f.Length <= 100
+            && !string.Equals(f, "Drafts", System.StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(f, "Sent", System.StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(f, "Scheduled", System.StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(f, JunkFolder, System.StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(f, Anjal.Store.FolderRow.Inbox, System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async System.Threading.Tasks.Task<RuleOutcome?> RuleForAsync(Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox, Anjal.Mime.MimeMessage parsed, string fromAddress, System.Threading.CancellationToken ct)
+    {
+        IReadOnlyList<MailRule> rules = MailRules.Parse(await this.store.GetMailboxDocumentAsync(mailbox.Id, MailRules.Kind, ct).ConfigureAwait(false));
+        if (rules.Count == 0)
+        {
+            return null;
+        }
+        IReadOnlyDictionary<string, IReadOnlyList<string>> groups = rules.Any(r => r.Conditions.Any(c => c.Field == "group"))
+            ? MailRules.ParseGroups(await this.store.GetMailboxDocumentAsync(mailbox.Id, MailRules.GroupsKind, ct).ConfigureAwait(false))
+            : new System.Collections.Generic.Dictionary<string, IReadOnlyList<string>>();
+        int at = fromAddress.LastIndexOf('@');
+        string fromDomain = at < 0 ? string.Empty : fromAddress[(at + 1)..];
+        bool outside = true;
+        foreach (Anjal.Store.TenantDomainRow d in await this.store.ListTenantDomainsAsync(tenant.Id, ct).ConfigureAwait(false))
+        {
+            if (string.Equals(d.Domain, fromDomain, System.StringComparison.OrdinalIgnoreCase))
+            {
+                outside = false;
+            }
+        }
+        var subject = new RuleSubject
+        {
+            From = Anjal.Mime.EncodedWordDecoder.Decode(parsed.Headers.Get("From") ?? string.Empty),
+            FromAddress = fromAddress,
+            To = Anjal.Mime.EncodedWordDecoder.Decode((parsed.Headers.Get("To") ?? string.Empty) + ", " + (parsed.Headers.Get("Cc") ?? string.Empty)),
+            Subject = Anjal.Mime.EncodedWordDecoder.Decode(parsed.Subject ?? string.Empty),
+            Body = MessageText.Extract(parsed),
+            HasAttachment = HasAttachment(parsed.Body),
+            HasUnsubscribe = parsed.Headers.Get("List-Unsubscribe") is not null,
+            FromOutside = outside,
+        };
+        return MailRules.Evaluate(rules, subject, groups);
+    }
+
     private async System.Threading.Tasks.Task<System.Guid?> CategoryForAsync(System.Guid mailboxId, string envelopeFrom, string fromHeader, System.Threading.CancellationToken ct)
     {
         System.Collections.Generic.IReadOnlyList<Anjal.Store.CategoryRuleRow> rules =

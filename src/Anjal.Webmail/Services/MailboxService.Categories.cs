@@ -89,7 +89,7 @@ public sealed partial class MailboxService
 
         // One activity read covers every count; a query per category would be
         // a query per row on a page that lists them all.
-        MailboxActivity activity = await this.store.GetActivityAsync(mailboxId, DateTimeOffset.UnixEpoch, DateTimeOffset.UtcNow.AddDays(1), ct).ConfigureAwait(false);
+        MailboxActivity activity = await this.store.GetActivityAsync(mailboxId, DateTimeOffset.UnixEpoch, DateTimeOffset.UtcNow.AddDays(1), "UTC", ct).ConfigureAwait(false);
         var counts = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         foreach (NamedCount c in activity.ByCategory)
         {
@@ -404,10 +404,15 @@ public sealed partial class MailboxService
                 days = period.Days;
             }
         }
-        DateTimeOffset end = new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero).AddDays(1);
-        DateTimeOffset start = end.AddDays(-days);
-        MailboxActivity activity = await this.store.GetActivityAsync(mailboxId, start, end, ct).ConfigureAwait(false);
-        activity.ByDay = FillGaps(activity.ByDay, start, end);
+        // Days run midnight to midnight in the person's own zone (DEF-088).
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
+        ZonedClock clock = context is null ? ZonedClock.Default : ZonedClock.For(context.Value.Mailbox.TimeZone, context.Value.Mailbox.DateFormat);
+        DateTime today = clock.Local(DateTimeOffset.UtcNow).Date;
+        DateTime firstDay = today.AddDays(1 - days);
+        DateTimeOffset start = new(TimeZoneInfo.ConvertTimeToUtc(firstDay, clock.Zone), TimeSpan.Zero);
+        DateTimeOffset end = new(TimeZoneInfo.ConvertTimeToUtc(today.AddDays(1), clock.Zone), TimeSpan.Zero);
+        MailboxActivity activity = await this.store.GetActivityAsync(mailboxId, start, end, clock.ZoneId, ct).ConfigureAwait(false);
+        activity.ByDay = FillGaps(activity.ByDay, new DateTimeOffset(firstDay, TimeSpan.Zero), new DateTimeOffset(today.AddDays(1), TimeSpan.Zero));
         return activity;
     }
 

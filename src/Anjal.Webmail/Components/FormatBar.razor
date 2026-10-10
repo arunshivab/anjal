@@ -1,32 +1,180 @@
 @* The formatting toolbar, shared by compose and the signature. Hidden until
    the browser script enables the editor, so it never appears without
-   JavaScript. Uniform square buttons in four groups; the script marks the
-   ones whose formatting is active at the cursor (aria-pressed). Icons are
-   LiPicons where the set has one, otherwise small drawn glyphs. *@
-<div class="rte-bar" role="toolbar" aria-label="Formatting" data-rte-bar hidden>
+   JavaScript. Uniform square buttons in groups; the script marks the ones
+   whose formatting is active at the cursor (aria-pressed). Icons are
+   LiPicons where the set has one, otherwise small drawn glyphs.
+   rc.12 (item 15): size, colour, highlight, alignment, indent, emoji and
+   the mail's background. Colours are true named colours (D-112), and every
+   pop-up is a details element, so it is page markup, not made by script. *@
+<div class="rte-bar" role="toolbar" aria-label="@L["Formatting"]" data-rte-bar hidden>
     <span class="rte-grp">
-        <button type="button" class="rte-btn" data-cmd="bold" title="Bold (Ctrl+B)" aria-label="Bold" aria-pressed="false"><b class="rte-b">B</b></button>
-        <button type="button" class="rte-btn" data-cmd="italic" title="Italic (Ctrl+I)" aria-label="Italic" aria-pressed="false"><i class="rte-i">I</i></button>
-        <button type="button" class="rte-btn" data-cmd="underline" title="Underline (Ctrl+U)" aria-label="Underline" aria-pressed="false"><LipiIcon Name="underline" Size="16" /></button>
+        <select class="rte-size" data-cmd-select="fontSize" title="@L["Text size"]" aria-label="@L["Text size"]">
+            <option value="2">@L["Small"]</option>
+            <option value="3" selected>@L["Normal"]</option>
+            <option value="5">@L["Large"]</option>
+            <option value="6">@L["Huge"]</option>
+        </select>
     </span>
     <span class="rte-sep" aria-hidden="true"></span>
     <span class="rte-grp">
-        <button type="button" class="rte-btn" data-cmd="insertUnorderedList" title="Bulleted list" aria-label="Bulleted list" aria-pressed="false">
+        <button type="button" class="rte-btn" data-cmd="bold" title="@(L["Bold"] + " (Ctrl+B)")" aria-label="@L["Bold"]" aria-pressed="false"><b class="rte-b">B</b></button>
+        <button type="button" class="rte-btn" data-cmd="italic" title="@(L["Italic"] + " (Ctrl+I)")" aria-label="@L["Italic"]" aria-pressed="false"><i class="rte-i">I</i></button>
+        <button type="button" class="rte-btn" data-cmd="underline" title="@(L["Underline"] + " (Ctrl+U)")" aria-label="@L["Underline"]" aria-pressed="false"><LipiIcon Name="underline" Size="16" /></button>
+        <button type="button" class="rte-btn" data-cmd="strikeThrough" title="@L["Strikethrough"]" aria-label="@L["Strikethrough"]" aria-pressed="false"><LipiIcon Name="strikethrough" Size="16" /></button>
+    </span>
+    <span class="rte-sep" aria-hidden="true"></span>
+    <span class="rte-grp">
+        <details class="rte-pop">
+            <summary class="rte-btn" title="@L["Text colour"]" aria-label="@L["Text colour"]">
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4.2 11.5L7.4 3h1.2l3.2 8.5M5.4 8.4h5.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" /><rect x="2.5" y="13" width="11" height="2" rx="1" fill="#dc143c" data-swatch-now /></svg>
+            </summary>
+            <div class="rte-menu rte-swatches" role="group" aria-label="@L["Text colour"]">
+                @foreach ((string name, string hex) in TextColours)
+                {
+                    <button type="button" class="rte-sw" data-cmd="foreColor" data-val="@hex" title="@L[name]" aria-label="@L[name]" style="--sw:@hex"></button>
+                }
+            </div>
+        </details>
+        <details class="rte-pop">
+            <summary class="rte-btn" title="@L["Highlight"]" aria-label="@L["Highlight"]"><LipiIcon Name="highlight" Size="16" /></summary>
+            <div class="rte-menu rte-swatches" role="group" aria-label="@L["Highlight"]">
+                @foreach ((string name, string hex) in Tints)
+                {
+                    <button type="button" class="rte-sw" data-cmd="hiliteColor" data-val="@hex" title="@L[name]" aria-label="@L[name]" style="--sw:@hex"></button>
+                }
+                <button type="button" class="rte-sw rte-sw-none" data-cmd="hiliteColor" data-val="transparent" title="@L["No highlight"]" aria-label="@L["No highlight"]"></button>
+            </div>
+        </details>
+    </span>
+    <span class="rte-sep" aria-hidden="true"></span>
+    <span class="rte-grp">
+        <button type="button" class="rte-btn" data-cmd="justifyLeft" title="@L["Align left"]" aria-label="@L["Align left"]" aria-pressed="false">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2.5 3.5h11M2.5 6.5h7M2.5 9.5h11M2.5 12.5h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" /></svg>
+        </button>
+        <button type="button" class="rte-btn" data-cmd="justifyCenter" title="@L["Centre"]" aria-label="@L["Centre"]" aria-pressed="false">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2.5 3.5h11M4.5 6.5h7M2.5 9.5h11M4.5 12.5h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" /></svg>
+        </button>
+        <button type="button" class="rte-btn" data-cmd="justifyRight" title="@L["Align right"]" aria-label="@L["Align right"]" aria-pressed="false">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2.5 3.5h11M6.5 6.5h7M2.5 9.5h11M6.5 12.5h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" /></svg>
+        </button>
+    </span>
+    <span class="rte-sep" aria-hidden="true"></span>
+    <span class="rte-grp">
+        <button type="button" class="rte-btn" data-cmd="insertUnorderedList" title="@L["Bulleted list"]" aria-label="@L["Bulleted list"]" aria-pressed="false">
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="3" cy="4" r="1.3" fill="currentColor" /><circle cx="3" cy="8" r="1.3" fill="currentColor" /><circle cx="3" cy="12" r="1.3" fill="currentColor" /><path d="M6.5 4h7M6.5 8h7M6.5 12h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" /></svg>
         </button>
-        <button type="button" class="rte-btn" data-cmd="insertOrderedList" title="Numbered list" aria-label="Numbered list" aria-pressed="false">
+        <button type="button" class="rte-btn" data-cmd="insertOrderedList" title="@L["Numbered list"]" aria-label="@L["Numbered list"]" aria-pressed="false">
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2.2 2.8h1.2v3M2 5.8h2.4M1.9 9.4c.3-.6 1.9-.7 1.9.3 0 .8-1.9 1.4-1.9 2.4h2.1" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" fill="none" /><path d="M6.5 4h7M6.5 8h7M6.5 12h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" /></svg>
+        </button>
+        <button type="button" class="rte-btn" data-cmd="outdent" title="@L["Decrease indent"]" aria-label="@L["Decrease indent"]">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M7 4h6.5M7 8h6.5M7 12h6.5M2.5 3.5h2M5 6l-2.5 2L5 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" /></svg>
+        </button>
+        <button type="button" class="rte-btn" data-cmd="indent" title="@L["Increase indent"]" aria-label="@L["Increase indent"]">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M7 4h6.5M7 8h6.5M7 12h6.5M2.5 6L5 8l-2.5 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none" /></svg>
         </button>
     </span>
     <span class="rte-sep" aria-hidden="true"></span>
     <span class="rte-grp">
-        <button type="button" class="rte-btn" data-cmd="link" title="Insert a link" aria-label="Insert a link"><LipiIcon Name="link" Size="16" /></button>
-        <button type="button" class="rte-btn" data-cmd="quote" title="Quote" aria-label="Quote">
+        <button type="button" class="rte-btn" data-cmd="link" title="@L["Insert a link"]" aria-label="@L["Insert a link"]"><LipiIcon Name="link" Size="16" /></button>
+        <button type="button" class="rte-btn" data-cmd="quote" title="@L["Quote"]" aria-label="@L["Quote"]">
             <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M2.5 12V9.2c0-2.6 1-4.2 3.2-5.2l.5 1c-1.2.6-1.8 1.4-1.9 2.6h1.9V12zM9 12V9.2c0-2.6 1-4.2 3.2-5.2l.5 1c-1.2.6-1.8 1.4-1.9 2.6h1.9V12z" fill="currentColor" /></svg>
         </button>
+        <details class="rte-pop">
+            <summary class="rte-btn" title="@L["Emoji"]" aria-label="@L["Emoji"]">
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none" /><circle cx="6" cy="6.6" r=".9" fill="currentColor" /><circle cx="10" cy="6.6" r=".9" fill="currentColor" /><path d="M5.3 9.6c.7 1 1.6 1.5 2.7 1.5s2-.5 2.7-1.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none" /></svg>
+            </summary>
+            <div class="rte-menu rte-emoji" role="group" aria-label="@L["Emoji"]">
+                @foreach (string e in Emoji)
+                {
+                    <button type="button" class="rte-em" data-cmd="insertText" data-val="@e" aria-label="@e">@e</button>
+                }
+            </div>
+        </details>
     </span>
     <span class="rte-sep" aria-hidden="true"></span>
-    <button type="button" class="rte-btn" data-cmd="clear" title="Clear formatting" aria-label="Clear formatting">
-        <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3.5h8M7 3.5V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none" /><path d="M10 10l4 4M14 10l-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none" /></svg>
-    </button>
+    <span class="rte-grp">
+        <details class="rte-pop">
+            <summary class="rte-btn" title="@L["Paragraph background"]" aria-label="@L["Paragraph background"]">
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2.5" fill="currentColor" opacity=".18" /><path d="M4.5 6.5h7M4.5 9.5h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none" /></svg>
+            </summary>
+            <div class="rte-menu rte-swatches" role="group" aria-label="@L["Paragraph background"]">
+                @foreach ((string name, string hex) in Tints)
+                {
+                    <button type="button" class="rte-sw" data-cmd="blockBg" data-val="@hex" title="@L[name]" aria-label="@L[name]" style="--sw:@hex"></button>
+                }
+                <button type="button" class="rte-sw rte-sw-none" data-cmd="blockBg" data-val="" title="@L["No background"]" aria-label="@L["No background"]"></button>
+            </div>
+        </details>
+        <details class="rte-pop rte-pop-right">
+            <summary class="rte-btn" title="@L["Mail background"]" aria-label="@L["Mail background"]">
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="10" rx="2" stroke="currentColor" stroke-width="1.4" fill="none" /><path d="M2.5 4l5.5 4.2L13.5 4" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="none" /></svg>
+            </summary>
+            <div class="rte-menu rte-backs" role="group" aria-label="@L["Mail background"]">
+                <div class="rte-backhead"><b>@L["Mail background"]</b><span>@L["For the whole message"]</span></div>
+                <span class="rte-backlabel">@L["Colours"]</span>
+                <div class="rte-tiles">
+                    @foreach ((string name, string colour) in MailBackgrounds.Colours)
+                    {
+                        <button type="button" class="@(colour.Length == 0 ? "rte-tile rte-tile-none" : "rte-tile")" data-cmd="mailBg" data-val="@colour" data-name="@L[name]" style="--sw:@(colour.Length == 0 ? "#ffffff" : colour)"><span class="rte-tilebox" aria-hidden="true"></span>@L[name]</button>
+                    }
+                </div>
+                <span class="rte-backlabel">@L["Images"]</span>
+                <div class="rte-tiles">
+                    @foreach ((string name, string colour, string picture) in MailBackgrounds.Pictures)
+                    {
+                        <button type="button" class="rte-tile" data-cmd="mailBg" data-val="@colour" data-pic="@picture" data-name="@L[name]"><span class="rte-tilebox" aria-hidden="true" style="background-color:@colour;background-image:url(@picture)"></span>@L[name]</button>
+                    }
+                </div>
+                <p class="rte-backnote">@L["Some mail programs, such as Outlook, may not show backgrounds. Your text stays readable either way: Anjal keeps text dark on these light backgrounds."]</p>
+            </div>
+        </details>
+        <button type="button" class="rte-btn" data-cmd="clear" title="@L["Clear formatting"]" aria-label="@L["Clear formatting"]">
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M3 3.5h8M7 3.5V13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none" /><path d="M10 10l4 4M14 10l-4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none" /></svg>
+        </button>
+    </span>
 </div>
+
+@code {
+    /// <summary>The words of the person's language (rc.15, item 41).</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    // True named colours (D-112): each is the colour its name says, and each
+    // stays readable on white (contrast 4.5:1 or better).
+    private static readonly (string Name, string Hex)[] TextColours =
+    {
+        ("Black", "#1b1f24"),
+        ("Grey", "#5f6670"),
+        ("Crimson", "#dc143c"),
+        ("Maroon", "#800000"),
+        ("Burnt orange", "#b7410e"),
+        ("Green", "#008000"),
+        ("Teal", "#008080"),
+        ("Royal blue", "#2a52be"),
+        ("Navy", "#000080"),
+        ("Indigo", "#4b0082"),
+        ("Purple", "#800080"),
+        ("Saddle brown", "#8b4513"),
+    };
+
+    // Soft tints for highlight and paragraph backgrounds: black text stays readable on each.
+    private static readonly (string Name, string Hex)[] Tints =
+    {
+        ("Lemon chiffon", "#fffacd"),
+        ("Honeydew", "#f0fff0"),
+        ("Alice blue", "#f0f8ff"),
+        ("Lavender", "#e6e6fa"),
+        ("Misty rose", "#ffe4e1"),
+        ("Peach puff", "#ffdab9"),
+        ("Pale green", "#98fb98"),
+        ("Light sky blue", "#87cefa"),
+        ("Gold", "#ffd700"),
+    };
+
+
+    private static readonly string[] Emoji =
+    {
+        "😊", "😀", "😂", "🙂", "😉", "😍", "🤔", "😅",
+        "🙏", "👍", "👏", "🙌", "💪", "👋", "🤝", "✌️",
+        "🎉", "🎂", "🌸", "🌟", "🔥", "✅", "❤️", "☕",
+    };
+}

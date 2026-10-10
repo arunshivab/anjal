@@ -568,7 +568,7 @@ current_user;` line three times, typing from each copy.
 vm$ sudo awk '/^ANJAL_(API_TOKEN|KEK)=/{i=index($0,"="); print substr($0,1,i-1), "length", length(substr($0,i+1))}' /etc/anjal/server.env   # 48 and 44
 vm$ sudo grep '^ANJAL_KEK=' /etc/anjal/server.env | cut -d= -f2- | base64 -d | wc -c          # 32
 vm$ sudo grep -c 'CHANGE-ME' /etc/anjal/server.env /etc/anjal/webmail.env                      # 0 and 0
-vm$ sudo grep -E '^ANJAL_(ACME_STAGING|WEBMAIL_KEYS_DIR)' /etc/anjal/server.env /etc/anjal/webmail.env
+vm$ sudo grep -E '^ANJAL_(ACME_STAGING|WEBMAIL_KEYS_DIR|OPERATORS)' /etc/anjal/server.env /etc/anjal/webmail.env
 vm$ for f in server webmail; do
       sudo bash -c "pw=\$(grep '^ANJAL_POSTGRES=' /etc/anjal/$f.env | sed -E 's/.*Password=([^;]*).*/\1/'); PGPASSWORD=\"\$pw\" psql 'host=127.0.0.1 dbname=anjal user=anjal' -Atc 'select current_user'" && echo "$f.env: database login OK"
     done
@@ -576,8 +576,10 @@ vm$ sudo -u anjal cat /etc/anjal/server.env >/dev/null && echo readable
 vm$ sudo ls -l /etc/anjal                                                                       # root anjal, -rw-r----- on all three
 ```
 
-Expect `ANJAL_ACME_STAGING=true` in `webmail.env` only, and
-`ANJAL_WEBMAIL_KEYS_DIR=/var/lib/anjal/webmail-keys` in `webmail.env`. Both
+Expect `ANJAL_ACME_STAGING=true` in `webmail.env` only,
+`ANJAL_WEBMAIL_KEYS_DIR=/var/lib/anjal/webmail-keys` in `webmail.env`, and
+`ANJAL_OPERATORS` in `webmail.env` naming the operators' own addresses (the
+`CHANGE-ME` count above is 0 only once it is set). Both
 files must agree on `ANJAL_POSTGRES`, `ANJAL_MAILDIR_ROOT`, `ANJAL_ACME_DIR`
 and `ANJAL_ACME_DOMAINS`; every variable is explained in `README.md`.
 
@@ -822,7 +824,7 @@ vm$ unset P1 P2 TOKEN
 
 **Check:** `https://mail.anjal.co.in/` shows the sign-in page with no
 certificate warning; signing in shows INBOX, Drafts, Junk, Sent and Trash
-and `0 B of 2 GB`.
+and `0 B of 1.00 GB`.
 
 ---
 
@@ -1054,6 +1056,21 @@ encryption. Any difference fails the run (`systemctl --failed` lists
 `anjal-backup.service`). Before rc.6 the check compared sizes only and a
 detected difference still ended in `done` (DEF-061), and a failed upload
 left the unencrypted dump on disk (DEF-062).
+
+Since rc.15 (D-88, owner 10 October 2026) a failed run is tried again
+after 2, 4, 8 and 16 minutes - about 30 minutes in all - so a short
+network or Backblaze outage does not cost a night's backup. Each failed
+try is logged as `try N failed (exit N); trying again in N s`. When the
+last try fails too, the log ends `FAILED after 5 tries` and a `failed`
+line is added to `/var/lib/anjal/backup-status`, beside the `ok` line of
+the last good backup: the Anjal console's "Last good backup" turns red at
+once, and the operators are mailed within 15 minutes (before rc.15, only
+when the last good backup was 48 hours old). The next good run clears it.
+"Not configured" is not tried again (exit 3). A first run that fails
+therefore takes about 30 minutes to return; watch it with
+`sudo journalctl -u anjal-backup -f`. The waits are set by
+`ANJAL_BACKUP_RETRY_WAITS` in `/etc/anjal/server.env` (seconds, separated
+by spaces); set to empty, a failed run is not tried again.
 
 From rc.7 each run also uploads `settings/`: copies of `/etc/anjal/server.env`
 and `webmail.env` with every secret replaced by
@@ -1441,12 +1458,60 @@ without redacting it.
 
 ## 13b. Mailbox passwords
 
-One rule applies to the webmail, the admin API and SMTP service accounts:
-at least 8 characters with an upper-case letter, a lower-case letter, a
-number and a symbol - or a phrase of 16 characters or more, which needs
-none of those. Both are checked against a list of predictable choices, so
-`Apulki@123` and `Passw0rd!` are refused however well they satisfy the
-rule, as is anything containing the person's own name or address.
+One rule applies to the webmail, the admin API and SMTP service accounts
+(owner, 10 October 2026; it meets NIST SP 800-63B-4, OWASP ASVS 4.0.3 and
+5.0, and PCI DSS 4.0 at once):
+
+- **Length:** at least 15 characters for a password used alone - every SMTP
+  service account and mail-app password, and a webmail person without
+  two-step sign-in - and at least 12 with two-step sign-in (on, or required
+  by the organisation). An organisation may ask for more, up to 64. Length
+  counts characters (Unicode code points) after the password is normalised
+  (NFKC), so a Tamil or Hindi letter counts once; at most 256.
+- **No rule about kinds of characters**, and **no forced periodic change**
+  (NIST forbids both). A change is still asked for when an administrator
+  resets a password, and at the next sign-in of anyone whose password is
+  shorter than the rule now asks for them.
+- **Refused:** known leaked passwords (below), and a password made up mostly
+  of a common word, this product's or a customer's name, or the person's own
+  name or address - `Apulki@123` is refused, a long phrase that happens to
+  contain "mail" is not.
+- **Earlier passwords** are not checked unless the organisation asks: then
+  the last 3 or the last 5 are refused.
+- **Wrong passwords:** five from one computer in 15 minutes stop that
+  computer; ten in a row on one account pause signing in with the password
+  for 30 minutes on every device (the person is mailed; "Forgot password"
+  still works).
+- Every password box has an eye to show what was typed.
+
+From rc.15 every new password is also checked against passwords known from
+data leaks (Have I Been Pwned's Pwned Passwords), twice:
+
+- **Online**, against the full and current list, by k-anonymity: only the first
+  5 of the 40 characters of the password's SHA-1 fingerprint go to
+  `api.pwnedpasswords.com`; the answer holds every leaked fingerprint starting
+  with them (padded to a uniform size) and the match is made on the server. The
+  password itself never leaves it. If the service cannot be reached within 3
+  seconds, the password is judged without it - a change is never held up.
+- **Downloaded**, against a list kept at `/var/lib/anjal/pwned-passwords.bin`:
+  passwords seen in 3 or more leaks (about 1.1 billion, about 5.8 GB). Five
+  minutes after the server starts it downloads the list if there is none, and
+  again whenever it is more than 182 days (six months) old: about an hour, about
+  1 million small requests sending only range numbers (the outbound firewall
+  already allows the `anjal` user HTTPS). The download needs about 8 GB free
+  while the new file is built beside the old; the old list stays in use until
+  the new one is complete.
+
+Progress and the list's age show on the Operations console, *Service health*,
+tile *Leaked passwords*. Settings: `ANJAL_PWNED_MODE` (`both`, `download` -
+nothing sent at password time, for a customer whose servers may not reach the
+internet - `online` or `off`), `ANJAL_PWNED_ONLINE_MIN_COUNT` (1),
+`ANJAL_PWNED_FILE`, `ANJAL_PWNED_SOURCE` (`api` or `off`),
+`ANJAL_PWNED_REFRESH_DAYS` (182), `ANJAL_PWNED_MIN_COUNT` (3). To build the list
+on another computer instead: download it there with the official downloader
+(one SHA-1 file), run
+`Anjal.Server --pwned-build --from-file pwnedpasswords.txt --out pwned-passwords.bin`,
+and copy the result to `/var/lib/anjal/` (owner `anjal`).
 
 ## 13c. Unknown recipients
 
@@ -1580,6 +1645,39 @@ arrive - and confirm a new message has its original kept:
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, direction, outcome, left(sha256,16) from evidence order by captured_at desc limit 3"
 vm$ unset TOKEN
 ```
+
+**rc.10 to rc.15** (the webmail release), in addition to the usual steps
+(backup first): `schema.sql` adds what the release needs, among it the
+`service_records` table (rc.15, item 61: the operator's daily disk record,
+restore drills, and the mail server's refusal counts per day). **Required:**
+`ANJAL_OPERATORS` in `webmail.env` (the operators' addresses, comma-separated;
+without it nobody can open the Anjal console and nobody receives the service
+summary or alerts). **DKIM keys (DES-11 S6):** at its first start the mail
+server makes its seal key, `/var/lib/anjal/dkim-seal.pem` (`ANJAL_DKIM_SEAL_KEY`),
+publishes its public half, and locks every DKIM key still kept unlocked or under
+`ANJAL_KEK`; the webmail then makes each new domain's key and locks it with the
+public half - neither `webmail.env` nor the webmail process ever holds a key it
+can read. `backup.sh` copies the seal key into the encrypted backup (`keys/`)
+and `restore.sh` brings it back; the Service health tile "DKIM key lock" says
+when it was last in a verified backup. Optional new webmail settings, all with working defaults (see `webmail.env.example`):
+`ANJAL_GEO_MODE` and `ANJAL_GEO_FILE` (sign-in places from the DB-IP list,
+downloaded monthly by the webmail from download.db-ip.com over HTTPS - the
+outbound firewall already lets the anjal account use port 443),
+`ANJAL_DNS_CHECK` (the daily check of every organisation's DNS records) and
+`ANJAL_BACKUP_SCRATCH`. Record the last restore drill once on the Anjal
+console's Service health page, so the next one is reminded.
+
+What people notice after rc.10 to rc.15 (owner, 10 October 2026). **Passwords:**
+anyone whose password is shorter than the new rule (15 characters, or 12 with
+two-step sign-in) is asked for a longer one at their next sign-in - check the
+operators' own mailboxes first. Ten wrong passwords in a row pause signing in
+with the password for 30 minutes (section 13b). **Storage:** a new mailbox gets
+1 GB; existing mailboxes keep their size until the operator sets the
+organisation's storage plan on the Anjal console. **Backups:** a failed run is
+tried again for about 30 minutes before the console turns red (section 11.6).
+**Leaked-password list:** five minutes after the first start the server
+downloads it (about an hour; about 8 GB free needed while it is built) -
+check `df -h /var/lib/anjal` first.
 
 **rc.9.2 to rc.10**: the usual steps (backup first). No schema change. After
 the install: the start-up log has a new `Postmaster:` line saying where
@@ -1760,8 +1858,8 @@ Things to watch in the first weeks:
   allow rule. If spam lands in INBOX, note the reasons it *did* trigger
   and what it should have - that is the data for the next anti-spam
   release.
-- Disk: `df -h /var/mail` monthly. The 2 GB default quota per mailbox
-  bounds it.
+- Disk: `df -h /var/mail` monthly. The 1 GB default per mailbox (or each
+  organisation's storage plan) bounds it.
 
 ## 13i. MTA-STS (from rc.10)
 

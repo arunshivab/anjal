@@ -6,6 +6,7 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 
 ## Members
 
+- **PreviewOf** *(method)* - The first 160 characters of a text, never splitting a character in two.
 - **Answered** *(property)* - Maildir "R" flag - the message has been replied to.
 - **BodyText** *(property)* - The message's readable text, for search (see Anjal.Mailbox.MessageText). Written when the message is stored; listing queries do not read it back, so it is empty on rows loaded for display.
 - **CategoryId** *(property)* - The category this message carries, or null.
@@ -20,6 +21,7 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 - **MailboxId** *(property)* - The owning mailbox.
 - **MaildirFile** *(property)* - Path of the Maildir file relative to the folder's Maildir directory, e.g. new/1726560000.M123456P4242Q7.host.
 - **MessageId** *(property)* - The Message-ID header value with angle brackets stripped, or empty.
+- **Preview** *(property)* - The first 160 characters of the readable text, for the preview line in a message list (rc.11). Filled when messages are read for display; the whole text is never loaded for a list.
 - **ReceivedAt** *(property)* - Time the message was delivered to the folder.
 - **Seen** *(property)* - Maildir "S" flag - the message has been read.
 - **SizeBytes** *(property)* - Size of the Maildir file in bytes.

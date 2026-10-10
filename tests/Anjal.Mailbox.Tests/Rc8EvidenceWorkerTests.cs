@@ -17,6 +17,13 @@ public sealed class Rc8EvidenceWorkerTests : System.IDisposable
     private readonly List<string> log = new();
     private System.DateTimeOffset now = new(2026, 10, 3, 6, 0, 0, System.TimeSpan.Zero);
 
+    public Rc8EvidenceWorkerTests()
+    {
+        // DEF-090: the store stamps "purge after" with its own clock. Give it the
+        // test's clock from the start, or the result depends on the real date.
+        this.store.EvidenceClock = () => this.now;
+    }
+
     public void Dispose()
     {
         if (System.IO.Directory.Exists(this.root))

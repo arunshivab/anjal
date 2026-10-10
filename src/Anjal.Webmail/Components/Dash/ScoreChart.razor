@@ -1,0 +1,66 @@
+@* rc.15 (items 56, 58): checked mail by spam score, 0 to 10+, the Junk line
+   drawn where the organisation's threshold is; both axes labelled; a bar
+   opens its messages when there is a place to open them. *@
+<div class="schart" role="img" aria-label="@(L["{n} checked; {j} at or over the Junk line"].Replace("{n}", Checked.ToString("N0", Inv), StringComparison.Ordinal).Replace("{j}", AtOrOver.ToString("N0", Inv), StringComparison.Ordinal))">
+    <span class="saxis-y">@L["Messages"]</span>
+    <div class="splot">
+        @for (int s = 0; s <= MailFigures.TopScore; s++)
+        {
+            int score = s;
+            long n = Scores.Length > s ? Scores[s] : 0;
+            @if (score == Threshold)
+            {
+                <span class="sline" aria-hidden="true"><b>@L["Junk from {n}"].Replace("{n}", Threshold.ToString(Inv), StringComparison.Ordinal)</b></span>
+            }
+            <span class="scol">
+                <span class="sval">@(n > 0 ? n.ToString("N0", Inv) : string.Empty)</span>
+                @if (Link?.Invoke(score) is string href && n > 0)
+                {
+                    <a class="sbar @Tone(score)" style="height:@Height(n)%" href="@href" title="@(L["Score {s}: {n} messages"].Replace("{s}", Label(score), StringComparison.Ordinal).Replace("{n}", n.ToString("N0", Inv), StringComparison.Ordinal))"></a>
+                }
+                else
+                {
+                    <span class="sbar @Tone(score)" style="height:@Height(n)%"></span>
+                }
+                <span class="slabel">@Label(score)</span>
+            </span>
+        }
+    </div>
+    <span class="saxis-x">@L["Score"]</span>
+</div>
+@if (Note is not null)
+{
+    <p class="dnote">@Note</p>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    /// <summary>Messages by score, 0 to 10+.</summary>
+    [Parameter] public long[] Scores { get; set; } = new long[MailFigures.TopScore + 1];
+
+    /// <summary>The Junk threshold.</summary>
+    [Parameter] public int Threshold { get; set; } = TenantRow.DefaultSpamThreshold;
+
+    /// <summary>How many were checked.</summary>
+    [Parameter] public long Checked { get; set; }
+
+    /// <summary>Where a score's bar opens, or null.</summary>
+    [Parameter] public Func<int, string?>? Link { get; set; }
+
+    /// <summary>A line under the chart.</summary>
+    [Parameter] public string? Note { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private long AtOrOver => Scores.Skip(Math.Clamp(Threshold, 0, MailFigures.TopScore)).Sum();
+
+    private long Peak => Math.Max(1, Scores.Length == 0 ? 0 : Scores.Max());
+
+    private string Height(long n) => n == 0 ? "0" : Math.Max(3, n * 100 / Peak).ToString(Inv);
+
+    private string Tone(int s) => s == 0 ? "s-clean" : s < Threshold ? "s-mild" : "s-junk";
+
+    private static string Label(int s) => s >= MailFigures.TopScore ? "10+" : s.ToString(Inv);
+}

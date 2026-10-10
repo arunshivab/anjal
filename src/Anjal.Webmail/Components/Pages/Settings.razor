@@ -1,99 +1,585 @@
 @page "/settings"
 @page "/settings/{Section}"
+@page "/settings/{Section}/{Sub}"
 @attribute [Authorize]
 @inject MailboxService Mail
+@inject Words Words
+@inject SessionRegistry Sessions
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
 
-<PageTitle>Settings — Anjal</PageTitle>
+<PageTitle>@L["Settings"] — Anjal</PageTitle>
 
-<div class="settings">
-    <nav class="setnav" aria-label="Settings sections">
-        @foreach ((string key, string label) in Sections)
+@* rc.13: Settings as the approved boards draw them (SetAppearance, SetLanguage,
+   SetMail, SetSecurity, SetRules): the sections listed with what each holds,
+   the section in a card, and beside it what applies - a preview, how dates
+   will look, what the organisation allows, the rules for signing in. *@
+<div class="settings3 @(Aside ? "" : "noaside")">
+    <nav class="setnav3" aria-label="@L["Settings sections"]">
+        <h1 class="setnav-title">@L["Settings"]</h1>
+        @foreach ((string key, string label, string sub, string icon) in Sections)
         {
-            <a href="/settings/@key" class="@(Current == key ? "on" : null)" aria-current="@(Current == key ? "page" : null)">@label</a>
+            <a href="/settings/@key" class="setnav-item @(Current == key ? "on" : null)" aria-current="@(Current == key ? "page" : null)">
+                <LipiIcon Name="@icon" Size="20" />
+                <span class="setnav-text"><b>@L[label]</b><span>@L[sub]</span></span>
+            </a>
         }
+        <p class="setnav-note"><LipiIcon Name="lock" Size="13" /> @L["Settings marked with a lock are set by your organisation and cannot be changed here."]</p>
     </nav>
-<div class="stack setpane">
-    <h1>Settings</h1>
-    <p class="lead">Choose a section on the left. Each saves on its own, so one cannot fail because of another.</p>
 
+    <div class="setmain">
     @if (Saved is not null)
     {
-        <div class="notice n-ok" style="margin-bottom:16px"><LipiIcon Name="check" Size="16" /><span>@SavedMessage</span></div>
+        <div class="notice n-ok setnotice" role="status"><LipiIcon Name="check" Size="16" /><span>@SavedMessage</span></div>
     }
-    @if (Error is not null)
+    @if (ErrorText is not null)
     {
-        <div class="notice n-err" style="margin-bottom:16px"><LipiIcon Name="warning" Size="16" /><span>@Error</span></div>
-    }
-
-    @if (Current == "profile")
-    {
-        <div class="formcard">
-            <h2>Display name</h2>
-            <p class="hint">The name recipients see beside your address.</p>
-            <form method="post" action="/settings/name">
-                <AntiforgeryToken />
-                <div class="row">
-                    <label class="lbl" for="displayName">Display name</label>
-                    <input class="inp" id="displayName" name="displayName" type="text" value="@displayName" maxlength="100" />
-                </div>
-                <p class="sentas">Sent as: @FromLine</p>
-                <button type="submit" class="btn btn-p" style="margin-top:12px">Save</button>
-            </form>
-        </div>
+        <div class="notice n-err setnotice" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(ErrorText ?? string.Empty)</span></div>
     }
     @if (Current == "appearance")
     {
-        <div class="formcard">
-            <h2>Theme</h2>
-            <p class="hint">Stored with your mailbox, so it follows you to any browser you sign in from.</p>
-            <form method="post" action="/settings/theme">
-                <AntiforgeryToken />
-                <div class="themepick">
-                    @foreach (string t in MailboxService.Themes)
+        @* The approved Appearance board (SPEC-11 items 40, 45). Changes apply at once. *@
+        <form method="post" action="/settings/appearance" class="formcard setform setcard">
+            <AntiforgeryToken />
+            <h2>@L["Appearance"]</h2>
+            <p class="hint">@L["Changes apply at once. Only you see them."]</p>
+
+            <fieldset class="setgroup">
+                <legend>@L["Theme"]</legend>
+                <div class="swatches">
+                    @foreach (string c in MailboxRow.ThemeColours)
                     {
-                        <label>
-                            <input type="radio" name="theme" value="@t" checked="@(theme == t)" />
-                            <span>@Title(t)</span>
+                        <label class="swatch" title="@L[Title(c)]">
+                            <input type="radio" name="colour" value="@c" checked="@(colour == c)" data-autosubmit />
+                            <span class="sw swatch-@c" aria-hidden="true"></span>
+                            <span class="swname">@L[Title(c)]</span>
                         </label>
                     }
                 </div>
-                <button type="submit" class="btn btn-p">Save</button>
+            </fieldset>
+
+            <fieldset class="setgroup">
+                <legend>@L["Light or dark"]</legend>
+                <div class="seg">
+                    @foreach ((string key, string word) in Modes)
+                    {
+                        <label class="segopt"><input type="radio" name="mode" value="@key" checked="@(mode == key)" data-autosubmit /><span>@L[word]</span></label>
+                    }
+                </div>
+            </fieldset>
+
+            <fieldset class="setgroup">
+                <legend>@L["Density"]</legend>
+                <div class="seg">
+                    <label class="segopt"><input type="radio" name="density" value="comfortable" checked="@(density == "comfortable")" data-autosubmit /><span>@L["Comfortable"]</span></label>
+                    <label class="segopt"><input type="radio" name="density" value="compact" checked="@(density == "compact")" data-autosubmit /><span>@L["Compact"]</span></label>
+                </div>
+            </fieldset>
+
+            <fieldset class="setgroup">
+                <legend>@L["Layout"]</legend>
+                <div class="seg">
+                    <label class="segopt"><input type="radio" name="layout" value="three" checked="@(layout == "three")" data-autosubmit /><span>@L["Three panes"]</span></label>
+                    <label class="segopt"><input type="radio" name="layout" value="focus" checked="@(layout == "focus")" data-autosubmit /><span>@L["Focus"]</span></label>
+                    <label class="segopt"><input type="radio" name="layout" value="list" checked="@(layout == "list")" data-autosubmit /><span>@L["List only"]</span></label>
+                </div>
+                <p class="hint">@L["The same three buttons sit at the head of the message list."]</p>
+            </fieldset>
+            <noscript><button type="submit" class="btn btn-p">@L["Save"]</button></noscript>
+        </form>
+    }
+    @if (Current == "language")
+    {
+        @* The approved Language and time board (SPEC-11 items 36, 41; D-92). *@
+        <form method="post" action="/settings/language" class="formcard setform setcard">
+            <AntiforgeryToken />
+            <h2>@L["Language and time"]</h2>
+            <p class="hint">@L["Language changes every word of Anjal; your messages are not translated."]</p>
+
+            <fieldset class="setgroup">
+                <legend>@L["Language"]</legend>
+                <div class="langs">
+                    @foreach (string lc in MailboxPreferences.Languages)
+                    {
+                        // rc.15 (item 41): an operator may look at a language before it is switched on.
+                        bool preview = !Words.IsEnabled(lc) && Words.IsPreview(lc) && isOperator;
+                        bool on = Words.IsEnabled(lc) || preview;
+                        <label class="langopt @(on ? "" : "soon")" lang="@lc">
+                            <input type="radio" name="language" value="@lc" checked="@(language == lc)" disabled="@(!on)" data-autosubmit />
+                            <span>@Words.NativeName(lc)</span>
+                            @if (preview)
+                            {
+                                <span class="soonnote" lang="en">@L["preview: not checked"]</span>
+                            }
+                            else if (!on)
+                            {
+                                <span class="soonnote" lang="en">@L["coming soon"]</span>
+                            }
+                        </label>
+                    }
+                </div>
+            </fieldset>
+
+            <fieldset class="setgroup">
+                <legend><label for="timeZone">@L["Time zone"]</label></legend>
+                <select id="timeZone" name="timeZone" class="scope wide" data-autosubmit>
+                    @foreach ((string id, string label) in ZonedClock.Choices(DateTimeOffset.UtcNow))
+                    {
+                        <option value="@id" selected="@(timeZone == id)">@label</option>
+                    }
+                </select>
+                <p class="hint">@L["Every date and time in Anjal is shown in this zone, labelled."]</p>
+            </fieldset>
+
+            <fieldset class="setgroup">
+                <legend>@L["Date format"]</legend>
+                <div class="seg">
+                    @foreach (string f in MailboxPreferences.DateFormats.Where(f => f != "d-mmm-yyyy"))
+                    {
+                        <label class="segopt"><input type="radio" name="dateFormat" value="@f" checked="@(dateFormat == f || (f == "language" && dateFormat == "d-mmm-yyyy"))" data-autosubmit />
+                            <span>@(f == "language" ? L["Follow the language"] : ZonedClock.For(timeZone, f).In(L).Date(DateTimeOffset.UtcNow))</span></label>
+                    }
+                </div>
+            </fieldset>
+
+            @* Owner, 8 Oct 2026: the 24-hour clock unless the organisation chooses otherwise; each person
+               may choose their own, and someone who never chose follows the organisation. *@
+            <fieldset class="setgroup">
+                <legend>@L["Clock"]</legend>
+                <div class="seg">
+                    <label class="segopt"><input type="radio" name="clock" value="" checked="@(clockOwn.Length == 0)" data-autosubmit />
+                        <span>@L["Same as {org} ({clock})"].Replace("{org}", tenantName, StringComparison.Ordinal).Replace("{clock}", ClockWord(Clocks.DefaultOf(tenantSlug)), StringComparison.Ordinal)</span></label>
+                    <label class="segopt"><input type="radio" name="clock" value="24" checked="@(clockOwn == "24")" data-autosubmit /><span>@L["24-hour (14:30)"]</span></label>
+                    <label class="segopt"><input type="radio" name="clock" value="12" checked="@(clockOwn == "12")" data-autosubmit /><span>@L["12-hour (2:30 pm)"]</span></label>
+                </div>
+            </fieldset>
+
+            <fieldset class="setgroup">
+                <legend>@L["Week starts on"]</legend>
+                <div class="seg">
+                    <label class="segopt"><input type="radio" name="weekStart" value="monday" checked="@(weekStart == "monday")" data-autosubmit /><span>@L["Monday"]</span></label>
+                    <label class="segopt"><input type="radio" name="weekStart" value="sunday" checked="@(weekStart == "sunday")" data-autosubmit /><span>@L["Sunday"]</span></label>
+                </div>
+            </fieldset>
+            <noscript><button type="submit" class="btn btn-p">@L["Save"]</button></noscript>
+        </form>
+    }
+    @if (Current == "mail")
+    {
+        @* The approved Mail board (SetMail, rc.13). Each choice saves as it is made. *@
+        <section class="formcard setcard">
+            <h2>@L["Mail"]</h2>
+            <p class="hint">@L["How your mailbox behaves."]</p>
+            <div class="setgrid">
+                <form method="post" action="/settings/pagesize" class="setfield">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/settings/mail?saved=mail" />
+                    <label class="setlbl" for="pagesize">@L["Messages per page"]</label>
+                    <select id="pagesize" name="size" class="setsel" data-autosubmit>
+                        @foreach (int size in MailboxPreferences.PageSizes)
+                        {
+                            <option value="@size" selected="@(pageSize == size)">@size</option>
+                        }
+                    </select>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                <form method="post" action="/settings/mail" class="setfield">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="undo">@L["Undo send"]</label>
+                    <select id="undo" name="undo" class="setsel" data-autosubmit>
+                        @foreach (int sec in MailboxService.UndoChoices)
+                        {
+                            <option value="@sec" selected="@(mailSettings.UndoSeconds == sec)">@(sec == 0 ? L["Off: send at once"] : L["{n} seconds"].Replace("{n}", sec.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</option>
+                        }
+                    </select>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                <form method="post" action="/settings/sound" class="setfield">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/settings/mail?saved=mail" />
+                    <span class="setlbl">@L["New mail"]</span>
+                    <label class="mtoggle">
+                        <input type="checkbox" name="on" value="1" checked="@sound" data-autosubmit role="switch" />
+                        <span class="toggle" aria-hidden="true"><i></i></span>
+                        <span>@L["Play a sound"]</span>
+                    </label>
+                    <button type="button" class="linkbtn setplay" data-play-sound>@L["Play it now"]</button>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                @* rc.15 (item 58): "Your habits" on the dashboard, seen only by the person. *@
+                <form method="post" action="/settings/habits" class="setfield">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/settings/mail?saved=mail" />
+                    <span class="setlbl">@L["Your habits"]</span>
+                    <label class="mtoggle">
+                        <input type="checkbox" name="on" value="1" checked="@mailSettings.Habits" data-autosubmit role="switch" />
+                        <span class="toggle" aria-hidden="true"><i></i></span>
+                        <span>@L["Show how quickly I reply and my busiest hours on my dashboard (only I see it)"]</span>
+                    </label>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                <form method="post" action="/contacts/settings" class="setfield">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/settings/mail?saved=mail" />
+                    <input type="hidden" name="toggle" value="ask" />
+                    <span class="setlbl">@L["New senders"]</span>
+                    <label class="mtoggle">
+                        <input type="checkbox" name="ask" value="1" checked="@(!contactSettings.SaveNewSendersAutomatically)" data-autosubmit role="switch" />
+                        <span class="toggle" aria-hidden="true"><i></i></span>
+                        <span>@L["Ask to save them to contacts"]</span>
+                    </label>
+                    <p class="hint">@(contactSettings.SaveNewSendersAutomatically ? L["Off: senders of mail you open are saved without asking."] : L["On: when you close a new sender's mail, a window offers to save them."])</p>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                <form method="post" action="/contacts/settings" class="setfield">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/settings/mail?saved=mail" />
+                    <input type="hidden" name="toggle" value="recipients" />
+                    <span class="setlbl">@L["People you write to"]</span>
+                    <label class="mtoggle">
+                        <input type="checkbox" name="recipients" value="1" checked="@contactSettings.SaveRecipientsAutomatically" data-autosubmit role="switch" />
+                        <span class="toggle" aria-hidden="true"><i></i></span>
+                        <span>@L["Add them to contacts"]</span>
+                    </label>
+                    <p class="hint">@L["Names are taken from what you wrote; names you have changed are never overwritten. Lists uploaded for Send one each are left out."]</p>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                <form method="post" action="/settings/mail" class="setfield">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="trash">@L["Empty Trash after"]</label>
+                    @* rc.15 (item 22, owner 7 Oct): until a person chooses, they follow the organisation - including later changes. *@
+                    <select id="trash" name="trash" class="setsel setsel-fit" data-autosubmit>
+                        <option value="0" selected="@(!trashRule.Chosen)">@L["Same as my organisation ({n} days)"].Replace("{n}", trashRule.OrganisationDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</option>
+                        @foreach (int d in MailboxService.TrashChoices.Where(d => d <= trashRule.Longest))
+                        {
+                            <option value="@d" selected="@(trashRule.Chosen && trashRule.Days == d)">@L["{n} days"].Replace("{n}", d.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</option>
+                        }
+                    </select>
+                    <p class="hint">@L["Your organisation allows {min} to {max} days."].Replace("{min}", MailboxService.MinTrashDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{max}", trashRule.Longest.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                <div class="setfield">
+                    <span class="setlbl">@L["Empty Junk after"] <span class="setlock"><LipiIcon Name="lock" Size="12" />@L["set by your organisation"]</span></span>
+                    <select class="setsel" disabled aria-label="@L["Empty Junk after"]">
+                        <option>@L["{n} days"].Replace("{n}", junkDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</option>
+                    </select>
+                    <p class="hint">@L["Set by your organisation: {n} days."].Replace("{n}", junkDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+                </div>
+            </div>
+
+            @* rc.15 (item 65 b, D-100): full offline mail - the person's choice, on their own devices only. *@
+            <form method="post" action="/settings/offline" class="setrow">
+                <AntiforgeryToken />
+                <span class="setlbl">@L["Offline mail"] @if (!offlineAllowed) {<span class="setlock"><LipiIcon Name="lock" Size="12" />@(shared ? L["not on a shared computer"] : L["set by your organisation"])</span>}</span>
+                <label class="mtoggle @(offlineAllowed ? null : "off")">
+                    <input type="checkbox" name="on" value="1" checked="@offlineOn" disabled="@(!offlineAllowed)" data-autosubmit role="switch" />
+                    <span class="toggle" aria-hidden="true"><i></i></span>
+                    <span>@L["Keep my mail list on my devices, to look at without a connection"]</span>
+                </label>
+                @* DES-11 D5 (owner, 10 Oct 2026): the list only, locked with an offline code or the passkey. *@
+                <p class="hint">@(offlineAllowed
+                    ? L["The list of your newest {inbox} messages of the Inbox and {sent} of Sent - never the mail itself - kept on each of your own devices, locked with an offline code or your passkey. Five wrong tries, seven days without reaching Anjal, turning it off or signing out remove it."].Replace("{inbox}", OfflineEndpoints.InboxKept.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{sent}", OfflineEndpoints.SentKept.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                    : shared ? L["Mail is never kept on a shared computer."] : L["Your organisation does not allow mail to be kept on devices."])</p>
+                <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
             </form>
-        </div>
+            @if (offlineOn)
+            {
+                <div class="setrow offlock" data-offline-lock data-passkeys="@string.Join(",", offlinePasskeys)"
+                     data-word-set="@L["This device keeps your list, locked with your offline code."]"
+                     data-word-setpk="@L["This device keeps your list, locked with your offline code or your passkey."]"
+                     data-word-notset="@L["Set an offline code on this device; until you do, nothing is kept here."]"
+                     data-word-short="@L["The offline code needs at least 6 characters."]"
+                     data-word-pkfail="@L["This device's passkey cannot lock the list. The offline code still opens it."]"
+                     data-word-noworker="@L["This browser cannot keep the list."]">
+                    <span class="setlbl">@L["Offline lock"]</span>
+                    <p class="hint" data-offline-state>@L["Checking this device..."]</p>
+                    <div class="setinline">
+                        <input class="inp" type="password" data-offline-code autocomplete="new-password" minlength="6" aria-label="@L["Offline code"]" placeholder="@L["At least 6 characters"]" />
+                        <button type="button" class="btn btn-s" data-offline-setcode>@L["Set the offline code"]</button>
+                    </div>
+                    <button type="button" class="btn btn-s btn-sm" data-offline-passkey-add hidden>@L["Also open it with my passkey"]</button>
+                </div>
+            }
+
+            <form method="post" action="/settings/name" class="setrow">
+                <AntiforgeryToken />
+                <label class="setlbl" for="displayName">@L["Your name"]</label>
+                <div class="setinline">
+                    <input class="inp" id="displayName" name="displayName" type="text" value="@displayName" maxlength="100" />
+                    <button type="submit" class="btn btn-s">@L["Save"]</button>
+                </div>
+                <p class="hint">@L["Recipients see it beside your address: {from}"].Replace("{from}", FromLine, StringComparison.Ordinal)</p>
+            </form>
+
+            <form method="post" action="/settings/signature" class="setrow">
+                <AntiforgeryToken />
+                <span class="setlbl">@L["Signature"]</span>
+                <div class="sigedit">
+                    <FormatBar L="L" />
+                    <textarea class="inp sigbox" name="signatureText" rows="4" aria-label="@L["Signature"]" data-rte>@signatureText</textarea>
+                    <input type="hidden" name="signatureHtml" value="@signatureHtml" data-rte-html />
+                </div>
+                <p class="hint">@L["Added to new messages and replies. You can still change or remove it before sending."]</p>
+                <div class="setactions"><button type="submit" class="btn btn-p btn-sm">@L["Save signature"]</button></div>
+            </form>
+        </section>
+    }
+    @if (Current == "security" && Sub != "two-step")
+    {
+        @* The approved Security board (SetSecurity, rc.13). *@
+        <section class="formcard setcard">
+            <h2>@L["Security"]</h2>
+            @if (demand == "password" || Change is not null)
+            {
+                <div class="notice n-warn setdemand" role="alert"><LipiIcon Name="warning" Size="16" /><span>@(security.MustChangePassword ? L["Your administrator reset your password. Choose a new one to go on."] : security.PasswordBelowRules ? L["Passwords are now at least {n} characters for you. Choose a longer one to go on."].Replace("{n}", pwLength.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) : L["Your organisation asks you to choose a new password now. Choose one to go on."])</span></div>
+            }
+            else if (demand == "twostep")
+            {
+                <div class="notice n-warn setdemand" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["Your organisation requires two-step sign-in."] <a href="/settings/security/two-step?required=1">@L["Set it up to go on."]</a></span></div>
+            }
+
+            <form method="post" action="/settings/password" class="setblock" data-pwform>
+                <AntiforgeryToken />
+                <h3 class="sethead">@L["Change password"]</h3>
+                <input type="text" name="username" value="@address" autocomplete="username" hidden />
+                <div class="setgrid">
+                    <div class="setfield">
+                        <label class="setlbl" for="current">@L["Current password"]</label>
+                        <input class="inp" id="current" name="current" type="password" autocomplete="current-password" required />
+                    </div>
+                    <div class="setfield">
+                        <label class="setlbl" for="next">@L["New password"]</label>
+                        <input class="inp" id="next" name="next" type="password" autocomplete="new-password" required data-pwinput />
+                    </div>
+                </div>
+                <PasswordRules L="L" For="next" Failed="failedRules" MinLength="pwLength" History="policy.PasswordHistory" Note="@L["Your organisation's rules are checked as you type."]" />
+                <div class="setactions"><button type="submit" class="btn btn-p btn-sm">@L["Change password"]</button></div>
+                <p class="hint">@L["Changing it signs out your other devices; this one stays signed in."]</p>
+            </form>
+
+            <div class="setblock">
+                <h3 class="sethead">@L["Two-step sign-in"]</h3>
+                <div class="twostate">
+                    <p>@TwoStepLine</p>
+                    <div class="twobtns">
+                        @if (security.TotpSecret.Length == 0)
+                        {
+                            <a class="btn btn-s btn-sm" href="/settings/security/two-step"><LipiIcon Name="qr-code" Size="15" />@L["Set up an authenticator app"]</a>
+                        }
+                        @if (security.TwoStepOn && policy.Methods != "no-backup")
+                        {
+                            <form method="post" action="/settings/security/backup-codes" class="inline">
+                                <AntiforgeryToken />
+                                <button type="submit" class="btn btn-s btn-sm">@L["Backup codes"]</button>
+                            </form>
+                        }
+                        <button type="button" class="btn btn-s btn-sm" data-passkey-add hidden><LipiIcon Name="biometric" Size="15" />@L["Add a passkey"]</button>
+                    </div>
+                </div>
+                <div class="err" role="alert" data-passkey-error hidden><LipiIcon Name="warning" Size="16" /><span></span></div>
+                @if (security.Passkeys.Count > 0)
+                {
+                    <ul class="keylist">
+                        @foreach (PasskeyRecord p in security.Passkeys)
+                        {
+                            <li>
+                                <LipiIcon Name="biometric" Size="18" />
+                                <span class="keytext"><b>@p.Name</b><span>@L["Added {date}"].Replace("{date}", clock.Date(p.Added), StringComparison.Ordinal)@(p.LastUsed is DateTimeOffset used ? ". " + L["Last used {when}"].Replace("{when}", Ago(used), StringComparison.Ordinal) : string.Empty)</span></span>
+                                <form method="post" action="/settings/security/passkey/remove" class="inline">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value="@p.Id" />
+                                    <button type="submit" class="btn btn-q btn-sm">@L["Remove"]</button>
+                                </form>
+                            </li>
+                        }
+                    </ul>
+                }
+                @if (security.TotpSecret.Length > 0)
+                {
+                    <details class="setmore">
+                        <summary>@L["Turn off the authenticator app"]</summary>
+                        <form method="post" action="/settings/security/authenticator/remove" class="setinline">
+                            <AntiforgeryToken />
+                            <input class="inp" name="password" type="password" autocomplete="current-password" required placeholder="@L["Your password"]" aria-label="@L["Your password"]" />
+                            <button type="submit" class="btn btn-danger btn-sm">@L["Turn off"]</button>
+                        </form>
+                    </details>
+                }
+            </div>
+
+            <form method="post" action="/settings/security/recovery" class="setblock">
+                <AntiforgeryToken />
+                <h3 class="sethead">@L["Recovery address"]</h3>
+                <p class="hint">@(security.RecoveryAddress.Length > 0
+                    ? L["A forgotten password is reset with a code sent to {address}."].Replace("{address}", security.RecoveryAddress, StringComparison.Ordinal)
+                    : L["None yet. Without one, a forgotten password needs a backup code, another signed-in device, or your administrator."])</p>
+                <div class="setinline">
+                    <input class="inp" name="recovery" type="email" value="@security.RecoveryAddress" placeholder="@L["A personal address"]" aria-label="@L["Recovery address"]" autocomplete="email" />
+                    <input class="inp" name="password" type="password" required placeholder="@L["Your password"]" aria-label="@L["Your password"]" autocomplete="current-password" />
+                    <button type="submit" class="btn btn-s btn-sm">@L["Save"]</button>
+                </div>
+            </form>
+
+            <div class="setblock">
+                <h3 class="sethead">@L["Signed-in devices"]</h3>
+                <ul class="devlist">
+                    @foreach (SessionRecord d in devices)
+                    {
+                        bool me = d.Id == sessionId;
+                        <li>
+                            <LipiIcon Name="@(d.Phone ? "mobile-app" : "monitoring")" Size="20" />
+                            <span class="devtext">
+                                <b>@(me ? L["This computer"] : d.Device)</b>
+                                @if (d.Shared)
+                                {
+                                    <span class="pill pill-warn">@L["Shared computer"]</span>
+                                }
+                                <span class="devsub">@(me ? d.Device + ". " : string.Empty)@d.Address. @(me ? L["Now"] : Ago(d.LastSeen))</span>
+                            </span>
+                            <form method="post" action="/settings/security/sessions/end" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="sid" value="@d.Id" />
+                                <button type="submit" class="btn btn-s btn-sm">@L["Sign out"]</button>
+                            </form>
+                        </li>
+                    }
+                </ul>
+                @if (devices.Count > 1)
+                {
+                    <form method="post" action="/settings/security/sessions/others">
+                        <AntiforgeryToken />
+                        <button type="submit" class="btn btn-danger-q">@L["Sign out everywhere else"]</button>
+                    </form>
+                }
+            </div>
+        </section>
+    }
+    @if (Current == "security" && Sub == "two-step")
+    {
+        <section class="formcard setcard">
+            @if ((demand == "twostep" || Required is not null) && !security.TwoStepOn)
+            {
+                <div class="notice n-warn setdemand" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["Your organisation requires two-step sign-in. Set it up to go on."]</span></div>
+            }
+            @if (Welcome is not null)
+            {
+                <ol class="authsteps" aria-label="@L["Steps"]">
+                    <li class="done">@L["1 Password"]</li>
+                    <li aria-hidden="true" class="bar"></li>
+                    <li class="on" aria-current="step">@L["2 Two-step sign-in"]</li>
+                </ol>
+            }
+            @if (codes is not null)
+            {
+                <h2>@L["Your backup codes"]</h2>
+                <p class="hint">@L["Each code works once, when your phone is not to hand. Keep them somewhere safe, away from your phone. They are shown only now."]</p>
+                <ol class="codelist">
+                    @foreach (string c in codes)
+                    {
+                        <li><code>@c</code></li>
+                    }
+                </ol>
+                <div class="setactions">
+                    <a class="btn btn-s btn-sm" download="anjal-backup-codes.txt" href="@CodesFile"><LipiIcon Name="download" Size="15" />@L["Download"]</a>
+                    <button type="button" class="btn btn-s btn-sm" data-print><LipiIcon Name="print" Size="15" />@L["Print"]</button>
+                    <a class="btn btn-p btn-sm" href="@(Welcome is not null ? "/folder/INBOX" : "/settings/security?saved=twostep")">@L["I have saved them"]</a>
+                </div>
+            }
+            else if (Codes is not null)
+            {
+                <h2>@L["Your backup codes"]</h2>
+                <p class="hint">@L["Backup codes are shown only once. If you did not save them, make a new set: the old ones stop working."]</p>
+                <form method="post" action="/settings/security/backup-codes"><AntiforgeryToken /><button type="submit" class="btn btn-s btn-sm">@L["Make new backup codes"]</button></form>
+            }
+            else if (security.TotpSecret.Length > 0)
+            {
+                <h2>@L["Two-step sign-in is on"]</h2>
+                <p class="hint">@TwoStepLine</p>
+                <a class="btn btn-s btn-sm" href="/settings/security">@L["Back to Security"]</a>
+            }
+            else if (setup is not null)
+            {
+                <h2>@L["Set up two-step sign-in"]</h2>
+                <p class="hint">@L["After your password, Anjal will ask for a code from an app on your phone. Any authenticator app works: Google Authenticator, Microsoft Authenticator, 1Password and others."]</p>
+                <div class="twosetup">
+                    <div class="twoqr">@((MarkupString)QrCode.Svg(setup.Value.Uri, L["Picture for your authenticator app"]))</div>
+                    <div class="twosteps">
+                        <p><b>@L["1. Scan the picture with the app."]</b></p>
+                        <p class="hint">@L["Or type this key into it:"]</p>
+                        <code class="twokey">@setup.Value.Secret</code>
+                    </div>
+                </div>
+                <form method="post" action="/settings/security/authenticator/confirm" class="authfields twoconfirm">
+                    <AntiforgeryToken />
+                    <p><b>@L["2. Type the 6-digit code it shows."]</b></p>
+                    <CodeBoxes L="L" Label="@L["Code from your authenticator app"]" Focus="false" />
+                    <div class="setactions"><button type="submit" class="btn btn-p">@L["Turn on"]</button></div>
+                </form>
+                <p class="hint twoalt">@L["Or use a passkey: this computer or your phone confirms it is you, with a fingerprint, face or PIN."] <button type="button" class="linkbtn" data-passkey-add hidden>@L["Add a passkey"]</button></p>
+                <div class="err" role="alert" data-passkey-error hidden><LipiIcon Name="warning" Size="16" /><span></span></div>
+                @if (Welcome is not null && demand != "twostep" && Required is null)
+                {
+                    <p class="setactions"><a class="btn btn-q btn-sm" href="/folder/INBOX">@L["Skip for now"]</a></p>
+                }
+            }
+        </section>
+    }
+    @if (Current == "help")
+    {
+        <section class="formcard setcard">
+            <h2>@L["Help"]</h2>
+            <p class="hint">@L["Shortcuts, the tour, and where to get help."]</p>
+            <div class="helplinks">
+                <a class="btn btn-s" href="#shortcuts"><LipiIcon Name="help" Size="16" />@L["Keyboard shortcuts"]</a>
+                <a class="btn btn-s" href="/folder/INBOX#tour"><LipiIcon Name="refresh" Size="16" />@L["Take the tour again"]</a>
+            </div>
+            <p class="hint">@L["For anything else, ask your organisation's administrator."]</p>
+        </section>
+    }
+    @if (Current == "rules")
+    {
+        <RulesSettings Part="main" />
     }
     @if (Current == "categories")
     {
-        <div class="formcard">
-            <h2>Categories</h2>
-            <p class="hint">
-                Your organisation sets the shared ones; you can add your own on top.
-                Eight carry a colour — the shared ones take theirs first, yours take what is left,
-                and any beyond eight still work, told apart by name.
-            </p>
+        @* rc.15 (owner, 7 Oct: "no design consistency"): the same pattern as Folders and rules -
+           a heading and its lead, a section with its action at the right, rows, and one empty state. *@
+        <div class="formcard setcard">
+            <h2>@L["Categories"]</h2>
+            <p class="hint">@L["Your organisation sets the shared ones; you can add your own on top. Eight carry a colour: the shared ones take theirs first, yours take what is left, and any beyond eight still work, told apart by name."]</p>
+            <div class="rhead"><h3>@L["Categories"]</h3><span class="lh-grow"></span>
+                <details class="pmenu pmenu-right">
+                    <summary class="btn btn-s"><LipiIcon Name="plus" Size="15" />@L["New category"]</summary>
+                    <form method="post" action="/settings/categories" class="pmenu-body">
+                        <AntiforgeryToken />
+                        <input class="railinp" name="name" type="text" maxlength="40" required placeholder="@L["Category name"]" aria-label="@L["Category name"]" />
+                        <button type="submit" class="btn btn-p btn-sm" data-needs-server>@L["Create"]</button>
+                    </form>
+                </details>
+            </div>
+            @if (categories.Count == 0)
+            {
+                <p class="sempty">@L["None yet."]</p>
+            }
             @foreach (CategoryView c in categories)
             {
                 <div class="catrow">
                     <span class="chip slot-@c.Row.Slot"><i></i>@c.Row.Name</span>
-                    <span class="catmeta">@c.Count message@(c.Count == 1 ? "" : "s")</span>
+                    <span class="catmeta">@(c.Count == 1 ? L["1 message"] : L["{n} messages"].Replace("{n}", MailboxService.Count(c.Count), StringComparison.Ordinal))</span>
                     @if (c.Shared)
                     {
-                        <span class="catmeta shared">Shared by @tenantName</span>
+                        <span class="catmeta shared">@L["Shared by {organisation}"].Replace("{organisation}", tenantName, StringComparison.Ordinal)</span>
                     }
                     else
                     {
                         <form method="post" action="/settings/categories/delete" class="inline catdel">
                             <AntiforgeryToken />
                             <input type="hidden" name="categoryId" value="@c.Row.Id" />
-                            <button type="submit" class="btn btn-q btn-sm">Remove</button>
+                            <button type="submit" class="btn btn-q btn-sm" data-needs-server>@L["Remove"]</button>
                         </form>
                     }
                 </div>
             }
-            <form method="post" action="/settings/categories" class="catadd">
-                <AntiforgeryToken />
-                <input class="inp" name="name" type="text" maxlength="40" placeholder="Add a category of your own" aria-label="New category" />
-                <button type="submit" class="btn btn-p">Add</button>
-            </form>
         </div>
 
         @* Everything this mailbox has decided about particular senders, in one
@@ -102,130 +588,308 @@
     }
     @if (Current == "senders")
     {
-        <div class="formcard" id="senders">
-            <h2>Senders</h2>
-            <p class="hint">
-                Report spam and Not spam decide where a sender's mail goes in <b>your</b> mailbox only.
-                Remove a rule here and that sender's mail is judged afresh.
-            </p>
-            <form method="post" action="/settings/senders/add" class="ruleadd">
-                <AntiforgeryToken />
-                <input class="inp" name="pattern" placeholder="name@@hospital.example or @@hospital.example" aria-label="Sender address or domain" required />
-                <select class="inp" name="rule" aria-label="What to do with their mail">
-                    <option value="block">Always to Junk</option>
-                    <option value="allow">Never to Junk</option>
-                    @foreach (CategoryView c in categories)
-                    {
-                        <option value="cat:@c.Row.Id">File in @c.Row.Name</option>
-                    }
-                </select>
-                <button type="submit" class="btn btn-s btn-sm">Add rule</button>
-            </form>
-            @if (senderRules.Count == 0 && rules.Count == 0)
+        <div class="formcard setcard" id="senders">
+            <h2>@L["Senders"]</h2>
+            <p class="hint">@L["Report spam and Not spam decide where a sender's mail goes in your mailbox only. Remove a rule here and that sender's mail is judged afresh."]</p>
+            <div class="rhead"><h3>@L["Blocked and allowed"]</h3><span class="lh-grow"></span>
+                <details class="pmenu pmenu-right">
+                    <summary class="btn btn-s"><LipiIcon Name="plus" Size="15" />@L["New sender rule"]</summary>
+                    <form method="post" action="/settings/senders/add" class="pmenu-body ruleadd">
+                        <AntiforgeryToken />
+                        <input class="railinp" name="pattern" placeholder="@L["name@hospital.example or @hospital.example"]" aria-label="@L["Sender address or domain"]" required />
+                        <select class="railinp" name="rule" aria-label="@L["What to do with their mail"]">
+                            <option value="block">@L["Always to Junk"]</option>
+                            <option value="allow">@L["Never to Junk"]</option>
+                            @foreach (CategoryView c in categories)
+                            {
+                                <option value="cat:@c.Row.Id">@L["File in {category}"].Replace("{category}", c.Row.Name, StringComparison.Ordinal)</option>
+                            }
+                        </select>
+                        <button type="submit" class="btn btn-p btn-sm" data-needs-server>@L["Add rule"]</button>
+                    </form>
+                </details>
+            </div>
+            @if (senderRules.Count == 0)
             {
-                <p class="catmeta">No sender rules yet. They appear here when you use Report spam or Not spam,
-                   or file a sender's mail in a category automatically.</p>
+                <p class="sempty">@L["None yet. Rules appear here when you use Report spam or Not spam, or add one."]</p>
             }
-            @if (senderRules.Count > 0)
+            @foreach (SenderRuleRow r in senderRules)
             {
-                <h3 class="subhead">Blocked and allowed</h3>
-                @foreach (SenderRuleRow r in senderRules)
+                <div class="catrow">
+                    <span class="mono">@r.Pattern</span>
+                    <span class="catmeta">@(r.Action == SenderRuleAction.Block ? L["Always to Junk"] : L["Never to Junk"])</span>
+                    <form method="post" action="/settings/senders/delete" class="inline catdel">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="ruleId" value="@r.Id" />
+                        <button type="submit" class="btn btn-q btn-sm" data-needs-server>@L["Remove"]</button>
+                    </form>
+                </div>
+            }
+            <div class="rhead"><h3>@L["Filed in a category automatically"]</h3></div>
+            @if (rules.Count == 0)
+            {
+                <p class="sempty">@L["None yet. Choose a category for a message and tick “Also file future mail” to add one."]</p>
+            }
+            @foreach (CategoryRuleRow r in rules)
+            {
+                <div class="catrow">
+                    <span class="mono">@r.Pattern</span>
+                    <span class="catmeta">@(NameOf(r.CategoryId))</span>
+                    <form method="post" action="/settings/categories/rules/delete" class="inline catdel">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="ruleId" value="@r.Id" />
+                        <button type="submit" class="btn btn-q btn-sm" data-needs-server>@L["Forget"]</button>
+                    </form>
+                </div>
+            }
+        </div>
+    }
+    </div>
+
+    @if (Aside)
+    {
+        <aside class="setaside" aria-label="@L["About this section"]">
+            @if (Current == "appearance")
+            {
+                <h2 class="asidehead">@L["Preview"]</h2>
+                <div class="apreview" aria-hidden="true">
+                    <span class="ap-rail"><i class="ap-tile"></i><i></i><i></i></span>
+                    <span class="ap-list"><i class="ap-sel"></i><i></i><i></i><i></i></span>
+                    <span class="ap-read"><i class="ap-h"></i><i></i><i></i><i></i><b class="ap-send">@L["Send"]</b></span>
+                </div>
+                <p class="asidetext">@L["{colour}, {mode}, {density}, {layout}. Stamps stay green in every theme."].Replace("{colour}", L[Title(colour)], StringComparison.Ordinal).Replace("{mode}", L[ModeWord].ToLowerInvariant(), StringComparison.Ordinal).Replace("{density}", L[Title(density)].ToLowerInvariant(), StringComparison.Ordinal).Replace("{layout}", L[LayoutWord].ToLowerInvariant(), StringComparison.Ordinal)</p>
+                <form method="post" action="/settings/appearance">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="colour" value="anjal" />
+                    <input type="hidden" name="mode" value="light" />
+                    <input type="hidden" name="density" value="@MailboxPreferences.DefaultDensity" />
+                    <input type="hidden" name="layout" value="@MailboxPreferences.DefaultLayout" />
+                    <button type="submit" class="btn btn-s asidebtn">@L["Reset to organisation default"]</button>
+                </form>
+            }
+            @if (Current == "language")
+            {
+                <h2 class="asidehead">@L["How dates will look"]</h2>
+                <div class="asidecard"><span>@L["In the list"]</span><b>@SampleList</b></div>
+                <div class="asidecard"><span>@L["In the envelope"]</span><b>@clock.Full(DateTimeOffset.UtcNow)</b></div>
+                <div class="asidecard"><span>@L["Time zone"]</span><b>@clock.ZoneName(DateTimeOffset.UtcNow)</b></div>
+                <p class="asidetext">@L["All words in Indian scripts are checked by a native speaker before release."]</p>
+            }
+            @if (Current == "mail")
+            {
+                <h2 class="asidehead">@L["What your organisation allows"]</h2>
+                <p class="asideline"><b>@L["Trash"]</b>: @L["you choose, {min} to {max} days."].Replace("{min}", MailboxService.MinTrashDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{max}", trashRule.Longest.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+                <p class="asideline"><b>@L["Junk"]</b>: @L["emptied after {n} days for everyone."].Replace("{n}", trashRule.JunkDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+                <p class="asideline"><b>@L["Attachments"]</b>: @L["up to 18 MB per message."]</p>
+                <p class="asideline"><b>@L["Storage"]</b>: @(quota > 0 ? L["{quota}; you use {used}."].Replace("{quota}", Layout.MainLayout.Size(quota), StringComparison.Ordinal).Replace("{used}", Layout.MainLayout.Size(used), StringComparison.Ordinal) : L["no limit; you use {used}."].Replace("{used}", Layout.MainLayout.Size(used), StringComparison.Ordinal))</p>
+                @if (quota > 0)
                 {
-                    <div class="catrow">
-                        <span class="mono">@r.Pattern</span>
-                        <span class="catmeta">@(r.Action == SenderRuleAction.Block ? "Always to Junk" : "Never to Junk")</span>
-                        <form method="post" action="/settings/senders/delete" class="inline catdel">
-                            <AntiforgeryToken />
-                            <input type="hidden" name="ruleId" value="@r.Id" />
-                            <button type="submit" class="btn btn-q btn-sm">Remove</button>
-                        </form>
-                    </div>
+                    <span class="quotabar" role="img" aria-label="@L["{n}% used"].Replace("{n}", UsedPercent.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)"><i style="width:@(Math.Max(1, UsedPercent))%"></i></span>
                 }
             }
-            @if (rules.Count > 0)
+            @if (Current == "security")
             {
-                <h3 class="subhead">Filed in a category automatically</h3>
-                @foreach (CategoryRuleRow r in rules)
+                <h2 class="asidehead">@L["Rules that apply to you"]</h2>
+                <div class="asidecard"><b>@L["On a shared computer"]</b><span>@L["Signed out after {n} minutes idle; nothing kept after sign-out."].Replace("{n}", policy.SharedIdleMinutes.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span></div>
+                <div class="asidecard"><b>@L["On your own devices"]</b><span>@L["Signed out after {h} hours idle; stay signed in up to {d} days."].Replace("{h}", policy.OwnIdleHours.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{d}", policy.StayDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span></div>
+                <div class="asidecard"><b>@L["Password"]</b><span>@L["At least {n} characters for you: 15 without two-step sign-in, 12 with it. Any characters; a phrase of ordinary words works well."].Replace("{n}", pwLength.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) @L["You are not made to change it on a schedule."]</span></div>
+                @if (policy.TwoStep != "optional")
                 {
-                    <div class="catrow">
-                        <span class="mono">@r.Pattern</span>
-                        <span class="catmeta">@(NameOf(r.CategoryId))</span>
-                        <form method="post" action="/settings/categories/rules/delete" class="inline catdel">
-                            <AntiforgeryToken />
-                            <input type="hidden" name="ruleId" value="@r.Id" />
-                            <button type="submit" class="btn btn-q btn-sm">Forget</button>
-                        </form>
-                    </div>
+                    <div class="asidecard"><b>@L["Two-step sign-in"]</b><span>@(policy.TwoStep == "everyone" ? L["Required for everyone in your organisation."] : L["Required for administrators."])</span></div>
+                }
+                <p class="asidetext">@L["Anjal sets these limits; your organisation can make them stricter. Ask your administrator about them."]</p>
+                @* rc.15 (item 60): everyone sees whether their organisation counts figures about them, and why. *@
+                <h2 class="asidehead">@L["Figures about you"]</h2>
+                @if (figures.On)
+                {
+                    <div class="asidecard"><b>@L["{org} counts figures for each person"].Replace("{org}", tenantName, StringComparison.Ordinal)</b><span>@L["How many messages you receive, send and have filed in Junk. Never what mail says, who it is from or to, or its subjects."]</span></div>
+                    <div class="asidecard"><b>@L["Why"]</b><span>@figures.Purpose</span></div>
+                    <div class="asidecard"><b>@L["Counted from"]</b><span>@(figures.FromAt is DateTimeOffset f ? clock.Date(f) : L["All mail kept"]). @L["Turned on by {who}."].Replace("{who}", figures.By, StringComparison.Ordinal)</span></div>
+                }
+                else
+                {
+                    <p class="asidetext">@L["{org} does not count figures about any one person: only totals for the whole organisation."].Replace("{org}", tenantName, StringComparison.Ordinal)</p>
                 }
             }
-        </div>
+            @if (Current == "rules")
+            {
+                @if (RuleQuery is not null)
+                {
+                    <RulesSettings Part="edit" />
+                }
+                else
+                {
+                    <h2 class="asidehead">@L["How rules work"]</h2>
+                    <div class="asidecard"><b>@L["In order"]</b><span>@L["Rules run top first; the first that matches acts."]</span></div>
+                    <div class="asidecard"><b>@L["Tried first"]</b><span>@L["Each rule can be tried on the last 30 days before it is saved."]</span></div>
+                    <div class="asidecard"><b>@L["Your folders"]</b><span>@L["A folder can be removed once it is empty."]</span></div>
+                    <p class="asidetext">@L["Choose a rule to change it here."]</p>
+                }
+            }
+            @if (Current == "categories")
+            {
+                <h2 class="asidehead">@L["Your categories"]</h2>
+                <div class="asidecard"><span>@L["Shared by {organisation}"].Replace("{organisation}", tenantName, StringComparison.Ordinal)</span><b>@categories.Count(c => c.Shared)</b></div>
+                <div class="asidecard"><span>@L["Yours"]</span><b>@categories.Count(c => !c.Shared)</b></div>
+                <div class="asidecard"><span>@L["Colours in use"]</span><b>@L["{n} of 8"].Replace("{n}", Math.Min(8, categories.Count).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</b></div>
+            }
+            @if (Current == "senders")
+            {
+                <h2 class="asidehead">@L["Your sender rules"]</h2>
+                <div class="asidecard"><span>@L["Always to Junk"]</span><b>@senderRules.Count(r => r.Action == SenderRuleAction.Block)</b></div>
+                <div class="asidecard"><span>@L["Never to Junk"]</span><b>@senderRules.Count(r => r.Action != SenderRuleAction.Block)</b></div>
+                <div class="asidecard"><span>@L["Filed in a category automatically"]</span><b>@rules.Count</b></div>
+                <p class="asidetext">@L["These rules affect your mailbox only."]</p>
+            }
+            @if (Current == "help")
+            {
+                <h2 class="asidehead">@L["Your account"]</h2>
+                <div class="asidecard"><span>@L["Signed in as"]</span><b>@address</b></div>
+                <div class="asidecard"><span>@L["Organisation"]</span><b>@tenantName</b></div>
+            }
+        </aside>
     }
-    @if (Current == "signature")
-    {
-        <div class="formcard">
-            <h2>Signature</h2>
-            <p class="hint">Added below your message when you start a new message, reply or forward. You can still edit or remove it before sending.</p>
-            <form method="post" action="/settings/signature">
-                <AntiforgeryToken />
-                <FormatBar />
-                <textarea class="inp sigbox" name="signatureText" rows="5" aria-label="Signature" data-rte>@signatureText</textarea>
-                <input type="hidden" name="signatureHtml" value="@signatureHtml" data-rte-html />
-                <div class="setactions"><button type="submit" class="btn btn-p btn-sm">Save signature</button></div>
-            </form>
-        </div>
-    }
-    @if (Current == "password")
-    {
-        <div class="formcard">
-            <h2>Password</h2>
-            <p class="hint">At least @MailboxService.MinimumPasswordLength characters. Anjal does not expire passwords. Changing it keeps this session signed in.</p>
-            <form method="post" action="/settings/password">
-                <AntiforgeryToken />
-                <div class="row">
-                    <label class="lbl" for="current">Current password</label>
-                    <input class="inp" id="current" name="current" type="password" autocomplete="current-password" required />
-                </div>
-                <div class="row">
-                    <label class="lbl" for="next">New password</label>
-                    <input class="inp" id="next" name="next" type="password" autocomplete="new-password" required minlength="@MailboxService.MinimumPasswordLength" />
-                </div>
-                <div class="row">
-                    <label class="lbl" for="confirm">Confirm new password</label>
-                    <input class="inp" id="confirm" name="confirm" type="password" autocomplete="new-password" required />
-                </div>
-                <button type="submit" class="btn btn-p">Change password</button>
-            </form>
-        </div>
-    }
-</div>
 </div>
 
 @code {
-    /// <summary>The section in the address, e.g. /settings/senders; Profile when absent.</summary>
+    /// <summary>The section in the address, e.g. /settings/mail; Appearance when absent.</summary>
     [Parameter] public string? Section { get; set; }
 
-    private static readonly (string Key, string Label)[] Sections =
+    /// <summary>A page within a section: /settings/security/two-step.</summary>
+    [Parameter] public string? Sub { get; set; }
+
+    private static readonly (string Key, string Label, string Sub, string Icon)[] Sections =
     {
-        ("profile", "Profile"), ("appearance", "Appearance"), ("categories", "Categories"),
-        ("senders", "Senders"), ("signature", "Signature"), ("password", "Password"),
+        ("appearance", "Appearance", "Theme, density, layout", "contrast"),
+        ("language", "Language and time", "Language, time zone, dates", "world-route"),
+        ("mail", "Mail", "Per page, sound, signature, emptying", "email"),
+        ("security", "Security", "Password, two-step, devices", "lock"),
+        ("rules", "Folders and rules", "Your folders, rules that file mail", "folder"),
+        ("categories", "Categories", "Shared and your own", "tag"),
+        ("senders", "Senders", "Always or never to Junk", "security"),
+        ("help", "Help", "Shortcuts, tour, guide", "help"),
     };
 
-    private string Current => Sections.Any(x => x.Key == Section) ? Section! : "profile";
+    // Addresses from before rc.13 still land in the right place.
+    private string Current => Section switch
+    {
+        "profile" or "signature" => "mail",
+        "password" => "security",
+        _ when Sections.Any(x => x.Key == Section) => Section!,
+        _ => "appearance",
+    };
+
+    // rc.15 (owner, 7 Oct: "make the entire settings in a single design concept"): every section
+    // has the same three columns - the sections, the card, and a right-hand column about it.
+    private bool Aside => true;
+
+    [SupplyParameterFromQuery(Name = "rule")] private string? RuleQuery { get; set; }
 
     private string signatureHtml = string.Empty;
     private string signatureText = string.Empty;
 
     [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
     [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
+    [SupplyParameterFromQuery(Name = "welcome")] private string? Welcome { get; set; }
+    [SupplyParameterFromQuery(Name = "codes")] private string? Codes { get; set; }
+    [SupplyParameterFromQuery(Name = "change")] private string? Change { get; set; }
+    [SupplyParameterFromQuery(Name = "required")] private string? Required { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private string displayName = string.Empty;
     private string theme = MailboxRow.DefaultTheme;
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private string colour = "anjal";
+    private string mode = "light";
+    private string density = MailboxPreferences.DefaultDensity;
+    private string layout = MailboxPreferences.DefaultLayout;
+    private string language = MailboxPreferences.DefaultLanguage;
+    private string timeZone = MailboxPreferences.DefaultTimeZone;
+    private string dateFormat = MailboxPreferences.DefaultDateFormat;
+    private string weekStart = MailboxPreferences.DefaultWeekStart;
+    private int pageSize = MailboxPreferences.DefaultPageSize;
+    private bool sound = true;
+    private long quota;
+    private long used;
+    private ZonedClock clock = ZonedClock.Default;
+    private MailSettings mailSettings = new();
+    private string clockOwn = string.Empty;
+    private string? tenantSlug;
+    private PersonFiguresSetting figures = new();
+
+    private string ClockWord(string clock) => clock == Clocks.Twelve ? L["12-hour"] : L["24-hour"];
+    private bool isOperator;
+    private TrashRule trashRule = new(MailboxService.DefaultTrashDays, false, MailboxService.DefaultTrashDays, MailboxService.MaxTrashDays, MailboxService.JunkDays);
+    private int junkDays = MailboxService.JunkDays;
+    private bool offlineAllowed;
+    private bool offlineOn;
+    private IReadOnlyList<string> offlinePasskeys = Array.Empty<string>();
+    private bool shared;
+    private ContactSettings contactSettings = new();
+    private SecurityDocument security = new();
+    private SignInPolicy policy = new();
+
+    // The person's shortest password: 15, or 12 with two-step (owner, 10 Oct 2026).
+    private int pwLength = Anjal.Smtp.PasswordPolicy.AloneLength;
+    private string? demand;
+    private IReadOnlyList<SessionRecord> devices = System.Array.Empty<SessionRecord>();
+    private string? sessionId;
+    private (string Uri, string Secret)? setup;
+    private IReadOnlyList<string>? codes;
+    private string? note;
+    private IReadOnlyCollection<string> failedRules = System.Array.Empty<string>();
+
+    private static readonly (string Key, string Word)[] Modes = { ("light", "Light"), ("dark", "Dark"), ("auto", "Follow this device") };
     private string address = string.Empty;
     private string tenantName = string.Empty;
     private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
     private IReadOnlyList<CategoryRuleRow> rules = System.Array.Empty<CategoryRuleRow>();
     private IReadOnlyList<SenderRuleRow> senderRules = System.Array.Empty<SenderRuleRow>();
+
+    private string? ErrorText => note ?? Error;
+
+    private int UsedPercent => Sizes.Percent(used, quota);
+
+    private string ModeWord => Modes.FirstOrDefault(m => m.Key == mode).Word ?? "Light";
+
+    private string LayoutWord => layout switch { "focus" => "Focus", "list" => "List only", _ => "Three panes" };
+
+    private string SampleList
+    {
+        get
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            return string.Join(" · ", new[] { now.AddMinutes(-40), now.AddDays(-1), now.AddDays(-3), now.AddDays(-9) }.Select(t => clock.List(t, now)));
+        }
+    }
+
+    private string TwoStepLine
+    {
+        get
+        {
+            if (!security.TwoStepOn)
+            {
+                return L["Off. Only your password is asked for."];
+            }
+            var parts = new List<string>();
+            if (security.TotpSecret.Length > 0)
+            {
+                parts.Add(L["authenticator app"]);
+            }
+            if (security.Passkeys.Count > 0)
+            {
+                parts.Add(L["passkeys: {n}"].Replace("{n}", security.Passkeys.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal));
+            }
+            string line = L["On: {ways}."].Replace("{ways}", string.Join(", ", parts), StringComparison.Ordinal);
+            return security.BackupCodes.Count > 0
+                ? line + " " + L["{n} backup codes left."].Replace("{n}", security.BackupCodes.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                : line;
+        }
+    }
+
+    private string CodesFile => "data:text/plain;charset=utf-8," + Uri.EscapeDataString(
+        "Anjal backup codes for " + address + "\r\nEach works once.\r\n\r\n" + string.Join("\r\n", codes ?? System.Array.Empty<string>()) + "\r\n");
 
     private string NameOf(Guid categoryId)
     {
@@ -243,19 +907,42 @@
 
     private string SavedMessage => Saved switch
     {
-        "name" => "Display name saved.",
-        "theme" => "Theme saved.",
-        "password" => "Password changed. You are still signed in here; other sessions will need the new password.",
-        "category" => "Category added.",
-        "categoryremoved" => "Category removed. Messages that carried it are now uncategorised.",
-        "ruleremoved" => "That sender will no longer be filed automatically.",
-        "senderremoved" => "Rule removed. That sender's mail will be judged afresh.",
-        "senderadded" => "Rule added. It applies to mail arriving from now on.",
-        "signature" => "Signature saved. It will appear in new messages, replies and forwards.",
-        _ => "Saved.",
+        "name" => L["Your name is saved."],
+        "theme" => L["Theme saved."],
+        "appearance" => L["Appearance saved."],
+        "language" => L["Language and time saved."],
+        "mail" => L["Saved."],
+        "offline" => L["Offline list is on. Set an offline code below on each device that should keep it."],
+        "offlineoff" => L["Offline list is off. The copy kept on this device is being removed; on your other devices, the next time you open Anjal there."],
+        "password" => L["Your password is changed. You are signed out everywhere else, and every trusted device will ask for the second step once more."],
+        "recovery" => L["Recovery address saved."],
+        "twostep" => L["Two-step sign-in is on."],
+        "authenticatoroff" => L["The authenticator app is turned off."],
+        "passkey" => L["Passkey added. You can use it at the second step of signing in."],
+        "passkeyremoved" => L["Passkey removed."],
+        "device" => L["That device is signed out."],
+        "others" => L["Every other device is signed out, and will ask for the second step again."],
+        "category" => L["Category added."],
+        "categoryremoved" => L["Category removed. Messages that carried it are now uncategorised."],
+        "ruleremoved" => L["That sender will no longer be filed automatically."],
+        "senderremoved" => L["Rule removed. That sender's mail will be judged afresh."],
+        "senderadded" => L["Rule added. It applies to mail arriving from now on."],
+        "signature" => L["Signature saved. It will appear in new messages, replies and forwards."],
+        _ => L["Saved."],
     };
 
     private static string Title(string t) => t.Length == 0 ? t : char.ToUpperInvariant(t[0]) + t.Substring(1);
+
+    private string Ago(DateTimeOffset at)
+    {
+        TimeSpan d = DateTimeOffset.UtcNow - at;
+        return d < TimeSpan.FromMinutes(2) ? L["just now"]
+            : d < TimeSpan.FromHours(1) ? L["{n} minutes ago"].Replace("{n}", ((int)d.TotalMinutes).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+            : d < TimeSpan.FromHours(2) ? L["an hour ago"]
+            : d < TimeSpan.FromDays(1) ? L["{n} hours ago"].Replace("{n}", ((int)d.TotalHours).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+            : d < TimeSpan.FromDays(2) ? L["yesterday"]
+            : L["{n} days ago"].Replace("{n}", ((int)d.TotalDays).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -263,24 +950,84 @@
         {
             return;
         }
-        Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        isOperator = Operators.Is(user.Identity?.Name);
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        Guid? mailboxId = WebmailAuthService.PersonIdOf(user);
         if (mailboxId is null)
         {
             return;
+        }
+        note = AuthEndpoints.ReadNote(Protection, E);
+        if (note is not null && note.Contains("used that password before", StringComparison.Ordinal))
+        {
+            failedRules = new[] { "history" };
         }
         (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);
         if (context is not null)
         {
             displayName = context.Value.Mailbox.DisplayName;
-            theme = context.Value.Mailbox.Theme;
+            theme = MailboxRow.NormalizeTheme(context.Value.Mailbox.Theme);
+            colour = theme[..theme.LastIndexOf('-')];
+            mode = theme[(theme.LastIndexOf('-') + 1)..];
+            MailboxPreferences prefs = MailboxPreferences.Of(context.Value.Mailbox).Normalized();
+            density = prefs.Density;
+            layout = prefs.Layout;
+            language = prefs.Language;
+            timeZone = prefs.TimeZone;
+            dateFormat = prefs.DateFormat;
+            weekStart = prefs.WeekStart;
+            pageSize = prefs.PageSize;
+            sound = prefs.NewMailSound;
+            quota = context.Value.Mailbox.QuotaBytes;
+            used = context.Value.Mailbox.UsedBytes;
             address = context.Value.Mailbox.Address;
+            tenantSlug = context.Value.Tenant.Slug;
+            clockOwn = Clocks.Choice((await Mail.GetMailSettingsAsync(mailboxId.Value)).Clock);
             tenantName = string.IsNullOrWhiteSpace(context.Value.Tenant.DisplayName)
                 ? context.Value.Tenant.Slug
                 : context.Value.Tenant.DisplayName;
         }
-        categories = await Mail.ListCategoriesAsync(mailboxId.Value);
-        rules = await Mail.ListCategoryRulesAsync(mailboxId.Value);
-        senderRules = await Mail.ListSenderRulesAsync(mailboxId.Value);
-        (signatureHtml, signatureText) = await Mail.GetSignatureAsync(mailboxId.Value);
+        switch (Current)
+        {
+            case "categories":
+            case "senders":
+                categories = await Mail.ListCategoriesAsync(mailboxId.Value);
+                rules = await Mail.ListCategoryRulesAsync(mailboxId.Value);
+                senderRules = await Mail.ListSenderRulesAsync(mailboxId.Value);
+                break;
+            case "mail":
+                shared = SessionRegistry.IsShared(user);
+                (offlineAllowed, offlineOn) = await Mail.OfflineMailAsync(mailboxId.Value, shared);
+                offlinePasskeys = (await Mail.GetSecurityAsync(mailboxId.Value)).Passkeys.Select(k => k.Id).ToList();
+                if (context is not null)
+                {
+                    junkDays = (await Mail.RetentionOfAsync(context.Value.Tenant)).JunkDays;
+                }
+                (signatureHtml, signatureText) = await Mail.GetSignatureAsync(mailboxId.Value);
+                mailSettings = await Mail.GetMailSettingsAsync(mailboxId.Value);
+                trashRule = await Mail.TrashRuleForAsync(mailboxId.Value);
+                junkDays = trashRule.JunkDays;
+                contactSettings = await Mail.GetContactSettingsAsync(mailboxId.Value);
+                break;
+            case "security":
+                figures = context is null ? new PersonFiguresSetting() : await Mail.PersonFiguresOfAsync(context.Value.Tenant.Id);
+                policy = await Mail.SignInPolicyForAsync(mailboxId.Value);
+                pwLength = context is null ? pwLength : await Mail.PasswordLengthForAsync(context.Value.Mailbox, null);
+                demand = await Mail.SignInDemandAsync(mailboxId.Value);
+                sessionId = SessionRegistry.SessionOf(user);
+                security = await Mail.GetSecurityAsync(mailboxId.Value);
+                devices = await Sessions.ListAsync(mailboxId.Value, sessionId);
+                if (Sub == "two-step")
+                {
+                    codes = Codes is not null ? Sessions.TakeReveal(sessionId) : null;
+                    if (codes is null && Codes is null && security.TotpSecret.Length == 0)
+                    {
+                        setup = await Mail.BeginAuthenticatorAsync(mailboxId.Value);
+                    }
+                }
+                break;
+        }
     }
 }

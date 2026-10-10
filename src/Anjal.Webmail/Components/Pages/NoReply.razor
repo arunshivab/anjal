@@ -1,0 +1,77 @@
+@page "/no-reply"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+
+@* rc.15 (item 63, owner 7 Oct): exactly the messages behind the dashboard's "No reply" count -
+   each opens, and each can be marked "No reply needed" here. *@
+<PageTitle>@L["Waiting for a reply"] — Anjal</PageTitle>
+
+<div class="fview layout-three">
+    <section class="listcol">
+        <div class="listhead">
+            <div class="lh-row">
+                <h1>@L["Waiting for a reply"]</h1>
+                <span class="cnt">@(items.Count == 1 ? L["1 message"] : L["{n} messages"].Replace("{n}", MailboxService.Count(items.Count), StringComparison.Ordinal))</span>
+                <span class="lh-grow"></span>
+                <a class="btn btn-q btn-sm" href="/dashboard">@L["Back to your dashboard"]</a>
+            </div>
+            <p class="lh-note">@L["Sent by you to a person three to thirty days ago, with no answer yet. Lists, no-reply addresses and Cc are left out, unless you chose Expect a reply."]</p>
+        </div>
+        @if (items.Count == 0)
+        {
+            <p class="empty">@L["Nothing waiting. Every message you sent has had its answer."]</p>
+        }
+        else
+        {
+            <div class="mlist" data-list>
+                <section class="mgroup" aria-label="@L["Waiting for a reply"]">
+                    @foreach (MessageRow m in items)
+                    {
+                        <div class="mrow nrrow" data-message="@m.Id">
+                            <span class="spine" aria-hidden="true"><i></i></span>
+                            <div class="mbody">
+                                <div class="mline1"><span class="sto">@L["To"]</span><span class="sname">@Recipient(m)</span><time title="@clock.Full(m.ReceivedAt)"><span class="tt">@clock.Time(m.ReceivedAt)</span><small class="td">@clock.ListDay(m.ReceivedAt, DateTimeOffset.UtcNow)</small></time></div>
+                                <div class="mline2"><a class="subj" href="/message/@m.Id?back=%2Fno-reply">@(string.IsNullOrWhiteSpace(m.Subject) ? L["(no subject)"] : m.Subject)</a></div>
+                            </div>
+                            <form method="post" action="/message/@m.Id/noreply" class="inline nrform">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="back" value="/no-reply" />
+                                <button type="submit" class="btn btn-s btn-sm" data-needs-server><LipiIcon Name="check" Size="14" />@L["No reply needed"]</button>
+                            </form>
+                        </div>
+                    }
+                </section>
+            </div>
+        }
+    </section>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private IReadOnlyList<MessageRow> items = Array.Empty<MessageRow>();
+
+    private static string Recipient(MessageRow m)
+    {
+        IReadOnlyList<Anjal.Mime.MailAddress> to = Anjal.Mime.AddressParser.Parse(Anjal.Mime.EncodedWordDecoder.Decode(m.ToHeader));
+        return to.Count == 0 ? m.ToHeader : to[0].DisplayName.Length > 0 ? to[0].DisplayName : to[0].Address;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        if (WebmailAuthService.MailboxIdOf(user) is Guid mailboxId)
+        {
+            items = await Mail.NoReplyMessagesAsync(mailboxId, DateTimeOffset.UtcNow);
+        }
+    }
+}

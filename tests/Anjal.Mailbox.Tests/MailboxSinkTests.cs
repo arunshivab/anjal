@@ -178,16 +178,27 @@ public sealed class MailboxSinkTests : System.IDisposable
     }
 
     [Fact]
-    public async System.Threading.Tasks.Task Deliver_OverSoftQuota_StillAcceptsAndLogs()
+    public async System.Threading.Tasks.Task Deliver_TheMessageThatFillsIt_IsAccepted_TheNextIsDeferred_SecurityMailStillArrives()
     {
+        // DES-11 D2 (owner, 10 Oct 2026): the limit is enforced - a full mailbox receives nothing,
+        // except Anjal's own security mail.
         TenantRow tenant = await this.store.UpsertTenantAsync(new TenantRow { Slug = "t" });
         await this.store.UpsertTenantDomainAsync(new TenantDomainRow { TenantId = tenant.Id, Domain = "q.test" });
         await this.store.UpsertMailboxAsync(new MailboxRow { TenantId = tenant.Id, LocalPart = "small", Domain = "q.test", QuotaBytes = 10 });
 
-        DeliveryResult r = await this.Sink().DeliverAsync(Ctx(Sample, "small@q.test"));
-        Assert.Equal(DeliveryOutcome.Accepted, r.Outcome);
-        Assert.Contains(this.log, l => l.Contains("over quota", System.StringComparison.Ordinal));
+        DeliveryResult first = await this.Sink().DeliverAsync(Ctx(Sample, "small@q.test"));
+        Assert.Equal(DeliveryOutcome.Accepted, first.Outcome);
+        Assert.Contains(this.log, l => l.Contains("is now full", System.StringComparison.Ordinal));
+
+        DeliveryResult next = await this.Sink().DeliverAsync(Ctx(Sample, "small@q.test"));
+        Assert.NotEqual(DeliveryOutcome.Accepted, next.Outcome);
+        Assert.Contains(this.log, l => l.Contains("is full; not delivered", System.StringComparison.Ordinal));
+
+        DeliveryResult security = await this.Sink().DeliverAsync(new DeliveryContext { EnvelopeFrom = string.Empty, EnvelopeTo = SmallRecipient, RawBytes = Sample, AnjalSecurityMail = true });
+        Assert.Equal(DeliveryOutcome.Accepted, security.Outcome);
     }
+
+    private static readonly string[] SmallRecipient = { "small@q.test" };
 
     private static readonly byte[] Scored7 = System.Text.Encoding.ASCII.GetBytes(
         "X-Anjal-Spam-Score: 7\r\nX-Anjal-Spam-Reasons: SPF_FAIL(3), DKIM_FAIL(3), NO_DATE(1)\r\n" +

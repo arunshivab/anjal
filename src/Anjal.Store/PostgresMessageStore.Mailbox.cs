@@ -12,9 +12,9 @@ public sealed partial class PostgresMessageStore
     private const string TenantColumns = "id, slug, display_name, enabled, spam_threshold, created_at, unencrypted_folder, evidence_retention_days, postmaster_mailbox";
     private const string SenderRuleColumns = "id, tenant_id, pattern, action, created_at";
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
-    private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme";
+    private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme, time_zone, language, density, layout, rail_folded, date_format, week_start, page_size, new_mail_sound, welcome_done, rail_chosen";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
-    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id";
+    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id, left(body_text, 160)";
 
     /// <inheritdoc/>
     public async Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
@@ -188,7 +188,7 @@ RETURNING " + TenantDomainColumns + ";";
         // used_bytes: never overwritten by an upsert.
         const string sql = @"
 INSERT INTO mailboxes (tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, theme)
-VALUES (@tenant_id, lower(@local_part), lower(@domain), @password, @display_name, @enabled, @quota, CASE WHEN @theme = '' THEN 'paper' ELSE @theme END)
+VALUES (@tenant_id, lower(@local_part), lower(@domain), @password, @display_name, @enabled, @quota, CASE WHEN @theme = '' THEN 'anjal-light' ELSE @theme END)
 ON CONFLICT (local_part, domain) DO UPDATE
     SET tenant_id       = EXCLUDED.tenant_id,
         password_pbkdf2 = CASE WHEN EXCLUDED.password_pbkdf2 = '' THEN mailboxes.password_pbkdf2 ELSE EXCLUDED.password_pbkdf2 END,
@@ -209,7 +209,7 @@ RETURNING " + MailboxColumns + ";";
         cmd.Parameters.AddWithValue("enabled", mailbox.Enabled);
         cmd.Parameters.AddWithValue("quota", mailbox.QuotaBytes);
         // Empty means "keep the stored theme" on update; the SQL CASE decides.
-        // On insert the column default supplies "paper".
+        // On insert an empty theme becomes "anjal-light", the default (rc.15).
         cmd.Parameters.AddWithValue("theme", mailbox.Theme ?? string.Empty);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -427,6 +427,31 @@ LIMIT @limit OFFSET @offset;";
         cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("folder_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = folderId });
         object? result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         return result is long n ? n : 0;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<MessageRow>> ListMessagesBySeenAsync(System.Guid mailboxId, System.Guid folderId, bool seen, int limit, int offset, CancellationToken ct = default)
+    {
+        const string sql = @"
+SELECT " + MessageColumns + @"
+FROM messages
+WHERE mailbox_id = @mailbox_id AND folder_id = @folder_id AND seen = @seen
+ORDER BY received_at DESC, id DESC
+LIMIT @limit OFFSET @offset;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
+        cmd.Parameters.AddWithValue("folder_id", folderId);
+        cmd.Parameters.AddWithValue("seen", seen);
+        cmd.Parameters.AddWithValue("limit", System.Math.Max(0, limit));
+        cmd.Parameters.AddWithValue("offset", System.Math.Max(0, offset));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var result = new List<MessageRow>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            result.Add(ReadMailboxMessage(reader));
+        }
+        return result;
     }
 
     /// <inheritdoc/>
@@ -723,7 +748,46 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         CreatedAt = r.GetFieldValue<System.DateTimeOffset>(9),
         UpdatedAt = r.GetFieldValue<System.DateTimeOffset>(10),
         Theme = r.GetString(11),
+        TimeZone = r.GetString(12),
+        Language = r.GetString(13),
+        Density = r.GetString(14),
+        Layout = r.GetString(15),
+        RailFolded = r.GetBoolean(16),
+        DateFormat = r.GetString(17),
+        WeekStart = r.GetString(18),
+        PageSize = r.GetInt32(19),
+        NewMailSound = r.GetBoolean(20),
+        WelcomeDone = r.GetBoolean(21),
+        RailChosen = r.GetBoolean(22),
     };
+
+    /// <inheritdoc/>
+    public async Task<bool> SetMailboxPreferencesAsync(System.Guid mailboxId, MailboxPreferences preferences, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(preferences);
+        MailboxPreferences p = preferences.Normalized();
+        const string sql = @"
+UPDATE mailboxes
+   SET time_zone = @time_zone, language = @language, density = @density, layout = @layout,
+       rail_folded = @rail_folded, rail_chosen = @rail_chosen, date_format = @date_format, week_start = @week_start,
+       page_size = @page_size, new_mail_sound = @new_mail_sound, welcome_done = @welcome_done, updated_at = now()
+ WHERE id = @id;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", mailboxId);
+        cmd.Parameters.AddWithValue("time_zone", p.TimeZone);
+        cmd.Parameters.AddWithValue("language", p.Language);
+        cmd.Parameters.AddWithValue("density", p.Density);
+        cmd.Parameters.AddWithValue("layout", p.Layout);
+        cmd.Parameters.AddWithValue("rail_folded", p.RailFolded);
+        cmd.Parameters.AddWithValue("rail_chosen", p.RailChosen);
+        cmd.Parameters.AddWithValue("date_format", p.DateFormat);
+        cmd.Parameters.AddWithValue("week_start", p.WeekStart);
+        cmd.Parameters.AddWithValue("page_size", p.PageSize);
+        cmd.Parameters.AddWithValue("new_mail_sound", p.NewMailSound);
+        cmd.Parameters.AddWithValue("welcome_done", p.WelcomeDone);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
+    }
 
     private static FolderRow ReadFolder(NpgsqlDataReader r) => new()
     {
@@ -757,6 +821,7 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         TransportEncrypted = r.IsDBNull(19) ? null : r.GetBoolean(19),
         TransportTls = r.IsDBNull(20) ? null : r.GetString(20),
         EvidenceId = r.IsDBNull(21) ? null : r.GetGuid(21),
+        Preview = r.IsDBNull(22) ? string.Empty : r.GetString(22),
     };
 
     // ================= Categories (v0.15.0) =================
@@ -904,8 +969,10 @@ RETURNING id, mailbox_id, pattern, category_id, created_at;";
     }
 
     /// <inheritdoc/>
-    public async Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, CancellationToken ct = default)
+    public async Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, string timeZone, CancellationToken ct = default)
     {
+        // Only a zone this server knows reaches the query (DEF-088).
+        string zone = MailboxPreferences.IsKnownTimeZone(timeZone) ? timeZone.Trim() : "UTC";
         // One round trip: the period's messages joined to their folder and
         // category, aggregated five ways by the database rather than in
         // memory, because a busy mailbox is tens of thousands of rows.
@@ -955,7 +1022,7 @@ WHERE m.mailbox_id = @mailbox_id AND m.received_at >= @from AND m.received_at < 
 GROUP BY sender ORDER BY count(*) DESC, sender LIMIT 5;";
 
         const string daySql = @"
-SELECT date_trunc('day', m.received_at AT TIME ZONE 'UTC') AS day,
+SELECT date_trunc('day', m.received_at AT TIME ZONE @tz) AS day,
        count(*) FILTER (WHERE f.name <> 'Sent' AND f.name <> 'Drafts') AS received,
        count(*) FILTER (WHERE f.name = 'Sent') AS sent
 FROM messages m JOIN folders f ON f.id = m.folder_id
@@ -986,6 +1053,7 @@ GROUP BY day ORDER BY day;";
         await using (var cmd = new NpgsqlCommand(daySql, conn))
         {
             Bind(cmd, mailboxId, periodStart, periodEnd);
+            cmd.Parameters.AddWithValue("tz", zone);
             await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             var days = new List<DailyCount>();
             while (await r.ReadAsync(ct).ConfigureAwait(false))

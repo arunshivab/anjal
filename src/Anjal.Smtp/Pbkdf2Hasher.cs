@@ -41,9 +41,11 @@ public static class Pbkdf2Hasher
         System.ArgumentNullException.ThrowIfNull(password);
         System.ArgumentOutOfRangeException.ThrowIfLessThan(iterations, 1);
 
+        // Owner, 10 Oct 2026 (P5; NIST SP 800-63B-4): the same password typed on a phone and on a
+        // computer can arrive as different Unicode; it is normalised (NFKC) before it is hashed.
         byte[] salt = RandomNumberGenerator.GetBytes(SaltBytes);
         byte[] hash = Rfc2898DeriveBytes.Pbkdf2(
-            Encoding.UTF8.GetBytes(password),
+            Encoding.UTF8.GetBytes(PasswordPolicy.Normalize(password)),
             salt,
             iterations,
             HashAlgorithmName.SHA256,
@@ -66,6 +68,15 @@ public static class Pbkdf2Hasher
     {
         System.ArgumentNullException.ThrowIfNull(password);
         System.ArgumentNullException.ThrowIfNull(storedHash);
+        // Hashed normalised since 10 Oct 2026 (P5); a password set before then was hashed as typed,
+        // and still opens; it is hashed normalised when it is next changed.
+        string normalised = PasswordPolicy.Normalize(password);
+        return VerifyExact(normalised, storedHash)
+            || (!string.Equals(normalised, password, System.StringComparison.Ordinal) && VerifyExact(password, storedHash));
+    }
+
+    private static bool VerifyExact(string password, string storedHash)
+    {
 
         string[] parts = storedHash.Split('$');
         if (parts.Length != 4 || parts[0] != "pbkdf2")

@@ -1,0 +1,740 @@
+@page "/ops"
+@page "/ops/{Section}"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject SessionRegistry Sessions
+@inject Anjal.Mailbox.IMaildirStore Maildir
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+<PageTitle>@L["Anjal console"] — Anjal</PageTitle>
+
+@* rc.14: the Anjal console as the approved boards draw it (OpsOrgs,
+   OpsLimits, OpsHealth). Only the operators named in ANJAL_OPERATORS see
+   it. Operators manage the service, never anyone's mail. *@
+@if (!ready)
+{
+    <div class="dash"><p class="dnote">@L["Loading…"]</p></div>
+}
+else if (me is null)
+{
+    <div class="emptystate">
+        <h1>@L["Anjal console"]</h1>
+        <p>@L["Only an operator of this Anjal service can open this."]</p>
+        <a class="btn btn-s" href="/folder/INBOX">@L["Back to your mail"]</a>
+    </div>
+}
+else
+{
+<div class="settings3 orgconsole @(Current == "overview" ? "noaside" : null)">
+    <nav class="setnav3" aria-label="@L["Anjal console sections"]">
+        <div class="setnav-title orgtitle"><span>@L["Anjal console"]</span><small>@L["For operators of this Anjal service"]</small></div>
+        @foreach ((string key, string label, string icon) in Sections)
+        {
+            <a href="/ops/@key" class="setnav-item @(Current == key ? "on" : null)" aria-current="@(Current == key ? "page" : null)">
+                <LipiIcon Name="@icon" Size="20" />
+                <span class="setnav-text"><b>@L[label]</b><span>@NavSub(key)</span></span>
+            </a>
+        }
+        <p class="setnav-note">@L["Operators manage the service, never anyone's mail. Every action is logged."]</p>
+    </nav>
+
+    <div class="setmain">
+    @if (Saved is not null)
+    {
+        <div class="notice n-ok setnotice" role="status"><LipiIcon Name="check" Size="16" /><span>@SavedMessage</span></div>
+    }
+    @if (note is not null)
+    {
+        <div class="notice n-err setnotice" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(note)</span></div>
+    }
+    @if (revealed is not null)
+    {
+        <div class="formcard orgreveal" role="status">
+            <h2><LipiIcon Name="link" Size="18" /> @L["The administrator's invitation link"]</h2>
+            <p class="hint">@L["Shown once. Give it to the administrator; it works once, for 7 days."]</p>
+            <ul class="reveallist">
+                @foreach (string line in revealed)
+                {
+                    string[] parts = line.Split('|', 2);
+                    <li><b>@parts[0]</b>@if (parts.Length > 1) {<code class="mono revealval">@parts[1]</code><button type="button" class="btn btn-s btn-sm" data-copy="@parts[1]"><LipiIcon Name="copy" Size="14" />@L["Copy"]</button>}</li>
+                }
+            </ul>
+        </div>
+    }
+
+    @switch (Current)
+    {
+        case "overview":
+            <div class="dash opsdash">
+                <header class="dhead">
+                    <div>
+                        <h1>@L["Anjal service overview"]</h1>
+                        <p class="dsub">@(orgs.Count == 1 ? L["1 organisation"] : L["{n} organisations"].Replace("{n}", orgs.Count.ToString(Inv), StringComparison.Ordinal)). @L["Totals per organisation only: never people or mail."] @clock.Full(DateTimeOffset.UtcNow)</p>
+                    </div>
+                    <div class="dheadbtns"><a class="btn btn-s" href="/ops">@L["Reset all to Today"]</a></div>
+                </header>
+                <div class="dgrid">
+                    <section class="dcard span2">
+                        <h2>@L["Received, sent and Junk, whole service"]</h2>
+                        <CountsTable Rows="table" L="L" />
+                    </section>
+                    <section class="dcard">
+                        <h2>@L["Needs attention"]</h2>
+                        <DashLines Lines="opsAttention" L="L" Empty="@L["Nothing needs you: every tile is green."]" />
+                    </section>
+                    @* DES-11 D8: the last 30 days, four lines; each day opens that day's figures below. *@
+                    <section class="dcard span2" id="v-activity">
+                        <h2>@L["Last 30 days, whole service"]</h2>
+                        <ActivityChart Days="activity" L="L" Link="@(d => "/ops?o=day:" + d.Day.ToString("yyyy-MM-dd", Inv) + "&s=day:" + d.Day.ToString("yyyy-MM-dd", Inv) + "#v-orgs")" />
+                    </section>
+                    <section class="dcard span2" id="v-scores">
+                        <h2>@L["Messages by spam score, whole service"]</h2>
+                        <div class="dcardhead"><PeriodChips Current="@scorePeriod.Key" Href="@(k => OvLink("s", k) + "#v-scores")" For="@L["Messages by spam score"]" L="L" /></div>
+                        @if (scorePeriod.Key.StartsWith("day:", StringComparison.Ordinal))
+                        {
+                            <p class="dayshown">@L["Showing {date}"].Replace("{date}", clock.Date(scorePeriod.Start), StringComparison.Ordinal)</p>
+                        }
+                        <ScoreChart Scores="scores.Scores" Threshold="TenantRow.DefaultSpamThreshold" Checked="scores.Checked" L="L"
+                                    Note="@(L["{n} checked {period}; {j} at or over the Junk line."].Replace("{n}", scores.Checked.ToString("N0", Inv), StringComparison.Ordinal).Replace("{period}", L[scorePeriod.Label].ToLowerInvariant(), StringComparison.Ordinal).Replace("{j}", scores.Scores.Skip(TenantRow.DefaultSpamThreshold).Sum().ToString("N0", Inv), StringComparison.Ordinal))" />
+                    </section>
+                    <section class="dcard" id="v-capacity">
+                        <h2>@L["Server capacity"]</h2>
+                        @if (capacity.DiskTotal > 0)
+                        {
+                            <p class="dbig"><b>@Layout.MainLayout.Size(capacity.DiskUsed)</b> @L["of {total} disk ({p}%)"].Replace("{total}", Layout.MainLayout.Size(capacity.DiskTotal), StringComparison.Ordinal).Replace("{p}", Sizes.Percent(capacity.DiskUsed, capacity.DiskTotal).ToString(Inv), StringComparison.Ordinal)</p>
+                            @* DES-11 D8: the database is its own part of the bar, with its own forecast below. *@
+                            <span class="dstack"><i class="ds-mail" style="width:@Share(capacity.Mail)%"></i><i class="ds-ev" style="width:@Share(capacity.Evidence)%"></i><i class="ds-bk" style="width:@Share(capacity.Backups)%"></i><i class="ds-db" style="width:@Share(capacity.Database)%"></i><i class="ds-other" style="width:@Share(RestOfDisk)%"></i></span>
+                            <div class="dstacklegend"><span><i class="ds-mail"></i>@L["Mail"] @Layout.MainLayout.Size(capacity.Mail)</span><span><i class="ds-ev"></i>@L["Evidence"] @Layout.MainLayout.Size(capacity.Evidence)</span><span><i class="ds-bk"></i>@L["Backups"] @Layout.MainLayout.Size(capacity.Backups)</span>@if (capacity.Database > 0) {<span><i class="ds-db"></i>@L["Database"] @Layout.MainLayout.Size(capacity.Database)</span>}<span><i class="ds-other"></i>@(capacity.Database > 0 ? L["System and the rest"] : L["Database, system and the rest"]) @Layout.MainLayout.Size(RestOfDisk)</span></div>
+                        }
+                        <DashLines Lines="capacityLines" L="L" Empty="" />
+                    </section>
+                    <section class="dcard" id="v-orgs">
+                        <div class="dcardhead col">
+                            <h2>@L["Organisations by mail received"]</h2>
+                            <PeriodChips Current="@orgsPeriod.Key" Href="@(k => OvLink("o", k) + "#v-orgs")" For="@L["Organisations by mail received"]" Class="small" L="L" />
+                        </div>
+                        @if (orgsPeriod.Key.StartsWith("day:", StringComparison.Ordinal))
+                        {
+                            <p class="dayshown">@L["Showing {date}"].Replace("{date}", clock.Date(orgsPeriod.Start), StringComparison.Ordinal)</p>
+                        }
+                        <BarList Items="byOrg" Tone="h-brand" Empty="@L["Nothing received in this period."]" />
+                    </section>
+                    <section class="dcard">
+                        <h2>@L["Reputation"]</h2>
+                        <DashLines Lines="reputation" L="L" Empty="" />
+                    </section>
+                    <section class="dcard" id="v-security">
+                        <div class="dcardhead col">
+                            <h2>@L["Security"]</h2>
+                            <PeriodChips Current="@securityPeriod.Key" Href="@(k => OvLink("sec", k) + "#v-security")" For="@L["Security"]" Class="small" L="L" />
+                        </div>
+                        <DashLines Lines="securityLines" L="L" Empty="" />
+                    </section>
+                    <section class="dcard" id="v-backups">
+                        <h2>@L["Backups and evidence"]</h2>
+                        <DashLines Lines="backupLines" L="L" Empty="" />
+                    </section>
+                    <section class="dcard span2">
+                        <h2>@L["Business"]</h2>
+                        <div class="tiles4">
+                            <div><span>@L["Organisations"]</span><b>@orgs.Count</b><span>@L["{a} active, {s} setting up, {x} suspended"].Replace("{a}", orgs.Count(o => o.Status == "active").ToString(Inv), StringComparison.Ordinal).Replace("{s}", orgs.Count(o => o.Status == "setting-up").ToString(Inv), StringComparison.Ordinal).Replace("{x}", orgs.Count(o => o.Status == "suspended").ToString(Inv), StringComparison.Ordinal)</span></div>
+                            <div><span>@L["People"]</span><b>@orgs.Sum(o => o.People).ToString("N0", Inv)</b><span>@L["across all organisations"]</span></div>
+                            <div><span>@L["Storage given"]</span><b>@Layout.MainLayout.Size(orgs.Sum(o => o.GivenBytes))</b><span>@L["to organisations"]</span></div>
+                            <div><span>@L["Mail stored"]</span><b>@Layout.MainLayout.Size(orgs.Sum(o => o.UsedBytes))</b><span>@L["{p}% of what is given"].Replace("{p}", StoredPercent.ToString(Inv), StringComparison.Ordinal)</span></div>
+                        </div>
+                        <p class="dnote">@L["Billing will appear here when it is built."]</p>
+                    </section>
+                </div>
+            </div>
+            break;
+
+        case "orgs":
+            <section class="formcard orgcard">
+                <header class="orghead">
+                    <h2>@L["Organisations"]</h2>
+                    <a class="btn btn-p" href="/ops/orgs?new=1"><LipiIcon Name="plus" Size="16" />@L["Add an organisation"]</a>
+                </header>
+                <div class="orgfilters">
+                    <form method="get" action="/ops/orgs" class="orgsearch" role="search">
+                        <LipiIcon Name="search" Size="16" />
+                        <input type="search" name="q" value="@Q" placeholder="@L["Find an organisation"]" aria-label="@L["Find an organisation"]" />
+                    </form>
+                    <div class="seg orgseg">
+                        @foreach ((string key, string word) in OrgFilters)
+                        {
+                            <a href="/ops/orgs@(key == "all" ? "" : "?f=" + key)" aria-current="@(Filter == key ? "page" : null)">@L[word] @orgs.Count(o => key == "all" || o.Status == key)</a>
+                        }
+                    </div>
+                </div>
+                <table class="orgtable">
+                    <thead><tr><th>@L["Organisation"]</th><th>@L["People"]</th><th>@L["Domains"]</th><th>@L["Storage"]</th><th>@L["Status"]</th></tr></thead>
+                    <tbody>
+                    @foreach (OrgSummary o in Shown)
+                    {
+                        <tr class="@(sel?.Tenant.Id == o.Tenant.Id ? "on" : null)">
+                            <td><a class="rowlink" href="/ops/orgs?sel=@o.Tenant.Id"><b>@NameOf(o)</b><span>@string.Join(", ", o.Domains)</span></a></td>
+                            <td>@o.People</td>
+                            <td>@if (o.Domains.Count == 0) {<span class="pill pill-mute">-</span>} else if (o.DkimMissing.Count > 0) {<span class="pill pill-warn">@L["DKIM missing"]</span>} else {<span class="pill pill-info">@(o.Domains.Count == 1 ? L["1 domain, keyed"] : L["{n} domains, keyed"].Replace("{n}", o.Domains.Count.ToString(Inv), StringComparison.Ordinal))</span>}</td>
+                            <td>@Layout.MainLayout.Size(o.UsedBytes) @L["of"] @Layout.MainLayout.Size(o.GivenBytes)</td>
+                            <td><span class="pill @StatusPill(o.Status)">@L[StatusWord(o.Status)]</span></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+                @if (Shown.Count == 0)
+                {
+                    <p class="orgempty">@L["No organisation matches."]</p>
+                }
+            </section>
+            break;
+
+        case "limits":
+            <section class="formcard orgcard">
+                <h2>@L["Platform limits"]</h2>
+                <p class="hint orglead">@L["The rules every organisation works within (policies CMP-02 and SEC-06). Sign-in rules can only be made stricter."]</p>
+                <table class="orgtable rules">
+                    <thead><tr><th>@L["Rule"]</th><th>Anjal</th><th>@L["Applies to"]</th></tr></thead>
+                    <tbody>
+                    @foreach ((string rule, string value) in Limits)
+                    {
+                        <tr><th scope="row">@L[rule]</th><td>@value</td><td>@AppliesTo</td></tr>
+                    }
+                    </tbody>
+                </table>
+            </section>
+            break;
+
+        case "health":
+            <section class="formcard orgcard">
+                <header class="orghead">
+                    <h2>@L["Service health"]</h2>
+                    <span class="hint">@L["Updated {time}"].Replace("{time}", clock.Time(DateTimeOffset.UtcNow) + " " + clock.ZoneName(DateTimeOffset.UtcNow), StringComparison.Ordinal)</span>
+                </header>
+                <div class="healthgrid">
+                    @foreach (HealthTile t in tiles)
+                    {
+                        <div class="healthtile lvl-@t.Level">
+                            <b><i aria-hidden="true"></i>@L[t.Title]</b>
+                            <span>@HealthTile.Fill(L[t.Text], t.Args)</span>
+                        </div>
+                    }
+                </div>
+                <h3 class="charthead">@L["Messages received per hour, last 24 hours"]</h3>
+                <div class="hourchart" role="img" aria-label="@L["{n} messages in the last 24 hours"].Replace("{n}", hours.Sum(h => h.Count).ToString("N0", Inv), StringComparison.Ordinal)">
+                    @foreach ((DateTimeOffset hour, long count) in hours)
+                    {
+                        <span class="hourbar" style="height:@BarHeight(count)%" title="@clock.Local(hour).ToString("HH:00", Inv): @count.ToString("N0", Inv)"></span>
+                    }
+                </div>
+                <div class="hourlabels"><span>@clock.Local(hours.FirstOrDefault().Hour).ToString("HH:00", Inv)</span><span>@L["now"]</span></div>
+            </section>
+            break;
+    }
+    </div>
+
+    @if (Current != "overview")
+    {
+    <aside class="setaside" aria-label="@L["About this section"]">
+    @switch (Current)
+    {
+        case "orgs":
+            @if (New == "1")
+            {
+                <h2 class="asidehead">@L["Add an organisation"]</h2>
+                <form method="post" action="/ops/orgs/new" class="asideform">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="oname">@L["Name"]</label>
+                    <input id="oname" class="inp" name="name" maxlength="100" required />
+                    <label class="setlbl" for="odomain">@L["Its domain"]</label>
+                    <input id="odomain" class="inp" name="domain" maxlength="253" required placeholder="exampleclinic.in" autocomplete="off" />
+                    <label class="setlbl" for="aname">@L["First administrator"]</label>
+                    <input id="aname" class="inp" name="adminName" maxlength="100" required placeholder="@L["Name"]" />
+                    <span class="addrline"><input class="inp" name="adminLocal" maxlength="64" required placeholder="admin" aria-label="@L["Their address, before the @@"]" autocomplete="off" /><span>@@ @L["the domain"]</span></span>
+                    <label class="setlbl" for="apersonal">@L["Their personal address, for the invitation"]</label>
+                    <input id="apersonal" class="inp" name="personal" type="email" maxlength="200" />
+                    <label class="setlbl" for="ostatus">@L["Status"]</label>
+                    <select id="ostatus" class="setsel" name="status"><option value="setting-up">@L["Setting up"]</option><option value="trial">@L["Trial"]</option><option value="active">@L["Active"]</option></select>
+                    <p class="hint">@L["The domain is added at once, with a DKIM key; the administrator then publishes its records from their console."]</p>
+                    <div class="setactions"><button type="submit" class="btn btn-p">@L["Add"]</button><a class="btn btn-s" href="/ops/orgs">@L["Cancel"]</a></div>
+                </form>
+            }
+            else if (sel is not null)
+            {
+                <h2 class="asidehead">@L["Selected organisation"]</h2>
+                <h3 class="asidetitle">@NameOf(sel)</h3>
+                <span class="pill wide @StatusPill(sel.Status)">@L[StatusWord(sel.Status)]</span>
+                <p class="asideline"><b>@L["Administrator"]</b>: @(sel.Admins.Count > 0 ? string.Join(", ", sel.Admins) : L["none yet"])</p>
+                <p class="asideline"><b>@L["People"]</b>: @L["{n} of {max} allowed"].Replace("{n}", sel.People.ToString(Inv), StringComparison.Ordinal).Replace("{max}", sel.Ops.PeopleLimit.ToString("N0", Inv), StringComparison.Ordinal)</p>
+                <p class="asideline"><b>@L["Storage"]</b>: @Layout.MainLayout.Size(sel.UsedBytes) @L["of"] @Layout.MainLayout.Size(sel.GivenBytes)</p>
+                <p class="asideline"><b>@L["Storage plan"]</b>: @PlanText(sel)</p>
+                <p class="asideline"><b>@L["Sending"]</b>: @L["up to {n} a day"].Replace("{n}", sel.Ops.SendPerDay.ToString("N0", Inv), StringComparison.Ordinal)</p>
+                <p class="asideline"><b>@L["Data agreement"]</b>: @(sel.Ops.AgreementSigned is DateTimeOffset signed ? L["signed {date}"].Replace("{date}", clock.Date(signed), StringComparison.Ordinal) : L["not signed yet"])</p>
+                @if (sel.DkimMissing.Count > 0)
+                {
+                    <div class="asidecard warn"><span class="asidebody"><b>@L["DKIM key missing"]</b> @L["for {domains}. Mail they send may be refused."].Replace("{domains}", string.Join(", ", sel.DkimMissing), StringComparison.Ordinal) @(canMakeKeys ? L["Anjal makes a key when a domain is added; create one with the admin API for a domain added before."] : L["Start the mail server once, so that it publishes its seal key; Anjal then makes and locks DKIM keys itself."])</span></div>
+                }
+                @if (Edit == "1")
+                {
+                    <form method="post" action="/ops/orgs/@sel.Tenant.Id/limits" class="asideform">
+                        <AntiforgeryToken />
+                        <label class="setlbl" for="lstatus">@L["Status"]</label>
+                        <select id="lstatus" class="setsel" name="status">
+                            <option value="setting-up" selected="@(sel.Ops.Status == "setting-up")">@L["Setting up"]</option>
+                            <option value="trial" selected="@(sel.Ops.Status == "trial")">@L["Trial"]</option>
+                            <option value="active" selected="@(sel.Ops.Status == "active")">@L["Active"]</option>
+                        </select>
+                        <label class="setlbl" for="lpeople">@L["People allowed"]</label>
+                        <input id="lpeople" class="inp" name="people" type="number" min="1" max="100000" value="@sel.Ops.PeopleLimit" required />
+                        @* DES-11 D2 (owner, 10 Oct 2026): the storage plan - per person, shared, mixed, or Anjal's 1 GB each. *@
+                        <label class="setlbl" for="lplan">@L["Storage plan"]</label>
+                        <select id="lplan" class="setsel" name="plan">
+                            <option value="none" selected="@(PlanOf(sel) == "none")">@L["Anjal's default: 1 GB each"]</option>
+                            <option value="person" selected="@(PlanOf(sel) == "person")">@L["Per person"]</option>
+                            <option value="shared" selected="@(PlanOf(sel) == "shared")">@L["Shared total"]</option>
+                            <option value="mixed" selected="@(PlanOf(sel) == "mixed")">@L["Mixed"]</option>
+                        </select>
+                        <p class="hint">@L["Per person: the same size for each. Shared total: one total for everyone. Mixed: a size each, and a shared reserve once it is used."]</p>
+                        <div class="planfield plan-each">
+                            <label class="setlbl" for="leach">@L["Each mailbox, GB"]</label>
+                            <input id="leach" class="inp" name="eachGb" type="number" min="0.01" max="100000" step="0.01" value="@GbOf(sel.Plan?.PersonBytes ?? 0, 1)" />
+                        </div>
+                        <div class="planfield plan-shared">
+                            <label class="setlbl" for="lshared">@L["Shared total or reserve, GB"]</label>
+                            <input id="lshared" class="inp" name="sharedGb" type="number" min="0.01" max="1000000" step="0.01" value="@GbOf(sel.Plan?.SharedBytes ?? 0, 50)" />
+                        </div>
+                        <label class="setlbl" for="lsend">@L["Messages sent a day"]</label>
+                        <input id="lsend" class="inp" name="send" type="number" min="1" max="1000000" value="@sel.Ops.SendPerDay" required />
+                        <label class="checkline"><input type="checkbox" name="agreement" value="1" checked="@(sel.Ops.AgreementSigned is not null)" /> @L["The data agreement is signed"]</label>
+                        <div class="setactions"><button type="submit" class="btn btn-p">@L["Save limits"]</button><a class="btn btn-s" href="/ops/orgs?sel=@sel.Tenant.Id">@L["Cancel"]</a></div>
+                    </form>
+                }
+                else if (Message == "1")
+                {
+                    <form method="post" action="/ops/orgs/@sel.Tenant.Id/message" class="asideform">
+                        <AntiforgeryToken />
+                        <label class="setlbl" for="msubj">@L["Subject"]</label>
+                        <input id="msubj" class="inp" name="subject" maxlength="200" />
+                        <label class="setlbl" for="mtext">@L["Message"]</label>
+                        <textarea id="mtext" class="inp" name="text" rows="6" maxlength="5000" required></textarea>
+                        <div class="setactions"><button type="submit" class="btn btn-p">@L["Send"]</button><a class="btn btn-s" href="/ops/orgs?sel=@sel.Tenant.Id">@L["Cancel"]</a></div>
+                    </form>
+                }
+                else
+                {
+                    <a class="btn btn-s asidebtn" href="/ops/orgs?sel=@sel.Tenant.Id&edit=1">@L["Change limits"]</a>
+                    <a class="btn btn-s asidebtn" href="/ops/orgs?sel=@sel.Tenant.Id&message=1">@L["Message the administrator"]</a>
+                    @if (sel.Status == "suspended")
+                    {
+                        <form method="post" action="/ops/orgs/@sel.Tenant.Id/resume"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn">@L["Resume"]</button></form>
+                    }
+                    else if (sel.Tenant.Id != me.TenantId)
+                    {
+                        <form method="post" action="/ops/orgs/@sel.Tenant.Id/suspend"><AntiforgeryToken /><button type="submit" class="btn btn-danger-q asidebtn">@L["Suspend"]</button></form>
+                    }
+                    <p class="asidetext">@L["Suspending stops everyone signing in and sending; their mail is kept and still received."]</p>
+                }
+            }
+            else
+            {
+                <h2 class="asidehead">@L["Organisations"]</h2>
+                <p class="asidetext">@L["Choose an organisation to see its limits, message its administrator, or suspend it."]</p>
+            }
+            break;
+
+        case "limits":
+            <h2 class="asidehead">@L["Effect"]</h2>
+            <div class="asidecard"><b>@L["Where they are set"]</b><span class="asidebody">@L["These limits are part of Anjal itself and change only with a new release; organisations choose within them."]</span></div>
+            <div class="asidecard"><b>@L["Not offered anywhere"]</b><span class="asidebody">@L["SMS and WhatsApp codes."]</span></div>
+            <div class="asidecard"><span class="asidebody"><b>@L["A mailbox's fullness"]</b> @L["shows to its owner in the status bar, and in red when it is full. Operators are not told."]</span></div>
+            break;
+
+        case "health":
+            <h2 class="asidehead">@L["Reports and alerts"]</h2>
+            <h3 class="asidetitle">@L["Summary"]</h3>
+            <p class="asidetext">@L["Sent to the operators: the health above, the mail received, and the organisations."]</p>
+            <form method="post" action="/ops/health/summary"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn">@L["Send it now"]</button></form>
+            <div class="asidecard"><span class="asidebody"><b>@L["Watch for"]</b>: @L["a failed backup; disk over 80%; a certificate under 15 days; the oldest waiting message over 6 hours."]</span></div>
+            @* rc.15 (item 61): the restore drill, every six months, recorded here. *@
+            <h3 class="asidetitle">@L["Restore drill"]</h3>
+            <p class="asidetext">@(drills.Count == 0 ? L["None recorded yet. A drill restores the backups on a spare server and checks that everything came back."] : DrillLine(drills[0]))</p>
+            @if (MailboxService.NextDrillDue(drills) is DateTime due)
+            {
+                <p class="asidetext @(due < Today ? "lv-bad" : due < Today.AddDays(14) ? "lv-warn" : null)"><b>@L["Next due"]</b>: @clock.Date(new DateTimeOffset(due.AddHours(12), TimeSpan.Zero))</p>
+            }
+            <form method="post" action="/ops/drill" class="asideform">
+                <AntiforgeryToken />
+                <label class="setlbl" for="ddate">@L["Day it was done (year-month-day)"]</label>
+                @* A plain box, not the browser's date picker, whose parts hold Tab (keyboard check, UX-09). *@
+                <input id="ddate" class="inp" type="text" inputmode="numeric" name="date" required maxlength="10" pattern="\d{4}-\d{2}-\d{2}" placeholder="@Today.ToString("yyyy-MM-dd", Inv)" />
+                <label class="setlbl" for="dresult">@L["Result"]</label>
+                <select id="dresult" class="setsel" name="result"><option value="passed">@L["Everything came back"]</option><option value="failed">@L["Something failed"]</option></select>
+                <label class="setlbl" for="dnote">@L["Note"]</label>
+                <input id="dnote" class="inp" name="note" maxlength="300" placeholder="@L["What was restored, or what failed"]" />
+                <button type="submit" class="btn btn-s asidebtn">@L["Record the drill"]</button>
+            </form>
+            break;
+    }
+    </aside>
+    }
+</div>
+}
+
+@code {
+    /// <summary>The section in the address, e.g. /ops/health.</summary>
+    [Parameter] public string? Section { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    private static readonly (string Key, string Label, string Icon)[] Sections =
+    {
+        ("overview", "Overview", "dashboard"),
+        ("orgs", "Organisations", "home"),
+        ("limits", "Platform limits", "security"),
+        ("health", "Service health", "server-stack"),
+    };
+
+    private static readonly (string Key, string Word)[] OrgFilters = { ("all", "All"), ("active", "Active"), ("setting-up", "Setting up"), ("suspended", "Suspended") };
+
+    [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
+    [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
+    [SupplyParameterFromQuery(Name = "sel")] private string? Sel { get; set; }
+    [SupplyParameterFromQuery(Name = "links")] private string? Links { get; set; }
+    [SupplyParameterFromQuery(Name = "new")] private string? New { get; set; }
+    [SupplyParameterFromQuery(Name = "edit")] private string? Edit { get; set; }
+    [SupplyParameterFromQuery(Name = "message")] private string? Message { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] private string? QText { get; set; }
+    [SupplyParameterFromQuery(Name = "f")] private string? FilterText { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private MailboxRow? me;
+    private string? note;
+    private IReadOnlyList<string>? revealed;
+    private IReadOnlyList<OrgSummary> orgs = Array.Empty<OrgSummary>();
+    private OrgSummary? sel;
+    private IReadOnlyList<HealthTile> tiles = Array.Empty<HealthTile>();
+    private IReadOnlyList<(DateTimeOffset Hour, long Count)> hours = Array.Empty<(DateTimeOffset, long)>();
+    private string healthWord = "All systems normal";
+
+    private string Current => Sections.Any(s => s.Key == Section) ? Section! : "overview";
+    private string Q => (QText ?? string.Empty).Trim();
+    private string Filter => OrgFilters.Any(f => f.Key == FilterText) ? FilterText! : "all";
+
+    private List<OrgSummary> Shown => orgs
+        .Where(o => Filter == "all" || o.Status == Filter)
+        .Where(o => Q.Length == 0 || NameOf(o).Contains(Q, StringComparison.CurrentCultureIgnoreCase) || o.Domains.Any(d => d.Contains(Q, StringComparison.OrdinalIgnoreCase)))
+        .ToList();
+
+    private string AppliesTo => orgs.Count == 1 ? L["1 organisation"] : L["{n} organisations"].Replace("{n}", orgs.Count.ToString(Inv), StringComparison.Ordinal);
+
+    private IEnumerable<(string Rule, string Value)> Limits => new[]
+    {
+        ("Password length", L["At least 15, or 12 with two-step"]),
+        ("Earlier passwords", L["Not checked; an organisation may refuse the last 3 or 5"]),
+        ("Wrong passwords", L["10 in a row pause password sign-in for 30 minutes"]),
+        ("Idle sign-out, shared computer", L["At most {n} minutes"].Replace("{n}", SignInPolicy.AnjalSharedIdleMinutes.ToString(Inv), StringComparison.Ordinal)),
+        ("Idle sign-out, own device", L["At most {n} hours"].Replace("{n}", SignInPolicy.AnjalOwnIdleHours.ToString(Inv), StringComparison.Ordinal)),
+        ("Stay signed in", L["At most {n} days"].Replace("{n}", SignInPolicy.AnjalStayDays.ToString(Inv), StringComparison.Ordinal)),
+        ("Trust a device for two-step", L["At most {n} days, never on shared computers"].Replace("{n}", SignInPolicy.AnjalTrustDays.ToString(Inv), StringComparison.Ordinal)),
+        ("Mailbox size", L["Set by each organisation's storage plan; 1 GB a mailbox by default"]),
+        ("Trash", L["Default {n} days; 7 to 90"].Replace("{n}", MailboxService.DefaultTrashDays.ToString(Inv), StringComparison.Ordinal)),
+        ("Junk", L["Default {n} days"].Replace("{n}", MailboxService.JunkDays.ToString(Inv), StringComparison.Ordinal)),
+        ("Outbox copies and copies passed to applications", L["Removed within 30 days"]),
+        ("Evidence", L["Default 3 years after deletion; 1 to 10"]),
+        ("Accounts without sign-in", L["Never deleted automatically; addresses never reissued"]),
+    };
+
+    private string NavSub(string key) => key switch
+    {
+        "overview" => L["Everything at a glance"],
+        "orgs" => orgs.Count == 1 ? L["1 organisation"] : L["{n} organisations"].Replace("{n}", orgs.Count.ToString(Inv), StringComparison.Ordinal),
+        "limits" => L["The outer limits for everyone"],
+        "health" => L[healthWord],
+        _ => string.Empty,
+    };
+
+    private string SavedMessage => Saved switch
+    {
+        "limits" => L["Limits saved."],
+        "suspend" => L["Suspended. No one there can sign in or send; their mail is kept and still received."],
+        "resume" => L["Resumed. They can sign in again."],
+        "message" => L["Sent to the administrator."],
+        "summary" => L["The summary was sent to the operators."],
+        "drill" => L["Restore drill recorded."],
+        "drill-date" => L["Choose the day the drill was done."],
+        "self" => L["You cannot suspend your own organisation."],
+        _ => L["Saved."],
+    };
+
+    [SupplyParameterFromQuery(Name = "s")] private string? S { get; set; }
+    [SupplyParameterFromQuery(Name = "o")] private string? O { get; set; }
+    [SupplyParameterFromQuery(Name = "sec")] private string? Sec { get; set; }
+
+    private IReadOnlyList<(DashPeriod Period, MailFigures Figures)> table = Array.Empty<(DashPeriod, MailFigures)>();
+    private DashPeriod scorePeriod = null!;
+    private DashPeriod orgsPeriod = null!;
+    private DashPeriod securityPeriod = null!;
+    private MailFigures scores = new();
+    private IReadOnlyList<DashLine> opsAttention = Array.Empty<DashLine>();
+    private ServiceCapacity capacity = new(0, 0, 0, 0, 0, 0);
+    private IReadOnlyList<DashLine> capacityLines = Array.Empty<DashLine>();
+    private IReadOnlyList<(string, long, string?, int)> byOrg = Array.Empty<(string, long, string?, int)>();
+    private IReadOnlyList<DashLine> reputation = Array.Empty<DashLine>();
+    private IReadOnlyList<DashLine> securityLines = Array.Empty<DashLine>();
+    private IReadOnlyList<DashLine> backupLines = Array.Empty<DashLine>();
+    private IReadOnlyList<RestoreDrill> drills = Array.Empty<RestoreDrill>();
+    private bool canMakeKeys;
+
+    private static string PlanOf(OrgSummary o) => o.Plan?.Plan ?? "none";
+
+    private string PlanText(OrgSummary o)
+    {
+        (string text, IReadOnlyDictionary<string, string> args) = MailboxService.PlanWords(o.Plan ?? new Anjal.Store.StoragePlan());
+        return HealthTile.Fill(L[text], args);
+    }
+
+    // A size in GB for the form, two decimals; the fallback when the plan has none yet.
+    private static string GbOf(long bytes, double fallback) =>
+        (bytes > 0 ? bytes / (double)Sizes.GB : fallback).ToString("0.##", Inv);
+    private IReadOnlyList<DiskDay> diskDays = Array.Empty<DiskDay>();
+    private IReadOnlyList<ActivityDay> activity = Array.Empty<ActivityDay>();
+
+    private string DrillLine(RestoreDrill d) =>
+        L[d.Passed ? "Last drill {date}: everything came back." : "Last drill {date}: something failed."].Replace("{date}", DrillDay(d), StringComparison.Ordinal)
+        + (d.Note.Length > 0 ? " " + d.Note : string.Empty);
+
+    // A drill's day is a calendar day: written as it is, in the viewer's own format (noon keeps it the same day in every zone).
+    private string DrillDay(RestoreDrill d) => DateTime.TryParseExact(d.Date, "yyyy-MM-dd", Inv, System.Globalization.DateTimeStyles.None, out DateTime day)
+        ? clock.Date(new DateTimeOffset(day.AddHours(12), TimeSpan.Zero))
+        : d.Date;
+
+    // Owner, 9 Oct 2026: today is the viewer's today (at 00:40 in India it is already the 9th, not the 8th).
+    private DateTime Today => clock.Local(DateTimeOffset.UtcNow).Date;
+
+    private int StoredPercent
+    {
+        get
+        {
+            long given = orgs.Sum(o => o.GivenBytes);
+            return Sizes.Percent(orgs.Sum(o => o.UsedBytes), given);
+        }
+    }
+
+    private long RestOfDisk => Math.Max(0, capacity.DiskUsed - capacity.Mail - capacity.Evidence - capacity.Backups - capacity.Database);
+
+    private string Share(long part) => capacity.DiskTotal <= 0 ? "0" : Math.Max(part > 0 ? 1 : 0, part * 100 / capacity.DiskTotal).ToString(Inv);
+
+    private string OvLink(string card, string key)
+    {
+        var q = new List<string>();
+        foreach ((string k, string? v) in new[] { ("s", S), ("o", O), ("sec", Sec) })
+        {
+            string value = k == card ? key : v ?? "today";
+            if (value != "today")
+            {
+                q.Add(k + "=" + Uri.EscapeDataString(value));
+            }
+        }
+        return "/ops" + (q.Count > 0 ? "?" + string.Join("&", q) : string.Empty);
+    }
+
+    private async Task LoadOverviewAsync()
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        table = await Mail.FiguresTableAsync(FigureScope.Service, clock, now);
+        scorePeriod = MailboxService.DashPeriodOf(S, clock, now);
+        orgsPeriod = MailboxService.DashPeriodOf(O, clock, now);
+        securityPeriod = MailboxService.DashPeriodOf(Sec, clock, now);
+        // A single day (DES-11 D8) is not in the counts table: its figures are fetched on their own.
+        scores = table.FirstOrDefault(r => r.Period.Key == scorePeriod.Key).Figures ?? await Mail.FiguresAsync(FigureScope.Service, scorePeriod, clock);
+        (tiles, hours) = await Mail.HealthAsync(OpsEndpoints.RootOf(Maildir), now);
+
+        // DES-11 F4 and F9: the same list the operators are mailed about, with the drill in the viewer's days.
+        opsAttention = await Mail.OpsAttentionAsync(clock, tiles, orgs, now);
+        drills = await Mail.DrillsAsync();
+        activity = await Mail.ActivityAsync(clock, now);
+
+        capacity = await Mail.WithDatabaseAsync(MailboxService.Capacity(OpsEndpoints.RootOf(Maildir), Environment.GetEnvironmentVariable("ANJAL_EVIDENCE_ROOT") ?? Anjal.Mailbox.EvidenceVault.DefaultRoot, now));
+        var cap = new List<DashLine>
+        {
+            new("server-stack", "Memory: this service uses {used} of {total}", string.Empty, string.Empty, string.Empty, new Dictionary<string, string>(StringComparer.Ordinal) { ["used"] = Layout.MainLayout.Size(capacity.MemoryUsed), ["total"] = Layout.MainLayout.Size(capacity.MemoryTotal) }),
+        };
+        // rc.15 (item 61): the processor, and when the disk will be full at the present rate.
+        if (MailboxService.Processor(now) is (int cpu, int cores))
+        {
+            cap.Add(new DashLine("chart-gauge", "Processor: {p}% in use", cores == 1 ? "1 core" : "{c} cores", string.Empty, cpu >= 90 ? "bad" : cpu >= 70 ? "warn" : string.Empty,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["p"] = cpu.ToString(Inv), ["c"] = cores.ToString(Inv) }));
+        }
+        diskDays = await Mail.DiskHistoryAsync();
+        int? months = MailboxService.MonthsUntilFull(diskDays, capacity);
+        cap.Add(months is int m
+            ? new DashLine("growth-chart", m == 1 ? "Disk full in about 1 month at the present rate" : "Disk full in about {n} months at the present rate", "From the daily disk record", string.Empty, m <= 3 ? "bad" : m <= 6 ? "warn" : string.Empty, DashLine.N(m))
+            : new DashLine("growth-chart", diskDays.Count < 7 ? "Disk forecast after a week of daily records" : "Disk use is not growing", diskDays.Count < 7 ? (diskDays.Count == 1 ? "1 day recorded so far" : "{n} days recorded so far") : "From the daily disk record", string.Empty, string.Empty, DashLine.N(diskDays.Count)));
+        // DES-11 D8: the database's own forecast - the disk full if only the database kept growing as it has.
+        if (capacity.Database > 0)
+        {
+            int? dbMonths = MailboxService.MonthsUntilFull(diskDays, capacity, d => d.Database);
+            cap.Add(dbMonths is int dm
+                ? new DashLine("database", dm == 1 ? "Database: disk full in about 1 month at its present rate" : "Database: disk full in about {n} months at its present rate", "From the daily disk record", string.Empty, dm <= 3 ? "bad" : dm <= 6 ? "warn" : string.Empty, DashLine.N(dm))
+                : diskDays.Count(d => d.Database > 0) < 7
+                    ? new DashLine("database", "Database: {size}", "Its forecast after a week of daily records", string.Empty, string.Empty, new Dictionary<string, string>(StringComparer.Ordinal) { ["size"] = Layout.MainLayout.Size(capacity.Database) })
+                    : new DashLine("database", "Database: {size}, not growing", "From the daily disk record", string.Empty, string.Empty, new Dictionary<string, string>(StringComparer.Ordinal) { ["size"] = Layout.MainLayout.Size(capacity.Database) }));
+        }
+        if (tiles.FirstOrDefault(t => t.Title == "Delivery queue") is HealthTile queue)
+        {
+            cap.Add(new DashLine("upload", queue.Text, "Queue", "/ops/health", queue.Level is "warn" or "bad" ? queue.Level : string.Empty, queue.Args));
+        }
+        capacityLines = cap;
+
+        IReadOnlyDictionary<Guid, long> received = await Mail.ReceivedByOrganisationAsync(orgsPeriod);
+        var list = orgs.Select(o => (NameOf(o), received.TryGetValue(o.Tenant.Id, out long n) ? n : 0, (string?)("/ops/orgs?sel=" + o.Tenant.Id), 0)).Where(x => x.Item2 > 0).OrderByDescending(x => x.Item2).ToList();
+        byOrg = list.Count > 6 ? list.Take(5).Append((L["{n} others"].Replace("{n}", (list.Count - 5).ToString(Inv), StringComparison.Ordinal), list.Skip(5).Sum(x => x.Item2), (string?)null, 0)).ToList() : list;
+
+        var rep = new List<DashLine>();
+        foreach (HealthTile t in tiles.Where(t => t.Title is "Reputation" or "TLS reports" or "DKIM"))
+        {
+            rep.Add(new DashLine(MailboxService.OpsIcon(t.Title), t.Text, t.Title, "/ops/health", t.Level is "warn" or "bad" ? t.Level : string.Empty, t.Args));
+        }
+        // rc.15 (item 61): how much Gmail, Microsoft and Yahoo accepted, from Anjal's own sending records, last 30 days.
+        DashPeriod month = MailboxService.DashPeriodOf("30d", clock, now);
+        foreach (Acceptance a in await Mail.AcceptanceAsync(month))
+        {
+            rep.Add(a.Percent is int pc
+                ? new DashLine("email", "{name} accepted {p}% of {n}", a.Failed > 0 ? "{f} given up on; last 30 days" : "Last 30 days", string.Empty, pc < 80 ? "bad" : pc < 95 ? "warn" : string.Empty,
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["name"] = a.Name, ["p"] = pc.ToString(Inv), ["n"] = (a.Sent + a.Failed).ToString("N0", Inv), ["f"] = a.Failed.ToString("N0", Inv) })
+                : new DashLine("email", "{name}: nothing sent in the last 30 days", string.Empty, string.Empty, string.Empty, new Dictionary<string, string>(StringComparer.Ordinal) { ["name"] = a.Name }));
+        }
+        // Anjal's own DMARC and TLS reports (those for the domain of this server's own name).
+        if (await Mail.ServiceOrganisationAsync() is TenantRow own)
+        {
+            (IReadOnlyList<SenderLine> lines, int dmarcReports) = await Mail.WhoSendsAsAsync(own, month);
+            long total = lines.Sum(l => l.Count);
+            long passed = lines.Where(l => l.Status != "blocked").Sum(l => l.Count);
+            rep.Add(dmarcReports == 0
+                ? new DashLine("compliance-shield", "Anjal's own DMARC reports: none in 30 days", string.Empty, string.Empty, string.Empty)
+                : new DashLine("compliance-shield", "Anjal's own DMARC reports: {p}% of {n} messages passed", "{r} reports, last 30 days", string.Empty, total > 0 && Sizes.Percent(passed, total) < 95 ? "warn" : string.Empty,
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["p"] = (total == 0 ? 100 : Sizes.Percent(passed, total)).ToString(Inv), ["n"] = total.ToString("N0", Inv), ["r"] = dmarcReports.ToString(Inv) }));
+            (IReadOnlyList<TlsReportRow> tlsRows, int tlsCount) = await Mail.TlsReportsAsync(own, month);
+            long ok = tlsRows.Sum(r => r.Successful);
+            long bad = tlsRows.Sum(r => r.Failed);
+            rep.Add(tlsCount == 0
+                ? new DashLine("lock", "Anjal's own TLS reports: none in 30 days", string.Empty, string.Empty, string.Empty)
+                : new DashLine("lock", "Anjal's own TLS reports: {ok} deliveries encrypted, {bad} failed", "{r} reports, last 30 days", string.Empty, bad > 0 ? "warn" : string.Empty,
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["ok"] = ok.ToString("N0", Inv), ["bad"] = bad.ToString("N0", Inv), ["r"] = tlsCount.ToString(Inv) }));
+        }
+        reputation = rep;
+
+        int failed = await Mail.FailedSignInsAsync(null, securityPeriod.Start);
+        int operatorActions = await Mail.OperatorActionsAsync(securityPeriod.Start);
+        securityLines = new List<DashLine>
+        {
+            new("lock", failed == 1 ? "1 refused webmail sign-in {period}" : "{n} refused webmail sign-ins {period}", string.Empty, string.Empty, failed > 50 ? "warn" : string.Empty, new Dictionary<string, string>(StringComparer.Ordinal) { ["n"] = failed.ToString("N0", Inv), ["period"] = L[securityPeriod.Label].ToLowerInvariant() }),
+            new("audit-log", operatorActions == 1 ? "1 operator action, logged" : "{n} operator actions, all logged", string.Empty, string.Empty, string.Empty, DashLine.N(operatorActions)),
+        };
+        // rc.15 (item 61): attacks the mail server refused, from its counts per day.
+        IReadOnlyDictionary<string, long> refusals = await Mail.RefusalsSinceAsync(securityPeriod.Start);
+        long R(string name) => refusals.TryGetValue(name, out long v) ? v : 0;
+        long guesses = R("anjal_smtp_auth_failures_total") + R("anjal_smtp_auth_throttled_total");
+        var attacks = new List<DashLine>
+        {
+            new("compliance-shield", "{n} wrong mail-app passwords refused {period}", "{t} times an address was stopped for guessing", string.Empty, guesses > 500 ? "warn" : string.Empty,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["n"] = R("anjal_smtp_auth_failures_total").ToString("N0", Inv), ["t"] = R("anjal_smtp_auth_throttled_total").ToString("N0", Inv), ["period"] = L[securityPeriod.Label].ToLowerInvariant() }),
+            new("circle-x", "{n} connections refused {period}", "Too many at once, or from a blocked address", string.Empty, string.Empty,
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["n"] = R("anjal_smtp_connections_refused_total").ToString("N0", Inv), ["period"] = L[securityPeriod.Label].ToLowerInvariant() }),
+            new("circle-x", "{n} messages refused {period}", "{s} as spam, {u} to unknown addresses, {d} malformed; {g} delayed by greylisting", string.Empty, string.Empty,
+                new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["n"] = (R("anjal_spam_rejected_total") + R("anjal_smtp_unknown_recipient_total") + R("anjal_smtp_bare_dot_rejected_total")).ToString("N0", Inv),
+                    ["s"] = R("anjal_spam_rejected_total").ToString("N0", Inv),
+                    ["u"] = R("anjal_smtp_unknown_recipient_total").ToString("N0", Inv),
+                    ["d"] = R("anjal_smtp_bare_dot_rejected_total").ToString("N0", Inv),
+                    ["g"] = R("anjal_greylist_deferred_total").ToString("N0", Inv),
+                    ["period"] = L[securityPeriod.Label].ToLowerInvariant(),
+                }),
+        };
+        securityLines = securityLines.Concat(attacks).ToList();
+
+        var backups = new List<DashLine>();
+        if (tiles.FirstOrDefault(t => t.Title == "Last good backup") is HealthTile backup)
+        {
+            backups.Add(new DashLine(backup.Level == "ok" ? "check" : "warning", backup.Text, "Last good backup", "/ops/health", backup.Level is "warn" or "bad" ? backup.Level : string.Empty, backup.Args));
+        }
+        backups.Add(new DashLine("archive", "Evidence kept: {size}", "Removed only when its period ends; the removal is logged", string.Empty, string.Empty, new Dictionary<string, string>(StringComparer.Ordinal) { ["size"] = Layout.MainLayout.Size(capacity.Evidence) }));
+        // rc.15 (item 61): how evidence and the backup copies grew over 30 days, from the daily disk record.
+        if (MailboxService.GrowthOver(diskDays, 30, d => d.Evidence) is long evidenceGrowth)
+        {
+            backups.Add(new DashLine("growth-chart", "Evidence grew {size} in 30 days", string.Empty, string.Empty, string.Empty, new Dictionary<string, string>(StringComparer.Ordinal) { ["size"] = Layout.MainLayout.Size(Math.Max(0, evidenceGrowth)) }));
+        }
+        backups.Add(new DashLine("archive", "Backup copies waiting on this server: {size}", MailboxService.GrowthOver(diskDays, 30, d => d.Backups) is long backupGrowth && backupGrowth > 0 ? "Grew {grew} in 30 days" : string.Empty, string.Empty, string.Empty,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["size"] = Layout.MainLayout.Size(capacity.Backups), ["grew"] = Layout.MainLayout.Size(Math.Max(0, MailboxService.GrowthOver(diskDays, 30, d => d.Backups) ?? 0)) }));
+        if (drills.Count > 0)
+        {
+            string drillDay = DrillDay(drills[0]);
+            backups.Add(new DashLine("version-history", drills[0].Passed ? "Last restore drill {date}: everything came back" : "Last restore drill {date}: something failed", string.Empty, "/ops/health", drills[0].Passed ? string.Empty : "bad",
+                new Dictionary<string, string>(StringComparer.Ordinal) { ["date"] = drillDay }));
+        }
+        backupLines = backups;
+    }
+
+    private static string NameOf(OrgSummary o) => o.Tenant.DisplayName.Length > 0 ? o.Tenant.DisplayName : o.Tenant.Slug;
+
+    private static string StatusPill(string status) => status switch { "active" => "pill-info", "suspended" => "pill-bad", "trial" => "pill-mute", _ => "pill-mute" };
+
+    private static string StatusWord(string status) => status switch { "active" => "Active", "setting-up" => "Setting up", "trial" => "Trial", "suspended" => "Suspended", _ => status };
+
+
+    private int BarHeight(long count)
+    {
+        long max = hours.Count == 0 ? 0 : hours.Max(h => h.Count);
+        return max == 0 ? 2 : (int)Math.Max(2, count * 100 / max);
+    }
+
+    private bool ready;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        ready = false;
+        await this.LoadAsync();
+        ready = true;
+    }
+
+    // Everything the page shows, loaded before it is drawn: the page is
+    // drawn once while this waits, and must not draw half-loaded figures.
+    private async Task LoadAsync()
+    {
+        me = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        if (WebmailAuthService.PersonIdOf(user) is not Guid person || await Mail.GetMailboxAnyAsync(person) is not MailboxRow mine || !Operators.Is(mine.Address))
+        {
+            return;
+        }
+        me = mine;
+        note = AuthEndpoints.ReadNote(Protection, E);
+        revealed = Links == "1" ? Sessions.TakeReveal(SessionRegistry.SessionOf(user)) : null;
+        orgs = await Mail.ListOrganisationsAsync();
+        canMakeKeys = await Mail.CanMakeDkimKeysAsync();
+        sel = Guid.TryParse(Sel, out Guid id) ? orgs.FirstOrDefault(o => o.Tenant.Id == id) : null;
+        if (Current == "overview")
+        {
+            await this.LoadOverviewAsync();
+        }
+        if (Current == "health")
+        {
+            drills = await Mail.DrillsAsync();
+            (tiles, hours) = await Mail.HealthAsync(OpsEndpoints.RootOf(Maildir), DateTimeOffset.UtcNow);
+            healthWord = tiles.Any(t => t.Level == "bad") ? "Needs attention" : tiles.Any(t => t.Level == "warn") ? "Some things to look at" : "All systems normal";
+        }
+        else
+        {
+            healthWord = "Tiles, alerts, the last 24 hours";
+        }
+    }
+}

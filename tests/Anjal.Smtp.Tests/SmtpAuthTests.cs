@@ -167,6 +167,54 @@ public class SmtpAuthTests
         Assert.StartsWith("250", reply!, System.StringComparison.Ordinal);
     }
 
+    private static readonly string[] AppKeyAddress = { "notifications@hospital-a.test" };
+
+    [Fact]
+    public async System.Threading.Tasks.Task SubmissionPort_AppKeyLimitedToOneAddress_RefusesItsDomainsOtherAddresses()
+    {
+        // rc.14: an application's key may send as one address only.
+        using var fixture = await StartSubmissionServerAsync(
+            user: "app-key", password: "AppSecret", allowedDomains: AppKeyAddress);
+
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
+        await conn.WriteLineAsync("AUTH PLAIN " + Convert.ToBase64String(Encoding.UTF8.GetBytes("\0app-key\0AppSecret")));
+        await conn.ReadLineAsync();
+
+        await conn.WriteLineAsync("MAIL FROM:<payroll@hospital-a.test>");
+        Assert.StartsWith("550", (await conn.ReadLineAsync())!, System.StringComparison.Ordinal);
+        await conn.WriteLineAsync("MAIL FROM:<Notifications@Hospital-A.test>");
+        Assert.StartsWith("250", (await conn.ReadLineAsync())!, System.StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async System.Threading.Tasks.Task SubmissionRefusals_AreTold_WithTheUserNameAndWhy()
+    {
+        // rc.15 (item 59): an organisation sees what was refused for its applications' keys.
+        var told = new System.Collections.Concurrent.ConcurrentQueue<SubmissionRefusal>();
+        using var fixture = await StartSubmissionServerAsync(
+            user: "app-key", password: "AppSecret", allowedDomains: AppKeyAddress, refused: told.Enqueue);
+
+        using var conn = await ConnectAsync(fixture.Port);
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("EHLO test.local");
+        await DrainEhloAsync(conn);
+        await conn.WriteLineAsync("AUTH PLAIN " + Convert.ToBase64String(Encoding.UTF8.GetBytes("\0app-key\0Wrong")));
+        Assert.StartsWith("535", (await conn.ReadLineAsync())!, System.StringComparison.Ordinal);
+        await conn.WriteLineAsync("AUTH PLAIN " + Convert.ToBase64String(Encoding.UTF8.GetBytes("\0app-key\0AppSecret")));
+        await conn.ReadLineAsync();
+        await conn.WriteLineAsync("MAIL FROM:<payroll@hospital-a.test>");
+        Assert.StartsWith("550", (await conn.ReadLineAsync())!, System.StringComparison.Ordinal);
+
+        SubmissionRefusal[] all = told.ToArray();
+        Assert.Equal(2, all.Length);
+        Assert.Equal("app-key", all[0].Username);
+        Assert.Equal("wrong password", all[0].Reason);
+        Assert.Contains("payroll@hospital-a.test", all[1].Reason, System.StringComparison.Ordinal);
+    }
+
     [Fact]
     public async System.Threading.Tasks.Task SubmissionPort_AdminUser_AnyFromDomain_Accepted()
     {
@@ -231,7 +279,8 @@ public class SmtpAuthTests
     private static async System.Threading.Tasks.Task<ServerFixture> StartSubmissionServerAsync(
         string user = "alice",
         string password = "Sekret123",
-        string[]? allowedDomains = null)
+        string[]? allowedDomains = null,
+        System.Action<SubmissionRefusal>? refused = null)
     {
         string hash = Pbkdf2Hasher.Hash(password, iterations: 1000);
         var authenticator = new TestAuthenticator(user, hash, allowedDomains ?? DefaultAllowedDomains);
@@ -243,6 +292,7 @@ public class SmtpAuthTests
             AdvertisedHostName = "test.local",
             Role = SmtpServerRole.Submission,
             AllowPlaintextAuth = true,
+            Refused = refused,
         };
         var cts = new System.Threading.CancellationTokenSource();
         var server = new SmtpServer(options, sink,

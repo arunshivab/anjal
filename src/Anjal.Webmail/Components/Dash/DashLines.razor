@@ -1,0 +1,46 @@
+@* rc.15: a box's lines - "Needs attention", "Your safety", "Security" - each
+   with its icon, a second line when there is one, and where it opens. *@
+@if (Lines.Count == 0)
+{
+    <p class="dnote dclear"><LipiIcon Name="check" Size="16" />@Empty</p>
+}
+else
+{
+    <ul class="dlines">
+        @foreach (DashLine line in Lines)
+        {
+            <li class="@(line.Level.Length > 0 ? "lv-" + line.Level : null)">
+                @if (line.Href.Length > 0)
+                {
+                    <a href="@line.Href"><LipiIcon Name="@line.Icon" Size="17" /><span class="dltext"><span>@Fill(line.Text, line)</span>@if (line.Sub.Length > 0) {<small>@Fill(line.Sub, line)</small>}</span><LipiIcon Name="chevron-right" Size="15" Class="dlgo" /></a>
+                }
+                else
+                {
+                    <span class="dlrow"><LipiIcon Name="@line.Icon" Size="17" /><span class="dltext"><span>@Fill(line.Text, line)</span>@if (line.Sub.Length > 0) {<small>@Fill(line.Sub, line)</small>}</span></span>
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    /// <summary>The lines.</summary>
+    [Parameter] public IReadOnlyList<DashLine> Lines { get; set; } = Array.Empty<DashLine>();
+
+    /// <summary>What to say when there are none.</summary>
+    [Parameter] public string Empty { get; set; } = string.Empty;
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    // The words looked up with their blanks, then the blanks filled.
+    private string Fill(string words, DashLine line)
+    {
+        string text = L[words];
+        foreach (KeyValuePair<string, string> a in line.Args ?? new Dictionary<string, string>())
+        {
+            text = text.Replace("{" + a.Key + "}", a.Value, StringComparison.Ordinal);
+        }
+        return text;
+    }
+}

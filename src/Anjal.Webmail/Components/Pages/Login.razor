@@ -2,69 +2,117 @@
 @page "/login"
 @layout MainLayout
 @attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 
-<PageTitle>Sign in — Anjal</PageTitle>
+<PageTitle>@L["Sign in"] — Anjal</PageTitle>
 
-<div class="centre">
-    <div class="panel signin">
-        <img src="/logos/anjal-lockup.svg" alt="Anjal" style="display:block;margin:0 auto 10px;height:52px" />
-        <p class="hostline">@HostName</p>
+@* The approved sign-in board (AuthSignIn, rc.13): the user name alone, with the
+   organisation's domain shown after it; Forgot password; and "This computer is"
+   the person's own or shared, which decides how long the sign-in lasts. *@
+<AuthFrame L="L" Org="org">
+    <h1 class="authtitle">@L["Sign in"]</h1>
 
-        @if (Error is not null)
-        {
-            <div class="err">
-                <LipiIcon Name="warning" Size="16" />
-                <span>Address or password not accepted.</span>
-            </div>
-        }
-        @if (Throttled is not null)
-        {
-            <div class="err">
-                <LipiIcon Name="warning" Size="16" />
-                <span>Too many unsuccessful attempts. Wait fifteen minutes and try again.</span>
-            </div>
-        }
-        @if (Unsaved is not null)
-        {
-            <div class="note">
-                <LipiIcon Name="info" Size="16" />
-                <span>Your session had ended, so that change was not saved. Sign in and make it again.</span>
-            </div>
-        }
-        @if (Expired is not null)
-        {
-            <div class="note">
-                <LipiIcon Name="info" Size="16" />
-                <span>Your session expired. Sign in again to carry on; nothing you were reading was lost.</span>
-            </div>
-        }
+    @if (Error is not null)
+    {
+        <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["User name or password not accepted."]</span></div>
+    }
+    @if (Throttled is not null)
+    {
+        <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["Too many unsuccessful attempts. Wait fifteen minutes and try again."]</span></div>
+    }
+    @if (Paused is not null)
+    {
+        @* Owner, 10 Oct 2026 (P6): ten wrong passwords in a row pause signing in with the password for 30 minutes. *@
+        <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["Too many wrong passwords. Signing in is paused for 30 minutes. Forgot password still works."]</span></div>
+    }
+    @if (Locked is not null)
+    {
+        @* DES-11 S3: five wrong second-step codes lock it on every device for fifteen minutes. *@
+        <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["Too many wrong codes. The second step is locked for fifteen minutes on every device, and you have been sent a mail about it."]</span></div>
+    }
+    @if (Unsaved is not null)
+    {
+        <div class="note"><LipiIcon Name="info" Size="16" /><span>@L["Your session had ended, so that change was not saved. Sign in and make it again."]</span></div>
+    }
+    @if (Expired is not null)
+    {
+        <div class="note"><LipiIcon Name="info" Size="16" /><span>@L["Your session expired. Sign in again to carry on; nothing you were reading was lost."]</span></div>
+    }
+    @if (Ended is not null)
+    {
+        <div class="note"><LipiIcon Name="info" Size="16" /><span>@L["You were signed out from another device, or your password was changed. Sign in again."]</span></div>
+    }
+    @if (Reset is not null)
+    {
+        <div class="note n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Your password is changed. You are signed out everywhere, and every trusted device will ask for the second step once more. Sign in with the new password."]</span></div>
+    }
 
-        <form method="post" action="/auth/login">
-            <AntiforgeryToken />
-            <div class="row">
-                <label class="lbl" for="address">Address</label>
-                <input class="inp @(Error is not null ? "bad" : "")" id="address" name="address" type="email"
-                       inputmode="email" autocomplete="username" required autofocus />
-            </div>
-            <div class="row">
-                <label class="lbl" for="password">Password</label>
-                <input class="inp @(Error is not null ? "bad" : "")" id="password" name="password" type="password"
-                       autocomplete="current-password" required />
-            </div>
-            <button type="submit" class="full">Sign in</button>
-        </form>
-        <p class="hint" style="color:var(--ink-subtle);font-size:12px;margin:14px 0 0;text-align:center">
-            No password reset here. Ask your administrator; Anjal will not email a new password.
-        </p>
-    </div>
-</div>
+    <form method="post" action="/auth/login" class="authfields" data-signin>
+        <AntiforgeryToken />
+        <label class="authlbl" for="address">@(org is null ? L["Address"] : L["User name"])</label>
+        <div class="authinpwrap @(Error is not null ? "bad" : "")">
+            <input class="authinp-in" id="address" name="address" type="text" value="@User"
+                   autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus="@(string.IsNullOrEmpty(User))"
+                   placeholder="@(org is null ? "you@organisation.in" : null)" />
+            @if (org is not null)
+            {
+                <span class="authsuffix" data-suffix>@@@org.Domain</span>
+            }
+        </div>
+        <div class="authlblrow">
+            <label class="authlbl" for="password">@L["Password"]</label>
+            <a class="authlink" href="/sign-in/forgot" data-forgot>@L["Forgot password?"]</a>
+        </div>
+        <div class="authinpwrap @(Error is not null ? "bad" : "")">
+            <input class="authinp-in" id="password" name="password" type="password" autocomplete="current-password" required autofocus="@(!string.IsNullOrEmpty(User))" />
+        </div>
+        <fieldset class="authdevice">
+            <legend>@L["This computer is"]</legend>
+            <label class="authradio">
+                <input type="radio" name="device" value="own" checked="@(!SharedChosen)" />
+                <span><span>@L["My own device"]</span><span class="authhint">@(org is null ? L["Stay signed in, within your organisation's limits"] : L["Stay signed in, within {organisation}'s limits"].Replace("{organisation}", org.Name, StringComparison.Ordinal))</span></span>
+            </label>
+            <label class="authradio">
+                <input type="radio" name="device" value="shared" checked="@SharedChosen" />
+                <span><span>@L["Shared with others"]</span><span class="authhint">@L["Signs out after 15 minutes idle and leaves nothing behind"]</span></span>
+            </label>
+        </fieldset>
+        <button type="submit" class="authbtn">@L["Sign in"]</button>
+    </form>
+    @if (org is not null && org.Message.Length > 0)
+    {
+        <p class="authnote authorgmsg">@org.Message</p>
+    }
+    <p class="authnote">@L["New accounts are created by your organisation's administrator, who sends you an invitation."]</p>
+</AuthFrame>
 
 @code {
     [SupplyParameterFromQuery] private string? Error { get; set; }
     [SupplyParameterFromQuery] private string? Expired { get; set; }
     [SupplyParameterFromQuery] private string? Throttled { get; set; }
-    [SupplyParameterFromQuery] private string? Unsaved { get; set; }
-    [Inject] private Anjal.Webmail.Services.HostInfo Host { get; set; } = default!;
 
-    private string HostName => Host.Name;
+    [SupplyParameterFromQuery] private string? Paused { get; set; }
+    [SupplyParameterFromQuery] private string? Locked { get; set; }
+    [SupplyParameterFromQuery] private string? Unsaved { get; set; }
+    [SupplyParameterFromQuery] private string? Ended { get; set; }
+    [SupplyParameterFromQuery] private string? Reset { get; set; }
+    [SupplyParameterFromQuery(Name = "u")] private string? User { get; set; }
+    [SupplyParameterFromQuery(Name = "shared")] private string? Shared { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+
+    private bool SharedChosen => Shared == "1";
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        if (User is { Length: > 120 })
+        {
+            User = User[..120];
+        }
+    }
 }
