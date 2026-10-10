@@ -45,6 +45,13 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Owner, 11 Oct 2026: line endings and byte-order marks checked on every
+      # change, so a new file type, a disagreeing .editorconfig or a stray CR
+      # fails here with the file named, instead of surfacing later as a
+      # formatting failure or a "different" file in a release check.
+      - name: Line endings
+        run: python tools/check_eol.py
+
       - name: Words and colours
         run: |
           set -euo pipefail

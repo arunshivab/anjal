@@ -8,6 +8,10 @@ charset = utf-8
 trim_trailing_whitespace = true
 insert_final_newline = true
 
+# Line endings must match .gitattributes (tools/check_eol.py checks both).
+[*.{py,sh,yml,yaml,service,timer,example}]
+end_of_line = lf
+
 [*.{yml,yaml}]
 indent_size = 2
 

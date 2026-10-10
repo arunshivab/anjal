@@ -1033,6 +1033,18 @@ from-domain authority.
 
     python tools/gen_api_docs.py
 
+## Line endings
+
+Every tracked file has an explicit rule in `.gitattributes` (CRLF for sources, docs and
+web files; LF for scripts, workflows, systemd units and env templates; binary for
+images, fonts and packages), and `.editorconfig` gives the same ending. Check or fix:
+
+    python tools/check_eol.py          # lists any fault and fails
+    python tools/check_eol.py --fix    # rewrites working files to their rule
+
+CI runs the check in the style workflow; `deploy.ps1` runs `--fix` before formatting.
+A new file type needs a line in both files.
+
 ## Pre-push verification (Windows)
 
     .\deploy.ps1 -Message "Your commit message"
