@@ -6,6 +6,14 @@
 *.md text eol=crlf
 *.sql text eol=crlf
 *.ps1 text eol=crlf
+# Web and build files: CRLF too (rc.15, 11 Oct 2026). Without a rule, a Linux checkout
+# kept them as stored while the generators write CRLF, so CI saw tokens.css as changed.
+*.razor text eol=crlf
+*.js text eol=crlf
+*.css text eol=crlf
+*.html text eol=crlf
+*.props text eol=crlf
+*.targets text eol=crlf
 
 # Python and shell scripts: LF.
 *.py text eol=lf

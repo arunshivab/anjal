@@ -3316,11 +3316,11 @@ time > .td { font-size: 11px; font-weight: 400; color: var(--ink-subtle); }
 }
 
 /* Owner, 9 Oct 2026: sorting. The Sort menu sits in the list head; the headings under the search row sort too. */
-.lhsort summary.on { background: var(--brand-soft); color: var(--brand); }
-/* With a message open the list is narrow: the menu opens over the letter, never under the folder rail. */
+.lhsort summary.on { background: var(--brand-soft); color: var(--brand); }
+/* With a message open the list is narrow: the menu opens over the letter, never under the folder rail. */
 .fview.has-open .lhsort.pmenu-right .pmenu-body { left: 0; right: auto; }
 .pmi-gap { display: inline-block; width: 15px; flex: 0 0 15px; }
-.lh-sorthead { gap: 4px; padding: 0 6px 0 26px; margin-top: 2px; }
+.lh-sorthead { gap: 4px; padding: 0 6px 0 26px; margin-top: 2px; }
 .lh-sorthead .sorth:last-of-type { margin-left: auto; }
 .sorth { display: inline-flex; align-items: center; gap: 3px; height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: none;
          font: inherit; font-size: 12px; font-weight: 600; color: var(--ink-subtle); cursor: pointer; }

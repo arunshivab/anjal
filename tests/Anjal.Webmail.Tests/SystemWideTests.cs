@@ -179,6 +179,14 @@ public partial class SystemWideTests
         {
             Assert.Contains(Path.GetFileNameWithoutExtension(file), ScreenChecks);
         }
+        // rc.15 (11 Oct 2026): the checks run in groups side by side; each check in exactly one.
+        List<string> grouped = screens.Split('\n')
+            .Select(l => l.Trim())
+            .Where(l => l.StartsWith("checks: \"", StringComparison.Ordinal))
+            .SelectMany(l => l["checks: \"".Length..].TrimEnd('"').Split(','))
+            .Select(c => c.Trim())
+            .ToList();
+        Assert.Equal(ScreenChecks.OrderBy(c => c, StringComparer.Ordinal), grouped.OrderBy(c => c, StringComparer.Ordinal));
         string style = File.ReadAllText(Path.Combine(root, ".github", "workflows", "style.yml"));
         Assert.Contains("python tools/check_words.py", style, StringComparison.Ordinal);
         Assert.Contains("python tools/gen_words.py", style, StringComparison.Ordinal);

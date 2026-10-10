@@ -14,10 +14,26 @@ on:
   pull_request:
     branches: [main]
 
+# rc.15 (11 Oct 2026): the 17 checks took longer than one job may run (the first pull request
+# hit the 75-minute limit), so they run in four groups side by side. Every check is in exactly
+# one group; a test (SystemWideTests) keeps it so.
 jobs:
   screens:
+    name: screens (${{ matrix.group }})
     runs-on: ubuntu-24.04
     timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: menus
+            checks: "noscroll,names,menus"
+          - group: buttons
+            checks: "tips,close,keyboard,swap,flap,reach"
+          - group: layout
+            checks: "shrink,clip,steady,lineup"
+          - group: look
+            checks: "align,same,sizes,scrollbars"
     services:
       postgres:
         image: postgres:16
@@ -64,13 +80,13 @@ jobs:
 
       - name: Check every screen
         working-directory: tools/ui
-        run: node check.js
+        run: node check.js --only ${{ matrix.checks }}
 
       - name: Keep the reports
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: screen-checks
+          name: screen-checks-${{ matrix.group }}
           path: |
             tools/ui/out/
             ${{ runner.temp }}/anjal-ui/*.log
