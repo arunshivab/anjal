@@ -134,11 +134,15 @@ internal static class AuthEndpoints
                 sessions.RemovePending(pending.Id);
                 return Results.Redirect("/sign-in?locked=1");
             }
+            // Owner, 11 Oct 2026 (CodeQL cs/user-controlled-bypass): both kinds of code are
+            // always checked, the app's first; the tab the person used only decides what the
+            // page shows next. Either check uses the stored secret, and a code works once.
             bool backup = method == "backup";
-            bool ok = backup
-                ? await svc.UseBackupCodeAsync(pending.MailboxId, code ?? string.Empty, ct).ConfigureAwait(false)
-                : await svc.CheckAuthenticatorCodeAsync(pending.MailboxId, code ?? string.Empty, ct).ConfigureAwait(false);
-            if (!ok)
+            string typed = code ?? string.Empty;
+            string? used = await svc.CheckAuthenticatorCodeAsync(pending.MailboxId, typed, ct).ConfigureAwait(false) ? "authenticator"
+                : await svc.UseBackupCodeAsync(pending.MailboxId, typed, ct).ConfigureAwait(false) ? "backup code"
+                : null;
+            if (used is null)
             {
                 pending.Attempts++;
                 await audit.RecordAsync(pending.Address, "webmail.signin.second-step-failed", pending.Address, ClientOf(http)).ConfigureAwait(false);
@@ -149,7 +153,7 @@ internal static class AuthEndpoints
                 }
                 return Results.Redirect("/sign-in/two-step?error=1" + (backup ? "&method=backup" : string.Empty));
             }
-            return Results.Redirect(await FinishSecondStepAsync(http, pending, trust == "1", backup ? "backup code" : "authenticator", ct).ConfigureAwait(false));
+            return Results.Redirect(await FinishSecondStepAsync(http, pending, trust == "1", used, ct).ConfigureAwait(false));
         });
 
         app.MapPost("/auth/two-step/ask", (HttpContext http, SessionRegistry sessions) =>
@@ -835,6 +839,20 @@ internal static class AuthEndpoints
             }
             return Results.Redirect(error is null ? "/settings/security?saved=recovery" : "/settings/security?e=" + Uri.EscapeDataString(Note(dp, error)));
         }).RequireAuthorization();
+
+        // Owner, 11 Oct 2026 (CodeQL cs/user-controlled-bypass): a setup starts only from
+        // this button, never from opening the page, so a page view writes nothing.
+        app.MapPost("/settings/security/authenticator/start", async (HttpContext http, [FromForm] string? welcome, [FromForm] string? required, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.BeginAuthenticatorAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            string back = welcome == "1" ? "?welcome=1" : required == "1" ? "?required=1" : string.Empty;
+            return Results.Redirect("/settings/security/two-step" + back);
+        }).RequireAuthorization().AddEndpointFilter(Program.RequireAntiforgery);
 
         app.MapPost("/settings/security/authenticator/confirm", async (HttpContext http, [FromForm] string? code, MailboxService svc, SessionRegistry sessions, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
         {

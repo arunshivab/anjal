@@ -246,9 +246,15 @@ public sealed class Rc13AuthFlowTests : IAsyncLifetime, IDisposable
         Assert.Equal("/settings/security/two-step?welcome=1", ok.Headers.Location!.ToString());
         string step2 = await c.GetStringAsync("settings/security/two-step?welcome=1");
         Assert.Contains("Set up two-step sign-in", step2, StringComparison.Ordinal);
-        Assert.Contains("<svg class=\"qr\"", step2, StringComparison.Ordinal);
         Assert.Contains("Skip for now", step2, StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"welcome", step2, StringComparison.Ordinal);
+        // Opening the page starts nothing; the button does, and the welcome steps stay.
+        Assert.DoesNotContain("<svg class=\"qr\"", step2, StringComparison.Ordinal);
+        HttpResponseMessage start = await Post(c, "settings/security/authenticator/start", Token(step2), ("welcome", "1"));
+        Assert.Equal("/settings/security/two-step?welcome=1", start.Headers.Location!.ToString());
+        string qr = await c.GetStringAsync("settings/security/two-step?welcome=1");
+        Assert.Contains("<svg class=\"qr\"", qr, StringComparison.Ordinal);
+        Assert.Contains("Skip for now", qr, StringComparison.Ordinal);
 
         string used = await this.Client().GetStringAsync("invite/" + token);
         Assert.Contains("This invitation cannot be used", used, StringComparison.Ordinal);
@@ -301,6 +307,57 @@ public sealed class Rc13AuthFlowTests : IAsyncLifetime, IDisposable
         Assert.Contains("This invitation cannot be used", page, StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"rail", page, StringComparison.Ordinal);
         Assert.Contains("You have signed out", await c.GetStringAsync("signed-out"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CodeQl_OpeningTheTwoStepPage_StartsNothing_AndEitherCodeWorksWhicheverTabWasUsed()
+    {
+        // Owner, 11 Oct 2026 (CodeQL cs/user-controlled-bypass, alerts 9 and 10).
+        MailboxService svc = this.app.Services.GetRequiredService<MailboxService>();
+        HttpClient c = this.Client();
+        await SignInAsync(c, "arun", "correct horse battery");
+        string page = await c.GetStringAsync("settings/security/two-step");
+        Assert.Contains("action=\"/settings/security/authenticator/start\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<svg class=\"qr\"", page, StringComparison.Ordinal);
+        Assert.Empty((await svc.GetSecurityAsync(this.mailbox.Id)).PendingTotpSecret);
+        Assert.Null(await svc.GetAuthenticatorSetupAsync(this.mailbox.Id));
+
+        // Without the form's token, nothing starts.
+        using (var bare = new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()))
+        {
+            await c.PostAsync("settings/security/authenticator/start", bare);
+        }
+        Assert.Empty((await svc.GetSecurityAsync(this.mailbox.Id)).PendingTotpSecret);
+
+        HttpResponseMessage start = await Post(c, "settings/security/authenticator/start", Token(page));
+        Assert.Equal("/settings/security/two-step", start.Headers.Location!.ToString());
+        Assert.Contains("<svg class=\"qr\"", await c.GetStringAsync("settings/security/two-step"), StringComparison.Ordinal);
+        (string _, string secretText) = (await svc.GetAuthenticatorSetupAsync(this.mailbox.Id))!.Value;
+        Assert.Equal(secretText, (await svc.GetAuthenticatorSetupAsync(this.mailbox.Id))!.Value.Secret);   // reading again changes nothing
+        byte[] secret = Base32.Decode(secretText)!;
+        long step = Totp.StepOf(DateTimeOffset.UtcNow);
+        (string? error, IReadOnlyList<string> backup) = await svc.ConfirmAuthenticatorAsync(this.mailbox.Id, Totp.Code(secret, step - 1));
+        Assert.Null(error);
+        Assert.Null(await svc.GetAuthenticatorSetupAsync(this.mailbox.Id));
+
+        // A backup code typed on the app's tab, and the app's code typed on the backup tab.
+        HttpClient one = this.Client();
+        Assert.Equal("/sign-in/two-step", (await SignInAsync(one, "arun", "correct horse battery")).Headers.Location!.ToString());
+        HttpResponseMessage viaApp = await Post(one, "auth/two-step", Token(await one.GetStringAsync("sign-in/two-step")), ("code", backup[0]));
+        Assert.DoesNotContain("error", viaApp.Headers.Location!.ToString(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, (await one.GetAsync("folder/INBOX")).StatusCode);
+
+        HttpClient two = this.Client();
+        await SignInAsync(two, "arun", "correct horse battery");
+        HttpResponseMessage viaBackup = await Post(two, "auth/two-step", Token(await two.GetStringAsync("sign-in/two-step")), ("code", Totp.Code(secret, step)), ("method", "backup"));
+        Assert.DoesNotContain("error", viaBackup.Headers.Location!.ToString(), StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.OK, (await two.GetAsync("folder/INBOX")).StatusCode);
+
+        // A used backup code stays used; a wrong code still counts as a wrong try.
+        HttpClient three = this.Client();
+        await SignInAsync(three, "arun", "correct horse battery");
+        HttpResponseMessage again = await Post(three, "auth/two-step", Token(await three.GetStringAsync("sign-in/two-step")), ("code", backup[0]), ("method", "backup"));
+        Assert.Equal("/sign-in/two-step?error=1&method=backup", again.Headers.Location!.ToString());
     }
 
     private static string Token(string html)

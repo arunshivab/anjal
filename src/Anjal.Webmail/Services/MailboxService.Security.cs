@@ -435,8 +435,32 @@ public sealed partial class MailboxService
         byte[] secret = doc.PendingTotpSecret.Length > 0 ? this.Unprotect(doc.PendingTotpSecret) ?? Totp.NewSecret() : Totp.NewSecret();
         doc.PendingTotpSecret = this.Secrets.Protect(Base32.Encode(secret));
         await this.WriteDocumentAsync(mailboxId, SecurityKind, doc, ct).ConfigureAwait(false);
-        string org = string.IsNullOrWhiteSpace(context.Value.Tenant.DisplayName) ? context.Value.Tenant.Slug : context.Value.Tenant.DisplayName.Trim();
-        return (Totp.Uri(org + " mail", context.Value.Mailbox.Address, secret), Base32.Grouped(secret));
+        return SetupFor(context.Value.Tenant, context.Value.Mailbox, secret);
+    }
+
+    /// <summary>
+    /// The authenticator setup already started (by <see cref="BeginAuthenticatorAsync"/>),
+    /// or null when none is waiting. Only reads: opening a page never starts a
+    /// setup (owner, 11 Oct 2026; CodeQL cs/user-controlled-bypass).
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task<(string Uri, string Secret)?> GetAuthenticatorSetupAsync(Guid mailboxId, CancellationToken ct = default)
+    {
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
+        if (context is null)
+        {
+            return null;
+        }
+        SecurityDocument doc = await this.GetSecurityAsync(mailboxId, ct).ConfigureAwait(false);
+        byte[]? secret = doc.PendingTotpSecret.Length > 0 && doc.TotpSecret.Length == 0 ? this.Unprotect(doc.PendingTotpSecret) : null;
+        return secret is null ? null : SetupFor(context.Value.Tenant, context.Value.Mailbox, secret);
+    }
+
+    private static (string Uri, string Secret) SetupFor(TenantRow tenant, MailboxRow mailbox, byte[] secret)
+    {
+        string org = string.IsNullOrWhiteSpace(tenant.DisplayName) ? tenant.Slug : tenant.DisplayName.Trim();
+        return (Totp.Uri(org + " mail", mailbox.Address, secret), Base32.Grouped(secret));
     }
 
     /// <summary>

@@ -364,7 +364,10 @@
                     <div class="twobtns">
                         @if (security.TotpSecret.Length == 0)
                         {
-                            <a class="btn btn-s btn-sm" href="/settings/security/two-step"><LipiIcon Name="qr-code" Size="15" />@L["Set up an authenticator app"]</a>
+                            <form method="post" action="/settings/security/authenticator/start" class="inline">
+                                <AntiforgeryToken />
+                                <button type="submit" class="btn btn-s btn-sm"><LipiIcon Name="qr-code" Size="15" />@L["Set up an authenticator app"]</button>
+                            </form>
                         }
                         @if (security.TwoStepOn && policy.Methods != "no-backup")
                         {
@@ -514,6 +517,30 @@
                     <p><b>@L["2. Type the 6-digit code it shows."]</b></p>
                     <CodeBoxes L="L" Label="@L["Code from your authenticator app"]" Focus="false" />
                     <div class="setactions"><button type="submit" class="btn btn-p">@L["Turn on"]</button></div>
+                </form>
+                <p class="hint twoalt">@L["Or use a passkey: this computer or your phone confirms it is you, with a fingerprint, face or PIN."] <button type="button" class="linkbtn" data-passkey-add hidden>@L["Add a passkey"]</button></p>
+                <div class="err" role="alert" data-passkey-error hidden><LipiIcon Name="warning" Size="16" /><span></span></div>
+                @if (Welcome is not null && demand != "twostep" && Required is null)
+                {
+                    <p class="setactions"><a class="btn btn-q btn-sm" href="/folder/INBOX">@L["Skip for now"]</a></p>
+                }
+            }
+            else
+            {
+                @* Owner, 11 Oct 2026: opening this page starts nothing; the button does. *@
+                <h2>@L["Set up two-step sign-in"]</h2>
+                <p class="hint">@L["After your password, Anjal will ask for a code from an app on your phone. Any authenticator app works: Google Authenticator, Microsoft Authenticator, 1Password and others."]</p>
+                <form method="post" action="/settings/security/authenticator/start" class="setactions">
+                    <AntiforgeryToken />
+                    @if (Welcome is not null)
+                    {
+                        <input type="hidden" name="welcome" value="1" />
+                    }
+                    @if (Required is not null)
+                    {
+                        <input type="hidden" name="required" value="1" />
+                    }
+                    <button type="submit" class="btn btn-p"><LipiIcon Name="qr-code" Size="16" />@L["Set up an authenticator app"]</button>
                 </form>
                 <p class="hint twoalt">@L["Or use a passkey: this computer or your phone confirms it is you, with a fingerprint, face or PIN."] <button type="button" class="linkbtn" data-passkey-add hidden>@L["Add a passkey"]</button></p>
                 <div class="err" role="alert" data-passkey-error hidden><LipiIcon Name="warning" Size="16" /><span></span></div>
@@ -1022,10 +1049,7 @@
                 if (Sub == "two-step")
                 {
                     codes = Codes is not null ? Sessions.TakeReveal(sessionId) : null;
-                    if (codes is null && Codes is null && security.TotpSecret.Length == 0)
-                    {
-                        setup = await Mail.BeginAuthenticatorAsync(mailboxId.Value);
-                    }
+                    setup = await Mail.GetAuthenticatorSetupAsync(mailboxId.Value);
                 }
                 break;
         }

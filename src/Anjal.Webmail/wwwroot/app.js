@@ -1998,19 +1998,49 @@
   /* ---------- 5b1. Copy (rc.14) ----------
      A button marked data-copy puts its value on the clipboard and says so
      for a moment: DNS records, invitation links, application keys. Without
-     the script the value stays on the page to select by hand. */
+     the script the value stays on the page to select by hand.
+     rc.15 (CI, 11 Oct 2026): a browser may refuse the clipboard (a policy, plain
+     HTTP, no permission). The refusal was left unhandled, a script error. Now the
+     older copy route is tried, and if that fails too the value on the page is
+     selected, ready for Ctrl+C. */
   page(function copyButtons() {
+  function shown(btn) {
+    btn.classList.add("copied");
+    btn.setAttribute("aria-live", "polite");
+    var was = btn.getAttribute("title");
+    btn.setAttribute("title", "Copied");
+    setTimeout(function () { btn.classList.remove("copied"); if (was) { btn.setAttribute("title", was); } }, 1600);
+  }
+  function older(text) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (err) { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  function selectOnPage(btn) {
+    var value = btn.previousElementSibling;
+    if (!value || !window.getSelection) { return; }
+    var range = document.createRange();
+    range.selectNodeContents(value);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+  function fallBack(btn, text) {
+    if (older(text)) { shown(btn); } else { selectOnPage(btn); }
+  }
   $$("[data-copy]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       var text = btn.getAttribute("data-copy") || "";
-      if (!navigator.clipboard) { return; }
-      navigator.clipboard.writeText(text).then(function () {
-        btn.classList.add("copied");
-        btn.setAttribute("aria-live", "polite");
-        var was = btn.getAttribute("title");
-        btn.setAttribute("title", "Copied");
-        setTimeout(function () { btn.classList.remove("copied"); if (was) { btn.setAttribute("title", was); } }, 1600);
-      });
+      if (!navigator.clipboard || !navigator.clipboard.writeText) { fallBack(btn, text); return; }
+      navigator.clipboard.writeText(text).then(function () { shown(btn); }, function () { fallBack(btn, text); });
     });
   });
   });

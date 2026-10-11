@@ -25,7 +25,9 @@ function measure() {
   const cls = (e) => (e.className.toString() || e.tagName.toLowerCase()).split(/\s+/).filter(Boolean).slice(0, 3).join('.');
   // Controls in different panes or cards are never one row, however close they sit.
   const region = (e) => e.closest('.listcol, .readcol, .rail, .ecard, .letter, .composer, aside, dialog, details') || document.body;
-  const list = els.map((e) => { const q = e.getBoundingClientRect(); return { h: Math.round(q.height), n: name(e), c: cls(e), mid: q.top + q.height / 2, left: q.left, right: q.right, r: region(e) }; });
+  // The laid-out height, not the drawn one: a menu that pops open is drawn at 97% for a moment
+  // (anjal-pop), and a slow machine measured 36 as 35 (CI, 11 Oct 2026).
+  const list = els.map((e) => { const q = e.getBoundingClientRect(); return { h: e.offsetHeight || Math.round(q.height), n: name(e), c: cls(e), mid: q.top + q.height / 2, left: q.left, right: q.right, r: region(e) }; });
   const odd = list.filter((i) => !SIZES_.includes(i.h)).map((i) => `"${i.n}" [${i.c}] is ${i.h}px`);
   const rows = [];
   for (let a = 0; a < list.length; a++) {

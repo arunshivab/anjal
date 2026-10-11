@@ -87,6 +87,8 @@ jobs:
           # created (that is the step DEF-049 broke), then the order is refused.
           sudo sed -i "s|^ANJAL_ACME_DOMAINS=.*|ANJAL_ACME_DOMAINS=anjal-ci.invalid|" /etc/anjal/server.env /etc/anjal/webmail.env
           sudo sed -i 's|^# ANJAL_ACME_STAGING=true.*|ANJAL_ACME_STAGING=true|' /etc/anjal/webmail.env
+          # rc.15: who may open the Anjal console (DEPLOY.md 13d).
+          sudo sed -i "s|^ANJAL_OPERATORS=.*|ANJAL_OPERATORS=ci@anjal.co.in|" /etc/anjal/webmail.env
           test "$(sudo grep -c CHANGE-ME /etc/anjal/server.env /etc/anjal/webmail.env | awk -F: '{s+=$2} END {print s}')" -eq 0
 
       - name: Start both services under their systemd units
