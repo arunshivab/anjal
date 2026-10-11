@@ -8,7 +8,10 @@ const L = require('../lib.js');
 function mainText() {
   const m = document.querySelector('#main');
   // Figures that change by themselves (times, the disk, counts) are left out of the comparison.
-  return m ? m.innerText.replace(/\d+([.,:]\d+)*/g, '#').replace(/\s+/g, ' ').trim().slice(0, 4000) : '';
+  // Numbers are not compared, and neither is the plural after one: a count can move between the
+  // swap and the full load (CI, 11 Oct 2026: /ops said "0 days recorded", then "1 day", as the
+  // first daily record was written mid-check).
+  return m ? m.innerText.replace(/\d+([.,:]\d+)*/g, '#').replace(/# (\p{L}+?)s\b/gu, '# $1').replace(/\s+/g, ' ').trim().slice(0, 4000) : '';
 }
 
 module.exports = {
