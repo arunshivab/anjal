@@ -37,6 +37,10 @@ module.exports = {
         return true;
       };
       const settle = () => p.waitForFunction(() => !document.documentElement.classList.contains('swapping'), null, { timeout: 15000 }).then(() => p.waitForTimeout(200));
+      // CI, 11 Oct 2026: on a slow runner the check looked before the swap had even begun
+      // ("/folder/Scheduled: the address did not change"). After a rail click, wait for the new
+      // address first (up to 15 s), then for the swap to finish.
+      const arrive = (href) => p.waitForFunction((h) => location.pathname + location.search === h, href, { timeout: 15000 }).catch(() => {}).then(settle);
 
       // 1. Every link in the rail swaps, and the page is the one a full load shows.
       const rail = await p.$$eval('nav.rail a[href^="/"]', (a) => [...new Set(a.map((x) => x.getAttribute('href')))].filter((h) => !h.startsWith('/compose')));
@@ -44,7 +48,7 @@ module.exports = {
       for (const href of rail) {
         const before = p.url();
         await p.click(`nav.rail a[href="${href}"]`);
-        await settle();
+        await arrive(href);
         if (!(await kept(href))) { continue; }
         if (p.url() === before && !before.endsWith(href)) { found.push(`${href}: the address did not change`); }
         const focused = await p.evaluate(() => { const a = document.activeElement; return a && (a.tagName === 'H1' || a.id === 'main'); });

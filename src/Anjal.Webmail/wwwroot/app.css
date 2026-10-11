@@ -2677,6 +2677,9 @@ table, .score, time, .cnt, .n, .num, .ctable, .dcard, .bigline, .ucount { font-v
 .pmenu-body, .rte-menu, .suggest ul, .phonesheet .pssheet { border-color: var(--edge); box-shadow: var(--shadow-lg); }
 .listhead { border-bottom-color: var(--edge); }
 .statusbar { border-top-color: var(--edge); }
+/* CI, 11 Oct 2026: the clock and "Updated" times change their digits every minute; with
+   proportional digits ("1" is narrow) every item after them shifted by a pixel or two. */
+.statusbar { font-variant-numeric: tabular-nums; }
 .rail { border-right-color: var(--edge); }
 .mrow .spine::before { background: var(--edge); }
 
