@@ -154,6 +154,26 @@ public partial class SystemWideTests
     }
 
     /// <summary>
+    /// CI, 11 Oct 2026: a test whose checks all passed failed on macOS while removing its
+    /// temporary folder, because a background writer was still finishing a file. Every test
+    /// removes its folders through TestFolders, which waits and tries again.
+    /// </summary>
+    [Fact]
+    public void EveryTest_RemovesItsFolders_ThroughTheOneHelper()
+    {
+        string tests = Path.Combine(RepoRoot(), "tests");
+        string[] direct = Directory.GetFiles(tests, "*.cs", SearchOption.AllDirectories)
+            .Where(f => !f.Contains(Path.DirectorySeparatorChar + "Shared" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar, StringComparison.Ordinal)
+                && !f.EndsWith("SystemWideTests.cs", StringComparison.Ordinal)
+                && File.ReadAllText(f).Contains("Directory.Delete(", StringComparison.Ordinal))
+            .Select(f => Path.GetRelativePath(tests, f))
+            .ToArray();
+        Assert.Empty(direct);
+    }
+
+    /// <summary>
     /// Item 47 and UX-09 (owner, 7 Oct 2026): the browser checks of every screen - no page
     /// scrolling on mail screens at 1366x768, names, tips, menus, closing, alignment, squeezing,
     /// cut-off words, the keyboard and every button - run on every change, as one of the GitHub

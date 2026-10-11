@@ -62,7 +62,7 @@ public sealed class Des11SecurityTests : IAsyncLifetime, IDisposable
         await this.app.DisposeAsync();
         if (Directory.Exists(this.root))
         {
-            Directory.Delete(this.root, recursive: true);
+            TestFolders.Delete(this.root);
         }
     }
 

@@ -35,7 +35,7 @@ public sealed class AcmeTests : IDisposable
         this.ca.Dispose();
         if (Directory.Exists(this.dir))
         {
-            Directory.Delete(this.dir, recursive: true);
+            TestFolders.Delete(this.dir);
         }
     }
 

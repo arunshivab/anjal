@@ -23,7 +23,7 @@ public sealed class Des11SealKeyTests : IDisposable
         Environment.SetEnvironmentVariable("ANJAL_DKIM_SEAL_KEY", this.before);
         if (Directory.Exists(this.dir))
         {
-            Directory.Delete(this.dir, recursive: true);
+            TestFolders.Delete(this.dir);
         }
     }
 

@@ -36,7 +36,7 @@ public sealed class PwnedPasswordsTests : IDisposable
         PwnedPasswords.OnlineBaseUrl = PwnedPasswordBuilder.RangeApi;
         Environment.SetEnvironmentVariable("ANJAL_PWNED_MODE", null);
         Environment.SetEnvironmentVariable("ANJAL_PWNED_ONLINE_MIN_COUNT", null);
-        Directory.Delete(this.dir, recursive: true);
+        TestFolders.Delete(this.dir);
     }
 
     [Fact]

@@ -36,7 +36,7 @@ public sealed class Rc7AssetDeliveryTests : IAsyncLifetime, System.IDisposable
         await this.app.DisposeAsync();
         if (System.IO.Directory.Exists(this.root))
         {
-            System.IO.Directory.Delete(this.root, recursive: true);
+            TestFolders.Delete(this.root);
         }
     }
 

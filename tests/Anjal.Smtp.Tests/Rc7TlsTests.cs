@@ -126,7 +126,7 @@ public sealed class Rc7TlsTests
         }
         finally
         {
-            System.IO.Directory.Delete(dir, recursive: true);
+            TestFolders.Delete(dir);
         }
     }
 

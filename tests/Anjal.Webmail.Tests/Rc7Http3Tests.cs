@@ -25,7 +25,7 @@ public sealed class Rc7Http3Tests : System.IDisposable
     {
         if (System.IO.Directory.Exists(this.root))
         {
-            System.IO.Directory.Delete(this.root, recursive: true);
+            TestFolders.Delete(this.root);
         }
     }
 

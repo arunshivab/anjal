@@ -36,7 +36,7 @@ public class Def092CertificatePairTests
         }
         finally
         {
-            Directory.Delete(dir, recursive: true);
+            TestFolders.Delete(dir);
         }
     }
 }

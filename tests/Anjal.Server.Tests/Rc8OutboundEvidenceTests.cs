@@ -31,7 +31,7 @@ public sealed class Rc8OutboundEvidenceTests : System.IDisposable
             {
                 System.IO.File.SetAttributes(f, System.IO.FileAttributes.Normal);
             }
-            System.IO.Directory.Delete(this.root, recursive: true);
+            TestFolders.Delete(this.root);
         }
     }
 

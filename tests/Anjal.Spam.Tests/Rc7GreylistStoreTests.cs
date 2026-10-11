@@ -17,7 +17,7 @@ public sealed class Rc7GreylistStoreTests : System.IDisposable
 
     private string File => System.IO.Path.Combine(this.dir, "greylist.tsv");
 
-    public void Dispose() => System.IO.Directory.Delete(this.dir, recursive: true);
+    public void Dispose() => TestFolders.Delete(this.dir);
 
     [Fact]
     public async Task Load_PrefersTheDatabase()
