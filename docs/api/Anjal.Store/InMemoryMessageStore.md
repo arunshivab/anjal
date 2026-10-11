@@ -10,16 +10,24 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
 - **AddTrustedSenderAsync** *(method)* - _(no description)_
 - **AppendAuditAsync** *(method)* - _(no description)_
+- **CancelOutboundAsync** *(method)* - _(no description)_
 - **CompleteWebhookJobAsync** *(method)* - _(no description)_
+- **CountArrivalsByHourAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
 - **CountOutboundAsync** *(method)* - _(no description)_
+- **CountOutboundByRecipientDomainAsync** *(method)* - _(no description)_
+- **CountOutboundBySenderAsync** *(method)* - _(no description)_
+- **CountOutboundBySenderDomainAsync** *(method)* - _(no description)_
+- **CountReceivedByTenantAsync** *(method)* - _(no description)_
 - **CountSearchAsync** *(method)* - _(no description)_
 - **CountUnreadAsync** *(method)* - _(no description)_
 - **CountWebhookJobsAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
+- **DatabaseBytesAsync** *(method)* - _(no description)_
 - **DeleteCategoryAsync** *(method)* - _(no description)_
 - **DeleteCategoryRuleAsync** *(method)* - _(no description)_
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
+- **DeleteEmptyFolderAsync** *(method)* - _(no description)_
 - **DeleteLocalDomainAsync** *(method)* - _(no description)_
 - **DeleteMailboxAsync** *(method)* - _(no description)_
 - **DeleteMailboxSenderRuleAsync** *(method)* - _(no description)_
@@ -41,17 +49,21 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **GetEvidenceAsync** *(method)* - _(no description)_
 - **GetInboundByIdAsync** *(method)* - _(no description)_
 - **GetLatestEvidenceManifestAsync** *(method)* - _(no description)_
+- **GetMailFiguresAsync** *(method)* - _(no description)_
 - **GetMailboxAsync** *(method)* - _(no description)_
 - **GetMailboxByIdAsync** *(method)* - _(no description)_
+- **GetMailboxDocumentAsync** *(method)* - _(no description)_
 - **GetMessageByIdAsync** *(method)* - _(no description)_
 - **GetOutboundByIdAsync** *(method)* - _(no description)_
 - **GetOutboundEvidenceLinkAsync** *(method)* - _(no description)_
 - **GetOutboundTlsPolicyAsync** *(method)* - _(no description)_
 - **GetRoutingRuleAsync** *(method)* - _(no description)_
+- **GetServiceRecordAsync** *(method)* - _(no description)_
 - **GetSignatureAsync** *(method)* - _(no description)_
 - **GetSmtpUserAsync** *(method)* - _(no description)_
 - **GetTenantAsync** *(method)* - _(no description)_
 - **GetTenantByIdAsync** *(method)* - _(no description)_
+- **GetTenantDocumentAsync** *(method)* - _(no description)_
 - **GetTenantDomainAsync** *(method)* - _(no description)_
 - **ImportSettingsAsync** *(method)* - _(no description)_
 - **InsertEvidenceAsync** *(method)* - _(no description)_
@@ -74,7 +86,12 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **ListLocalDomainsAsync** *(method)* - _(no description)_
 - **ListMailboxSenderRulesAsync** *(method)* - _(no description)_
 - **ListMailboxesAsync** *(method)* - _(no description)_
+- **ListMessageNamesAsync** *(method)* - _(no description)_
 - **ListMessagesAsync** *(method)* - _(no description)_
+- **ListMessagesByIdsAsync** *(method)* - _(no description)_
+- **ListMessagesBySeenAsync** *(method)* - _(no description)_
+- **ListMessagesSortedAsync** *(method)* - _(no description)_
+- **ListOutboundForSenderAsync** *(method)* - _(no description)_
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
 - **ListSenderRulesAsync** *(method)* - _(no description)_
@@ -87,21 +104,29 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
 - **NoteRecoveredFromJunk** *(method)* - Record that a message was moved out of Junk by the reader.
+- **OldestPendingOutboundAsync** *(method)* - _(no description)_
 - **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
+- **RetryOutboundNowAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveMessageAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SearchMessagesAsync** *(method)* - _(no description)_
 - **SetEvidenceOutcomeAsync** *(method)* - _(no description)_
+- **SetMailboxDocumentAsync** *(method)* - _(no description)_
+- **SetMailboxPreferencesAsync** *(method)* - _(no description)_
 - **SetMessageCategoryAsync** *(method)* - _(no description)_
 - **SetMessageEvidenceAsync** *(method)* - _(no description)_
 - **SetMessageFlagsAsync** *(method)* - _(no description)_
 - **SetOutboundEvidenceAsync** *(method)* - _(no description)_
+- **SetServiceRecordAsync** *(method)* - _(no description)_
 - **SetSignatureAsync** *(method)* - _(no description)_
+- **SetTenantDocumentAsync** *(method)* - _(no description)_
 - **StartClocksForOutboundWithoutMailboxCopyAsync** *(method)* - _(no description)_
 - **StartEvidenceClocks** *(method)* - The in-memory stand-in for the database trigger: when the last copy pointing at an evidence row is gone, its retention clock starts. Called with the gate held.
+- **StepStart** *(method)* - The start of the step a local time falls in: the hour, the day, the Monday, or the first of the month.
+- **SumFolderBytesAsync** *(method)* - _(no description)_
 - **UpdateMessageTransportAsync** *(method)* - _(no description)_
 - **UpsertCategoryAsync** *(method)* - _(no description)_
 - **UpsertCategoryRuleAsync** *(method)* - _(no description)_
@@ -116,9 +141,11 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **UpsertSmtpUserAsync** *(method)* - _(no description)_
 - **UpsertTenantAsync** *(method)* - _(no description)_
 - **UpsertTenantDomainAsync** *(method)* - _(no description)_
+- **VerifyAuditChainAsync** *(method)* - _(no description)_
 - **Deliveries** *(property)* - The webhook deliveries currently stored. Provided for inspection in tests.
 - **EvidenceClock** *(property)* - The clock used to start retention clocks; tests may replace it.
 - **MailboxMessages** *(property)* - The mailbox message rows currently stored. Provided for inspection in tests.
+- **MessageClock** *(property)* - The clock that stamps a saved message's arrival time. Real time unless a test pins it, so no test depends on the day it runs (DEF-090, rc.11).
 - **Messages** *(property)* - The inbound messages currently stored. Provided for inspection in tests.
 - **Outbound** *(property)* - The outbound messages currently queued or completed. Provided for inspection in tests.
 - **Rules** *(property)* - The routing rules currently stored. Provided for inspection in tests.

@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Security.Claims;
 using Anjal.Acme;
 using Anjal.Mailbox;
 using Anjal.Store;
@@ -264,15 +263,27 @@ public static class Program
             ? new Anjal.Mailbox.EvidenceRecorder(evidenceStore, new Anjal.Mailbox.EvidenceVault(evidenceRoot))
             : null;
         // v1.0.0-rc.10 (D-75): once per process - tests build the app many times.
+        // rc.15 (item 35): passwords set here are checked against the full leaked-password list,
+        // which the server downloads and refreshes; the webmail picks up each new list by itself.
+        bool firstBuild = System.Threading.Interlocked.CompareExchange(ref evidenceNoteWritten, 0, 0) == 0;
+        Anjal.Smtp.PwnedPasswords.Use(Anjal.Smtp.PwnedPasswords.ConfiguredPath, firstBuild ? Console.WriteLine : null);
         if (System.Threading.Interlocked.Exchange(ref evidenceNoteWritten, 1) == 0)
         {
             Console.WriteLine(evidence is null
                 ? $"Evidence: not kept for webmail sends (no folder at {evidenceRoot})."
                 : $"Evidence: originals of webmail sends kept in {evidenceRoot}; a message is not sent unless its original is kept.");
         }
-        builder.Services.AddSingleton(new MailboxService(mailboxStore, store, maildir, hostName) { Evidence = evidence });
+        builder.Services.AddSingleton(sp => new MailboxService(mailboxStore, store, maildir, hostName)
+        {
+            Evidence = evidence,
+            // rc.13: authenticator secrets are kept encrypted with the webmail's own keys.
+            Protector = sp.GetRequiredService<IDataProtectionProvider>().CreateProtector("anjal.secrets.v1"),
+        });
+        builder.Services.AddSingleton(sp => new SessionRegistry(sp.GetRequiredService<MailboxService>()));
         builder.Services.AddSingleton(new WebmailAuthService(mailboxStore));
+        builder.Services.AddHostedService(sp => new ScheduledSender(sp.GetRequiredService<MailboxService>(), OpsEndpoints.RootOf(sp.GetRequiredService<IMaildirStore>())));
         builder.Services.AddSingleton(new HostInfo(hostName));
+        builder.Services.AddSingleton(Words.Load());
         builder.Services.AddHttpContextAccessor();
 
         bool secure = string.Equals(Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_SECURE"), "true", StringComparison.OrdinalIgnoreCase);
@@ -284,8 +295,36 @@ public static class Program
             options.Cookie.SecurePolicy = secure || httpsOn ? CookieSecurePolicy.Always : CookieSecurePolicy.SameAsRequest;
             options.LoginPath = "/sign-in";
             options.LogoutPath = "/sign-out";
-            options.SlidingExpiration = true;
-            options.ExpireTimeSpan = TimeSpan.FromHours(12);
+            // rc.13: how long a sign-in lasts is the session's business - 12 hours
+            // on a shared computer, 30 days on the person's own, each ended
+            // sooner when idle - so the cookie itself does not slide.
+            options.SlidingExpiration = false;
+            options.ExpireTimeSpan = SessionRegistry.OwnLife;
+            options.Events = new CookieAuthenticationEvents
+            {
+                OnValidatePrincipal = async context =>
+                {
+                    SessionRegistry sessions = context.HttpContext.RequestServices.GetRequiredService<SessionRegistry>();
+                    SessionState state = await sessions.CheckAsync(context.Principal!, AuthEndpoints.IsActivity(context.HttpContext.Request), context.HttpContext.RequestAborted).ConfigureAwait(false);
+                    if (state != SessionState.Valid)
+                    {
+                        context.HttpContext.Items[AuthEndpoints.EndedItem] = state;
+                        context.RejectPrincipal();
+                        await context.HttpContext.SignOutAsync(CookieScheme).ConfigureAwait(false);
+                    }
+                },
+                OnRedirectToLogin = context =>
+                {
+                    string target = context.HttpContext.Items[AuthEndpoints.EndedItem] switch
+                    {
+                        SessionState.Idle => AuthEndpoints.SignedOutUrl(true, ZonedClock.For(null, null).ZoneId),
+                        SessionState.Ended => "/sign-in?ended=1",
+                        _ => context.RedirectUri,
+                    };
+                    context.Response.Redirect(target);
+                    return Task.CompletedTask;
+                },
+            };
         });
         builder.Services.AddAuthorization();
         builder.Services.AddCascadingAuthenticationState();
@@ -330,7 +369,9 @@ public static class Program
             catch (Exception ex)
             {
                 string reference = Guid.NewGuid().ToString("N").Substring(0, 12);
-                Console.WriteLine($"[{DateTimeOffset.UtcNow:HH:mm:ss}] 500 [{reference}] {http.Request.Method} {http.Request.Path}: {ex.GetType().Name}: {ex.Message}");
+                // rc.15: where it happened (the first frame), so the reference leads somewhere; never the request's data.
+                string where = (ex.StackTrace ?? string.Empty).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? string.Empty;
+                Console.WriteLine($"[{DateTimeOffset.UtcNow:HH:mm:ss}] 500 [{reference}] {http.Request.Method} {http.Request.Path}: {ex.GetType().Name}: {ex.Message} {where}");
                 if (!http.Response.HasStarted)
                 {
                     http.Response.Clear();
@@ -434,6 +475,24 @@ public static class Program
 
         app.UseAuthentication();
 
+        // rc.13: "leaves nothing behind" - no page of a signed-in mailbox is kept
+        // in the browser's cache (the fingerprinted assets are not mail, and keep theirs).
+        app.Use(async (http, next) =>
+        {
+            if (http.User.Identity?.IsAuthenticated == true)
+            {
+                http.Response.OnStarting(() =>
+                {
+                    if (!http.Response.Headers.ContainsKey("Cache-Control"))
+                    {
+                        http.Response.Headers.CacheControl = "no-store";
+                    }
+                    return Task.CompletedTask;
+                });
+            }
+            await next().ConfigureAwait(false);
+        });
+
         // A form posted after the session has ended cannot be saved. Say so on
         // the sign-in page, rather than discarding the change silently
         // (DEF-012). The sign-in form itself is the one anonymous POST.
@@ -441,13 +500,38 @@ public static class Program
         {
             if (HttpMethods.IsPost(http.Request.Method) &&
                 http.User.Identity?.IsAuthenticated != true &&
-                !http.Request.Path.StartsWithSegments("/auth/login", StringComparison.OrdinalIgnoreCase))
+                !http.Request.Path.StartsWithSegments("/auth", StringComparison.OrdinalIgnoreCase))
             {
                 http.Response.Redirect("/sign-in?unsaved=1");
                 return;
             }
             await next().ConfigureAwait(false);
         });
+        // DES-11 D7: a colour the organisation's administrator gave this person reaches their next
+        // page - the colour rides in the sign-in cookie, so it is re-issued once.
+        app.Use(async (http, next) =>
+        {
+            if (HttpMethods.IsGet(http.Request.Method) && WebmailAuthService.PersonIdOf(http.User) is Guid person)
+            {
+                System.Security.Claims.ClaimsPrincipal user = http.User;
+                if (MailboxService.TakeThemeRefresh(person, out string theme))
+                {
+                    user = WebmailAuthService.WithTheme(user, theme);
+                }
+                if (MailboxService.TakeLanguageRefresh(person, out string language))
+                {
+                    user = WebmailAuthService.WithLanguage(user, language);
+                }
+                if (!ReferenceEquals(user, http.User))
+                {
+                    await AuthEndpoints.ResignAsync(http, user).ConfigureAwait(false);
+                    http.User = user;
+                }
+            }
+            await next().ConfigureAwait(false);
+        });
+        // rc.14: a shared mailbox's rights, and what the organisation asks first.
+        app.Use(AuthEndpoints.DemandsAsync);
         app.UseAuthorization();
         app.UseAntiforgery();
 
@@ -460,52 +544,47 @@ public static class Program
             var renewal = new AcmeRenewalService(hostEnv.Options, new CertificateStore(hostEnv.Directory), line => Console.WriteLine(line));
             app.Lifetime.ApplicationStarted.Register(() => _ = renewal.RunAsync(app.Lifetime.ApplicationStopping));
         }
+        // Owner, 8 Oct 2026: every organisation's clock (24- or 12-hour) is known before the first page.
+        app.Lifetime.ApplicationStarted.Register(() => _ = LoadClocksAsync(app));
         return app;
+    }
+
+    private static async Task LoadClocksAsync(WebApplication app)
+    {
+        try
+        {
+            await app.Services.GetRequiredService<MailboxService>().LoadClocksAsync(app.Lifetime.ApplicationStopping).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // The 24-hour clock is used until each organisation's is read at sign-in.
+        catch (Exception ex)
+        {
+            Console.WriteLine("Clocks: could not read the organisations' clocks at start (" + ex.Message + "); each is read at sign-in.");
+        }
+#pragma warning restore CA1031
     }
 
     private static void MapEndpoints(WebApplication app)
     {
         // ---- embedded static assets ----
-        app.MapGet("/{file:regex(^(tokens\\.css|app\\.css|app\\.js)$)}", (string file, HttpContext http) => Asset(file, http));
+        app.MapGet("/{file:regex(^(tokens\\.css|app\\.css|app\\.js|sw\\.js|offline\\.js)$)}", (string file, HttpContext http) => Asset(file, http));
         app.MapGet("/fonts/{file}", (string file, HttpContext http) => Asset("fonts/" + file, http));
         app.MapGet("/logos/{file}", (string file, HttpContext http) => Asset("logos/" + file, http));
 
-        // ---- session ----
-        app.MapPost("/auth/login", async (HttpContext http, [FromForm] string address, [FromForm] string password, WebmailAuthService auth, LoginThrottle throttle, AuditTrail audit, CancellationToken ct) =>
-        {
-            string client = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            string account = address.Trim().ToLowerInvariant();
-            if (!throttle.IsAllowed(client, account))
-            {
-                // Refused before the password is checked: guessing costs the
-                // attacker the wait, and costs this server nothing.
-                await audit.RecordAsync("anonymous", "webmail.signin.throttled", account, client).ConfigureAwait(false);
-                return Results.Redirect("/sign-in?throttled=1");
-            }
-            ClaimsPrincipal? principal = await auth.AuthenticateAsync(address.Trim(), password, ct).ConfigureAwait(false);
-            if (principal is null)
-            {
-                throttle.RecordFailure(client, account);
-                await audit.RecordAsync("anonymous", "webmail.signin.failed", account, client).ConfigureAwait(false);
-                return Results.Redirect("/sign-in?error=1");
-            }
-            throttle.RecordSuccess(client, account);
-            await audit.RecordAsync(account, "webmail.signin", account, client).ConfigureAwait(false);
-            await http.SignInAsync(CookieScheme, principal, new AuthenticationProperties { IsPersistent = false }).ConfigureAwait(false);
-            return Results.Redirect("/folder/INBOX");
-        });
+        ContactEndpoints.Map(app);
 
-        app.MapPost("/sign-out", async (HttpContext http, IAntiforgery antiforgery, AuditTrail audit) =>
-        {
-            await antiforgery.ValidateRequestAsync(http).ConfigureAwait(false);
-            string who = http.User.Identity?.Name ?? string.Empty;
-            if (who.Length > 0)
-            {
-                await audit.RecordAsync(who, "webmail.signout", who, http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
-            }
-            await http.SignOutAsync(CookieScheme).ConfigureAwait(false);
-            return Results.Redirect("/sign-in");
-        });
+        // ---- rc.15 (DES-11 F1, owner 10 Oct): rules and folders were written in rc.12 but never
+        // connected, so saving a rule or creating a folder answered 400. ----
+        RuleEndpoints.Map(app);
+
+        // ---- session (rc.13: AuthEndpoints) ----
+        AuthEndpoints.Map(app);
+
+        // ---- rc.14: the organisation console and the Anjal console ----
+        OrgEndpoints.Map(app);
+        OpsEndpoints.Map(app);
+
+        // ---- rc.15: offline mail (item 65 b) ----
+        OfflineEndpoints.Map(app);
 
         // ---- one message ----
         app.MapPost("/message/{id:guid}/flag", async (HttpContext http, Guid id, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
@@ -547,11 +626,26 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
+            if (allow != "1" && block != "1")
+            {
+                // UX-07: Delete, Archive and Move to from an open message can be undone too,
+                // the same way as from the list.
+                (int count, Guid? token) = await svc.MoveWithUndoAsync(mailboxId.Value, new[] { id }, folder, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                if (count == 0)
+                {
+                    // Nothing moved (already there, or not this person's): as before.
+                    return await svc.MoveAsync(mailboxId.Value, id, folder, ct).ConfigureAwait(false) is null ? Results.NotFound() : Results.Redirect(SafeBack(back, "/folder/INBOX"));
+                }
+                string to = SafeBack(back, "/folder/INBOX");
+                if (token is not null && to.StartsWith("/folder/", StringComparison.Ordinal))
+                {
+                    to += (to.Contains('?', StringComparison.Ordinal) ? "&" : "?") + $"undo={token}&moved={count}&to={Uri.EscapeDataString(folder)}";
+                }
+                return Results.Redirect(to);
+            }
             MessageRow? moved = allow == "1"
                 ? await svc.MarkNotSpamAsync(mailboxId.Value, id, ct).ConfigureAwait(false)
-                : block == "1"
-                    ? await svc.ReportSpamAsync(mailboxId.Value, id, ct).ConfigureAwait(false)
-                    : await svc.MoveAsync(mailboxId.Value, id, folder, ct).ConfigureAwait(false);
+                : await svc.ReportSpamAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
             return moved is null ? Results.NotFound() : Results.Redirect(SafeBack(back, "/folder/INBOX"));
         }).RequireAuthorization();
 
@@ -562,10 +656,18 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
+            // rc.14: nothing is deleted for good from a mailbox under a legal hold.
+            if (await svc.IsHeldAsync(mailboxId.Value, ct).ConfigureAwait(false))
+            {
+                await svc.AddNoticeAsync(mailboxId.Value, "This mailbox is under a legal hold, so nothing can be deleted for good until the hold is lifted.", ct).ConfigureAwait(false);
+                return Results.Redirect(SafeBack(back, "/folder/Trash"));
+            }
             bool removed = await svc.DeleteAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
             return removed ? Results.Redirect(SafeBack(back, "/folder/Trash")) : Results.NotFound();
         }).RequireAuthorization();
 
+        // DEF-093 (found in rc.12 review): this and Block sender bind no form
+        // fields, so they need the antiforgery check added explicitly.
         app.MapPost("/message/{id:guid}/trust-sender", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
@@ -575,13 +677,13 @@ public static class Program
             }
             string? trustedAddress = await svc.TrustSenderOfAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
             return trustedAddress is null ? Results.NotFound() : Results.Redirect($"/message/{id}");
-        }).RequireAuthorization();
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
         app.MapPost("/message/{id:guid}/images", (HttpContext http, Guid id) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             return mailboxId is null ? Results.Redirect("/sign-in") : Results.Redirect($"/message/{id}?images=1");
-        }).RequireAuthorization();
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery); // DES-11 F2, system-wide: every post is checked
 
         app.MapGet("/message/{id:guid}/attachment/{index:int}", async (HttpContext http, Guid id, int index, MailboxService svc, CancellationToken ct) =>
         {
@@ -600,6 +702,30 @@ public static class Program
             return Results.File(found.Value.Bytes, "application/octet-stream", found.Value.View.FileName);
         }).RequireAuthorization();
 
+        // rc.12 (UX-06, the board GapPreview): images and PDFs shown in the letter
+        // area. Only raster images (never SVG) and PDF; everything else stays a
+        // download. Nothing served here can run in the webmail's own page.
+        app.MapGet("/message/{id:guid}/attachment/{index:int}/preview", async (HttpContext http, Guid id, int index, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            (AttachmentView View, byte[] Bytes)? found = await svc.GetAttachmentAsync(mailboxId.Value, id, index, ct).ConfigureAwait(false);
+            string? type = found is null ? null : MailboxService.PreviewType(found.Value.View);
+            if (found is null || type is null)
+            {
+                return Results.NotFound();
+            }
+            http.Response.Headers.ContentSecurityPolicy = type == "application/pdf"
+                ? "default-src 'none'; frame-ancestors 'self'"
+                : "default-src 'none'; img-src 'self'; sandbox; frame-ancestors 'self'";
+            http.Response.Headers.XFrameOptions = "SAMEORIGIN";
+            http.Response.Headers.ContentDisposition = "inline";
+            return Results.Bytes(found.Value.Bytes, type);
+        }).RequireAuthorization();
+
         app.MapGet("/message/{id:guid}/raw.eml", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
@@ -611,8 +737,64 @@ public static class Program
             return found is null ? Results.NotFound() : Results.File(found.Value.Raw, "message/rfc822", $"{id}.eml");
         }).RequireAuthorization();
 
+        // rc.11 (D-103): block the sender - future mail to Junk; this message stays.
+        app.MapPost("/message/{id:guid}/block", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? blocked = await svc.BlockSenderAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect(blocked is null ? "/folder/INBOX" : $"/message/{id}?blocked={Uri.EscapeDataString(blocked)}");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        // rc.11 (D-103): print - the letter with its envelope details. The body is
+        // the same cleaned HTML the message page shows; everything else is
+        // escaped; and this page's own policy allows no outside loading at all.
+        app.MapGet("/message/{id:guid}/print", async (HttpContext http, Guid id, MailboxService svc, Words words, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            MessageView? view = await svc.OpenAsync(mailboxId.Value, id, allowRemoteImages: false, ct).ConfigureAwait(false);
+            if (view is null)
+            {
+                return Results.NotFound();
+            }
+            Lexicon l = words.For(WebmailAuthService.LanguageOf(http.User, words));
+            ZonedClock clock = WebmailAuthService.ClockOf(http.User);
+            static string E(string s) => System.Net.WebUtility.HtmlEncode(s);
+            var page = new System.Text.StringBuilder();
+            page.Append("<!DOCTYPE html><html lang=\"").Append(E(l.Language)).Append("\"><head><meta charset=\"utf-8\">")
+                .Append("<title>").Append(E(view.Subject)).Append(" - Anjal</title>")
+                .Append("<link rel=\"stylesheet\" href=\"/fonts/lipi.css\">")
+                .Append("<style>body{font-family:'LiPi Sans',system-ui,sans-serif;font-size:14px;line-height:1.5;margin:24px;color:#111;background:#fff}")
+                .Append("h1{font-size:20px;margin:0 0 12px}table{border-collapse:collapse;margin:0 0 12px}th{text-align:left;padding:2px 12px 2px 0;color:#555;font-weight:600;vertical-align:top}")
+                .Append("td{padding:2px 0}hr{border:0;border-top:1px solid #ccc;margin:12px 0}img{max-width:100%}pre{white-space:pre-wrap;font-family:inherit}</style>")
+                .Append("</head><body data-autoprint><header><h1>").Append(E(string.IsNullOrWhiteSpace(view.Subject) ? l["(no subject)"] : view.Subject)).Append("</h1><table>");
+            void Row(string label, string value)
+            {
+                if (value.Length > 0)
+                {
+                    page.Append("<tr><th>").Append(E(label)).Append("</th><td>").Append(E(value)).Append("</td></tr>");
+                }
+            }
+            Row(l["From"], view.From);
+            Row(l["To"], view.To);
+            Row(l["Cc"], view.Cc);
+            Row(l["Received"], clock.Full(view.Row.ReceivedAt));
+            Row(l["Attachments"], string.Join(", ", view.Attachments.Select(a => a.FileName)));
+            page.Append("</table></header><hr><main>").Append(view.BodyHtml).Append("</main><script src=\"/app.js\"></script></body></html>");
+            http.Response.Headers.ContentSecurityPolicy =
+                "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+            return Results.Content(page.ToString(), "text/html; charset=utf-8");
+        }).RequireAuthorization();
+
         // ---- a folder full of messages ----
-        app.MapPost("/folder/{name}/bulk", async (HttpContext http, string name, [FromForm] string action, [FromForm] Guid[] id, [FromForm] int? page, [FromForm] string? categoryId, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/folder/{name}/bulk", async (HttpContext http, string name, [FromForm] string action, [FromForm] Guid[] id, [FromForm] int? page, [FromForm] string? categoryId, [FromForm] string? to, [FromForm] string? all, [FromForm] string? show, [FromForm] string? back, [FromQuery] Guid? one, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -630,6 +812,55 @@ public static class Program
                 "purge" => MailboxService.BulkAction.Purge,
                 _ => null,
             };
+            // rc.11 (item 13): "Select all in this folder" acts on every message the
+            // filter shows, not only this page; at most 5,000 at a time.
+            if (string.Equals(all, "1", StringComparison.Ordinal))
+            {
+                FolderView? whole = (await svc.ListFoldersAsync(mailboxId.Value, ct).ConfigureAwait(false)).FirstOrDefault(f => f.Name == name);
+                if (whole is not null)
+                {
+                    // The list hands out at most 200 a page, so read page by page.
+                    var everyone = new List<Guid>();
+                    for (int p = 0; everyone.Count < 5000; p++)
+                    {
+                        IReadOnlyList<MessageRow> chunk = (await svc.ListFilteredAsync(mailboxId.Value, whole.Id, show, p, 200, ct).ConfigureAwait(false)).Items;
+                        everyone.AddRange(chunk.Select(m => m.Id));
+                        if (chunk.Count < 200)
+                        {
+                            break;
+                        }
+                    }
+                    id = everyone.Take(5000).ToArray();
+                }
+            }
+
+            // rc.12 (D-116): a row's own hover buttons act on that one message,
+            // whatever else is ticked, through this same path (so Undo works).
+            if (one is Guid single)
+            {
+                id = new[] { single };
+            }
+
+            // rc.11 (UX-07): Trash, Restore and Move to are moves that can be undone.
+            string? moveTo = action switch
+            {
+                "trash" => "Trash",
+                "restore" => FolderRow.Inbox,
+                "move" => to,
+                "archive" => "Archive",
+                _ => null,
+            };
+            if (moveTo is not null && id.Length > 0)
+            {
+                (int moved, Guid? token) = await svc.MoveWithUndoAsync(mailboxId.Value, id, moveTo, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                string undo = token is null ? string.Empty : $"&undo={token}&moved={moved}&to={Uri.EscapeDataString(moveTo)}";
+                // rc.15 (item 37): ticked in the search results, back to those results.
+                if (FromSearch(back) is string there)
+                {
+                    return Results.Redirect(there + (there.Contains('?', StringComparison.Ordinal) ? "&" : "?") + undo.TrimStart('&'));
+                }
+                return Results.Redirect(FolderUrl(name, page, show) + undo);
+            }
             if (bulk is not null && id.Length > 0)
             {
                 await svc.BulkAsync(mailboxId.Value, id, bulk.Value, ct).ConfigureAwait(false);
@@ -645,10 +876,10 @@ public static class Program
                     }
                 }
             }
-            return Results.Redirect($"/folder/{Uri.EscapeDataString(name)}?page={System.Math.Max(0, page ?? 0)}");
+            return Results.Redirect(FromSearch(back) ?? FolderUrl(name, page, show));
         }).RequireAuthorization();
 
-        app.MapPost("/folder/{name}/readall", async (HttpContext http, string name, MailboxService svc, IAntiforgery antiforgery, CancellationToken ct) =>
+        app.MapPost("/folder/{name}/readall", async (HttpContext http, string name, [FromForm] string? show, MailboxService svc, IAntiforgery antiforgery, CancellationToken ct) =>
         {
             // This endpoint binds no form fields, so the framework's automatic
             // antiforgery check does not apply; without this line another site
@@ -671,8 +902,25 @@ public static class Program
             {
                 return Results.Json(new { changed });
             }
-            return Results.Redirect($"/folder/{Uri.EscapeDataString(name)}");
+            return Results.Redirect(FolderUrl(name, 0, show));
         }).RequireAuthorization();
+
+        // rc.12 (item 23): mark every message in a folder unread.
+        app.MapPost("/folder/{name}/unreadall", async (HttpContext http, string name, [FromForm] string? show, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            FolderRow? folder = await svc.GetFolderAsync(mailboxId.Value, name, ct).ConfigureAwait(false);
+            if (folder is null)
+            {
+                return Results.NotFound();
+            }
+            await svc.MarkFolderUnreadAsync(mailboxId.Value, folder.Id, ct).ConfigureAwait(false);
+            return Results.Redirect(FolderUrl(name, 0, show));
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
         app.MapPost("/folder/Trash/empty", async (HttpContext http, MailboxService svc, IAntiforgery antiforgery, CancellationToken ct) =>
         {
@@ -688,8 +936,21 @@ public static class Program
             return Results.Redirect("/folder/Trash");
         }).RequireAuthorization();
 
+        app.MapPost("/folder/Junk/empty", async (HttpContext http, MailboxService svc, IAntiforgery antiforgery, CancellationToken ct) =>
+        {
+            // SPEC-11 item 25: Empty Junk, checked like Empty Trash (DEF-023).
+            await antiforgery.ValidateRequestAsync(http).ConfigureAwait(false);
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.EmptyJunkAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            return Results.Redirect("/folder/" + Anjal.Mailbox.MailboxSink.JunkFolder);
+        }).RequireAuthorization();
+
         // ---- compose, drafts ----
-        app.MapPost("/compose", async (HttpContext http, [FromForm] string to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/compose", async (HttpContext http, [FromForm] string to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? undo, [FromForm] string? sendAt, [FromForm] string? sendAtLocal, [FromForm] string? back, [FromForm] string? merge, [FromForm] string? expect, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -712,8 +973,93 @@ public static class Program
                 }));
             }
             ReadCarry(http.Request.Form, request);
+            // rc.14: from a shared mailbox set to send "on behalf", the person is named as the Sender.
+            request.Sender = await svc.SenderForAsync(WebmailAuthService.PersonIdOf(http.User), mailboxId.Value, ct).ConfigureAwait(false);
             string? carryError = await svc.AddCarriedAttachmentsAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
-            string? error = carryError ?? await svc.SendAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
+            if (carryError is not null)
+            {
+                return Results.Redirect("/compose" + ComposeQuery(carryError, request));
+            }
+
+            // rc.15 (item 63): "Expect a reply" - counted on the dashboard if no answer comes in three days.
+            if (string.Equals(expect, "1", StringComparison.Ordinal))
+            {
+                await svc.MarkExpectReplyAsync(mailboxId.Value, request.To, request.Subject, ct).ConfigureAwait(false);
+            }
+
+            // rc.15 (item 29): the people written to join the writer's contacts (an uploaded list does not).
+            if (WebmailAuthService.PersonIdOf(http.User) is Guid writer)
+            {
+                await svc.RememberRecipientsAsync(writer, http.User.Identity?.Name ?? string.Empty, request, ct).ConfigureAwait(false);
+            }
+
+            // rc.12 (item 64): Send one each - one copy per person, blanks filled, sent gradually.
+            if (string.Equals(merge, "1", StringComparison.Ordinal))
+            {
+                // Owner, 8 Oct 2026: only for people their organisation has given it to.
+                if (WebmailAuthService.PersonIdOf(http.User) is not Guid sender || !await svc.MayMergeAsync(sender, ct).ConfigureAwait(false))
+                {
+                    return Results.Redirect("/compose" + ComposeQuery(MailboxService.MergeNotAllowed, request));
+                }
+                string? list = null;
+                IFormFile? listFile = http.Request.Form.Files.GetFile("mergeList");
+                if (listFile is { Length: > 0 and <= 2 * 1024 * 1024 })
+                {
+                    using var reader = new StreamReader(listFile.OpenReadStream(), System.Text.Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                    list = await reader.ReadToEndAsync(ct).ConfigureAwait(false);
+                }
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+                DateTimeOffset first = string.IsNullOrEmpty(sendAt) ? now : SendLaterTime(WebmailAuthService.ClockOf(http.User), now, sendAt, sendAtLocal) ?? now;
+                // rc.15 (item 64): how the person matched each blank, and what to write when a value is missing.
+                var map = new Dictionary<string, MergeBlank>(StringComparer.Ordinal);
+                Microsoft.Extensions.Primitives.StringValues blanks = http.Request.Form["mapBlank"];
+                Microsoft.Extensions.Primitives.StringValues fields = http.Request.Form["mapField"];
+                Microsoft.Extensions.Primitives.StringValues fallbacks = http.Request.Form["mapFallback"];
+                for (int i = 0; i < blanks.Count && i < 50; i++)
+                {
+                    string blank = blanks[i] ?? string.Empty;
+                    if (blank.Length is > 0 and <= 40)
+                    {
+                        map[blank] = new MergeBlank(i < fields.Count ? (fields[i] ?? string.Empty).Trim() : string.Empty, i < fallbacks.Count ? (fallbacks[i] ?? string.Empty).Trim() : string.Empty);
+                    }
+                }
+                request.MergeSummaryTo = http.Request.Form["mergeSummary"].ToString();
+                (string? mergeError, int made) = await svc.SendOneEachAsync(mailboxId.Value, request, list, first, map.Count > 0 ? map : null, WebmailAuthService.ClockOf(http.User), ct).ConfigureAwait(false);
+                return mergeError is null
+                    ? Results.Redirect($"/folder/{MailboxService.ScheduledFolder}?merged={made}")
+                    : Results.Redirect("/compose" + ComposeQuery(mergeError, request));
+            }
+
+            // rc.12 (item 8): Send later - kept in Scheduled until its time.
+            if (!string.IsNullOrEmpty(sendAt))
+            {
+                DateTimeOffset now = DateTimeOffset.UtcNow;
+                DateTimeOffset? when = SendLaterTime(WebmailAuthService.ClockOf(http.User), now, sendAt, sendAtLocal);
+                if (when is null || when.Value <= now.AddMinutes(1))
+                {
+                    return Results.Redirect("/compose" + ComposeQuery("Pick a send time in the future.", request));
+                }
+                (string? holdError, Guid? _) = await svc.HoldAsync(mailboxId.Value, request, when.Value, ct).ConfigureAwait(false);
+                return holdError is null
+                    ? Results.Redirect("/folder/" + MailboxService.ScheduledFolder + "?scheduled=1")
+                    : Results.Redirect("/compose" + ComposeQuery(holdError, request));
+            }
+
+            // rc.12 (UX-02): with the script on, Send waits so it can be undone -
+            // as long as the person chose in Mail settings (rc.13), or not at all.
+            int wait = (await svc.GetMailSettingsAsync(mailboxId.Value, ct).ConfigureAwait(false)).UndoSeconds;
+            if (string.Equals(undo, "1", StringComparison.Ordinal) && wait > 0)
+            {
+                (string? holdError, Guid? held) = await svc.HoldAsync(mailboxId.Value, request, DateTimeOffset.UtcNow + TimeSpan.FromSeconds(wait), ct).ConfigureAwait(false);
+                if (holdError is not null || held is null)
+                {
+                    return Results.Redirect("/compose" + ComposeQuery(holdError ?? "Not sent.", request));
+                }
+                string after = SafeBack(back, "/folder/INBOX");
+                return Results.Redirect(after + (after.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "held=" + held.Value + "&wait=" + wait.ToString(CultureInfo.InvariantCulture));
+            }
+
+            string? error = await svc.SendAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
             if (error is not null)
             {
                 return Results.Redirect("/compose" + ComposeQuery(error, request));
@@ -721,7 +1067,7 @@ public static class Program
             return Results.Redirect("/folder/Sent?sent=1");
         }).RequireAuthorization();
 
-        app.MapPost("/draft", async (HttpContext http, [FromForm] string? to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? autosave, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/draft", async (HttpContext http, [FromForm] string? to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? autosave, [FromForm] string? next, [FromForm] string? templates, [FromForm] string? savetemplate, [FromForm] string? expand, [FromForm] string? dock, [FromForm] string? back, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -738,6 +1084,8 @@ public static class Program
                 return Results.Redirect("/compose?error=" + Uri.EscapeDataString(AttachmentsTooLargeException.UserMessage));
             }
             ReadCarry(http.Request.Form, request);
+            // rc.14: from a shared mailbox set to send "on behalf", the person is named as the Sender.
+            request.Sender = await svc.SenderForAsync(WebmailAuthService.PersonIdOf(http.User), mailboxId.Value, ct).ConfigureAwait(false);
             string? carryError = await svc.AddCarriedAttachmentsAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
             if (carryError is not null)
             {
@@ -752,13 +1100,216 @@ public static class Program
             {
                 return Results.Json(new { id = saved.Value.ToString() });
             }
+            // rc.12 (item 62): Templates opens the picker over this draft;
+            // "Save as template" keeps the message as one of the person's own.
+            if (templates == "1")
+            {
+                return Results.Redirect($"/draft/{saved.Value}?templates=1");
+            }
+            // rc.14: an administrator may save it for everyone in the organisation.
+            if (savetemplate == "org")
+            {
+                string? orgError = WebmailAuthService.PersonIdOf(http.User) is Guid person && await svc.IsOrgAdminAsync(person, ct).ConfigureAwait(false)
+                    && await svc.TenantOfAsync(person, ct).ConfigureAwait(false) is Guid tenantId
+                    ? await svc.SaveOrgTemplateAsync(tenantId, subject ?? string.Empty, subject ?? string.Empty, body ?? string.Empty, ct).ConfigureAwait(false)
+                    : "Only an administrator can save a template for everyone.";
+                return Results.Redirect($"/draft/{saved.Value}?" + (orgError is null ? "templatesaved=1" : "error=" + Uri.EscapeDataString(orgError)));
+            }
+            if (savetemplate == "1")
+            {
+                string? templateError = await svc.SaveOwnTemplateAsync(mailboxId.Value, subject ?? string.Empty, subject ?? string.Empty, body ?? string.Empty, ct).ConfigureAwait(false);
+                return Results.Redirect($"/draft/{saved.Value}?" + (templateError is null ? "templatesaved=1" : "error=" + Uri.EscapeDataString(templateError)));
+            }
+            // rc.12 (item 17): "Save draft" in Keep this draft? goes where the person was going.
+            if (!string.IsNullOrEmpty(next))
+            {
+                string onward = SafeBack(next, "/folder/Drafts");
+                return Results.Redirect(onward + (onward.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "saved=1");
+            }
+            // rc.15 (owner, 7 Oct; item 48): full view and the small window, each opening the other.
+            if (expand == "1")
+            {
+                return Results.Redirect($"/draft/{saved.Value}");
+            }
+            if (dock == "1")
+            {
+                string list = SafeBack(back, "/folder/INBOX");
+                if (!list.StartsWith("/folder/", StringComparison.Ordinal))
+                {
+                    list = "/folder/INBOX";
+                }
+                return Results.Redirect(list + (list.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "write=" + saved.Value);
+            }
             return Results.Redirect($"/draft/{saved.Value}?saved=1");
         }).RequireAuthorization();
+
+        // rc.12 (item 17): "Keep this draft?" - Discard removes the draft that
+        // autosave or Save draft made, and only ever a message in Drafts.
+        app.MapPost("/draft/discard", async (HttpContext http, [FromForm] string? draftId, [FromForm] string? next, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            if (Guid.TryParse(draftId, out Guid id))
+            {
+                await svc.DiscardDraftAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            }
+            return Results.Redirect(SafeBack(string.IsNullOrEmpty(next) ? back : next, "/folder/INBOX"));
+        }).RequireAuthorization();
+
+        // rc.15 (item 63): "No reply needed" takes a sent message out of the dashboard's count.
+        app.MapPost("/message/{id:guid}/noreply", async (HttpContext http, Guid id, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.MarkNoReplyNeededAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect(SafeBack(back, "/no-reply"));
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        // rc.12 (UX-04): mark every message of a conversation read.
+        app.MapPost("/message/{id:guid}/conversation-read", async (HttpContext http, Guid id, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.MarkConversationReadAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect(SafeBack(back, $"/message/{id}"));
+        }).RequireAuthorization();
+
+        // rc.12 (item 62): use a template in a draft; remove one of your own.
+        app.MapPost("/draft/{id:guid}/template", async (HttpContext http, Guid id, [FromForm] string? t, [FromForm] string? festival, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            MailTemplate? template = await svc.FindTemplateAsync(mailboxId.Value, t, ct).ConfigureAwait(false);
+            ComposeRequest? draft = await svc.LoadDraftAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            if (template is null || draft is null)
+            {
+                return Results.Redirect($"/draft/{id}?templates=1");
+            }
+            var values = new Dictionary<string, string>(await svc.KnownBlanksAsync(mailboxId.Value, draft.To, festival, ct).ConfigureAwait(false), StringComparer.Ordinal);
+            IFormCollection form = http.Request.Form;
+            foreach (string blank in TemplateCatalogue.BlanksIn(template.Subject + "\n" + template.Body))
+            {
+                string typed = form["blank:" + blank].ToString().Trim();
+                if (typed.Length > 0)
+                {
+                    values[blank] = typed.Length > 500 ? typed[..500] : typed;
+                }
+            }
+            Guid? applied = await svc.ApplyTemplateAsync(mailboxId.Value, id, template, values, ct).ConfigureAwait(false);
+            return Results.Redirect(applied is Guid a ? $"/draft/{a}" : $"/draft/{id}?templates=1");
+        }).RequireAuthorization();
+
+        app.MapPost("/templates/delete", async (HttpContext http, [FromForm] string? key, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.DeleteOwnTemplateAsync(mailboxId.Value, key ?? string.Empty, ct).ConfigureAwait(false);
+            return Results.Redirect(SafeBack(back, "/compose"));
+        }).RequireAuthorization();
+
+        // rc.12 (items 8, 9, UX-02): mail waiting to be sent, and the Outbox.
+        app.MapPost("/held/{id:guid}/undo", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect(draft is Guid d ? $"/draft/{d}?undone=1" : "/folder/Sent?toolate=1");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        app.MapPost("/held/{id:guid}/edit", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect(draft is Guid d ? $"/draft/{d}" : "/folder/" + MailboxService.ScheduledFolder);
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        app.MapPost("/held/{id:guid}/cancel", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect("/folder/" + MailboxService.ScheduledFolder + (draft is null ? string.Empty : "?cancelled=1"));
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        app.MapPost("/held/{id:guid}/send", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.SendHeldAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/folder/Sent?sent=1" : "/folder/Drafts");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        app.MapPost("/held/{id:guid}/reschedule", async (HttpContext http, Guid id, [FromForm] string? sendAt, [FromForm] string? sendAtLocal, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            DateTimeOffset? when = SendLaterTime(WebmailAuthService.ClockOf(http.User), now, sendAt ?? string.Empty, sendAtLocal);
+            if (when is null || when.Value <= now.AddMinutes(1))
+            {
+                return Results.Redirect($"/folder/{MailboxService.ScheduledFolder}?open={id}&badtime=1");
+            }
+            (string? error, Guid? moved) = await svc.RescheduleAsync(mailboxId.Value, id, when.Value, ct).ConfigureAwait(false);
+            return Results.Redirect(error is null && moved is Guid m ? $"/folder/{MailboxService.ScheduledFolder}?open={m}" : "/folder/" + MailboxService.ScheduledFolder);
+        }).RequireAuthorization();
+
+        app.MapPost("/outbox/{id:guid}/cancel", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            bool done = await svc.CancelOutboxAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect(done ? "/outbox?cancelled=1" : "/outbox");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        app.MapPost("/outbox/{id:guid}/retry", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.RetryOutboxAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect($"/outbox?open={id}&retrying=1");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
         // ---- settings ----
         app.MapPost("/settings/name", async (HttpContext http, [FromForm] string? displayName, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
@@ -770,12 +1321,12 @@ public static class Program
                 await http.RequestServices.GetRequiredService<AuditTrail>().RecordAsync(
                     who, "webmail.displayname.changed", who, http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
             }
-            return Results.Redirect(error is null ? "/settings/profile?saved=name" : "/settings/profile?error=" + Uri.EscapeDataString(error));
+            return Results.Redirect(error is null ? "/settings/mail?saved=name" : "/settings/mail?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
         app.MapPost("/settings/theme", async (HttpContext http, [FromForm] string theme, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
@@ -785,24 +1336,162 @@ public static class Program
             {
                 // Re-issue the cookie so the new theme is on the root element
                 // of the very next page, with no extra query per request.
-                await http.SignInAsync(CookieScheme, WebmailAuthService.WithTheme(http.User, theme.Trim().ToLowerInvariant())).ConfigureAwait(false);
+                await AuthEndpoints.ResignAsync(http, WebmailAuthService.WithTheme(http.User, theme.Trim().ToLowerInvariant())).ConfigureAwait(false);
             }
             return Results.Redirect(error is null ? "/settings/appearance?saved=theme" : "/settings/appearance?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
-        app.MapPost("/settings/password", async (HttpContext http, [FromForm] string current, [FromForm] string next, [FromForm] string confirm, MailboxService svc, CancellationToken ct) =>
+        // rc.11 (UX-07): put back the messages of a delete or move, within ten minutes.
+        app.MapPost("/folder/undo", async (HttpContext http, [FromForm] Guid token, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
             }
-            string? error = await svc.ChangePasswordAsync(mailboxId.Value, current, next, confirm, ct).ConfigureAwait(false);
-            string who = http.User.Identity?.Name ?? string.Empty;
-            await http.RequestServices.GetRequiredService<AuditTrail>().RecordAsync(
-                who, error is null ? "webmail.password.changed" : "webmail.password.change-refused", who,
-                http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
-            return Results.Redirect(error is null ? "/settings/password?saved=password" : "/settings/password?error=" + Uri.EscapeDataString(error));
+            int restored = await svc.UndoMoveAsync(mailboxId.Value, token, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+            string safe = LocalPath.Safe(back);
+            return Results.Redirect(safe + (safe.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "undone=" + restored.ToString(CultureInfo.InvariantCulture));
+        }).RequireAuthorization();
+
+        // rc.11 (item 40 and 45): Appearance - colour, light or dark, density, layout - applied at once.
+        app.MapPost("/settings/appearance", async (HttpContext http, [FromForm] string? colour, [FromForm] string? mode, [FromForm] string? density, [FromForm] string? layout, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string theme = MailboxRow.NormalizeTheme((colour ?? "anjal") + "-" + (mode ?? "light"));
+            await svc.SetThemeAsync(mailboxId.Value, theme, ct).ConfigureAwait(false);
+            await svc.SetLayoutAsync(mailboxId.Value, layout, density, ct).ConfigureAwait(false);
+            await AuthEndpoints.ResignAsync(http, WebmailAuthService.WithTheme(http.User, theme)).ConfigureAwait(false);
+            return Results.Redirect("/settings/appearance?saved=appearance");
+        }).RequireAuthorization();
+
+        // rc.11 (items 36 and 41): language, time zone, date format, week start.
+        app.MapPost("/settings/language", async (HttpContext http, [FromForm] string? language, [FromForm] string? timeZone, [FromForm] string? dateFormat, [FromForm] string? weekStart, [FromForm] string? clock, MailboxService svc, Words words, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            MailboxPreferences? saved = await svc.SetLanguageAndTimeAsync(mailboxId.Value, language, timeZone, dateFormat, weekStart, words, Operators.Is(http.User.Identity?.Name), ct).ConfigureAwait(false);
+            if (saved is not null)
+            {
+                // The cookie carries zone, format and language, so the next page shows them.
+                System.Security.Claims.ClaimsPrincipal next = WebmailAuthService.WithPreferences(http.User, saved);
+                // Owner, 8 Oct 2026: the person's own clock, or theirs to follow the organisation.
+                if (clock is not null)
+                {
+                    string own = await svc.SetClockAsync(mailboxId.Value, clock, ct).ConfigureAwait(false);
+                    next = WebmailAuthService.WithClock(next, own);
+                }
+                await AuthEndpoints.ResignAsync(http, next).ConfigureAwait(false);
+            }
+            return Results.Redirect("/settings/language?saved=language");
+        }).RequireAuthorization();
+
+        // rc.11 (item 45): three panes, focus, or list only; and density.
+        app.MapPost("/settings/layout", async (HttpContext http, [FromForm] string? layout, [FromForm] string? density, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetLayoutAsync(mailboxId.Value, layout, density, ct).ConfigureAwait(false);
+            return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // rc.11 (item 5, D-105): the welcome screen answered - never shown again;
+        // "Show me around" starts the tour in the Inbox, where its buttons are.
+        app.MapPost("/settings/welcome", async (HttpContext http, [FromForm] string? tour, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetWelcomeDoneAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            return Results.Redirect(string.Equals(tour, "1", StringComparison.Ordinal) ? "/folder/INBOX#tour" : LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // rc.13 (board SetMail): how long Send waits for Undo, and when Trash is emptied.
+        app.MapPost("/settings/mail", async (HttpContext http, [FromForm] int? undo, [FromForm] int? trash, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.SetMailSettingsAsync(mailboxId.Value, undo, trash, ct).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/settings/mail?saved=mail" : "/settings/mail?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
+        // rc.11 (item 14): messages per page.
+        app.MapPost("/settings/pagesize", async (HttpContext http, [FromForm] int size, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetPageSizeAsync(mailboxId.Value, size, ct).ConfigureAwait(false);
+            return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // rc.11 (item 11): the new-mail sound on or off.
+        app.MapPost("/settings/sound", async (HttpContext http, [FromForm] string? on, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetNewMailSoundAsync(mailboxId.Value, string.Equals(on, "1", StringComparison.Ordinal), ct).ConfigureAwait(false);
+            return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // Owner, 9 Oct 2026: the order a folder (or search) is sorted in, remembered for it; back to its first page.
+        app.MapPost("/settings/sort", async (HttpContext http, [FromForm] string? folder, [FromForm] string? sort, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string name = (folder ?? string.Empty).Trim();
+            if (name.Length is > 0 and <= 200)
+            {
+                await svc.SetSortAsync(mailboxId.Value, name, sort, ct).ConfigureAwait(false);
+            }
+            return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // rc.15 (item 58): "Your habits" on the person's dashboard - on unless they turn it off.
+        app.MapPost("/settings/habits", async (HttpContext http, [FromForm] string? on, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetHabitsAsync(mailboxId.Value, on is "1" or "on", ct).ConfigureAwait(false);
+            return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // rc.11: fold the rail to icons, or open it, and return to the same page.
+        app.MapPost("/settings/rail", async (HttpContext http, [FromForm] string? folded, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetRailFoldedAsync(mailboxId.Value, string.Equals(folded, "1", StringComparison.Ordinal), ct).ConfigureAwait(false);
+            return Results.Redirect(LocalPath.Safe(back));
         }).RequireAuthorization();
 
         // ---- categories ----
@@ -820,7 +1509,7 @@ public static class Program
 
         app.MapPost("/settings/categories", async (HttpContext http, [FromForm] string? name, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
@@ -831,7 +1520,7 @@ public static class Program
 
         app.MapPost("/settings/categories/delete", async (HttpContext http, [FromForm] Guid categoryId, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
@@ -842,7 +1531,7 @@ public static class Program
 
         app.MapPost("/settings/categories/rules/delete", async (HttpContext http, [FromForm] Guid ruleId, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
@@ -853,18 +1542,18 @@ public static class Program
 
         app.MapPost("/settings/signature", async (HttpContext http, [FromForm] string? signatureHtml, [FromForm] string? signatureText, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
             }
             string? error = await svc.SetSignatureAsync(mailboxId.Value, signatureHtml ?? string.Empty, signatureText ?? string.Empty, ct).ConfigureAwait(false);
-            return Results.Redirect(error is null ? "/settings/signature?saved=signature" : "/settings/signature?error=" + Uri.EscapeDataString(error));
+            return Results.Redirect(error is null ? "/settings/mail?saved=signature" : "/settings/mail?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
 
         app.MapPost("/settings/senders/add", async (HttpContext http, [FromForm] string? pattern, [FromForm] string? rule, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
@@ -877,7 +1566,7 @@ public static class Program
 
         app.MapPost("/settings/senders/delete", async (HttpContext http, [FromForm] Guid ruleId, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
@@ -889,7 +1578,7 @@ public static class Program
         // ---- enhancement endpoints ----
         app.MapGet("/api/contacts", async (HttpContext http, string? q, MailboxService svc, CancellationToken ct) =>
         {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Unauthorized();
@@ -898,8 +1587,118 @@ public static class Program
             return Results.Json(found.Select(c => new { name = c.Name, address = c.Address }));
         }).RequireAuthorization();
 
+        // rc.12 (item 64): each person's blanks, for the Send one each preview.
+        app.MapGet("/api/merge-preview", async (HttpContext http, string? to, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Unauthorized();
+            }
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person || !await svc.MayMergeAsync(person, ct).ConfigureAwait(false))
+            {
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            }
+            IReadOnlyList<MergePerson> people = await svc.MergePreviewAsync(mailboxId.Value, to ?? string.Empty, ct).ConfigureAwait(false);
+            return Results.Json(people.Select(p => new { address = p.Address, values = p.Values }));
+        }).RequireAuthorization();
+
+        // rc.12 (items 28, 64): contact groups, offered as one recipient that adds its people.
+        app.MapGet("/api/groups", async (HttpContext http, string? q, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Unauthorized();
+            }
+            string query = (q ?? string.Empty).Trim();
+            IReadOnlyList<ContactGroup> groups = await svc.ListGroupsAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            return Results.Json(groups.Where(g => query.Length == 0 || g.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase))
+                .Take(5).Select(g => new { name = g.Name, members = g.Addresses }));
+        }).RequireAuthorization();
+
         app.MapGet("/api/ping", () => Results.NoContent()).RequireAuthorization();
+
+        // rc.11 (item 11): what the page checks every 30 seconds for live update.
+        app.MapGet("/api/state", async (HttpContext http, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Unauthorized();
+            }
+            (long unread, DateTimeOffset? newest) = await svc.InboxStateAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            return Results.Json(new { unread, newest = newest?.ToUnixTimeMilliseconds() ?? 0 });
+        }).RequireAuthorization();
+
+        // Owner, 9 Oct 2026 (B): the live channel. One tab per browser listens (app.js 5c); it is
+        // told within about a second when the Inbox changes, with the same state /api/state
+        // gives. It never counts as activity (an /api/ path), checks every 30 seconds that the
+        // session still stands, and ends after five minutes so the browser asks again - a
+        // session ended meanwhile is not let back in.
+        app.MapGet("/api/events", async (HttpContext http, MailboxService svc, SessionRegistry sessions, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                http.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+            http.Response.ContentType = "text/event-stream";
+            http.Response.Headers.CacheControl = "no-store";
+            http.Response.Headers["X-Accel-Buffering"] = "no";
+            await http.Response.WriteAsync("retry: 5000\n\n", ct).ConfigureAwait(false);
+            await http.Response.Body.FlushAsync(ct).ConfigureAwait(false);
+            DateTimeOffset started = DateTimeOffset.UtcNow;
+            DateTimeOffset written = started;
+            DateTimeOffset checkedAt = started;
+            string last = string.Empty;
+            try
+            {
+                while (!ct.IsCancellationRequested && DateTimeOffset.UtcNow - started < LiveStreamLife)
+                {
+                    DateTimeOffset now = DateTimeOffset.UtcNow;
+                    if (now - checkedAt > TimeSpan.FromSeconds(30))
+                    {
+                        checkedAt = now;
+                        if (await sessions.CheckAsync(http.User, false, ct).ConfigureAwait(false) != SessionState.Valid)
+                        {
+                            break;
+                        }
+                    }
+                    (long unread, DateTimeOffset? newest) = await svc.InboxStateAsync(mailboxId.Value, ct).ConfigureAwait(false);
+                    string state = System.Text.Json.JsonSerializer.Serialize(new { unread, newest = newest?.ToUnixTimeMilliseconds() ?? 0 });
+                    if (state != last)
+                    {
+                        await http.Response.WriteAsync("event: state\ndata: " + state + "\n\n", ct).ConfigureAwait(false);
+                        await http.Response.Body.FlushAsync(ct).ConfigureAwait(false);
+                        last = state;
+                        written = now;
+                    }
+                    else if (now - written > TimeSpan.FromSeconds(25))
+                    {
+                        // A comment line, so proxies keep the connection open.
+                        await http.Response.WriteAsync(": still here\n\n", ct).ConfigureAwait(false);
+                        await http.Response.Body.FlushAsync(ct).ConfigureAwait(false);
+                        written = now;
+                    }
+                    await Task.Delay(LiveStreamStep, ct).ConfigureAwait(false);
+                }
+                await http.Response.WriteAsync("event: end\ndata: {}\n\n", ct).ConfigureAwait(false);
+                await http.Response.Body.FlushAsync(ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // The browser went away.
+            }
+        }).RequireAuthorization();
     }
+
+    /// <summary>How long one live channel runs before the browser opens another (owner, 9 Oct 2026, B).</summary>
+    public static TimeSpan LiveStreamLife { get; set; } = TimeSpan.FromMinutes(5);
+
+    /// <summary>How often a live channel looks at the Inbox: "within about a second".</summary>
+    public static TimeSpan LiveStreamStep { get; set; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// Serve an embedded asset with its content type and a cache policy:
@@ -1079,7 +1878,8 @@ public static class Program
 
         foreach (IFormFile file in attachments)
         {
-            if (file.Length <= 0)
+            // Only the attachment field: a Send one each list (mergeList) is read on its own.
+            if (file.Length <= 0 || string.Equals(file.Name, "mergeList", StringComparison.Ordinal))
             {
                 continue;
             }
@@ -1095,13 +1895,47 @@ public static class Program
         $"?error={Uri.EscapeDataString(error)}&to={Uri.EscapeDataString(request.To)}&cc={Uri.EscapeDataString(request.Cc)}" +
         $"&subject={Uri.EscapeDataString(request.Subject)}&body={Uri.EscapeDataString(request.Body)}";
 
+    private static readonly string[] LocalTimeFormats = { "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd'T'HH:mm:ss" };
+
+    /// <summary>
+    /// The time Send later chose (rc.12, item 8): "tomorrow" or "monday" at
+    /// 09:00, or "pick" with a date and time typed in the person's own zone.
+    /// Null when nothing usable was given.
+    /// </summary>
+    internal static DateTimeOffset? SendLaterTime(ZonedClock clock, DateTimeOffset now, string sendAt, string? sendAtLocal)
+    {
+        (DateTimeOffset tomorrow, DateTimeOffset monday) = MailboxService.SendLaterChoices(clock, now);
+        switch (sendAt)
+        {
+            case "tomorrow":
+                return tomorrow;
+            case "monday":
+                return monday;
+            case "pick":
+                return DateTime.TryParseExact(sendAtLocal ?? string.Empty, LocalTimeFormats,
+                    System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime local)
+                    ? MailboxService.AtLocal(clock, local)
+                    : null;
+            default:
+                return null;
+        }
+    }
+
     /// <summary>Only allow same-origin relative redirects from form "back" fields.</summary>
     /// <remarks>
     /// Browsers treat a backslash as a slash, so <c>/\evil.example</c> is as
     /// much a protocol-relative URL as <c>//evil.example</c>. Any backslash
     /// or control character in the value refuses it.
     /// </remarks>
-    private static string SafeBack(string? back, string fallback)
+    /// <summary>rc.15 (item 37): a "back" that is Anjal's own search page, else null.</summary>
+    /// <param name="back">The form's back value.</param>
+    internal static string? FromSearch(string? back)
+    {
+        string safe = SafeBack(back, string.Empty);
+        return safe.StartsWith("/search", StringComparison.Ordinal) ? safe : null;
+    }
+
+    internal static string SafeBack(string? back, string fallback)
     {
         if (string.IsNullOrEmpty(back) || back[0] != '/' || back.Length > 2048)
         {
@@ -1239,6 +2073,23 @@ public static class Program
         {
             dataProtection.PersistKeysToFileSystem(new System.IO.DirectoryInfo(keysDirectory));
         }
+    }
+
+    /// <summary>
+    /// The antiforgery check for a POST endpoint that binds no form fields
+    /// (the framework checks only those that do; see DEF-027).
+    /// </summary>
+    /// <summary>
+    /// A folder's address after an action on it, keeping the page and the All / Unread / Read
+    /// choice (DES-11 F7, owner 10 Oct 2026: a person in Unread landed back in All).
+    /// </summary>
+    internal static string FolderUrl(string name, int? page, string? show) =>
+        $"/folder/{Uri.EscapeDataString(name)}?page={System.Math.Max(0, page ?? 0)}" + (show is "unread" or "read" ? "&show=" + show : string.Empty);
+
+    internal static async ValueTask<object?> RequireAntiforgery(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        await context.HttpContext.RequestServices.GetRequiredService<IAntiforgery>().ValidateRequestAsync(context.HttpContext).ConfigureAwait(false);
+        return await next(context).ConfigureAwait(false);
     }
 
     internal static void ApplySecurityHeaders(IHeaderDictionary headers)

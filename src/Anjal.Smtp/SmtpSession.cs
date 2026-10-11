@@ -503,6 +503,24 @@ public sealed class SmtpSession
         return await this.CompleteAuthAsync(username, password, ct).ConfigureAwait(false);
     }
 
+    // rc.15 (item 59): tell whoever listens that a submission was refused; never let it break the session.
+    private void TellRefused(string username, string reason)
+    {
+        if (this.options.Refused is not { } refused)
+        {
+            return;
+        }
+        try
+        {
+            refused(new SubmissionRefusal(username ?? string.Empty, reason, this.remoteAddress));
+        }
+#pragma warning disable CA1031 // A listener's failure must not change what the client is told.
+        catch (System.Exception)
+        {
+        }
+#pragma warning restore CA1031
+    }
+
     /// <summary>
     /// Common path for both AUTH PLAIN and AUTH LOGIN: hand credentials to
     /// the authenticator and reply 235 (success) or 535 (failure). On
@@ -547,6 +565,7 @@ public sealed class SmtpSession
         {
             Counters.Increment("anjal_smtp_auth_failures_total");
             this.options.AuthFailures?.RecordFailure(this.remoteAddress);
+            this.TellRefused(username, "wrong password");
             if (++this.authFailures >= this.options.MaxAuthFailuresPerSession)
             {
                 await this.WriteLineAsync("421 4.7.0 Too many authentication failures, closing connection", ct).ConfigureAwait(false);
@@ -612,11 +631,15 @@ public sealed class SmtpSession
         {
             if (this.authenticatedUser.AllowedFromDomains.Count > 0)
             {
+                // An entry is a domain, or (rc.13, an application's key) one whole address.
                 string fromDomain = ExtractDomain(addr);
                 bool allowed = false;
+                bool byAddress = false;
                 foreach (string d in this.authenticatedUser.AllowedFromDomains)
                 {
-                    if (string.Equals(fromDomain, d, System.StringComparison.OrdinalIgnoreCase))
+                    bool isAddress = d.Contains('@', System.StringComparison.Ordinal);
+                    byAddress |= isAddress;
+                    if (string.Equals(isAddress ? addr : fromDomain, d, System.StringComparison.OrdinalIgnoreCase))
                     {
                         allowed = true;
                         break;
@@ -624,7 +647,8 @@ public sealed class SmtpSession
                 }
                 if (!allowed)
                 {
-                    await this.WriteLineAsync($"550 5.7.1 Not authorized to send as {fromDomain}", ct).ConfigureAwait(false);
+                    this.TellRefused(this.authenticatedUser.Username, "not allowed to send as " + addr);
+                    await this.WriteLineAsync(byAddress ? $"550 5.7.1 Not authorized to send as {addr}" : $"550 5.7.1 Not authorized to send as {fromDomain}", ct).ConfigureAwait(false);
                     return true;
                 }
             }
@@ -633,6 +657,10 @@ public sealed class SmtpSession
         PolicyDecision mailPolicy = await this.ConsultAsync(p => p.OnMailFromAsync(this.remoteAddress, this.authenticatedUser?.Username, addr, ct)).ConfigureAwait(false);
         if (!mailPolicy.Allowed)
         {
+            if (this.authenticatedUser is not null)
+            {
+                this.TellRefused(this.authenticatedUser.Username, mailPolicy.ReplyCode.ToString(System.Globalization.CultureInfo.InvariantCulture) + " " + mailPolicy.ReplyText);
+            }
             await this.WriteLineAsync($"{mailPolicy.ReplyCode} {mailPolicy.ReplyText}", ct).ConfigureAwait(false);
             return true;
         }

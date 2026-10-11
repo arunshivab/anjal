@@ -1,0 +1,93 @@
+name: screens
+
+# rc.15 (owner, 7 Oct 2026; items 47 and UX-09): every webmail screen is opened in a real
+# browser on every change and checked the way a person would notice - mail screens never scroll
+# as a whole page at 1366x768; every control has a name; every text button has a tip; menus open
+# fully on screen, on top, and close on a click outside or Escape; buttons are centred, level and
+# still; nothing is squeezed or cut off; the keyboard reaches every control and shows where it
+# is; and every link and button works. The checks run against a throwaway copy filled with
+# sample mail (tools/ui/setup.sh), never a real server.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# rc.15 (11 Oct 2026): the 17 checks took longer than one job may run (the first pull request
+# hit the 75-minute limit), so they run in four groups side by side. Every check is in exactly
+# one group; a test (SystemWideTests) keeps it so.
+jobs:
+  screens:
+    name: screens (${{ matrix.group }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: menus
+            checks: "noscroll,names,menus"
+          - group: buttons
+            checks: "tips,close,keyboard,swap,flap,reach"
+          - group: layout
+            checks: "shrink,clip,steady,lineup"
+          - group: look
+            checks: "align,same,sizes,scrollbars"
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Build (Release)
+        run: dotnet build --configuration Release
+
+      - name: Browser for the checks
+        working-directory: tools/ui
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+
+      - name: A throwaway copy with sample mail
+        env:
+          PGPASSWORD: postgres
+        run: bash tools/ui/setup.sh
+
+      - name: Check every screen
+        working-directory: tools/ui
+        run: node check.js --only ${{ matrix.checks }}
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: screen-checks-${{ matrix.group }}
+          path: |
+            tools/ui/out/
+            ${{ runner.temp }}/anjal-ui/*.log
+          if-no-files-found: ignore

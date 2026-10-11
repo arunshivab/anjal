@@ -60,9 +60,10 @@ public class SanitizerDosTests
     [Fact]
     public void TheShortenedFlag_ReachesTheReader()
     {
-        // The flag is only worth setting if the page shows it.
+        // The flag is only worth setting if the page shows it. Since rc.11 the
+        // letter and envelope are one shared component, used by every layout.
         string page = System.IO.File.ReadAllText(System.IO.Path.Combine(
-            RepoRoot(), "src", "Anjal.Webmail", "Components", "Pages", "Message.razor"));
+            RepoRoot(), "src", "Anjal.Webmail", "Components", "MessageReader.razor"));
         Assert.Contains("view.BodyShortened", page, StringComparison.Ordinal);
         Assert.Contains("cut short", page, StringComparison.Ordinal);
     }

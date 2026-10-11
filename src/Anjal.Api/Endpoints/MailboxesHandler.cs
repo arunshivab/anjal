@@ -69,7 +69,7 @@ public sealed class MailboxesHandler
             await ctx.WriteErrorAsync(400, "invalid_request", "address must be local@domain without a +tag; the local part may use letters, digits and . _ % - (no spaces or slashes) and the domain must be a real domain name.").ConfigureAwait(false);
             return;
         }
-        if (req.Password.Length > 0 && Anjal.Smtp.PasswordPolicy.Check(req.Password, req.Address, req.DisplayName) is string weak)
+        if (req.Password.Length > 0 && await Anjal.Smtp.PasswordPolicy.CheckAsync(req.Password, req.Address, req.DisplayName).ConfigureAwait(false) is string weak)
         {
             await ctx.WriteErrorAsync(400, "invalid_request", weak).ConfigureAwait(false);
             return;

@@ -18,7 +18,7 @@ public sealed class GreylistRememberTests : System.IDisposable
 
     public GreylistRememberTests() => System.IO.Directory.CreateDirectory(this.dir);
 
-    public void Dispose() => System.IO.Directory.Delete(this.dir, recursive: true);
+    public void Dispose() => TestFolders.Delete(this.dir);
 
     [Fact]
     public void RemembersAPassedSenderFor35Days_ByDefault()

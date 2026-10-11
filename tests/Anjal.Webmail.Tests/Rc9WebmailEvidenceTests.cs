@@ -28,7 +28,7 @@ public sealed class Rc9WebmailEvidenceTests : IDisposable
             {
                 File.SetAttributes(f, FileAttributes.Normal);
             }
-            Directory.Delete(this.root, recursive: true);
+            TestFolders.Delete(this.root);
         }
     }
 

@@ -1,0 +1,214 @@
+@* rc.12 (item 62, the board ComposeTemplates): choose a template for the draft
+   being written. The letter area lists the groups and shows the chosen one;
+   the envelope fills in its blanks - what Anjal knows is filled, the rest is
+   asked. "Use this" replaces the draft's subject and text; the recipients and
+   attachments stay. *@
+@inject MailboxService Mail
+@inject Words Words
+
+<form id="tsearch" method="get" action="/draft/@DraftId" hidden>
+    <input type="hidden" name="templates" value="1" />
+</form>
+<form method="post" action="/draft/@DraftId/template" class="cform tpick">
+    <AntiforgeryToken />
+    <input type="hidden" name="t" value="@(chosen?.Key ?? string.Empty)" />
+    <input type="hidden" name="festival" value="@Festival" />
+    <section class="cletter tletter" aria-label="@L["Choose a template"]">
+        <div class="thead">
+            <h1>@L["Choose a template"]</h1>
+            <span class="lh-grow"></span>
+            <a class="btn btn-s" href="/draft/@DraftId"><LipiIcon Name="chevron-left" Size="15" />@L["Back to your message"]</a>
+        </div>
+        <div class="tcols">
+            <nav class="ttree" aria-label="@L["Templates"]">
+                <label class="sbox tfind">
+                    <LipiIcon Name="search" Size="15" />
+                    <input type="search" name="q" form="tsearch" value="@Q" placeholder="@L["Find a template ({n}+)"].Replace("{n}", MailboxService.Count(TemplateCatalogue.All.Count), StringComparison.Ordinal)" aria-label="@L["Find a template"]" />
+                </label>
+                @foreach (string group in AllGroups)
+                {
+                    IReadOnlyList<MailTemplate> inGroup = Shown.Where(t => t.Group == group).ToList();
+                    @if (inGroup.Count > 0 || (Q.Length == 0 && group == MailboxService.OwnTemplatesGroup))
+                    {
+                        <details class="tgroup" open="@(OpenGroup == group || Q.Length > 0)">
+                            <summary><LipiIcon Name="chevron-right" Size="13" Class="tchev" /><span>@L[group]</span><span class="n">@inGroup.Count</span></summary>
+                            @foreach (MailTemplate t in inGroup)
+                            {
+                                <a class="@(chosen?.Key == t.Key ? "titem on" : "titem")" href="@Link(t.Key, Festival)" aria-current="@(chosen?.Key == t.Key ? "true" : null)">@t.Name</a>
+                            }
+                            @if (group == MailboxService.OwnTemplatesGroup && inGroup.Count == 0)
+                            {
+                                <span class="tnone">@L["None yet. Save any message as a template."]</span>
+                            }
+                        </details>
+                    }
+                }
+            </nav>
+            <div class="tshow">
+                @if (chosen is null)
+                {
+                    <p class="lead">@L["Choose a template on the left. Choosing one fills the subject and text, to edit and send as usual."]</p>
+                }
+                else
+                {
+                    @if (chosen.Key == "greet/festival")
+                    {
+                        <span class="elabel">@L["Festival"]</span>
+                        <div class="tchips">
+                            @foreach ((string name, string _) in TemplateCatalogue.Festivals)
+                            {
+                                <a class="@(Festival == name ? "tchip on" : "tchip")" href="@Link(chosen.Key, name)">@L[name]</a>
+                            }
+                        </div>
+                    }
+                    <span class="elabel">@L["Language"]</span>
+                    <div class="tchips">
+                        @foreach ((string lc, string label) in Languages)
+                        {
+                            @if (lc == "en")
+                            {
+                                <span class="tchip on">@label</span>
+                            }
+                            else
+                            {
+                                <span class="tchip soon" lang="@lc" title="@L["Available after the language check"]">@label</span>
+                            }
+                        }
+                    </div>
+                    <article class="tpreview" style="@PreviewStyle">
+                        <h2>@((MarkupString)Marked(chosen.Subject))</h2>
+                        @foreach (string line in chosen.Body.Split('\n'))
+                        {
+                            <p>@((MarkupString)(line.Length == 0 ? "&nbsp;" : Marked(line)))</p>
+                        }
+                        @if (chosen.Background.Length > 0)
+                        {
+                            <p class="tsuggest">@L["Suggested background: {name}. You can change it after choosing."].Replace("{name}", L[chosen.Background], StringComparison.Ordinal)</p>
+                        }
+                    </article>
+                    <div class="cbtns">
+                        <button type="submit" class="btn btn-p" data-needs-server>@L["Use this"]</button>
+                        @if (chosen.Group == MailboxService.OwnTemplatesGroup)
+                        {
+                            <button type="submit" class="btn btn-q" formaction="/templates/delete" name="key" value="@chosen.Key" formnovalidate data-needs-server>@L["Remove this template"]</button>
+                            <input type="hidden" name="back" value="/draft/@DraftId?templates=1" />
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </section>
+    <aside class="cenv tblanks" aria-label="@L["Fill in the blanks"]">
+        <h2 class="ehead2">@L["Fill in the blanks"]</h2>
+        <p class="railnote">@L["Anjal fills what it knows, and asks for the rest."]</p>
+        @if (chosen is not null)
+        {
+            @foreach (string blank in Blanks)
+            {
+                @if (blank == "Festival line")
+                {
+                    continue;
+                }
+                <label class="cfl">
+                    <span class="tblank">{@blank}</span>
+                    @if (known.TryGetValue(blank, out string? value))
+                    {
+                        <span class="tknown">@value <span>@KnownFrom(blank)</span></span>
+                    }
+                    else
+                    {
+                        <input class="railinp" name="blank:@blank" maxlength="500" />
+                    }
+                </label>
+            }
+            <p class="ttip"><b>@L["Tip:"]</b> @L["sending the same wishes to many people? Switch on Send one each: everyone gets their own copy, with their own name, and no one sees the other addresses."]</p>
+        }
+        <span class="cgrow"></span>
+        <p class="railnote">@L["The starter set ({n} templates) is in English now; the other five languages come after the language check. Bank and government ones are covering mails for a form you attach; Anjal never makes the form."].Replace("{n}", MailboxService.Count(TemplateCatalogue.All.Count), StringComparison.Ordinal)</p>
+    </aside>
+</form>
+
+@code {
+    /// <summary>The draft the template will be used in.</summary>
+    [Parameter, EditorRequired] public Guid DraftId { get; set; }
+
+    /// <summary>The draft's To line, for {Name}.</summary>
+    [Parameter] public string To { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "t")] private string? Key { get; set; }
+    [SupplyParameterFromQuery(Name = "festival")] private string? FestivalQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] private string? QText { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private static readonly (string Code, string Label)[] Languages =
+    {
+        ("en", "English"), ("ta", "தமிழ்"), ("ml", "മലയാളം"), ("hi", "हिन्दी"), ("mr", "मराठी"), ("gu", "ગુજરાતી"),
+    };
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private IReadOnlyList<MailTemplate> own = Array.Empty<MailTemplate>();
+    private IReadOnlyList<MailTemplate> org = Array.Empty<MailTemplate>();
+    private MailTemplate? chosen;
+    private IReadOnlyDictionary<string, string> known = new Dictionary<string, string>();
+
+    private string Q => (QText ?? string.Empty).Trim();
+    private string Festival => TemplateCatalogue.Festivals.Any(f => f.Name == FestivalQuery) ? FestivalQuery! : "Diwali";
+    private string? OpenGroup => chosen?.Group;
+    private IEnumerable<string> AllGroups => (org.Count > 0 ? TemplateCatalogue.Groups.Prepend(MailboxService.OrgTemplatesGroup) : TemplateCatalogue.Groups).Append(MailboxService.OwnTemplatesGroup);
+    private IEnumerable<MailTemplate> Shown => org.Concat(TemplateCatalogue.All).Concat(own)
+        .Where(t => Q.Length == 0 || t.Name.Contains(Q, StringComparison.CurrentCultureIgnoreCase) || t.Subject.Contains(Q, StringComparison.CurrentCultureIgnoreCase));
+    private IReadOnlyList<string> Blanks => chosen is null ? Array.Empty<string>() : TemplateCatalogue.BlanksIn(chosen.Subject + "\n" + chosen.Body);
+
+    private string PreviewStyle
+    {
+        get
+        {
+            (string Name, string Colour, string Picture) pic = MailBackgrounds.Pictures.FirstOrDefault(p => p.Name == chosen?.Background);
+            return pic.Name is null ? string.Empty : $"background-color:{pic.Colour};background-image:url({pic.Picture})";
+        }
+    }
+
+    private string Link(string key, string festival) =>
+        $"/draft/{DraftId}?templates=1&t={Uri.EscapeDataString(key)}" + (key == "greet/festival" ? "&festival=" + Uri.EscapeDataString(festival) : string.Empty)
+        + (Q.Length > 0 ? "&q=" + Uri.EscapeDataString(Q) : string.Empty);
+
+    private string KnownFrom(string blank) => blank switch
+    {
+        "Your name" => L["(from your profile)"],
+        "Organisation" => L["(from your organisation)"],
+        "Name" => L["(from the first recipient)"],
+        "Festival" => L["(chosen above)"],
+        _ => string.Empty,
+    };
+
+    // The text with its blanks marked, and known blanks shown filled.
+    private string Marked(string text)
+    {
+        string safe = HtmlSanitizer.Escape(text);
+        foreach (string blank in TemplateCatalogue.BlanksIn(text))
+        {
+            string shown = known.TryGetValue(blank, out string? v) ? HtmlSanitizer.Escape(v) : "{" + HtmlSanitizer.Escape(blank) + "}";
+            safe = safe.Replace("{" + HtmlSanitizer.Escape(blank) + "}", known.ContainsKey(blank) ? $"<span class=\"tfilled\">{shown}</span>" : $"<mark>{shown}</mark>", StringComparison.Ordinal);
+        }
+        return safe;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf(user);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        own = await Mail.ListOwnTemplatesAsync(mailboxId.Value);
+        org = await Mail.OrgTemplatesForAsync(mailboxId.Value);
+        chosen = await Mail.FindTemplateAsync(mailboxId.Value, Key);
+        known = await Mail.KnownBlanksAsync(mailboxId.Value, To, chosen?.Key == "greet/festival" ? Festival : null);
+    }
+}

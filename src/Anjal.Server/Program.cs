@@ -54,6 +54,15 @@ namespace Anjal.Server;
 ///                             RCPT TO and refuses them after DATA instead. Default false.
 ///   ANJAL_GREYLIST          - "false" disables greylisting on the MTA port. Default true.
 ///   ANJAL_GREYLIST_DELAY_SECONDS - greylist delay, default 300.
+///   ANJAL_PWNED_FILE        - the leaked-password list (rc.15): default /var/lib/anjal/pwned-passwords.bin
+///                             (Unix) or %LOCALAPPDATA%\Anjal\pwned-passwords.bin (Windows).
+///   ANJAL_PWNED_SOURCE      - "api" (default: download from Have I Been Pwned's range API when the
+///                             list is missing or old) or "off" (never download; a list copied in is still used).
+///   ANJAL_PWNED_MODE        - "both" (default: the downloaded list, and Have I Been Pwned online by
+///                             k-anonymity at each new password), "download", "online" or "off".
+///   ANJAL_PWNED_ONLINE_MIN_COUNT - the fewest leaks that make the online check refuse, default 1.
+///   ANJAL_PWNED_REFRESH_DAYS - how old the list may get before it is downloaded again, default 182.
+///   ANJAL_PWNED_MIN_COUNT   - the fewest leaks a password needs to be on the list, default 3.
 ///   ANJAL_ACME_*            - see <see cref="Anjal.Acme.AcmeEnvironment"/>. When
 ///                             ANJAL_ACME_DOMAINS is set and ANJAL_TLS_CERT_PATH is not,
 ///                             STARTTLS uses the ACME certificate and picks up renewals
@@ -64,6 +73,9 @@ namespace Anjal.Server;
 /// Command line:
 ///   --acme-renew-now        - ask the renewal service (in whichever process hosts it)
 ///                             to renew at its next check, then exit.
+///   --pwned-build [--from-file F] [--out P]
+///                           - build the leaked-password list now, from the range API or from the
+///                             single SHA-1 file of the official Pwned Passwords downloader, then exit.
 /// </summary>
 public static class Program
 {
@@ -71,6 +83,10 @@ public static class Program
     /// <param name="args">Command-line arguments.</param>
     public static async System.Threading.Tasks.Task<int> Main(string[] args)
     {
+        if (args is not null && System.Array.IndexOf(args, "--pwned-build") >= 0)
+        {
+            return await BuildPwnedNowAsync(args).ConfigureAwait(false);
+        }
         if (args is not null && System.Array.IndexOf(args, "--acme-renew-now") >= 0)
         {
             Anjal.Acme.AcmeEnvironment acmeEnv = Anjal.Acme.AcmeEnvironment.Read(hostByDefault: false);
@@ -112,14 +128,19 @@ public static class Program
             System.Console.Error.WriteLine(ex.Message);
             return 1;
         }
+        // DES-11 S6: DKIM keys are locked with the seal key now; ANJAL_KEK still opens keys sealed with it before.
         if (secrets is null && pg is not null)
         {
-            Log("WARNING: ANJAL_KEK is not set - DKIM private keys are stored unencrypted. Generate one with: openssl rand -base64 32");
+            Log("DKIM keys: locked with the seal key (ANJAL_KEK is not set, and is not needed for them).");
         }
 
         Anjal.Store.IMessageStore store = pg is null
             ? new Anjal.Store.InMemoryMessageStore()
             : new Anjal.Store.PostgresMessageStore(pg) { Secrets = secrets };
+
+        // DES-11 S6: the seal key - made at the first start, its public half published for the webmail,
+        // and every DKIM key still kept unlocked locked with it (whether or not this server sends).
+        using System.Security.Cryptography.RSA? sealKey = await DkimSealKey.PrepareAsync(store, Log).ConfigureAwait(false);
 
         var routing = new Anjal.Routing.StoreBackedRoutingTable(store);
         // Webhooks go only where the target policy allows: https to public
@@ -130,6 +151,7 @@ public static class Program
         var dispatcher = new Anjal.Routing.HttpWebhookDispatcher(http);
 
         void Log(string line) => System.Console.WriteLine($"[{System.DateTime.UtcNow:HH:mm:ss}] {line}");
+        Anjal.Smtp.PwnedPasswords.Use(Anjal.Smtp.PwnedPasswords.ConfiguredPath, Log);
 
         // Mailbox storage (v0.9.0): Maildir on disk + index in the store.
         // Both built-in stores implement IMailboxStore, so this is always on.
@@ -203,10 +225,10 @@ public static class Program
             Role = Anjal.Smtp.SmtpServerRole.Mta,
             Evidence = evidence,
             Policy = mtaPolicy,
-            CommandTimeout = System.TimeSpan.FromSeconds(ParseIntEnv("ANJAL_SMTP_IDLE_TIMEOUT_SECONDS", 300)),
-            MaxSessionDuration = System.TimeSpan.FromMinutes(ParseIntEnv("ANJAL_SMTP_MAX_SESSION_MINUTES", 15)),
-            MaxConcurrentSessions = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS", 200),
-            MaxSessionsPerAddress = ParseIntEnv("ANJAL_SMTP_MAX_CONNECTIONS_PER_IP", 10),
+            CommandTimeout = System.TimeSpan.FromSeconds(ParseLimitEnv("ANJAL_SMTP_IDLE_TIMEOUT_SECONDS", 300)),
+            MaxSessionDuration = System.TimeSpan.FromMinutes(ParseLimitEnv("ANJAL_SMTP_MAX_SESSION_MINUTES", 15)),
+            MaxConcurrentSessions = ParseLimitEnv("ANJAL_SMTP_MAX_CONNECTIONS", 200),
+            MaxSessionsPerAddress = ParseLimitEnv("ANJAL_SMTP_MAX_CONNECTIONS_PER_IP", 10),
             Log = Log,
             // Refuse an unknown recipient at RCPT TO rather than after the
             // message has been transferred (DEF-042). Set
@@ -287,12 +309,13 @@ public static class Program
                 MaxSessionsPerAddress = smtpOptions.MaxSessionsPerAddress,
                 MaxAuthFailuresPerSession = 3,
                 Log = Log,
+                Refused = ServiceRecords.RefusalRecorder(store, Log),
 
                 // Across sessions: ten failed logins from one address in 15
                 // minutes and that address is refused before any password
                 // is checked.
                 AuthFailures = new Anjal.Smtp.AuthFailureLimiter(
-                    ParseIntEnv("ANJAL_SMTP_AUTH_FAILURES_PER_IP", 10),
+                    ParseLimitEnv("ANJAL_SMTP_AUTH_FAILURES_PER_IP", 10),
                     System.TimeSpan.FromMinutes(15)),
             };
 
@@ -329,6 +352,7 @@ public static class Program
                     MaxAuthFailuresPerSession = submissionOptions.MaxAuthFailuresPerSession,
                     AuthFailures = submissionOptions.AuthFailures,
                     Log = Log,
+                    Refused = submissionOptions.Refused,
                 };
                 implicitTlsServer = new Anjal.Smtp.SmtpServer(implicitOptions, submissionSink,
                     authenticator: null, enforceReject: false,
@@ -358,7 +382,7 @@ public static class Program
         if (mailSender is not null)
         {
             // DKIM signing: env-var default key (if configured) chained with store-backed per-domain lookup.
-            (Anjal.Dkim.IDkimKeyResolver? dkimResolver, bool requireDkim) = BuildDkimResolver(store, Log);
+            (Anjal.Dkim.IDkimKeyResolver? dkimResolver, bool requireDkim) = BuildDkimResolver(store, Log, sealKey);
             var dkimSigner = new Anjal.Dkim.DkimSigner();
 
             var worker = new OutboundWorker(
@@ -527,6 +551,8 @@ public static class Program
             {
                 listeners.Add(RunEvidenceHousekeepingAsync(evidenceWorker, Log, cts.Token));
             }
+            listeners.Add(RunPwnedRefreshAsync(Log, cts.Token));
+            listeners.Add(ServiceRecords.RunRefusalCountsAsync(store, Log, cts.Token));
             if (submissionServer is not null)
             {
                 listeners.Add(submissionServer.StartAsync(cts.Token));
@@ -640,7 +666,7 @@ public static class Program
     /// with the store (per-domain overrides). Returns (resolver, requireDkim).
     /// If nothing is configured, resolver is null and DKIM is fully disabled.
     /// </summary>
-    private static (Anjal.Dkim.IDkimKeyResolver?, bool) BuildDkimResolver(Anjal.Store.IMessageStore store, System.Action<string> log)
+    private static (Anjal.Dkim.IDkimKeyResolver?, bool) BuildDkimResolver(Anjal.Store.IMessageStore store, System.Action<string> log, System.Security.Cryptography.RSA? sealKey)
     {
         string mode = (System.Environment.GetEnvironmentVariable("ANJAL_DKIM_MODE") ?? "off").ToLowerInvariant();
         if (mode != "required" && mode != "opportunistic")
@@ -660,7 +686,7 @@ public static class Program
         }
 
         // Store-backed lookup (per-domain).
-        resolvers.Add(new StoreBackedDkimResolver(store));
+        resolvers.Add(new StoreBackedDkimResolver(store, sealKey));
         log("DKIM: store-backed per-domain lookup enabled.");
 
         return (new Anjal.Dkim.ChainedKeyResolver(resolvers.ToArray()), requireDkim);
@@ -984,6 +1010,168 @@ public static class Program
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Keeps the downloaded leaked-password list current (rc.15, item 35; owner, 7 Oct 2026:
+    /// refreshed every six months - every password is also checked online). Five minutes after
+    /// start, and then every six hours, the list is downloaded again when it is missing or older
+    /// than ANJAL_PWNED_REFRESH_DAYS (182). A download needs about
+    /// 8 GB free while the new file is written beside the old; with less, it waits and says so.
+    /// A failure is logged and tried again later; it never stops the server, and the previous
+    /// list stays in use throughout.
+    /// </summary>
+    private static async System.Threading.Tasks.Task RunPwnedRefreshAsync(System.Action<string> log, System.Threading.CancellationToken ct)
+    {
+        if (!Anjal.Smtp.PwnedPasswords.UsesDownload)
+        {
+            log($"Leaked passwords: the downloaded list is not used (ANJAL_PWNED_MODE={Anjal.Smtp.PwnedPasswords.Mode}).");
+            return;
+        }
+        if (string.Equals(System.Environment.GetEnvironmentVariable("ANJAL_PWNED_SOURCE"), "off", System.StringComparison.OrdinalIgnoreCase))
+        {
+            log("Leaked passwords: downloading is off (ANJAL_PWNED_SOURCE=off).");
+            return;
+        }
+        int days = ParseIntEnv("ANJAL_PWNED_REFRESH_DAYS", 182);
+        if (days <= 0)
+        {
+            log("Leaked passwords: refreshing is off (ANJAL_PWNED_REFRESH_DAYS=0).");
+            return;
+        }
+        try
+        {
+            await System.Threading.Tasks.Task.Delay(System.TimeSpan.FromMinutes(5), ct).ConfigureAwait(false);
+            while (!ct.IsCancellationRequested)
+            {
+                string path = Anjal.Smtp.PwnedPasswords.ConfiguredPath;
+                Anjal.Smtp.PwnedPasswordList? list = Anjal.Smtp.PwnedPasswords.Current;
+                if (list is null || System.DateTimeOffset.UtcNow - list.BuiltAt >= System.TimeSpan.FromDays(days))
+                {
+                    await RefreshPwnedOnceAsync(path, log, ct).ConfigureAwait(false);
+                }
+                await System.Threading.Tasks.Task.Delay(System.TimeSpan.FromHours(6), ct).ConfigureAwait(false);
+            }
+        }
+        catch (System.OperationCanceledException)
+        {
+            // Stopping.
+        }
+    }
+
+    private static async System.Threading.Tasks.Task RefreshPwnedOnceAsync(string path, System.Action<string> log, System.Threading.CancellationToken ct)
+    {
+        const long Needed = 8L * 1024 * 1024 * 1024;
+        var status = new Anjal.Smtp.PwnedRefreshStatus { State = "building", Started = System.DateTimeOffset.UtcNow };
+        try
+        {
+            string dir = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path)) ?? ".";
+            System.IO.Directory.CreateDirectory(dir);
+            long free = new System.IO.DriveInfo(dir).AvailableFreeSpace;
+            if (free < Needed)
+            {
+                status.State = "failed";
+                status.Finished = System.DateTimeOffset.UtcNow;
+                status.Error = $"Not enough free disk: {free / (1024 * 1024 * 1024)} GB free, about 8 GB needed.";
+                status.Write(path);
+                log("WARN leaked passwords: " + status.Error + " Download postponed.");
+                return;
+            }
+            status.Write(path);
+            log("Leaked passwords: downloading the list from Have I Been Pwned (about 1 million range requests).");
+            using var handler = new System.Net.Http.SocketsHttpHandler { MaxConnectionsPerServer = 24, PooledConnectionLifetime = System.TimeSpan.FromMinutes(10) };
+            using var http = new System.Net.Http.HttpClient(handler) { Timeout = System.TimeSpan.FromSeconds(60) };
+            var progress = new System.Progress<int>(p =>
+            {
+                status.Percent = p;
+                if (p % 10 == 0)
+                {
+                    log($"Leaked passwords: {p}% downloaded.");
+                }
+                try
+                {
+                    status.Write(path);
+                }
+                catch (System.IO.IOException)
+                {
+                    // The next report writes it.
+                }
+            });
+            long count = await Anjal.Smtp.PwnedPasswordBuilder.BuildFromApiAsync(http, path, Anjal.Smtp.PwnedPasswordBuilder.ConfiguredMinimumCount, progress, ct: ct).ConfigureAwait(false);
+            Anjal.Smtp.PwnedPasswords.Reload();
+            status.State = "ready";
+            status.Percent = 100;
+            status.Finished = System.DateTimeOffset.UtcNow;
+            status.Write(path);
+            log($"Leaked passwords: list ready, {count:N0} fingerprints.");
+        }
+        catch (System.OperationCanceledException)
+        {
+            throw;
+        }
+#pragma warning disable CA1031 // A failed download is logged and tried again later; it must not stop the server.
+        catch (System.Exception ex)
+        {
+            status.State = "failed";
+            status.Finished = System.DateTimeOffset.UtcNow;
+            status.Error = ex.GetType().Name + ": " + ex.Message;
+            try
+            {
+                status.Write(path);
+            }
+            catch (System.IO.IOException)
+            {
+                // Logged below either way.
+            }
+            log("WARN leaked passwords: download failed, will try again in six hours: " + status.Error);
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>--pwned-build: build the list now and exit (0 when built).</summary>
+    private static async System.Threading.Tasks.Task<int> BuildPwnedNowAsync(string[] args)
+    {
+        string? fromFile = ArgAfter(args, "--from-file");
+        string output = ArgAfter(args, "--out") ?? Anjal.Smtp.PwnedPasswords.ConfiguredPath;
+        long count;
+        if (fromFile is not null)
+        {
+            System.Console.WriteLine($"Building {output} from {fromFile} ...");
+            using var reader = new System.IO.StreamReader(fromFile);
+            count = await Anjal.Smtp.PwnedPasswordBuilder.BuildFromTextAsync(reader, output, Anjal.Smtp.PwnedPasswordBuilder.ConfiguredMinimumCount).ConfigureAwait(false);
+        }
+        else
+        {
+            System.Console.WriteLine($"Downloading the leaked-password list into {output} (about 1 million requests; an hour or more) ...");
+            using var handler = new System.Net.Http.SocketsHttpHandler { MaxConnectionsPerServer = 24 };
+            using var http = new System.Net.Http.HttpClient(handler) { Timeout = System.TimeSpan.FromSeconds(60) };
+            var progress = new System.Progress<int>(p => System.Console.WriteLine($"  {p}%"));
+            count = await Anjal.Smtp.PwnedPasswordBuilder.BuildFromApiAsync(http, output, Anjal.Smtp.PwnedPasswordBuilder.ConfiguredMinimumCount, progress).ConfigureAwait(false);
+        }
+        System.Console.WriteLine($"Done: {count:N0} fingerprints in {output}.");
+        return 0;
+    }
+
+    private static string? ArgAfter(string[] args, string name)
+    {
+        int i = System.Array.IndexOf(args, name);
+        return i >= 0 && i + 1 < args.Length ? args[i + 1] : null;
+    }
+
+    /// <summary>
+    /// A limit that must be at least 1 (DES-11 settings check, 10 Oct 2026): a timeout or a
+    /// connection count of 0 or less refused every connection or stopped the server at start.
+    /// Such a value is reported and the default used instead.
+    /// </summary>
+    private static int ParseLimitEnv(string name, int fallback)
+    {
+        int n = ParseIntEnv(name, fallback);
+        if (n >= 1)
+        {
+            return n;
+        }
+        System.Console.WriteLine($"[{System.DateTime.UtcNow:HH:mm:ss}] WARNING: {name}={n} is not a usable limit (it must be 1 or more); using {fallback}.");
+        return fallback;
     }
 
     private static int ParseIntEnv(string name, int fallback)

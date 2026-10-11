@@ -1,0 +1,48 @@
+@* The seal of trust (SPEC-11 item 49, option 2, owner 2 Oct): a square stamp
+   with a white perforated margin, an outline and a soft shadow, and a green
+   panel with a tick (or a lock) and the words on two lines. Green in every
+   theme: the colours are the theme's own seal tokens. *@
+<svg class="stampsvg" width="68" height="68" viewBox="-4 -4 76 76" role="img" aria-label="@Word">
+    <title>@Why</title>
+    <rect class="st-margin" x="0" y="0" width="68" height="68"></rect>
+    @foreach (double p in Bites)
+    {
+        <circle class="st-bite" cx="@F(p)" cy="0" r="2.3"></circle>
+        <circle class="st-bite" cx="@F(p)" cy="68" r="2.3"></circle>
+        <circle class="st-bite" cx="0" cy="@F(p)" r="2.3"></circle>
+        <circle class="st-bite" cx="68" cy="@F(p)" r="2.3"></circle>
+    }
+    <rect class="st-panel" x="6" y="6" width="56" height="56"></rect>
+    @if (Lock)
+    {
+        <g transform="translate(34 25)" class="st-mark">
+            <rect x="-7" y="-1" width="14" height="10" rx="2"></rect>
+            <path d="M-4 -1 V-4 a4 4 0 0 1 8 0 V-1"></path>
+        </g>
+    }
+    else
+    {
+        <g transform="translate(34 27)"><path class="st-mark" d="M-9 0 L-3 6 L9 -6"></path></g>
+    }
+    <text class="st-word" x="34" y="47" text-anchor="middle">@Line1</text>
+    <text class="st-word" x="34" y="57" text-anchor="middle">@Line2</text>
+</svg>
+
+@code {
+    private static readonly double[] Bites = Enumerable.Range(0, 11).Select(i => i * 6.8).ToArray();
+
+    /// <summary>The stamp's words, such as "Verified sender"; split onto two lines at the first space.</summary>
+    [Parameter, EditorRequired] public string Word { get; set; } = string.Empty;
+
+    /// <summary>Why the stamp is there, shown on hover.</summary>
+    [Parameter] public string Why { get; set; } = string.Empty;
+
+    /// <summary>A lock instead of a tick (Arrived encrypted).</summary>
+    [Parameter] public bool Lock { get; set; }
+
+    private string Line1 => Word.Contains(' ', StringComparison.Ordinal) ? Word[..Word.IndexOf(' ', StringComparison.Ordinal)] : Word;
+
+    private string Line2 => Word.Contains(' ', StringComparison.Ordinal) ? Word[(Word.IndexOf(' ', StringComparison.Ordinal) + 1)..] : string.Empty;
+
+    private static string F(double v) => v.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+}

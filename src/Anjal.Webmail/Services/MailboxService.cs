@@ -109,6 +109,9 @@ public sealed class ComposeRequest
     /// <summary>Bcc header value. Recipients receive the message but the header is not sent.</summary>
     public string Bcc { get; set; } = string.Empty;
 
+    /// <summary>With Send one each: where the one summary copy goes instead of Cc and Bcc (DES-11 F5); empty for none.</summary>
+    public string MergeSummaryTo { get; set; } = string.Empty;
+
     /// <summary>
     /// The draft this compose is editing, if any. On send or save the old
     /// draft is replaced, so a draft never duplicates itself.
@@ -143,6 +146,13 @@ public sealed class ComposeRequest
 
     /// <summary>Which of <see cref="CarryFrom"/>'s attachments to include, by index.</summary>
     public IList<int> CarryIndexes { get; } = new List<int>();
+
+    /// <summary>
+    /// The person sending on behalf of a shared mailbox (rc.14), as "Name
+    /// &lt;address&gt;" for the Sender header; empty otherwise. Set by the
+    /// server from the signed-in person, never from the form.
+    /// </summary>
+    public string Sender { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -153,7 +163,14 @@ public sealed class ComposeRequest
 public sealed partial class MailboxService
 {
     /// <summary>Folders every mailbox shows even before any mail arrives.</summary>
-    public static readonly IReadOnlyList<string> DefaultFolders = new[] { FolderRow.Inbox, "Sent", "Drafts", MailboxSink.JunkFolder, "Trash" };
+    public static readonly IReadOnlyList<string> DefaultFolders = new[] { FolderRow.Inbox, ScheduledFolder, "Sent", "Drafts", "Archive", MailboxSink.JunkFolder, "Trash" };
+
+    /// <summary>
+    /// The order of the standard folders in the rail, from the approved boards
+    /// (rc.11): Inbox, Scheduled, Outbox, Drafts, Sent, Archive, Junk, Trash;
+    /// the person's own folders follow, in alphabetical order.
+    /// </summary>
+    private static readonly string[] RailOrder = { FolderRow.Inbox, "Scheduled", "Outbox", "Drafts", "Sent", "Archive", MailboxSink.JunkFolder, "Trash" };
 
     private readonly IMailboxStore store;
     private readonly IMessageStore messageStore;
@@ -172,6 +189,9 @@ public sealed partial class MailboxService
     /// whose original cannot be kept is not sent (SPEC-08 R-08).
     /// </summary>
     public Anjal.Mailbox.EvidenceRecorder? Evidence { get; init; }
+
+    /// <summary>Where messages were before a delete or move, for Undo (rc.11, UX-07).</summary>
+    public UndoLedger Undo { get; } = new();
 
     public MailboxService(IMailboxStore store, IMessageStore messageStore, IMaildirStore maildir, string hostName)
     {
@@ -219,7 +239,10 @@ public sealed partial class MailboxService
             long unread = await this.store.CountUnreadAsync(mailboxId, f.Id, ct).ConfigureAwait(false);
             result.Add(new FolderView { Id = f.Id, Name = f.Name, Count = count, Unread = unread });
         }
-        return result;
+        return result
+            .OrderBy(f => Array.IndexOf(RailOrder, f.Name) is int i && i >= 0 ? i : RailOrder.Length)
+            .ThenBy(f => f.Name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
     }
 
     /// <summary>Find a folder of the mailbox by name (case-sensitive). Null if none.</summary>
@@ -289,6 +312,17 @@ public sealed partial class MailboxService
     }
 
     /// <summary>
+    /// True when the message is in the person's mailbox index (rc.11): lets the
+    /// reader tell "gone" from "listed, but its stored copy cannot be read".
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The message.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when listed.</returns>
+    public async Task<bool> IsListedAsync(Guid mailboxId, Guid messageId, CancellationToken ct = default) =>
+        await this.GetOwnedRowAsync(mailboxId, messageId, ct).ConfigureAwait(false) is not null;
+
+    /// <summary>
     /// Open a message for display: parses MIME, picks the best body part,
     /// sanitises HTML, lists attachments, and marks the message seen.
     /// </summary>
@@ -296,7 +330,22 @@ public sealed partial class MailboxService
     /// <param name="messageId">The message.</param>
     /// <param name="allowRemoteImages">Whether to let remote images load.</param>
     /// <param name="ct">Cancellation.</param>
-    public async Task<MessageView?> OpenAsync(Guid mailboxId, Guid messageId, bool allowRemoteImages, CancellationToken ct = default)
+    public Task<MessageView?> OpenAsync(Guid mailboxId, Guid messageId, bool allowRemoteImages, CancellationToken ct = default) =>
+        this.OpenCoreAsync(mailboxId, messageId, allowRemoteImages, markSeen: true, ct);
+
+    /// <summary>
+    /// A message for an offline copy (rc.15, item 65b): as <see cref="OpenAsync"/>,
+    /// with remote images blocked, and without marking it seen - keeping a
+    /// copy on a device is not reading it.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The message.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The message, or null.</returns>
+    public Task<MessageView?> PeekAsync(Guid mailboxId, Guid messageId, CancellationToken ct = default) =>
+        this.OpenCoreAsync(mailboxId, messageId, allowRemoteImages: false, markSeen: false, ct);
+
+    private async Task<MessageView?> OpenCoreAsync(Guid mailboxId, Guid messageId, bool allowRemoteImages, bool markSeen, CancellationToken ct)
     {
         (MessageRow Row, FolderRow Folder, byte[] Raw)? loaded = await this.ReadRawAsync(mailboxId, messageId, ct).ConfigureAwait(false);
         if (loaded is null)
@@ -344,7 +393,7 @@ public sealed partial class MailboxService
             isHtml = false;
         }
 
-        if (!row.Seen)
+        if (!row.Seen && markSeen)
         {
             row = await this.SetFlagsAsync(mailboxId, messageId, seen: true, row.Flagged, row.Answered, ct).ConfigureAwait(false) ?? row;
         }
@@ -428,8 +477,9 @@ public sealed partial class MailboxService
     }
 
     /// <summary>
-    /// Move an owned message to another folder of the same mailbox
-    /// (creating the folder if needed). Null if the message is unknown.
+    /// Move an owned message to another folder of the same mailbox. Only a
+    /// folder that already exists, or a standard one, can be the target. Null
+    /// if the message or the folder is unknown.
     /// </summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="messageId">The message.</param>
@@ -480,10 +530,16 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public async Task<MessageRow?> MarkNotSpamAsync(Guid mailboxId, Guid messageId, CancellationToken ct = default)
     {
+        MessageRow? before = await this.GetOwnedRowAsync(mailboxId, messageId, ct).ConfigureAwait(false);
+        bool fromJunk = before is not null && (await this.FolderNamesAsync(mailboxId, ct).ConfigureAwait(false)).TryGetValue(before.FolderId, out string? was) && was == MailboxSink.JunkFolder;
         MessageRow? moved = await this.MoveAsync(mailboxId, messageId, FolderRow.Inbox, ct).ConfigureAwait(false);
         if (moved is not null)
         {
             await this.AddSenderRuleAsync(mailboxId, moved, SenderRuleAction.Allow, ct).ConfigureAwait(false);
+            if (fromJunk)
+            {
+                await this.NoteRescuedAsync(mailboxId, messageId, ct).ConfigureAwait(false);
+            }
         }
         return moved;
     }
@@ -515,6 +571,45 @@ public sealed partial class MailboxService
         ArgumentNullException.ThrowIfNull(row);
         string from = Anjal.Spam.SpamScorer.FirstAddress(Anjal.Mime.EncodedWordDecoder.Decode(row.FromHeader));
         return from.Length > 0 ? from : row.EnvelopeFrom.Trim().ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Block the sender of a message (rc.11, D-103): their future mail goes to
+    /// Junk, as the sender rules already do; this message stays where it is.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">A message from the sender.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The address blocked, or null when the message is unknown.</returns>
+    public async Task<string?> BlockSenderAsync(Guid mailboxId, Guid messageId, CancellationToken ct = default)
+    {
+        MessageRow? row = await this.GetOwnedRowAsync(mailboxId, messageId, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            return null;
+        }
+        await this.AddSenderRuleAsync(mailboxId, row, SenderRuleAction.Block, ct).ConfigureAwait(false);
+        return SenderOf(row);
+    }
+
+    /// <summary>The domains of the mailbox's organisation, for "inside" and "outside" (rc.11, item 52).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The domains, lower case.</returns>
+    public async Task<IReadOnlyList<string>> OrganisationDomainsAsync(Guid mailboxId, CancellationToken ct = default)
+    {
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
+        if (context is null)
+        {
+            return Array.Empty<string>();
+        }
+        IReadOnlyList<TenantDomainRow> rows = await this.store.ListTenantDomainsAsync(context.Value.Tenant.Id, ct).ConfigureAwait(false);
+        var domains = rows.Select(d => d.Domain.ToLowerInvariant()).ToList();
+        if (!domains.Contains(context.Value.Mailbox.Domain.ToLowerInvariant()))
+        {
+            domains.Add(context.Value.Mailbox.Domain.ToLowerInvariant());
+        }
+        return domains;
     }
 
     private async Task AddSenderRuleAsync(Guid mailboxId, MessageRow row, SenderRuleAction action, CancellationToken ct)
@@ -558,6 +653,9 @@ public sealed partial class MailboxService
         return removed;
     }
 
+    /// <summary>What a full mailbox is told when it tries to send (DES-11 D2).</summary>
+    public const string FullToSend = "Your mailbox is full. Delete or archive some mail to send again.";
+
     /// <summary>
     /// Build an RFC 5322 message from a compose form, enqueue it for each
     /// recipient, and file a copy in the Sent folder. Returns the error
@@ -575,30 +673,19 @@ public sealed partial class MailboxService
             return "Mailbox is not available.";
         }
         (TenantRow tenant, MailboxRow mailbox) = context.Value;
-        if (QuotaPolicy.IsFull(mailbox))
+        // DES-11 D2 (owner, 10 Oct 2026): a full mailbox cannot send - its organisation's plan taken in.
+        if ((await StoragePlan.StateOfAsync(this.store, mailbox, ct).ConfigureAwait(false)).Full)
         {
-            return "Your mailbox is full. Delete some messages (Trash, then Delete permanently) before sending.";
+            return FullToSend;
         }
 
+        if (CheckForSend(request) is string notReady)
+        {
+            return notReady;
+        }
         IReadOnlyList<MailAddress> to = AddressParser.Parse(request.To);
         IReadOnlyList<MailAddress> cc = AddressParser.Parse(request.Cc);
         IReadOnlyList<MailAddress> bcc = AddressParser.Parse(request.Bcc);
-        if (to.Count == 0)
-        {
-            return "At least one valid To address is required.";
-        }
-        if (!string.IsNullOrWhiteSpace(request.Cc) && cc.Count == 0)
-        {
-            return "The Cc field contains no valid address.";
-        }
-        if (!string.IsNullOrWhiteSpace(request.Bcc) && bcc.Count == 0)
-        {
-            return "The Bcc field contains no valid address.";
-        }
-        if (string.IsNullOrWhiteSpace(request.Subject) && string.IsNullOrWhiteSpace(request.Body) && request.Attachments.Count == 0)
-        {
-            return "The message is empty.";
-        }
 
         byte[] raw = BuildMessage(mailbox, request, to, cc);
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -656,6 +743,19 @@ public sealed partial class MailboxService
                 external.Add(rcpt);
             }
         }
+        // DES-11 D2: mail between people here follows the same rule - a full mailbox receives nothing.
+        var fullHere = new List<string>();
+        foreach (string address in local)
+        {
+            if (await sink.ResolveAsync(address, ct).ConfigureAwait(false) is { } found && (await StoragePlan.StateOfAsync(this.store, found.Mailbox, ct).ConfigureAwait(false)).Full)
+            {
+                fullHere.Add(address);
+            }
+        }
+        if (fullHere.Count > 0)
+        {
+            return "Not sent: the mailbox of " + string.Join(", ", fullHere) + " is full. Send it later, or without them.";
+        }
         if (local.Count > 0)
         {
             string trace = $"Received: by {this.hostName} (Anjal webmail) with HTTPS for local delivery;\r\n\t{FormatDate(now)}\r\n";
@@ -689,6 +789,20 @@ public sealed partial class MailboxService
                 GiveUpAt = now + OutboundMessage.DefaultGiveUp,
             }, ct).ConfigureAwait(false);
             queued.Add(row.Id);
+        }
+
+        // rc.14: a shared mailbox may be set to keep no copy of what is sent from it.
+        if ((await this.SharedInfoAsync(mailbox, ct).ConfigureAwait(false))?.KeepSentCopy == false)
+        {
+            if (evidenceId is Guid noCopy && this.Evidence is not null)
+            {
+                await this.Evidence.CompleteInboundAsync(noCopy, accepted: true, ct).ConfigureAwait(false);
+            }
+            if (request.DraftId is Guid usedDraft)
+            {
+                await this.DeleteAsync(mailbox.Id, usedDraft, ct).ConfigureAwait(false);
+            }
+            return null;
         }
 
         // Sent copy: written already-seen straight into cur/.
@@ -736,6 +850,36 @@ public sealed partial class MailboxService
         if (request.DraftId is Guid draftId)
         {
             await this.DeleteAsync(mailbox.Id, draftId, ct).ConfigureAwait(false);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// What stops a compose form from being sent, in the words shown to the
+    /// person; null when it can be sent. Checked before sending and before
+    /// holding a message for later (rc.12), so a held message never fails
+    /// for a reason that could have been told at once.
+    /// </summary>
+    /// <param name="request">The compose form.</param>
+    public static string? CheckForSend(ComposeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        IReadOnlyList<MailAddress> to = AddressParser.Parse(request.To);
+        if (to.Count == 0)
+        {
+            return "At least one valid To address is required.";
+        }
+        if (!string.IsNullOrWhiteSpace(request.Cc) && AddressParser.Parse(request.Cc).Count == 0)
+        {
+            return "The Cc field contains no valid address.";
+        }
+        if (!string.IsNullOrWhiteSpace(request.Bcc) && AddressParser.Parse(request.Bcc).Count == 0)
+        {
+            return "The Bcc field contains no valid address.";
+        }
+        if (string.IsNullOrWhiteSpace(request.Subject) && string.IsNullOrWhiteSpace(request.Body) && request.Attachments.Count == 0 && request.CarryIndexes.Count == 0)
+        {
+            return "The message is empty.";
         }
         return null;
     }
@@ -824,6 +968,10 @@ public sealed partial class MailboxService
 
         var msg = new MimeMessage(root);
         msg.Headers.Add("From", FormatFrom(mailbox));
+        if (request.Sender.Trim().Length > 0)
+        {
+            msg.Headers.Add("Sender", MimeHeader.Neutralise(request.Sender.Trim()));
+        }
         if (draftHeaders is not null)
         {
             // Draft fields are kept as typed, but a line break inside one

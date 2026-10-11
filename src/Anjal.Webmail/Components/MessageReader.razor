@@ -1,0 +1,963 @@
+@* rc.11: the letter and the envelope, shared by the message page and the
+   three-pane folder view (item 45), so reading looks the same in every mode. *@
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+
+<PageTitle>@(view?.Subject ?? L["Message"]) — Anjal</PageTitle>
+
+@if (view is null)
+{
+    <div class="stack readermiss">
+        @if (listed)
+        {
+            @* Listed in the index, but its stored copy could not be read: say so, not "gone". *@
+            <h1>@L["This message's stored copy cannot be read."]</h1>
+            <p class="lead">@L["It is still listed in this folder, but the server could not find its file. Nothing was deleted. The person who runs this server should check the mail folder setting (ANJAL_MAILDIR_ROOT)."]</p>
+        }
+        else
+        {
+            <h1>@L["That message is no longer here."]</h1>
+            <p class="lead">@L["It may have been deleted, or moved to another folder. The folder it was in is still there."]</p>
+        }
+        <a class="pbtn" href="/folder/INBOX">@L["Back to Inbox"]</a>
+    </div>
+}
+else
+{
+    <div class="mview" data-reader-id="@Id">
+        @* The phone (A11): back to the folder, and the envelope's one-line summary,
+           pinned while the letter scrolls (item 20); it opens the envelope sheet.
+           Outside the letter, so the letter still begins with its subject (item 42). *@
+        <div class="phonehead">
+            <a class="phoneback" href="/folder/@Uri.EscapeDataString(view.Folder.Name)"><LipiIcon Name="chevron-left" Size="16" />@L.Folder(view.Folder.Name)</a>
+            <a class="phonesummary" href="#envelope">
+                <b>@(string.IsNullOrWhiteSpace(view.From) ? view.Row.EnvelopeFrom : SenderName)</b>
+                <span>@PhoneRecipients @clock.Full(view.Row.ReceivedAt)</span>
+                @if (Stamps.Count > 0)
+                {
+                    <span class="pchecks">@(Stamps.Count == 1 ? L["1 check"] : L["{n} checks"].Replace("{n}", Stamps.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</span>
+                }
+            </a>
+        </div>
+        @* The letter: subject and body only, nothing above the subject (item 42). *@
+        <article class="letter" aria-label="@L["Message"]">
+            <h1 class="lsubj">@(string.IsNullOrWhiteSpace(view.Subject) ? L["(no subject)"] : view.Subject)</h1>
+            @* D-104 (owner, 5 Oct): the category shows under the subject - the one
+               exception to "subject and body only" - and is changed in the envelope. *@
+            @if (view.Row.CategoryId is Guid currentCat && categories.FirstOrDefault(c => c.Row.Id == currentCat) is CategoryView shown)
+            {
+                <p class="readcat"><span class="chip slot-@shown.Row.Slot"><i></i>@shown.Row.Name</span></p>
+            }
+
+            @if (Blocked is not null)
+            {
+                <div class="notice n-ok readnotice"><LipiIcon Name="check" Size="16" />
+                    <span>@L["Future mail from {address} goes to Junk. This message stays here."].Replace("{address}", Blocked, StringComparison.Ordinal)</span></div>
+            }
+            @if (MailboxService.ShowsUnencryptedWarning(view.Row, trusted))
+            {
+                <div class="notice n-warn readnotice slim" data-unencrypted-warning title="@L["Anyone on the network path could have read it on the way. If you know this sender, you can trust them and the warning will not be shown for their mail again."]">
+                    <LipiIcon Name="unlock" Size="15" />
+                    <span>@L["Arrived without encryption."]</span>
+                    <form method="post" action="/message/@Id/trust-sender" class="inline act">
+                        <AntiforgeryToken />
+                        <button type="submit" class="linkbtn" data-needs-server>@L["Trust this sender"]</button>
+                    </form>
+                </div>
+            }
+            @if (view.HasBlockedImages)
+            {
+                <div class="notice n-info readnotice">
+                    <LipiIcon Name="info" Size="16" />
+                    <span>@L["Remote images were blocked. They can tell the sender that you opened this message."]</span>
+                    <form method="post" action="/message/@Id/images" class="inline act">
+                        <AntiforgeryToken />
+                        <button type="submit" class="btn btn-s btn-sm" data-needs-server>@L["Load images"]</button>
+                    </form>
+                </div>
+            }
+            @if (view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+            {
+                <div class="notice n-info readnotice">
+                    <LipiIcon Name="info" Size="16" />
+                    @{ (string before, string after) = Around(L["Anjal accepted this message and filed it in Junk. It was never rejected. Choosing {action} moves it to Inbox and allows the sender."], "{action}"); }
+                    <span>@before<b>@L["Not junk"]</b>@after</span>
+                </div>
+            }
+
+            @if (Previewed is AttachmentView pv && MailboxService.PreviewType(pv) is string ptype)
+            {
+                @* UX-06: the attachment in the letter area, with the way back. *@
+                <div class="pvbar">
+                    <a class="btn btn-s" href="@Back"><LipiIcon Name="chevron-left" Size="15" />@L["Back to the letter"]</a>
+                    <b class="pvname">@pv.FileName</b>
+                    <span class="lh-grow"></span>
+                    <a class="iconbtn" href="/message/@Id/attachment/@pv.Index" title="@L["Download"]" aria-label="@L["Download"]"><LipiIcon Name="download" Size="16" /></a>
+                </div>
+                <div class="pvbody">
+                    @if (ptype == "application/pdf")
+                    {
+                        <iframe class="pvpdf" src="/message/@Id/attachment/@pv.Index/preview" title="@pv.FileName"></iframe>
+                    }
+                    else
+                    {
+                        <img class="pvimg" src="/message/@Id/attachment/@pv.Index/preview" alt="@pv.FileName" />
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="lbody">
+                    <iframe class="bodyframe" sandbox="" referrerpolicy="no-referrer" title="@L["Message body"]" srcdoc="@Srcdoc"></iframe>
+                </div>
+            }
+            @* Item 18 (owner, 27 Sep; 7 Oct): "when the mail is opened and closed... at that time show windows
+               with first name last name email... and save to contacts". The window waits here and opens when
+               the person leaves this mail - back to the list, another mail, Escape. *@
+            @if (OfferContact && Previewed is null)
+            {
+                <dialog class="nsdialog modal-card" data-newsender data-message="@Id" aria-labelledby="ns-title-@Id">
+                    <form method="post" action="/contacts/add" class="nsform">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="back" value="@Back" data-ns-back />
+                        <input type="hidden" name="message" value="@Id" />
+                        <h2 id="ns-title-@Id">@L["Save {name} to your contacts?"].Replace("{name}", SenderName, StringComparison.Ordinal)</h2>
+                        <div class="modal-row">
+                            <label class="modal-field">@L["First name"]<input class="inp" name="firstName" value="@FirstNameGuess" maxlength="100" autocomplete="off" /></label>
+                            <label class="modal-field">@L["Last name"]<input class="inp" name="lastName" value="@LastNameGuess" maxlength="100" autocomplete="off" /></label>
+                        </div>
+                        <label class="modal-field">@L["Address"]<input class="inp" name="address" value="@SenderAddress" readonly /></label>
+                        <label class="checkline"><input type="checkbox" name="always" value="1" /><span>@L["Always save new senders without asking"]</span></label>
+                        <div class="modal-actions">
+                            <button type="submit" class="btn btn-q" formaction="/contacts/not-offered" name="mode" value="never" formnovalidate data-needs-server>@L["Never for this sender"]</button>
+                            <span class="lh-grow"></span>
+                            <button type="submit" class="btn btn-s" formaction="/contacts/not-offered" name="mode" value="later" formnovalidate data-needs-server>@L["Not now"]</button>
+                            <button type="submit" class="btn btn-p" data-needs-server>@L["Save to contacts"]</button>
+                        </div>
+                    </form>
+                </dialog>
+            }
+            @* rc.15 (owner, 7 Oct): answer where reading ends, as well as in the envelope. *@
+            @if (!IsScheduled)
+            {
+                <div class="letterend">
+                    <a class="eb eb-p" href="@ReplyLink("reply")"><LipiIcon Name="undo" Size="15" />@L["Reply"]</a>
+                    @if (ReplyAllNeedsCheck)
+                    {
+                        <details class="pmenu replycheck">
+                            <summary class="eb">@ReplyAllWord</summary>
+                            <div class="pmenu-body pmenu-up">
+                                <p class="pm-note"><b>@L["Reply to all {n} people?"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)</b>
+                                    @if (ReplyAllOutside > 0)
+                                    {
+                                        <span>@L["{n} outside the organisation."].Replace("{n}", MailboxService.Count(ReplyAllOutside), StringComparison.Ordinal)</span>
+                                    }
+                                </p>
+                                <a class="btn btn-p btn-sm" href="@ReplyLink("reply")">@L["Reply to the sender only"]</a>
+                                <a class="btn btn-s btn-sm" href="@ReplyLink("replyall")" data-replyall>@L["Reply to all {n}"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)</a>
+                            </div>
+                        </details>
+                    }
+                    else
+                    {
+                        <a class="eb" href="@ReplyLink("replyall")" data-replyall>@ReplyAllWord</a>
+                    }
+                    <a class="eb" href="@ReplyLink("forward")"><LipiIcon Name="redo" Size="15" />@L["Forward"]</a>
+                </div>
+            }
+            <div class="phoneactions">
+                <a class="eb eb-p" href="/compose?reply=@Id"><LipiIcon Name="undo" Size="15" />@L["Reply"]</a>
+                @if (ReplyAllNeedsCheck)
+                {
+                    @* Item 53 on the phone too: ask first, "Reply to the sender only" first. *@
+                    <details class="pmenu replycheck">
+                        <summary class="eb">@ReplyAllWord</summary>
+                        <div class="pmenu-body pmenu-up">
+                            <p class="pm-note"><b>@L["Reply to all {n} people?"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)</b>
+                                @if (ReplyAllOutside > 0)
+                                {
+                                    <span>@L["{n} outside the organisation."].Replace("{n}", MailboxService.Count(ReplyAllOutside), StringComparison.Ordinal)</span>
+                                }
+                            </p>
+                            <a class="btn btn-p btn-sm" href="/compose?reply=@Id">@L["Reply to the sender only"]</a>
+                            <a class="btn btn-s btn-sm" href="/compose?replyall=@Id" data-replyall>@L["Reply to all {n}"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)</a>
+                        </div>
+                    </details>
+                }
+                else
+                {
+                    <a class="eb" href="/compose?replyall=@Id">@ReplyAllWord</a>
+                }
+                <a class="eb" href="/compose?forward=@Id"><LipiIcon Name="redo" Size="15" />@L["Forward"]</a>
+            </div>
+        </article>
+
+        @* The envelope: actions, From, To, Cc, time, stamps, attachments, details (item 42). *@
+        @if (SenderAddress.Length > 0 && !senderSaved && !IsOwn)
+        {
+            <div class="modal" id="addcontact" role="dialog" aria-modal="true" aria-labelledby="addcontact-title">
+                <a class="modal-shade" href="#" aria-label="@L["Cancel"]"></a>
+                <form method="post" action="/contacts/add" class="modal-card">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="@Back" />
+                    <h2 id="addcontact-title">@L["Add sender to contacts"]</h2>
+                    <div class="modal-row">
+                        <label class="modal-field">@L["First name"]<input class="inp" name="firstName" value="@FirstNameGuess" maxlength="100" autocomplete="off" /></label>
+                        <label class="modal-field">@L["Last name"]<input class="inp" name="lastName" value="@LastNameGuess" maxlength="100" autocomplete="off" /></label>
+                    </div>
+                    <label class="modal-field">@L["Address"]<input class="inp" name="address" value="@SenderAddress" readonly /></label>
+                    <div class="modal-actions">
+                        <a class="btn btn-s" href="#">@L["Cancel"]</a>
+                        <button type="submit" class="btn btn-p" data-needs-server>@L["Save to contacts"]</button>
+                    </div>
+                </form>
+            </div>
+        }
+        <aside class="envelope" id="envelope" aria-label="@L["Envelope"]">
+            @if (ShowBack)
+            {
+                @* rc.15 (owner, 7 Oct): open on its own (focus, or full view), the way back is the
+                   first thing in the envelope; Escape takes it too. *@
+                <a class="eback" href="@ReturnHref" data-escback><LipiIcon Name="arrow-left" Size="16" />@L["Back to {folder}"].Replace("{folder}", L.Folder(view.Folder.Name), StringComparison.Ordinal)</a>
+            }
+            <div class="pshead sheetonly"><b>@L["Envelope"]</b><span class="lh-grow"></span><a class="iconbtn" href="#close" aria-label="@L["Close"]"><LipiIcon Name="close" Size="17" /></a></div>
+            @* Item 20: name and address on one line. *@
+            <section class="ecard efrom">
+                <span class="elabel">@L["From"]</span>
+                @if (string.IsNullOrWhiteSpace(view.From))
+                {
+                    @* No From header: show who actually sent it, and say so (DEF-022). *@
+                    <span class="ewho"><span class="eaddr">@(string.IsNullOrWhiteSpace(view.Row.EnvelopeFrom) ? L["(unknown)"] : view.Row.EnvelopeFrom)</span></span>
+                    <span class="enote">@L["envelope sender; the message has no From header"]</span>
+                }
+                else
+                {
+                    <span class="ewho"><b>@SenderName</b>@if (SenderAddress.Length > 0 && SenderAddress != SenderName) { <span class="eaddr"> &lt;@SenderAddress&gt;</span> }</span>
+                }
+            </section>
+
+            @* Items 20 and 52: To and Cc always shown; above 5, chips with "+N more". *@
+            <section class="ecard erecip" aria-label="@L["Recipients"]">
+                @if (!recipients.Collapsed)
+                {
+                    @foreach (string line in new[] { "To", "Cc" })
+                    {
+                        @if (recipients.People.Any(r => r.Line == line))
+                        {
+                            <div class="eline"><span class="elabel">@L[line]</span>
+                                <span class="epeople">
+                                    @foreach (Recipient r in recipients.People.Where(r => r.Line == line))
+                                    {
+                                        <span class="eperson @(r.Inside ? "" : "outside")">@if (r.IsYou) { <b>@L["You"]</b> } else { <b>@r.Name</b> }@if (r.Name != r.Address || r.IsYou) { <span class="eaddr"> &lt;@r.Address&gt;</span> }</span>
+                                    }
+                                </span>
+                            </div>
+                        }
+                    }
+                }
+                else
+                {
+                    <p class="esummary">@L["{n} people: {inside} in the organisation, {outside} outside"].Replace("{n}", recipients.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{inside}", recipients.InsideCount.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{outside}", recipients.OutsideCount.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+                    <div class="echips">
+                        @foreach (Recipient r in recipients.People.Take(Recipients.ShownInFull))
+                        {
+                            <span class="echip @(r.Inside ? "" : "outside")" title="@r.Address"><i>@L[r.Line]</i>@(r.IsYou ? L["You"] : r.Name)</span>
+                        }
+                    </div>
+                    <details class="eall">
+                        <summary>@L["+{n} more"].Replace("{n}", (recipients.Count - Recipients.ShownInFull).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</summary>
+                        <input type="search" class="efind" placeholder="@L["Find a person"]" aria-label="@L["Find a person"]" data-findperson />
+                        @foreach (IGrouping<string, Recipient> org in recipients.ByOrganisation)
+                        {
+                            <div class="eorg">
+                                <span class="eorgname">@org.Key</span>
+                                @foreach (Recipient r in org)
+                                {
+                                    <span class="eperson @(r.Inside ? "" : "outside")" data-person="@(r.Name.ToLowerInvariant()) @(r.Address.ToLowerInvariant())"><i>@L[r.Line]</i><b>@(r.IsYou ? L["You"] : r.Name)</b><span class="eaddr"> &lt;@r.Address&gt;</span></span>
+                                }
+                            </div>
+                        }
+                    </details>
+                }
+            </section>
+
+            @if (IsScheduled)
+            {
+                <section class="ecard etime">
+                    <span class="elabel">@L["Sends"]</span>
+                    <span><b>@(SendsAt is DateTimeOffset s ? clock.Full(s) : view.Row.DateHeader)</b>@if (SendsAt is DateTimeOffset when) { <span class="eaddr"> · @InWords(when)</span> }</span>
+                </section>
+            }
+            else
+            {
+                <section class="ecard etime">
+                    <span class="elabel">@L["Received"]</span><span>@clock.Full(view.Row.ReceivedAt)</span>
+                </section>
+            }
+
+
+            @* The seal of trust: green stamps for what Anjal has proved about this message. *@
+            @if (Stamps.Count > 0 || NotVerified)
+            {
+                <section class="ecard estamps" aria-label="@L["Checks"]">
+                    @foreach ((string icon, string word, string why) in Stamps)
+                    {
+                        <Stamp Word="@L[word]" Why="@(L[why].Replace("{tls}", view.Row.TransportTls ?? string.Empty, StringComparison.Ordinal))" Lock="@(icon == "lock")" />
+                    }
+                    @if (NotVerified)
+                    {
+                        @* Item 49: "Not verified" is amber, with no stamp. *@
+                        <span class="notverified" title="@L["DMARC did not pass: the sender could not be confirmed."]">@L["Not verified"]</span>
+                    }
+                </section>
+            }
+
+            @* UX-04: the conversation - replies grouped, across folders. *@
+            @if (conversation.Count > 1)
+            {
+                <section class="ecard econv">
+                    <details class="econvd">
+                        <summary><span class="elabel">@L["Conversation"]</span>
+                            <span><u>@L["{n} messages"].Replace("{n}", MailboxService.Count(conversation.Count), StringComparison.Ordinal)</u>, @L["from {date}"].Replace("{date}", clock.Date(conversation[0].At), StringComparison.Ordinal)</span></summary>
+                        <ol class="econvlist">
+                            @foreach (ConversationItem c in conversation)
+                            {
+                                <li class="@(c.Id == Id ? "on" : null)">
+                                    <a href="@ConversationLink(c)">
+                                        <b>@c.From</b>
+                                        <span>@clock.List(c.At, DateTimeOffset.UtcNow) · @L.Folder(c.Folder)</span>
+                                    </a>
+                                </li>
+                            }
+                        </ol>
+                    </details>
+                </section>
+            }
+
+            @if (view.Attachments.Count > 0)
+            {
+                <section class="ecard">
+                    <h2 class="ehead">@L["Attachments"] · @view.Attachments.Count</h2>
+                    @foreach (AttachmentView a in view.Attachments)
+                    {
+                        <div class="attrow">
+                            <LipiIcon Name="attachment" Size="16" />
+                            @if (MailboxService.PreviewType(a) is not null)
+                            {
+                                <a class="attname" href="@PreviewLink(a.Index)" title="@L["Show it here"]">
+                                    <span class="fn">@a.FileName</span>
+                                    <span class="mt">@MainLayout.Size(a.SizeBytes)</span>
+                                </a>
+                            }
+                            else
+                            {
+                                <a class="attname" href="/message/@Id/attachment/@a.Index">
+                                    <span class="fn">@a.FileName</span>
+                                    <span class="mt">@MainLayout.Size(a.SizeBytes)</span>
+                                </a>
+                            }
+                            <a class="dlic" href="/message/@Id/attachment/@a.Index" title="@L["Download"]" aria-label="@L["Download"] @a.FileName"><LipiIcon Name="download" Size="15" /></a>
+                        </div>
+                    }
+                </section>
+            }
+
+            @* D-113 (owner, 6 Oct): the details first, the actions below them - nearer the
+               centre of the screen than the top corner. *@
+            @if (IsScheduled)
+            {
+                @* rc.12 (item 8, the board ListScheduled): mail waiting for its time. *@
+                <div class="eactions">
+                    <form method="post" action="/held/@Id/send" class="inline">
+                        <AntiforgeryToken />
+                        <button type="submit" class="eb eb-p" data-needs-server><LipiIcon Name="referral-out" Size="14" />@L["Send now"]</button>
+                    </form>
+                    <details class="pmenu">
+                        <summary class="eb"><LipiIcon Name="clock" Size="14" />@L["Change send time"]</summary>
+                        <form method="post" action="/held/@Id/reschedule" class="pmenu-body">
+                            <AntiforgeryToken />
+                            <SendLaterChoices L="L" Clock="clock" Tomorrow="laterTomorrow" Monday="laterMonday" />
+                        </form>
+                    </details>
+                    <form method="post" action="/held/@Id/edit" class="inline">
+                        <AntiforgeryToken />
+                        <button type="submit" class="eb" data-needs-server>@L["Edit"]</button>
+                    </form>
+                    <form method="post" action="/held/@Id/cancel" class="inline">
+                        <AntiforgeryToken />
+                        <button type="submit" class="eb eb-danger" data-needs-server title="@L["Not sent; it goes back to Drafts."]">@L["Cancel"]</button>
+                    </form>
+                </div>
+            }
+            @* rc.15: Reply, Reply all and Forward live where the letter ends (and on the phone's bar), not twice. *@
+            @if (!IsScheduled)
+            {
+            <div class="eactions">
+                <form method="post" action="/message/@Id/flag" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="@Back" />
+                    @* Item 19: the flag button carries its symbol, as in the list. *@
+                    <button type="submit" class="eb @(view.Row.Flagged ? "on" : "")" data-needs-server data-kb="flag" aria-pressed="@(view.Row.Flagged ? "true" : "false")">
+                        <span class="fav @(view.Row.Flagged ? "on" : "")" aria-hidden="true" lang="ta">அ</span>@(view.Row.Flagged ? L["Remove flag"] : L["Flag"])
+                    </button>
+                </form>
+                <form method="post" action="/message/@Id/read" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="seen" value="0" />
+                    <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                    <button type="submit" class="eb eicon" data-needs-server title="@L["Mark as unread"]" aria-label="@L["Mark as unread"]"><LipiIcon Name="email" Size="16" /></button>
+                </form>
+                @if (view.Folder.Name != "Archive" && view.Folder.Name != "Trash" && view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder)
+                {
+                    @* D-106: done, but kept - out of the Inbox, never deleted automatically. *@
+                    <form method="post" action="/message/@Id/move" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="folder" value="Archive" />
+                        <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                        <button type="submit" class="eb eicon" data-needs-server data-kb="archive" title="@L["Archive"]" aria-label="@L["Archive"]"><LipiIcon Name="archive" Size="16" /></button>
+                    </form>
+                }
+                @if (view.Folder.Name == "Trash")
+                {
+                    <form method="post" action="/message/@Id/move" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="folder" value="INBOX" />
+                        <input type="hidden" name="back" value="/folder/INBOX" />
+                        <button type="submit" class="eb" data-needs-server>@L["Restore"]</button>
+                    </form>
+                }
+                else
+                {
+                    <form method="post" action="/message/@Id/move" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="folder" value="Trash" />
+                        <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                        <button type="submit" class="eb eicon" data-needs-server data-kb="delete" title="@L["Delete"]" aria-label="@L["Delete"]"><LipiIcon Name="trash" Size="16" /></button>
+                    </form>
+                }
+                @if (view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+                {
+                    <form method="post" action="/message/@Id/move" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="folder" value="INBOX" />
+                        <input type="hidden" name="allow" value="1" />
+                        <input type="hidden" name="back" value="/folder/INBOX" />
+                        <button type="submit" class="eb" data-needs-server>@L["Not junk"]</button>
+                    </form>
+                }
+                <a class="eb eicon" href="/message/@Id/print" target="_blank" rel="noopener" title="@L["Print"]" aria-label="@L["Print"]"><LipiIcon Name="print" Size="16" /></a>
+                <details class="emore">
+                    <summary class="eb eicon" title="@L["More"]" aria-label="@L["More"]"><LipiIcon Name="more-horizontal" Size="16" /></summary>
+                    <div class="emenu" role="menu">
+                        @* rc.15 (owner, 7 Oct: "no mark as unread option"): named here as well as the envelope icon. *@
+                        <form method="post" action="/message/@Id/read" class="inline">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="seen" value="0" />
+                            <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                            <button type="submit" role="menuitem" data-needs-server><LipiIcon Name="email" Size="14" />@L["Mark as unread"]</button>
+                        </form>
+                        @if (view.Folder.Name == "Sent")
+                        {
+                            @* rc.15 (item 63): out of the dashboard's "No reply" count. *@
+                            <form method="post" action="/message/@Id/noreply" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="back" value="@Back" />
+                                <button type="submit" role="menuitem" data-needs-server><LipiIcon Name="check" Size="14" />@L["No reply needed"]</button>
+                            </form>
+                        }
+                        <a role="menuitem" href="/message/@Id/original"><LipiIcon Name="file" Size="14" />@L["Show original"]</a>
+                        @if (conversation.Any(c => !c.Seen && c.Id != Id))
+                        {
+                            <form method="post" action="/message/@Id/conversation-read" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="back" value="@Back" />
+                                <button type="submit" role="menuitem" data-needs-server><LipiIcon Name="check" Size="14" />@L["Mark all in conversation read"]</button>
+                            </form>
+                        }
+                        <a role="menuitem" href="/compose?forwardatt=@Id"><LipiIcon Name="file-attach" Size="14" />@L["Forward as attachment"]</a>
+                        @if (SenderAddress.Length > 0 && !senderSaved && !IsOwn)
+                        {
+                            @* rc.15 (owner, 7 Oct): a small window asks for the names first. *@
+                            <a role="menuitem" href="#addcontact"><LipiIcon Name="user" Size="14" />@L["Add sender to contacts"]</a>
+                        }
+                        <a role="menuitem" href="/message/@Id/print" target="_blank" rel="noopener"><LipiIcon Name="print" Size="14" />@L["Print"]</a>
+                        @if (view.Folder.Name != "Sent" && view.Folder.Name != "Drafts")
+                        {
+                            <form method="post" action="/message/@Id/block" class="inline">
+                                <AntiforgeryToken />
+                                <button type="submit" role="menuitem" data-needs-server><LipiIcon Name="minus-circle" Size="14" />@L["Block sender"]</button>
+                            </form>
+                        }
+                        @if (view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder && view.Folder.Name != "Trash" && view.Folder.Name != "Sent")
+                        {
+                            <form method="post" action="/message/@Id/move" class="inline">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="folder" value="Junk" />
+                            <input type="hidden" name="block" value="1" />
+                            <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                            <button type="submit" role="menuitem" data-needs-server><LipiIcon Name="minus-circle" Size="14" />@L["Report junk"]</button>
+                        </form>
+                        }
+                        <a role="menuitem" href="/message/@Id/raw.eml"><LipiIcon Name="download" Size="14" />@L["Download the original (.eml)"]</a>
+                        @if (view.Folder.Name == "Trash" || view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
+                        {
+                            <details class="confirm">
+                                <summary class="danger"><LipiIcon Name="trash" Size="14" />@L["Delete permanently"]</summary>
+                                <span class="inner">
+                                    @L["This cannot be undone."]
+                                    @if (view.Evidence is { PurgedAt: null })
+                                    {
+                                        <text> @L["Its original is kept as evidence for {time}."].Replace("{time}", RetentionText(view.EvidenceRetentionDays), StringComparison.Ordinal)</text>
+                                    }
+                                    <form method="post" action="/message/@Id/delete" class="inline">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                                        <button type="submit" class="btn btn-d btn-sm" data-needs-server>@L["Delete"]</button>
+                                    </form>
+                                </span>
+                            </details>
+                        }
+                    </div>
+                </details>
+            </div>
+
+            }
+            @* Category is for mail you keep: not offered in Junk or Trash. *@
+            @if (view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder && view.Folder.Name != "Trash" && !IsScheduled)
+            {
+                <section class="ecard">
+                    <h2 class="ehead">@L["Category"]</h2>
+                    @* rc.15: only the choice shows; the rest appears once it is changed (data-reveal, app.js). *@
+                    <form method="post" action="/message/@Id/category" data-reveal>
+                        <AntiforgeryToken />
+                        <input type="hidden" name="back" value="@Back" />
+                        <select class="railinp" name="categoryId" aria-label="@L["Category"]">
+                            <option value="">@L[MailboxService.Uncategorised]</option>
+                            @foreach (CategoryView c in categories)
+                            {
+                                <option value="@c.Row.Id" selected="@(view.Row.CategoryId == c.Row.Id)">
+                                    @(c.Shared ? c.Row.Name : L["{category} (yours)"].Replace("{category}", c.Row.Name, StringComparison.Ordinal))
+                                </option>
+                            }
+                        </select>
+                        <div class="revealed">
+                            <label class="checkline">
+                                <input type="checkbox" name="future" value="1" />
+                                <span>@L["Also file future mail from {name} here"].Replace("{name}", SenderName, StringComparison.Ordinal)</span>
+                            </label>
+                            <button type="submit" class="btn btn-s btn-sm" data-needs-server>@L["Save category"]</button>
+                        </div>
+                    </form>
+                </section>
+            }
+
+            <details class="ecard">
+                <summary class="ehead">@L["Details"]</summary>
+                @* The approved board: "Details: original date, checks, fingerprint". *@
+                <dl class="raildl">
+                    @if (view.Date.Length > 0)
+                    {
+                        <dt>@L["Sent as (original)"]</dt><dd>@view.Date</dd>
+                    }
+                    <dt>@L["Folder"]</dt><dd>@L.Folder(view.Folder.Name)</dd>
+                    <dt>@L["Size"]</dt><dd>@MainLayout.Size(view.Row.SizeBytes)</dd>
+                </dl>
+                <div class="echecks">
+                @* A message carrying this server's own verdicts was checked on arrival, whatever its stored flag says. *@
+                @if (view.Auth is null && !Anjal.Webmail.Services.SpamCheck.WasChecked(view.Row, view.Folder.Name))
+                {
+                    <p class="railnote">@L[Anjal.Webmail.Services.SpamCheck.NotCheckedNote(view.Folder.Name)]</p>
+                }
+                else if (view.Row.SpamScore > 0)
+                {
+                    <p class="scoreline @(view.Row.SpamScore >= 5 ? "hi" : "")">@L["score {n}"].Replace("{n}", view.Row.SpamScore.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+                    @if (view.SpamReasons.Length > 0)
+                    {
+                        <p class="railnote">@view.SpamReasons</p>
+                    }
+                }
+                else
+                {
+                    <p class="railnote"><LipiIcon Name="check" Size="14" /> @L["Nothing suspicious. Spam score 0."]</p>
+                }
+                @* The sender checks this server made on arrival - never a sender's own claim (DEF-038). *@
+                @if (view.Auth is AuthVerdicts av)
+                {
+                    <p class="authline">
+                        <span class="av av-@AuthVerdicts.Tone(av.Spf)" title="@L["Sender Policy Framework"]">SPF @av.Spf</span>
+                        <span class="av av-@AuthVerdicts.Tone(av.Dkim)" title="@L["DomainKeys Identified Mail"]">DKIM @av.Dkim</span>
+                        <span class="av av-@AuthVerdicts.Tone(av.Dmarc)" title="@L["Domain-based Message Authentication"]">DMARC @av.Dmarc</span>
+                    </p>
+                    @if (AuthVerdicts.DmarcMeaning(av.Dmarc) is string meaning && meaning.Length > 0)
+                    {
+                        <p class="railnote @(av.Dmarc == "fail" ? "avwarn" : null)">
+                            @if (av.Dmarc == "fail")
+                            {
+                                <LipiIcon Name="warning" Size="14" />
+                            }
+                            @L[meaning]
+                        </p>
+                    }
+                }
+                else if (Anjal.Webmail.Services.SpamCheck.WasChecked(view.Row, view.Folder.Name))
+                {
+                    <p class="railnote">@L["Sender checks: not recorded for this message."]</p>
+                }
+                @if (view.BodyShortened)
+                {
+                    <p class="railnote avwarn"><LipiIcon Name="warning" Size="14" /> @L["This message was too large to show in full, so what you see has been cut short. Download the original to read all of it."]</p>
+                }
+                @if (view.Row.TransportEncrypted is bool arrivedEncrypted)
+                {
+                    <p class="railnote @(arrivedEncrypted ? null : "avwarn")" data-transport>
+                        <LipiIcon Name="@(arrivedEncrypted ? "lock" : "unlock")" Size="14" />
+                        @(arrivedEncrypted ? L["Arrived encrypted ({tls})."].Replace("{tls}", view.Row.TransportTls ?? string.Empty, StringComparison.Ordinal) : L["Arrived unencrypted."])
+                    </p>
+                }
+                <p class="railnote"><LipiIcon Name="security" Size="14" /> @L["Shown in a sandbox; scripts cannot run."]</p>
+                </div>
+                @if (view.Evidence is { PurgedAt: null } kept)
+                {
+                    @* v1.0.0-rc.8: the original is kept as proof, fingerprinted (ANJAL-DES-01). *@
+                    <p class="railnote evidence" title="SHA-256 @kept.Sha256">
+                        <LipiIcon Name="lock" Size="14" />
+                        <span>
+                            @L[kept.Reconstructed ? "Original reconstructed (stored before evidence was kept)" : kept.Direction == Anjal.Store.EvidenceRow.Out ? "Original kept exactly as sent" : "Original kept exactly as received"]
+                            <span class="fingerprint">SHA-256 <code>@kept.Sha256[..12]…</code></span>
+                        </span>
+                    </p>
+                }
+            </details>
+        </aside>
+    </div>
+}
+
+@code {
+    /// <summary>The message to show.</summary>
+    [Parameter, EditorRequired] public Guid Id { get; set; }
+
+    /// <summary>"1" when the reader chose Load images.</summary>
+    [Parameter] public string? Images { get; set; }
+
+    /// <summary>The address just blocked, to confirm it (D-103).</summary>
+    [Parameter] public string? Blocked { get; set; }
+
+    /// <summary>Where flagging or a category change returns to: the message page, or the three-pane folder view (rc.11, item 45).</summary>
+    [Parameter] public string? BackLink { get; set; }
+
+    /// <summary>rc.15: show "Back to the folder" at the top of the envelope (focus, full view).</summary>
+    [Parameter] public bool ShowBack { get; set; }
+
+    /// <summary>rc.15: where "Back to the folder" goes; the message's own folder when not given.</summary>
+    [Parameter] public string? ReturnTo { get; set; }
+
+    private string ReturnHref => ReturnTo ?? "/folder/" + Uri.EscapeDataString(view?.Folder.Name ?? "INBOX");
+
+    /// <summary>
+    /// The three-pane view of this message: when set, Reply, Reply all and
+    /// Forward open the docked compose over it (item 48); otherwise compose
+    /// opens in the letter area.
+    /// </summary>
+    [Parameter] public string? DockBase { get; set; }
+
+    private string Back => BackLink ?? $"/message/{Id}";
+
+    /// <summary>UX-06: the attachment shown in the letter area, by index.</summary>
+    [Parameter] public int? Preview { get; set; }
+
+    private AttachmentView? Previewed => Preview is int i && view is not null ? view.Attachments.FirstOrDefault(a => a.Index == i) : null;
+
+    private string PreviewLink(int index) => Back + (Back.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "preview=" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private string ReplyLink(string kind) => DockBase is not null ? $"{DockBase}&{kind}={Id}" : $"/compose?{kind}={Id}";
+
+    private bool IsScheduled => view?.Folder.Name == MailboxService.ScheduledFolder;
+
+    private DateTimeOffset? SendsAt => view is null ? null : MailboxService.SendTimeOf(view.Row);
+
+    private IReadOnlyList<ConversationItem> conversation = Array.Empty<ConversationItem>();
+
+    private string ConversationLink(ConversationItem c) =>
+        DockBase is not null && c.Folder.Length > 0 ? $"/folder/{Uri.EscapeDataString(c.Folder)}?open={c.Id}" : $"/message/{c.Id}";
+
+    private DateTimeOffset laterTomorrow;
+    private DateTimeOffset laterMonday;
+    private bool senderSaved;
+    private bool senderDismissed;
+    private bool skippedHere;
+    private IReadOnlyList<string> orgDomains = Array.Empty<string>();
+    private string me = string.Empty;
+
+    /// <summary>The message is the reader's own (Sent, Drafts) or from the organisation: no contact offer.</summary>
+    private bool IsOwn => string.Equals(SenderAddress, me, StringComparison.OrdinalIgnoreCase) || view?.Folder.Name is "Sent" or "Drafts" or MailboxService.ScheduledFolder;
+
+    private bool OfferContact => view is not null && SenderAddress.Length > 0 && !senderSaved && !senderDismissed && !skippedHere && !IsOwn
+        && view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder && view.Folder.Name != "Trash";
+
+    private string FirstNameGuess => SplitName().First;
+
+    private string LastNameGuess => SplitName().Last;
+
+    private (string First, string Last) SplitName()
+    {
+        string name = SenderName == SenderAddress ? string.Empty : SenderName.Trim();
+        int space = name.LastIndexOf(' ');
+        return space <= 0 ? (name, string.Empty) : (name[..space].Trim(), name[(space + 1)..].Trim());
+    }
+
+    /// <summary>Everyone a reply to all would reach: the sender and every recipient but you (item 53).</summary>
+    private int ReplyAllCount => ReplyAllPeople.Count;
+
+    private int ReplyAllOutside => ReplyAllPeople.Count(a => !orgDomains.Contains(DomainOf(a), StringComparer.OrdinalIgnoreCase));
+
+    private List<string> ReplyAllPeople =>
+        recipients.People.Where(r => !r.IsYou).Select(r => r.Address)
+            .Append(SenderAddress).Where(a => a.Length > 0 && !string.Equals(a, me, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    /// <summary>Item 53: ask first when more than 5 would receive it, or anyone outside.</summary>
+    private bool ReplyAllNeedsCheck => ReplyAllCount > Recipients.ShownInFull || (ReplyAllOutside > 0 && ReplyAllCount > 1);
+
+    private string ReplyAllWord => ReplyAllCount > 1
+        ? L["Reply all ({n})"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)
+        : L["Reply all"];
+
+    private static string DomainOf(string address)
+    {
+        int at = address.LastIndexOf('@');
+        return at < 0 ? string.Empty : address[(at + 1)..];
+    }
+
+    /// <summary>"in 22 hours", "in 3 days" - how long until a scheduled message goes.</summary>
+    private string InWords(DateTimeOffset when)
+    {
+        TimeSpan left = when - DateTimeOffset.UtcNow;
+        if (left <= TimeSpan.FromMinutes(1))
+        {
+            return L["any moment now"];
+        }
+        if (left < TimeSpan.FromHours(1))
+        {
+            return L["in {n} minutes"].Replace("{n}", MailboxService.Count((long)left.TotalMinutes), StringComparison.Ordinal);
+        }
+        if (left < TimeSpan.FromDays(2))
+        {
+            return L["in {n} hours"].Replace("{n}", MailboxService.Count((long)left.TotalHours), StringComparison.Ordinal);
+        }
+        return L["in {n} days"].Replace("{n}", MailboxService.Count((long)left.TotalDays), StringComparison.Ordinal);
+    }
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private bool listed;
+    private Recipients recipients = Recipients.Of(null, null, null, Array.Empty<string>());
+
+    /// <summary>The sender's address, beside the name on one line (item 20).</summary>
+    private string SenderAddress
+    {
+        get
+        {
+            var parsed = Anjal.Mime.AddressParser.Parse(view?.From ?? string.Empty);
+            return parsed.Count > 0 ? parsed[0].Address : string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// The green stamps: only what Anjal has proved about this message itself -
+    /// the sender verified (DMARC passed), the message arrived encrypted, and
+    /// its original is kept unchanged as evidence.
+    /// </summary>
+    /// <summary>The phone's summary of who it went to, as on the board: "to you and 29 others, 3 outside."</summary>
+    private string PhoneRecipients
+    {
+        get
+        {
+            int n = recipients.Count;
+            bool you = recipients.People.Any(r => r.IsYou);
+            string who = you
+                ? (n <= 1 ? L["to you"] : L["to you and {n} others"].Replace("{n}", (n - 1).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))
+                : L["to {n} people"].Replace("{n}", n.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+            string outside = recipients.OutsideCount > 0
+                ? ", " + L["{n} outside"].Replace("{n}", recipients.OutsideCount.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                : string.Empty;
+            return who + outside + ".";
+        }
+    }
+
+    /// <summary>Sender checks were made and did not verify the sender (item 49: amber, no stamp).</summary>
+    private bool NotVerified => view?.Auth is AuthVerdicts av && av.Dmarc != "pass";
+
+    private List<(string Icon, string Word, string Why)> Stamps
+    {
+        get
+        {
+            var stamps = new List<(string, string, string)>();
+            if (view?.Auth is AuthVerdicts av && av.Dmarc == "pass")
+            {
+                stamps.Add(("check", "Verified sender", "DMARC passed: the sender is who the From line says."));
+            }
+            if (view?.Row.TransportEncrypted == true)
+            {
+                stamps.Add(("lock", "Arrived encrypted", "Arrived encrypted ({tls})."));
+            }
+            if (view?.Evidence is { PurgedAt: null })
+            {
+                stamps.Add(("security", "Original kept", "The original is kept unchanged, fingerprinted."));
+            }
+            return stamps;
+        }
+    }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private ZonedClock clock = ZonedClock.Default;
+    [CascadingParameter] private HttpContext? Http { get; set; }
+
+    [CascadingParameter] private Anjal.Webmail.Components.Layout.MainLayout? Layout { get; set; }
+
+    private MessageView? view;
+
+    /// <summary>"3 years", "18 months", "45 days" - the retention in plain words, in the reader's language.</summary>
+    private string RetentionText(int days) =>
+        days == 365 ? L["1 year"]
+        : days % 365 == 0 ? L["{n} years"].Replace("{n}", (days / 365).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+        : days % 30 == 0 && days >= 60 ? L["{n} months"].Replace("{n}", (days / 30).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+        : days == 1 ? L["1 day"]
+        : L["{n} days"].Replace("{n}", days.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+
+    /// <summary>The words before and after a blank, so a word inside a sentence can be drawn in bold.</summary>
+    private static (string Before, string After) Around(string text, string blank)
+    {
+        int i = text.IndexOf(blank, StringComparison.Ordinal);
+        return i < 0 ? (text, string.Empty) : (text[..i], text[(i + blank.Length)..]);
+    }
+    private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
+    private IReadOnlySet<string> trusted = new HashSet<string>();
+
+    private string SenderName
+    {
+        get
+        {
+            var parsed = Anjal.Mime.AddressParser.Parse(view?.From ?? string.Empty);
+            if (parsed.Count > 0 && parsed[0].DisplayName.Length > 0)
+            {
+                return parsed[0].DisplayName;
+            }
+            return parsed.Count > 0 ? parsed[0].Address : (view?.From ?? string.Empty);
+        }
+    }
+
+    /// <summary>First letter of the sender, for the seal beside the byline.</summary>
+    private string Initial
+    {
+        get
+        {
+            string name = SenderName.TrimStart();
+            return name.Length > 0 ? name.Substring(0, 1).ToUpperInvariant() : "?";
+        }
+    }
+
+    /// <summary>
+    /// The frame's own content security policy. It allows nothing to load
+    /// except inline images, until the reader chooses Load images, and even
+    /// then only images. Scripts are already impossible (sandbox=""); this
+    /// closes the remaining channels - stylesheets, fonts, media - that could
+    /// otherwise report an open back to a sender.
+    /// </summary>
+    private string FrameCsp =>
+        "default-src 'none'; style-src 'unsafe-inline'; font-src data:" + (FontOrigin is string o ? " " + o : string.Empty) +
+        "; img-src data:" + (Images == "1" ? " https: http:" : string.Empty);
+
+    /// <summary>
+    /// This server's own address, for loading LiPi Sans into the frame
+    /// (DEF-021). The frame may fetch fonts from here and nowhere else. The
+    /// value comes from the request's Host header, so it is used only when
+    /// it is made of host-name characters; otherwise the frame keeps the
+    /// system font.
+    /// </summary>
+    private string? FontOrigin
+    {
+        get
+        {
+            if (Http is null)
+            {
+                return null;
+            }
+            string host = Http.Request.Host.Value ?? string.Empty;
+            string scheme = Http.Request.Scheme;
+            bool safe = host.Length > 0 && host.Length <= 255 && (scheme == "https" || scheme == "http") &&
+                host.All(c => char.IsAsciiLetterOrDigit(c) || c == '.' || c == '-' || c == ':' || c == '[' || c == ']');
+            return safe ? $"{scheme}://{host}" : null;
+        }
+    }
+
+    /// <summary>LiPi Sans's @font-face rules with absolute addresses, or nothing.</summary>
+    private string FontFaces => FontOrigin is string origin ? Services.FrameFonts.FaceRules(origin) : string.Empty;
+
+    private string Srcdoc =>
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">" +
+        "<meta http-equiv=\"Content-Security-Policy\" content=\"" + FrameCsp + "\">" +
+        "<style>" + FontFaces + "body{font-family:'LiPi Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:14px;line-height:1.65;" +
+        "margin:20px 28px 28px;max-width:72ch;color:#1d2928;background:#fff;word-wrap:break-word}p{margin:0 0 .9em}img{max-width:100%}" +
+        "pre{white-space:pre-wrap;font-family:inherit;margin:0}a{color:#0b5d8f}</style></head><body>" +
+        (view?.BodyHtml ?? string.Empty) + "</body></html>";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        view = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        clock = WebmailAuthService.ClockOf((await AuthState).User);
+        L = Words.For(WebmailAuthService.LanguageOf((await AuthState).User, Words));
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
+        if (mailboxId is null)
+        {
+            return;
+        }
+        view = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
+        // DEF-066: opening marked the message read; the left pane recounts now.
+        if (Layout is not null)
+        {
+            await Layout.RefreshFoldersAsync(mailboxId.Value);
+        }
+        if (view is null && Http is not null)
+        {
+            // The friendly page stays; the status says what happened (DEF-013).
+            // Set as the headers go out: a 404 set during rendering makes
+            // Blazor discard the page and send an empty body.
+            HttpContext http = Http;
+            http.Response.OnStarting(() =>
+            {
+                http.Response.StatusCode = StatusCodes.Status404NotFound;
+                return Task.CompletedTask;
+            });
+        }
+        categories = await Mail.ListCategoriesAsync(mailboxId.Value);
+        trusted = await Mail.TrustedSendersAsync(mailboxId.Value);
+        listed = view is null && await Mail.IsListedAsync(mailboxId.Value, Id);
+        if (view is not null)
+        {
+            me = (await AuthState).User.Identity?.Name ?? string.Empty;
+            orgDomains = await Mail.OrganisationDomainsAsync(mailboxId.Value);
+            recipients = Recipients.Of(view.To, view.Cc, me, orgDomains);
+            (laterTomorrow, laterMonday) = MailboxService.SendLaterChoices(clock, DateTimeOffset.UtcNow);
+            conversation = await Mail.ConversationOfAsync(mailboxId.Value, view.Row);
+            if (SenderAddress.Length > 0)
+            {
+                // DES-11 F6: the contact book is the person's own, also in a shared mailbox - read and saved the same.
+                Guid book = WebmailAuthService.PersonIdOf((await AuthState).User) ?? mailboxId.Value;
+                senderSaved = await Mail.FindContactAsync(book, SenderAddress) is not null;
+                ContactSettings cs = await Mail.GetContactSettingsAsync(book);
+                skippedHere = cs.SkippedMessages.Contains(Id.ToString(), StringComparer.OrdinalIgnoreCase);
+                senderDismissed = cs.NotOffered.Contains(SenderAddress, StringComparer.OrdinalIgnoreCase)
+                    || orgDomains.Contains(DomainOf(SenderAddress), StringComparer.OrdinalIgnoreCase);
+                // Item 18: with the setting on, a new sender is saved without asking.
+                if (!senderSaved && !senderDismissed && !IsOwn && cs.SaveNewSendersAutomatically
+                    && view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder && view.Folder.Name != "Trash")
+                {
+                    senderSaved = await Mail.SaveContactAsync(book, new Contact { Address = SenderAddress, FirstName = FirstNameGuess, LastName = LastNameGuess }) is null;
+                }
+            }
+        }
+    }
+}

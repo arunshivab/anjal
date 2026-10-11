@@ -208,6 +208,13 @@ public sealed class CertificateStore
         {
             return null;
         }
+        catch (ArgumentException)
+        {
+            // DEF-092: Save writes the key, then the certificate. Read between the
+            // two, the pair does not match; that is "not ready yet", not a failure -
+            // the caller keeps the current certificate and looks again shortly.
+            return null;
+        }
     }
 
     /// <summary>Load the intermediate certificates from the chain (everything after the leaf).</summary>

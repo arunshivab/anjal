@@ -1,0 +1,430 @@
+@page "/dashboard/org"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject SessionRegistry Sessions
+
+<PageTitle>@L["Organisation dashboard"] — Anjal</PageTitle>
+
+@* rc.15: the organisation administrator's dashboard as the approved board
+   draws it (DashAdmin; items 56, 59, 60, 32, 33): totals for the whole
+   organisation - no one's messages are shown, and no figure is about one
+   person. Each graph has its own period; Reset returns all to Today. *@
+@if (!ready)
+{
+    <div class="dash"><p class="dnote">@L["Loading your figures…"]</p></div>
+}
+else if (tenant is null)
+{
+    <div class="emptystate">
+        <h1>@L["Organisation dashboard"]</h1>
+        <p>@L["Only an administrator of your organisation can open this."]</p>
+        <a class="btn btn-s" href="/dashboard">@L["Your dashboard"]</a>
+    </div>
+}
+else
+{
+<div class="dash">
+    <header class="dhead">
+        <div>
+            <h1>@L["{org} dashboard"].Replace("{org}", OrgName, StringComparison.Ordinal)</h1>
+            <p class="dsub">@HeadLine</p>
+        </div>
+        <div class="dheadbtns">
+            <nav class="seg dtoggle" aria-label="@L["Whose figures"]"><a href="/dashboard">@L["Yours"]</a><a href="/dashboard/org" aria-current="page">@OrgName</a></nav>
+            <a class="btn btn-s" href="/dashboard/org">@L["Reset all to Today"]</a>
+        </div>
+    </header>
+
+    <div class="dgrid">
+        <section class="dcard span2" id="o-activity">
+            <h2>@L["Received, sent and Junk, whole organisation"]</h2>
+            <CountsTable Rows="table" L="L" />
+            <div class="dsplit"></div>
+            <div class="dcardhead">
+                <h3>@L[ActivityTitle]</h3>
+                <PeriodChips Current="@activityPeriod.Key" Href="@(k => Link("a", k) + "#o-activity")" For="@L["Activity"]" L="L" />
+            </div>
+            <TimeChart Bars="bars" L="L" />
+        </section>
+
+        <section class="dcard">
+            <h2>@L["Needs attention"]</h2>
+            <DashLines Lines="attention" L="L" Empty="@L["Nothing needs you: every domain has its key, no one is locked out, and every invitation was taken up."]" />
+        </section>
+
+        <section class="dcard span2" id="o-scores">
+            <h2>@L["Messages by spam score, whole organisation"]</h2>
+            <div class="dcardhead"><PeriodChips Current="@scorePeriod.Key" Href="@(k => Link("s", k) + "#o-scores")" For="@L["Messages by spam score"]" L="L" /></div>
+            <ScoreChart Scores="scores.Scores" Threshold="threshold" Checked="scores.Checked" L="L"
+                        Note="@(L["{n} checked {period}; {j} at or over the Junk line ({t}). Totals only: no one's messages are shown."].Replace("{n}", scores.Checked.ToString("N0", Inv), StringComparison.Ordinal).Replace("{period}", L[scorePeriod.Label].ToLowerInvariant(), StringComparison.Ordinal).Replace("{j}", scores.Scores.Skip(threshold).Sum().ToString("N0", Inv), StringComparison.Ordinal).Replace("{t}", threshold.ToString(Inv), StringComparison.Ordinal))" />
+        </section>
+
+        <section class="dcard">
+            <h2>@L["Who sends as {domain}"].Replace("{domain}", domains.FirstOrDefault()?.Domain ?? OrgName, StringComparison.Ordinal)</h2>
+            @if (senders.Count == 0)
+            {
+                <p class="dnote">@L["No DMARC reports yet. Receivers such as Gmail and Microsoft send them daily to the address in your DMARC record; Anjal files them in the DMARC reports folder and reads them here."]</p>
+            }
+            else
+            {
+                <ul class="slines">
+                    @foreach (SenderLine s in senders.Take(6))
+                    {
+                        <li><span><b>@s.Name</b><small>@L[s.Sub]</small></span><span class="num">@s.Count.ToString("N0", Inv)</span><span class="pill @(s.Status == "pass" ? "pill-info" : s.Status == "blocked" ? "pill-bad" : "pill-warn")">@L[s.Status == "pass" ? "Pass" : s.Status == "blocked" ? "Blocked" : "Fix"]</span></li>
+                    }
+                </ul>
+            }
+            <p class="dnote">@L["From DMARC reports, last 30 days ({n} reports). MTA-STS: {mode}."].Replace("{n}", reports.ToString(Inv), StringComparison.Ordinal).Replace("{mode}", L[MtaStsMode], StringComparison.Ordinal)</p>
+        </section>
+
+        <section class="dcard span2" id="o-apps">
+            <div class="dcardhead">
+                <h2>@L["Applications"]</h2>
+                <PeriodChips Current="@appsPeriod.Key" Href="@(k => Link("ap", k) + "#o-apps")" For="@L["Applications"]" L="L" />
+            </div>
+            @if (apps.Count == 0)
+            {
+                <p class="dnote">@L["No application sends mail for {org} yet."].Replace("{org}", OrgName, StringComparison.Ordinal) <a href="/org/apps">@L["Add one"]</a></p>
+            }
+            else
+            {
+                <table class="atable">
+                    <thead><tr><th>@L["Application"]</th><th>@L["Sent"]</th><th>@L["Waiting"]</th><th title="@L["Sign-ins and sends the mail server refused for its keys: a wrong password, or an address it may not send as"]">@L["Refused"]</th><th title="@L["Messages receiving servers would not take, after every retry"]">@L["Bounced"]</th><th>@L["Key"]</th></tr></thead>
+                    <tbody>
+                        @foreach ((OrgApp app, SenderTraffic t) in apps)
+                        {
+                            int refusedN = app.Keys.Sum(k => refused.TryGetValue(k.Username, out int r) ? r : 0);
+                            <tr>
+                                <td><a href="/org/apps?sel=@Uri.EscapeDataString(app.Id)" class="rowlink"><b>@app.Name</b></a></td>
+                                <td class="num">@t.Sent.ToString("N0", Inv)</td>
+                                <td class="num">@t.Waiting.ToString("N0", Inv)</td>
+                                <td class="num @(refusedN > 0 ? "warnnum" : null)">@refusedN.ToString("N0", Inv)</td>
+                                <td class="num @(t.Failed > 0 ? "warnnum" : null)">@t.Failed.ToString("N0", Inv)</td>
+                                <td>@if (app.Keys.Count == 0) {<span class="pill pill-bad">@L["No key"]</span>} else if (app.Keys.Any(k => k.EndsAt is not null)) {<span class="pill pill-warn">@L["Rotating"]</span>} else {<span class="pill pill-info">@L["Healthy"]</span>}</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            }
+        </section>
+
+        <section class="dcard" id="o-security">
+            <div class="dcardhead col">
+                <h2>@L["Security"]</h2>
+                <PeriodChips Current="@securityPeriod.Key" Href="@(k => Link("sec", k) + "#o-security")" For="@L["Security"]" Class="small" L="L" />
+            </div>
+            <p class="bigline"><b>@L["{n} of {all}"].Replace("{n}", twoStepOn.ToString(Inv), StringComparison.Ordinal).Replace("{all}", activePeople.ToString(Inv), StringComparison.Ordinal)</b> @L["have two-step sign-in on ({p}%)"].Replace("{p}", TwoStepPercent.ToString(Inv), StringComparison.Ordinal)</p>
+            <span class="dmeter"><i style="width:@Math.Max(1, TwoStepPercent)%; background: var(--brand)"></i></span>
+            <DashLines Lines="security" L="L" Empty="" />
+            @if (newNetworks.Any(n => n.Place.Length > 0))
+            {
+                <p class="dnote dcredit"><a href="@IpLocations.CreditLink" rel="noopener" target="_blank">@IpLocations.Credit</a></p>
+            }
+        </section>
+
+        <section class="dcard" id="o-domains">
+            <h2>@L["Your domains' records"]</h2>
+            @* rc.15 (item 59): MX, SPF, DKIM, DMARC and MTA-STS for each domain, checked by Anjal every day. *@
+            @if (dnsCheck is null || dnsCheck.Domains.Count == 0)
+            {
+                <p class="dnote">@L["Anjal checks each domain's records once a day; the first check is made within a day of a domain being added."]</p>
+            }
+            else
+            {
+                <ul class="dnsrows">
+                    @foreach ((string domain, Dictionary<string, string> found) in dnsCheck.Domains.OrderBy(d => d.Key, StringComparer.OrdinalIgnoreCase))
+                    {
+                        <li>
+                            <a href="@("/org/domains?domain=" + Uri.EscapeDataString(domain) + "&check=1")" class="rowlink"><b>@domain</b></a>
+                            <span class="dnspills">
+                                @foreach (string kind in MailboxService.CheckedRecords)
+                                {
+                                    string status = found.TryGetValue(kind, out string? s) ? s : "unchecked";
+                                    <span class="pill @(status == "pass" ? "pill-info" : status is "testing" or "unchecked" ? "pill-mute" : "pill-bad")" title="@L[StatusWord(status)]">@kind</span>
+                                }
+                            </span>
+                        </li>
+                    }
+                </ul>
+                <p class="dnote">@L["Checked {time}. Each domain opens its records."].Replace("{time}", clock.Full(dnsCheck.At), StringComparison.Ordinal)</p>
+            }
+        </section>
+
+        <section class="dcard" id="o-tls">
+            <h2>@L["Encrypted delivery to you"]</h2>
+            @* rc.15 (item 59): what the TLS reports receivers send say about their deliveries to the organisation's domains. *@
+            @if (tls.Count == 0)
+            {
+                <p class="dnote">@L["No TLS reports yet. Receivers such as Google and Microsoft send them daily to the address in your _smtp._tls record; Anjal reads them here."]</p>
+            }
+            else
+            {
+                <ul class="slines">
+                    @foreach (TlsReportRow r in tls.Take(6))
+                    {
+                        <li><span><b>@r.Reporter</b><small>@(r.Failed > 0 && r.Failures.Length > 0 ? r.Failures : L["{n} encrypted"].Replace("{n}", r.Successful.ToString("N0", Inv), StringComparison.Ordinal))</small></span><span class="num">@((r.Successful + r.Failed).ToString("N0", Inv))</span><span class="pill @(r.Failed == 0 ? "pill-info" : "pill-warn")">@(r.Failed == 0 ? L["All encrypted"] : L["{n} failed"].Replace("{n}", r.Failed.ToString("N0", Inv), StringComparison.Ordinal))</span></li>
+                    }
+                </ul>
+            }
+            <p class="dnote">@L["From TLS reports, last 30 days ({n} reports)."].Replace("{n}", tlsReports.ToString(Inv), StringComparison.Ordinal)</p>
+        </section>
+
+        <section class="dcard">
+            <h2>@L["Storage"]</h2>
+            <p class="dbig"><b>@Layout.MainLayout.Size(used)</b> @L["of the {given} Anjal gives {org} ({p}%)"].Replace("{given}", Layout.MainLayout.Size(given), StringComparison.Ordinal).Replace("{org}", OrgName, StringComparison.Ordinal).Replace("{p}", StoragePercent.ToString(Inv), StringComparison.Ordinal)</p>
+            <span class="dmeter @(StoragePercent >= 90 ? "bad" : StoragePercent >= 80 ? "warn" : null)"><i style="width:@Math.Max(1, StoragePercent)%"></i></span>
+            <DashLines Lines="storage" L="L" Empty="@L["Every mailbox has room."]" />
+        </section>
+
+        @if (!figuresSetting.On)
+        {
+            <section class="dcard" id="o-people">
+                <h2>@L["Figures per person"]</h2>
+                <p class="dnote">@L["Off. {org} sees totals only. An administrator can turn it on in the organisation console, with a reason; everyone is told."].Replace("{org}", OrgName, StringComparison.Ordinal) <a href="/org/figures">@L["Figures per person"]</a></p>
+            </section>
+        }
+        else
+        {
+            <section class="dcard span2" id="o-people">
+                <div class="dcardhead">
+                    <h2>@L["Figures per person"]</h2>
+                    <PeriodChips Current="@peoplePeriod.Key" Href="@(k => Link("pf", k) + "#o-people")" For="@L["Figures per person"]" L="L" />
+                </div>
+                <table class="atable">
+                    <thead><tr><th>@L["Person"]</th><th>@L["Received"]</th><th>@L["Sent"]</th><th>@L["Junk"]</th><th>@L["Storage"]</th></tr></thead>
+                    <tbody>
+                        @foreach (PersonFigures pf in personFigures)
+                        {
+                            <tr>
+                                <td><b>@(pf.Mailbox.DisplayName.Trim().Length > 0 ? pf.Mailbox.DisplayName : pf.Mailbox.Address)</b></td>
+                                <td class="num">@pf.Received.ToString("N0", Inv)</td>
+                                <td class="num">@pf.Sent.ToString("N0", Inv)</td>
+                                <td class="num">@pf.Junk.ToString("N0", Inv)</td>
+                                <td class="num">@Layout.MainLayout.Size(pf.Mailbox.UsedBytes)</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <p class="dnote">@L["Counted from {date} for: {why}. Everyone was told."].Replace("{date}", figuresSetting.FromAt is DateTimeOffset ff ? clock.Date(ff) : L["the oldest mail kept"], StringComparison.Ordinal).Replace("{why}", figuresSetting.Purpose, StringComparison.Ordinal) <a href="/org/figures">@L["Change"]</a></p>
+            </section>
+        }
+    </div>
+</div>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    [SupplyParameterFromQuery(Name = "a")] private string? A { get; set; }
+    [SupplyParameterFromQuery(Name = "s")] private string? S { get; set; }
+    [SupplyParameterFromQuery(Name = "ap")] private string? Ap { get; set; }
+    [SupplyParameterFromQuery(Name = "sec")] private string? Sec { get; set; }
+    [SupplyParameterFromQuery(Name = "pf")] private string? Pf { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private DateTimeOffset now = DateTimeOffset.UtcNow;
+    private TenantRow? tenant;
+    private IReadOnlyList<TenantDomainRow> domains = Array.Empty<TenantDomainRow>();
+    private int threshold = TenantRow.DefaultSpamThreshold;
+    private IReadOnlyList<(DashPeriod Period, MailFigures Figures)> table = Array.Empty<(DashPeriod, MailFigures)>();
+    private DashPeriod activityPeriod = null!;
+    private DashPeriod scorePeriod = null!;
+    private DashPeriod appsPeriod = null!;
+    private DashPeriod securityPeriod = null!;
+    private IReadOnlyList<ChartBar> bars = Array.Empty<ChartBar>();
+    private MailFigures scores = new();
+    private IReadOnlyList<DashLine> attention = Array.Empty<DashLine>();
+    private IReadOnlyList<SenderLine> senders = Array.Empty<SenderLine>();
+    private int reports;
+    private IReadOnlyList<(OrgApp App, SenderTraffic Traffic)> apps = Array.Empty<(OrgApp, SenderTraffic)>();
+    private int twoStepOn;
+    private int activePeople;
+    private int peopleCount;
+    private IReadOnlyList<DashLine> security = Array.Empty<DashLine>();
+    private long used;
+    private long given;
+    private OpsRecord ops = new();
+    private IReadOnlyList<DashLine> storage = Array.Empty<DashLine>();
+    private IReadOnlyDictionary<string, int> refused = new Dictionary<string, int>();
+    private IReadOnlyList<NewNetworkSignIn> newNetworks = Array.Empty<NewNetworkSignIn>();
+    private DnsCheckRecord? dnsCheck;
+    private IReadOnlyList<TlsReportRow> tls = Array.Empty<TlsReportRow>();
+    private int tlsReports;
+    private PersonFiguresSetting figuresSetting = new();
+    private DashPeriod peoplePeriod = null!;
+    private IReadOnlyList<PersonFigures> personFigures = Array.Empty<PersonFigures>();
+
+    private static string StatusWord(string status) => status switch
+    {
+        "pass" => "Found and right",
+        "missing" => "Missing",
+        "different" => "Found, but not what Anjal needs",
+        "testing" => "Found; MTA-STS in testing",
+        _ => "Not checked yet",
+    };
+
+    private string OrgName => tenant is null ? string.Empty : tenant.DisplayName.Length > 0 ? tenant.DisplayName : tenant.Slug;
+
+    private string HeadLine => (peopleCount == 1 ? L["1 person"] : L["{n} people"].Replace("{n}", peopleCount.ToString(Inv), StringComparison.Ordinal))
+        + ", " + (domains.Count == 1 ? L["1 domain"] : L["{n} domains"].Replace("{n}", domains.Count.ToString(Inv), StringComparison.Ordinal))
+        + ". " + L["Totals only: no one's messages are shown."] + " " + clock.Full(now);
+
+    private string ActivityTitle => activityPeriod.Step switch { TimeStep.Hour => "Activity, by hour", TimeStep.Day => "Activity, by day", TimeStep.Week => "Activity, by week", _ => "Activity, by month" };
+
+    private int TwoStepPercent => Sizes.Percent(twoStepOn, activePeople);
+
+    private int StoragePercent => Sizes.Percent(used, given);
+
+    private static string MtaStsMode => (Environment.GetEnvironmentVariable("ANJAL_MTA_STS_MODE") ?? "testing") switch { "enforce" => "enforced", "none" => "off", _ => "testing" };
+
+    private string Link(string card, string key)
+    {
+        var q = new List<string>();
+        foreach ((string k, string? v) in new[] { ("a", A), ("s", S), ("ap", Ap), ("sec", Sec), ("pf", Pf) })
+        {
+            string value = k == card ? key : v ?? "today";
+            if (value != "today")
+            {
+                q.Add(k + "=" + Uri.EscapeDataString(value));
+            }
+        }
+        return "/dashboard/org" + (q.Count > 0 ? "?" + string.Join("&", q) : string.Empty);
+    }
+
+    private bool ready;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        ready = false;
+        await this.LoadAsync();
+        ready = true;
+    }
+
+    // Loaded whole before it is drawn: the page is drawn once while this waits.
+    private async Task LoadAsync()
+    {
+        tenant = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        now = DateTimeOffset.UtcNow;
+        if (WebmailAuthService.PersonIdOf(user) is not Guid person || !await Mail.IsOrgAdminAsync(person) || await Mail.GetContextAsync(person) is not { } context)
+        {
+            return;
+        }
+        tenant = context.Tenant;
+        domains = await Mail.TenantDomainsAsync(tenant.Id);
+        threshold = tenant.SpamThreshold > 0 ? tenant.SpamThreshold : TenantRow.DefaultSpamThreshold;
+        FigureScope scope = FigureScope.Organisation(tenant.Id);
+        table = await Mail.FiguresTableAsync(scope, clock, now);
+        activityPeriod = MailboxService.DashPeriodOf(A, clock, now);
+        scorePeriod = MailboxService.DashPeriodOf(S, clock, now);
+        appsPeriod = MailboxService.DashPeriodOf(Ap, clock, now);
+        securityPeriod = MailboxService.DashPeriodOf(Sec, clock, now);
+        MailFigures FiguresOf(DashPeriod p) => table.First(r => r.Period.Key == p.Key).Figures;
+        bars = MailboxService.Bars(FiguresOf(activityPeriod), activityPeriod, clock);
+        scores = FiguresOf(scorePeriod);
+
+        IReadOnlyList<PersonView> people = await Mail.ListPeopleAsync(tenant, Sessions);
+        peopleCount = people.Count;
+        attention = await Mail.OrgAttentionAsync(tenant, people, clock);
+        (senders, reports) = await Mail.WhoSendsAsAsync(tenant, MailboxService.DashPeriodOf("30d", clock, now));
+
+        List<OrgApp> orgApps = await Mail.AppsOfAsync(tenant.Id);
+        IReadOnlyList<SenderTraffic> traffic = await Mail.OutboundBySenderAsync(orgApps.Select(a => a.SendsAs).ToList(), appsPeriod);
+        apps = orgApps.Select(a => (a, traffic.FirstOrDefault(t => string.Equals(t.Sender, a.SendsAs, StringComparison.OrdinalIgnoreCase)) ?? new SenderTraffic(a.SendsAs, 0, 0, 0))).ToList();
+        refused = await Mail.RefusedSubmissionsAsync(orgApps.SelectMany(a => a.Keys.Select(k => k.Username)).ToList(), appsPeriod.Start, appsPeriod.End);
+
+        List<PersonView> active = people.Where(p => p.Status is "active" or "must-change").ToList();
+        activePeople = active.Count;
+        twoStepOn = active.Count(p => p.TwoStep.Length > 0);
+        var sec = new List<DashLine>();
+        IReadOnlyList<string> addresses = people.SelectMany(p => new[] { p.Mailbox.Address, p.Mailbox.LocalPart }).ToList();
+        int failed = await Mail.FailedSignInsAsync(addresses, securityPeriod.Start);
+        sec.Add(new DashLine("lock", failed == 0 ? "No refused sign-ins {period}" : failed == 1 ? "1 refused sign-in {period}" : "{n} refused sign-ins {period}",
+            string.Empty, "/org/log?kind=sign-in&days=" + SecurityDays.ToString(Inv), failed > 0 ? "warn" : string.Empty,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["n"] = failed.ToString(Inv), ["period"] = L[securityPeriod.Label].ToLowerInvariant() }));
+        int noKey = 0;
+        foreach (Guid admin in await Mail.AdminsOfAsync(tenant))
+        {
+            if ((await Mail.GetSecurityAsync(admin)).Passkeys.Count == 0)
+            {
+                noKey++;
+            }
+        }
+        if (noKey > 0)
+        {
+            sec.Add(new DashLine("lock", noKey == 1 ? "1 administrator without a passkey or hardware key" : "{n} administrators without a passkey or hardware key", string.Empty, "/org/people", string.Empty, DashLine.N(noKey)));
+        }
+        // Owner, 10 Oct 2026 (P6): people whose password sign-in is paused after ten wrong passwords.
+        int paused = 0;
+        foreach (PersonView p in active)
+        {
+            if ((await Mail.GetSecurityAsync(p.Mailbox.Id)).PasswordPausedUntil is DateTimeOffset until && until > now)
+            {
+                paused++;
+            }
+        }
+        if (paused > 0)
+        {
+            sec.Add(new DashLine("lock", paused == 1 ? "1 person's password sign-in is paused after 10 wrong passwords" : "{n} people's password sign-in is paused after 10 wrong passwords", "For 30 minutes; Forgot password still works", "/org/people", "warn", DashLine.N(paused)));
+        }
+        // rc.15 (item 59): sign-ins from a network the person had not used, with town and country.
+        newNetworks = await Mail.NewNetworkSignInsAsync(people.Select(p => p.Mailbox.Address).ToList(), securityPeriod.Start);
+        string whoNew = string.Join("; ", newNetworks.Take(3).Select(n => (people.FirstOrDefault(p => string.Equals(p.Mailbox.Address, n.Who, StringComparison.OrdinalIgnoreCase)) is PersonView pv && pv.Mailbox.DisplayName.Trim().Length > 0 ? pv.Mailbox.DisplayName.Trim() : n.Who)
+            + ", " + (n.Place.Length > 0 ? n.Place : L["place not known"]) + ", " + clock.Date(n.At)));
+        sec.Add(new DashLine("location-pin",
+            newNetworks.Count == 0 ? "No sign-ins from a new network {period}" : newNetworks.Count == 1 ? "1 sign-in from a new network {period}" : "{n} sign-ins from a new network {period}",
+            newNetworks.Count == 0 ? string.Empty : "{who}", newNetworks.Count == 0 ? string.Empty : "/org/log?kind=sign-in&days=" + SecurityDays.ToString(Inv), newNetworks.Count > 0 ? "warn" : string.Empty,
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["n"] = newNetworks.Count.ToString(Inv),
+                ["period"] = L[securityPeriod.Label].ToLowerInvariant(),
+                ["who"] = whoNew,
+            }));
+        security = sec;
+        dnsCheck = await Mail.DnsCheckOfAsync(tenant.Id);
+        (tls, tlsReports) = await Mail.TlsReportsAsync(tenant, MailboxService.DashPeriodOf("30d", clock, now));
+        figuresSetting = await Mail.PersonFiguresOfAsync(tenant.Id);
+        peoplePeriod = MailboxService.DashPeriodOf(Pf ?? "30d", clock, now);
+        personFigures = figuresSetting.On ? await Mail.PersonFiguresAsync(tenant, peoplePeriod, clock) : Array.Empty<PersonFigures>();
+
+        ops = await Mail.ReadTenantDocumentAsync<OpsRecord>(tenant.Id, MailboxService.OpsKind) ?? new OpsRecord();
+        used = people.Sum(p => p.Mailbox.UsedBytes);
+        // DES-11 D2: what Anjal gives under the organisation's storage plan.
+        given = (await Mail.ListOrganisationsAsync()).FirstOrDefault(o => o.Tenant.Id == tenant.Id)?.GivenBytes ?? 0;
+        // rc.15 (item 59): mailboxes at 100%, 90% and 80%, each its own line.
+        var st = new List<DashLine>();
+        int full = people.Count(p => MailboxService.Fullness(p.Mailbox) >= 100);
+        int over90 = people.Count(p => MailboxService.Fullness(p.Mailbox) >= 90) - full;
+        int over80 = people.Count(p => MailboxService.Fullness(p.Mailbox) >= 80) - full - over90;
+        if (full > 0)
+        {
+            st.Add(new DashLine("box", full == 1 ? "1 mailbox full" : "{n} mailboxes full", "{who}", "/org/people", "bad", Who(people.Where(p => MailboxService.Fullness(p.Mailbox) >= 100), full)));
+        }
+        if (over90 > 0)
+        {
+            st.Add(new DashLine("box", over90 == 1 ? "1 mailbox over 90% full" : "{n} mailboxes over 90% full", "{who}", "/org/people", "warn", Who(people.Where(p => MailboxService.Fullness(p.Mailbox) is >= 90 and < 100), over90)));
+        }
+        if (over80 > 0)
+        {
+            st.Add(new DashLine("box", over80 == 1 ? "1 mailbox over 80% full" : "{n} mailboxes over 80% full", "{who}", "/org/people", string.Empty, Who(people.Where(p => MailboxService.Fullness(p.Mailbox) is >= 80 and < 90), over80)));
+        }
+        storage = st;
+    }
+
+    private static Dictionary<string, string> Who(IEnumerable<PersonView> who, int n) => new(StringComparer.Ordinal)
+    {
+        ["n"] = n.ToString(Inv),
+        ["who"] = string.Join(", ", who.Take(3).Select(p => p.Mailbox.DisplayName.Trim().Length > 0 ? p.Mailbox.DisplayName.Trim() : p.Mailbox.Address)),
+    };
+
+    private int SecurityDays => securityPeriod.Key switch { "today" => 1, "yesterday" => 7, "7d" => 7, "30d" => 30, "3m" => 90, _ => 365 };
+}

@@ -1,0 +1,199 @@
+@page "/sign-in/forgot"
+@page "/sign-in/reset"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+@inject SessionRegistry Sessions
+@inject NavigationManager Nav
+
+<PageTitle>@L["Reset your password"] — Anjal</PageTitle>
+
+@* The approved reset board (AuthReset, rc.13): a six-digit code sent to the
+   recovery address, working for 10 minutes; the new password with its rules;
+   and the other ways - a backup code, another signed-in device, the administrator. *@
+<AuthFrame L="L" Org="org">
+    @if (mailbox is null)
+    {
+        <h1 class="authtitle">@L["Forgot your password?"]</h1>
+        <p class="authlead">@L["Type your user name. We send a 6-digit code to your recovery address, and you choose a new password."]</p>
+        @if (Throttled is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["Too many codes have been asked for. Wait fifteen minutes."]</span></div>
+        }
+        @if (ExpiredTicket is not null)
+        {
+            <div class="note"><LipiIcon Name="info" Size="16" /><span>@L["That reset had expired. Start again."]</span></div>
+        }
+        <form method="post" action="/auth/forgot" class="authfields">
+            <AntiforgeryToken />
+            <label class="authlbl" for="user">@(org is null ? L["Address"] : L["User name"])</label>
+            <div class="authinpwrap">
+                <input class="authinp-in" id="user" name="user" type="text" value="@User" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus />
+                @if (org is not null)
+                {
+                    <span class="authsuffix">@@@org.Domain</span>
+                }
+            </div>
+            <button type="submit" class="authbtn">@L["Send the code"]</button>
+        </form>
+        <p class="authnote"><a class="authlink" href="/sign-in">@L["Back to sign in"]</a></p>
+    }
+    else
+    {
+        <h1 class="authtitle">@L["Reset your password"]</h1>
+        @if (Waiting is not null)
+        {
+            @if (approved)
+            {
+                <p class="authlead">@L["Approved from your other device. Choose a new password."]</p>
+            }
+            else
+            {
+                <div class="authwait" data-approval-wait data-status="/auth/reset/status?t=@Uri.EscapeDataString(T!)&a=@Uri.EscapeDataString(Waiting)"
+                     data-word-refused="@L["Your other device said no. Use another way, or ask your administrator."]"
+                     data-word-expired="@L["Nobody answered in time. Try again, or use another way."]">
+                    <span class="authspin" aria-hidden="true"></span>
+                    <p>@L["Open Anjal on a device where you are signed in, and approve the request there. This page carries on by itself."]</p>
+                </div>
+            }
+        }
+        else if (None is not null)
+        {
+            <p class="authlead">@L["This account has no recovery address, so no code can be sent. Use a backup code, approve from a device where you are signed in, or ask your administrator."]</p>
+        }
+        else if (Method == "backup")
+        {
+            <p class="authlead">@L["Type one of the backup codes you saved when you set up two-step sign-in. Each works once."]</p>
+        }
+        else
+        {
+            @* DES-11 S1 (owner, 10 Oct 2026): the same words for every user name, so nothing tells a stranger whether it exists. *@
+            <p class="authlead">@L["If an account with that user name exists, a 6-digit code has been sent to its recovery address. It works for 10 minutes. No code? Use one of the other ways below."]</p>
+        }
+        @if (Sent is not null)
+        {
+            <div class="note n-ok"><LipiIcon Name="check" Size="16" /><span>@L["A new code is on its way. The earlier one no longer works."]</span></div>
+        }
+        @if (Refused is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["That approval was not given, or has been used. Use another way."]</span></div>
+        }
+        @if (error is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+        }
+
+        @if (ShowForm)
+        {
+            <form method="post" action="/auth/reset" class="authfields" data-pwform>
+                <AntiforgeryToken />
+                <input type="hidden" name="t" value="@T" data-ticket />
+                @if (Waiting is not null)
+                {
+                    <input type="hidden" name="method" value="approval" />
+                    <input type="hidden" name="approval" value="@Waiting" />
+                }
+                else if (Method == "backup")
+                {
+                    <input type="hidden" name="method" value="backup" />
+                    <label class="authlbl" for="code">@L["Backup code"]</label>
+                    <div class="authinpwrap"><input class="authinp-in mono" id="code" name="code" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" required autofocus placeholder="abcd-2345" /></div>
+                }
+                else
+                {
+                    <CodeBoxes L="L" Label="@L["Reset code"]" />
+                }
+                @if (Waiting is null && Method != "backup")
+                {
+                    <div class="authrow"><button type="submit" formaction="/auth/reset/resend" formnovalidate class="authlink linkbtn">@L["Send a new code"]</button></div>
+                }
+                <label class="authlbl" for="password">@L["New password"]</label>
+                <div class="authinpwrap"><input class="authinp-in" id="password" name="password" type="password" autocomplete="new-password" required data-pwinput /></div>
+                <PasswordRules L="L" For="password" Failed="failed" MinLength="minLength" History="history" />
+                <button type="submit" class="authbtn">@L["Set new password"]</button>
+            </form>
+        }
+        @if (Waiting is null)
+        {
+            <div class="authways">
+                <span>@L["Other ways:"]</span>
+                @if (Method == "backup" && None is null)
+                {
+                    <a class="authlink" href="/sign-in/reset?t=@Uri.EscapeDataString(T!)">@L["a code to your recovery address"]</a>
+                }
+                else if (Method != "backup")
+                {
+                    <a class="authlink" href="/sign-in/reset?t=@Uri.EscapeDataString(T!)&method=backup@(None is not null ? "&none=1" : "")">@L["a backup code"]</a>
+                }
+                <form method="post" action="/auth/reset/ask" class="inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="t" value="@T" />
+                    <button type="submit" class="authlink linkbtn">@L["approve from another signed-in device"]</button>
+                </form>
+                <span>@L["or ask your administrator."]</span>
+            </div>
+        }
+        else
+        {
+            <p class="authnote"><a class="authlink" href="/sign-in/reset?t=@Uri.EscapeDataString(T!)">@L["Use another way"]</a></p>
+        }
+    }
+</AuthFrame>
+
+@code {
+    [SupplyParameterFromQuery(Name = "u")] private string? User { get; set; }
+    [SupplyParameterFromQuery(Name = "t")] private string? T { get; set; }
+    [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
+    [SupplyParameterFromQuery] private string? Throttled { get; set; }
+    [SupplyParameterFromQuery(Name = "expired")] private string? ExpiredTicket { get; set; }
+    [SupplyParameterFromQuery] private string? None { get; set; }
+    [SupplyParameterFromQuery] private string? Sent { get; set; }
+    [SupplyParameterFromQuery] private string? Refused { get; set; }
+    [SupplyParameterFromQuery] private string? Method { get; set; }
+    [SupplyParameterFromQuery] private string? Waiting { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private MailboxRow? mailbox;
+    private int minLength = Anjal.Smtp.PasswordPolicy.AloneLength;
+    private int history;
+    private string? error;
+    private bool approved;
+    private IReadOnlyCollection<string> failed = Array.Empty<string>();
+
+    // The new password is asked for once a code can be typed, a backup code is
+    // chosen, or another device has approved.
+    private bool ShowForm => Waiting is not null ? approved : (None is null || Method == "backup");
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        if (Http.HttpContext?.Request.Path.Value?.EndsWith("/reset", StringComparison.Ordinal) == true)
+        {
+            mailbox = await AuthEndpoints.MailboxOfTicketAsync(Protection, Mail, T, default);
+            if (mailbox is null)
+            {
+                Nav.NavigateTo("/sign-in/forgot?expired=1");
+                return;
+            }
+            SignInPolicy rules = await Mail.SignInPolicyOfAsync(mailbox.TenantId);
+            minLength = MailboxService.ResetLength(rules);
+            history = rules.PasswordHistory;
+            Approval? a = Sessions.ApprovalOf(Waiting);
+            approved = a is not null && a.MailboxId == mailbox.Id && a.Kind == "reset" && a.Answer == true && !a.Used;
+        }
+        error = AuthEndpoints.ReadNote(Protection, E);
+        if (error is not null && error.Contains("used that password before", StringComparison.Ordinal))
+        {
+            failed = new[] { "history" };
+        }
+        if (User is { Length: > 120 })
+        {
+            User = User[..120];
+        }
+    }
+}

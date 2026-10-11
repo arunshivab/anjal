@@ -37,7 +37,8 @@ public sealed class AuthenticatedUser
     /// Domains the user is permitted to send <c>MAIL FROM</c> as. If empty,
     /// the user can send from any domain (admin-level authority). If
     /// non-empty, <c>MAIL FROM:&lt;addr&gt;</c> is rejected unless
-    /// <c>addr</c>'s domain is in this list.
+    /// <c>addr</c>'s domain is in this list - or, for an entry holding an
+    /// <c>@</c> (rc.13, an application's key), <c>addr</c> is that address.
     /// </summary>
     public System.Collections.Generic.IReadOnlyList<string> AllowedFromDomains { get; init; }
         = System.Array.Empty<string>();

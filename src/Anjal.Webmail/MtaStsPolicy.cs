@@ -40,7 +40,7 @@ public sealed class MtaStsPolicy
     public static MtaStsPolicy? FromEnvironment(string hostName, out string note)
     {
         System.ArgumentNullException.ThrowIfNull(hostName);
-        string mode = (System.Environment.GetEnvironmentVariable("ANJAL_MTA_STS_MODE") ?? string.Empty).Trim().ToLowerInvariant();
+        string mode = RawMode();
         if (mode.Length == 0 || mode == "off")
         {
             note = "MTA-STS: off (ANJAL_MTA_STS_MODE not set to testing, enforce or none).";
@@ -102,6 +102,22 @@ public sealed class MtaStsPolicy
         sb.Append("max_age: ").Append(this.MaxAgeSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// The MTA-STS mode as everything in the webmail reads it - the policy served, the Service
+    /// health tile and each organisation's DNS check (DES-11, 10 Oct 2026: the three read the
+    /// setting three different ways, so an unset mode showed "in testing" while nothing was
+    /// served): "off", "testing", "enforce" or "none". Unset or unknown is "off".
+    /// </summary>
+    /// <returns>The mode.</returns>
+    public static string ConfiguredMode()
+    {
+        string mode = RawMode();
+        return mode is "testing" or "enforce" or "none" ? mode : "off";
+    }
+
+    private static string RawMode() =>
+        (System.Environment.GetEnvironmentVariable("ANJAL_MTA_STS_MODE") ?? string.Empty).Trim().ToLowerInvariant();
 
     private static string[] Split(string? value) =>
         (value ?? string.Empty).Split(',', System.StringSplitOptions.RemoveEmptyEntries | System.StringSplitOptions.TrimEntries);

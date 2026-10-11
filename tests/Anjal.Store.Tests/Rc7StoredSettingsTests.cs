@@ -1,6 +1,7 @@
 namespace Anjal.Store.Tests;
 
 /// <summary>v1.0.0-rc.7: settings in the database, trusted senders and greylisting memory.</summary>
+[Collection("Stored settings")]
 public sealed class Rc7StoredSettingsTests
 {
     [Theory]

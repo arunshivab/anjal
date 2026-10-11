@@ -16,12 +16,22 @@
     <Authors>Arun Shivab</Authors>
     <Product>Anjal</Product>
     <Description>Zero-dependency .NET 10 mail server library.</Description>
-    <Version>1.0.0-rc.10</Version>
+    <Version>1.0.0-rc.15</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
     <IsPackable>false</IsPackable>
     <NoWarn>$(NoWarn);CA1707;CA2007;CA1515</NoWarn>
   </PropertyGroup>
+
+  <!-- CI, 11 Oct 2026: one way for every test project to remove its temporary folders.
+       Each test project compiles its own copy; where one test project sees another's
+       internals, its own copy is used (CS0436, the same code). -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <NoWarn>$(NoWarn);CS0436</NoWarn>
+  </PropertyGroup>
+  <ItemGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <Compile Include="$(MSBuildThisFileDirectory)tests/Shared/TestFolders.cs" Link="Shared/TestFolders.cs" />
+  </ItemGroup>
 
 </Project>

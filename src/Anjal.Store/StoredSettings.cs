@@ -93,7 +93,7 @@ public static class StoredSettings
 #pragma warning disable CA1031 // The service must still start on its environment when the database is unavailable.
         catch (System.Exception ex)
         {
-            log($"Settings: could not read them from the database ({ex.Message}); using the environment (/etc/anjal/{scope}.env) only.");
+            log($"Settings: could not read them from the database ({ex.Message}); using {EnvironmentName(scope)} only.");
             return -1;
         }
 #pragma warning restore CA1031
@@ -108,7 +108,7 @@ public static class StoredSettings
             string? current = System.Environment.GetEnvironmentVariable(row.Key);
             if (current is not null && !string.Equals(current, row.Value, System.StringComparison.Ordinal))
             {
-                log($"Settings: {row.Key}: using the database value; /etc/anjal/{scope}.env has a different one.");
+                log($"Settings: {row.Key}: using the database value; {EnvironmentName(scope)} has a different one.");
             }
             System.Environment.SetEnvironmentVariable(row.Key, row.Value);
             applied++;
@@ -118,10 +118,20 @@ public static class StoredSettings
         {
             if (!stored.Contains(envOnly.Key))
             {
-                log($"Settings: {envOnly.Key} is set only in /etc/anjal/{scope}.env, not in the database; the environment value is used. Store it through the admin API to keep it in backups.");
+                log($"Settings: {envOnly.Key} is set only in {EnvironmentName(scope)}, not in the database; the environment value is used. Store it through the admin API to keep it in backups.");
             }
         }
         log($"Settings: {applied} applied from the database ({scope}).");
         return applied;
     }
+
+    /// <summary>
+    /// Where the environment came from, in words: the service's settings file on Linux, where the
+    /// systemd unit reads it, and the environment it was started with anywhere else (DES-11 F12:
+    /// on Windows the messages named a Linux file that does not exist there).
+    /// </summary>
+    /// <param name="scope">"server" or "webmail".</param>
+    /// <returns>The words for the start-up messages.</returns>
+    public static string EnvironmentName(string scope) =>
+        System.OperatingSystem.IsLinux() ? $"/etc/anjal/{scope}.env" : "the environment this was started with";
 }

@@ -147,7 +147,7 @@ public sealed class MailboxRequest
     /// <summary>When false, delivery and authentication both fail.</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>Soft quota in bytes. Null or 0 means the default (2 GiB).</summary>
+    /// <summary>The mailbox's size limit in bytes, enforced (DES-11 D2). Null or 0 means the default (1 GiB), or the organisation's storage plan when it has one.</summary>
     public long? QuotaBytes { get; set; }
 }
 
@@ -178,7 +178,7 @@ public sealed class MailboxResponse
     /// <summary>Whether the mailbox has submission credentials.</summary>
     public bool CanAuthenticate { get; set; }
 
-    /// <summary>Soft quota in bytes.</summary>
+    /// <summary>The mailbox's size limit in bytes (0 when it has none of its own, under a shared storage plan).</summary>
     public long QuotaBytes { get; set; }
 
     /// <summary>Bytes currently stored.</summary>

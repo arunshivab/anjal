@@ -35,7 +35,7 @@ public sealed class AcmeTests : IDisposable
         this.ca.Dispose();
         if (Directory.Exists(this.dir))
         {
-            Directory.Delete(this.dir, recursive: true);
+            TestFolders.Delete(this.dir);
         }
     }
 
@@ -244,7 +244,8 @@ public sealed class AcmeTests : IDisposable
         await WaitUntilAsync(() => svc.Status.LastAttemptSucceeded, TimeSpan.FromSeconds(20));
         string firstThumb = new CertificateStore(this.dir).LoadCertificate()!.Thumbprint;
         store.RequestRenewal();
-        await WaitUntilAsync(() => new CertificateStore(this.dir).LoadCertificate()!.Thumbprint != firstThumb, TimeSpan.FromSeconds(20));
+        // DEF-092: read while a renewal is being written, the store says "not ready" (null).
+        await WaitUntilAsync(() => new CertificateStore(this.dir).LoadCertificate()?.Thumbprint is string now && now != firstThumb, TimeSpan.FromSeconds(20));
         Assert.False(File.Exists(store.RenewRequestPath));
         Assert.Equal(2, this.ca.Issued);
 

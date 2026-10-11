@@ -6,6 +6,7 @@ A queued outbound message. Created by the API layer or by a webhook auto-reply r
 
 ## Members
 
+- **CancelledBySender** *(field)* - The reason recorded when the sender cancels a waiting message from the Outbox (rc.12).
 - **DefaultGiveUp** *(field)* - How long outgoing mail is retried by default: 5 days (v1.0.0-rc.9, DEF-068, D-53; RFC 5321 4.5.4.1 asks for at least 4 to 5 days).
 - **LeaseDuration** *(field)* - How long a lease lasts. Longer than any single delivery attempt can take with its timeouts, so a slow but live send is never taken over.
 - **Attempts** *(property)* - Number of send attempts made so far.

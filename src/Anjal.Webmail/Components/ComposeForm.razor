@@ -1,0 +1,517 @@
+@* rc.12: compose as the approved boards draw it (ComposeLetter, RecipCompose,
+   GapCompose, ComposeDocked). In the letter area: the subject and the body,
+   with the formatting bar at its foot. In the envelope pane: From, To, Cc
+   and Bcc as name cards, the warnings, the attachments and Send. Docked: the
+   same form in a small panel over the message being answered (item 48).
+   Everything works without the script (plain address fields, Send, Save
+   draft, Discard); the script adds the cards, the suggestions, undo send
+   and drag and drop. *@
+@inject MailboxService Mail
+@inject Words Words
+
+@if (Picking && DraftId is Guid pickFor)
+{
+    <TemplatePicker DraftId="pickFor" To="@to" />
+}
+else if (Docked)
+{
+    <form method="post" action="/compose" enctype="multipart/form-data" data-compose data-docked class="@(ReplyId is null ? "cdock cdock-new" : "cdock")" aria-label="@Title"
+          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson"
+          data-word-hint="@L["Up and Down to move, Tab or Enter to choose. Chosen addresses are not offered again."]"
+          data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
+          data-word-sendeach="@L["Send {n} separate messages"]">
+        <AntiforgeryToken />
+        <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
+        <input type="hidden" name="inReplyTo" value="@inReplyTo" />
+        <input type="hidden" name="back" value="@Back" />
+        <input type="hidden" name="next" value="" data-next />
+        <input type="hidden" name="undo" value="" data-undo />
+        @if (ReplyId is not null)
+        {
+            <input type="hidden" name="subject" value="@subject" />
+        }
+        <input type="hidden" name="dock" value="1" />
+        <div class="cdock-head">
+            <b class="cdock-title">@Title</b>
+            <button type="button" class="cdock-btn" data-dock-min title="@L["Minimise"]" aria-label="@L["Minimise"]"><LipiIcon Name="minus" Size="15" /></button>
+            <button type="submit" class="cdock-btn" formaction="/draft" formnovalidate name="expand" value="1" title="@L["Full view"]" aria-label="@L["Full view"]"><LipiIcon Name="expand" Size="15" /></button>
+            <a class="cdock-btn" href="@Back" data-cancel title="@L["Close"]" aria-label="@L["Close"]"><LipiIcon Name="close" Size="15" /></a>
+        </div>
+        <div class="cdock-body">
+            @if (Error is not null)
+            {
+                <div class="notice n-err readnotice"><LipiIcon Name="warning" Size="16" /><span><b>@L["Not sent."]</b> @L.Say(Error)</span></div>
+            }
+            <div class="notice n-err readnotice" data-client-error hidden></div>
+            <div class="cdock-to" data-recips>
+                <label class="clabel" for="dto">@L["To"]</label>
+                <div class="rbox" data-rbox>
+                    <input class="rinput" id="dto" name="to" type="text" value="@to" data-suggest autocomplete="off" />
+                </div>
+            </div>
+            @* rc.15 (owner, 7 Oct): To, Cc and Bcc are always on show. *@
+            <div class="cdock-to" id="dcc" data-recips>
+                <label class="clabel" for="dcc-in">@L["Cc"]</label>
+                <div class="rbox" data-rbox>
+                    <input class="rinput" id="dcc-in" name="cc" type="text" value="@cc" data-suggest autocomplete="off" />
+                </div>
+            </div>
+            <div class="cdock-to" data-recips>
+                <label class="clabel" for="dbcc-in">@L["Bcc"]</label>
+                <div class="rbox" data-rbox>
+                    <input class="rinput" id="dbcc-in" name="bcc" type="text" value="@bcc" data-suggest autocomplete="off" />
+                </div>
+            </div>
+            @if (ReplyId is null)
+            {
+                <div class="cdock-to cdock-subj">
+                    <label class="clabel" for="dsubj">@L["Subject"]</label>
+                    <input class="rinput" id="dsubj" name="subject" type="text" value="@subject" autocomplete="off" />
+                </div>
+            }
+            <div class="cwarn" data-outside-warning hidden data-word-one="@L["{name} is outside {org}"]" data-word-many="@L["{n} of {total} recipients are outside {org}"]" data-word-attach="@L[", and there is an attachment."]"><LipiIcon Name="warning" Size="15" /><span data-warn-text></span></div>
+            <FormatBar L="L" />
+            <textarea class="canvas cdock-canvas" name="body" aria-label="@L["Message"]" data-rte placeholder="@(ReplyId is null ? L["Write your message."] : L["Write your reply."])">@body</textarea>
+            <input type="hidden" name="bodyHtml" value="@bodyHtml" data-rte-html />
+            <ul class="cfiles" data-filelist></ul>
+        </div>
+        <div class="cdock-foot">
+            <button type="submit" class="btn btn-p csendbtn" disabled="@full" data-send>@L["Send"]</button>
+            <details class="pmenu clater">
+                <summary class="iconsq" title="@L["Send later"]" aria-label="@L["Send later"]"><LipiIcon Name="clock" Size="16" /></summary>
+                <div class="pmenu-body pmenu-up">
+                    <SendLaterChoices L="L" Tomorrow="tomorrow" Monday="monday" Clock="clock" />
+                </div>
+            </details>
+            <label class="iconsq cattachbtn" title="@L["Attach files"]"><LipiIcon Name="attachment" Size="16" /><input type="file" name="attachments" multiple class="cfile" aria-label="@L["Attach files"]" /></label>
+            <label class="checkline cexpect" title="@L["Shown on your dashboard if no answer comes within three days."]"><input type="checkbox" name="expect" value="1" /><span>@L["Expect a reply"]</span></label>
+            <span class="cgrow"></span>
+            <span class="cstate" data-draft-state>@L["Drafts are saved as you write"]</span>
+        </div>
+        <KeepDraftDialog L="L" />
+        <ComposeTemplates L="L" />
+    </form>
+}
+else
+{
+    <form method="post" action="/compose" enctype="multipart/form-data" data-compose class="cform"
+          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson"
+          data-word-hint="@L["Up and Down to move, Tab or Enter to choose. Chosen addresses are not offered again."]"
+          data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
+          data-word-sendeach="@L["Send {n} separate messages"]">
+        <AntiforgeryToken />
+        <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
+        <input type="hidden" name="inReplyTo" value="@inReplyTo" />
+        <input type="hidden" name="back" value="@Back" />
+        <input type="hidden" name="next" value="" data-next />
+        <input type="hidden" name="undo" value="" data-undo />
+
+        @* The phone (the board PhoneCompose): close and Send at the top. *@
+        <div class="cphonehead">
+            <a class="iconbtn" href="@Back" data-cancel aria-label="@L["Close"]"><LipiIcon Name="close" Size="18" /></a>
+            <b>@(DraftId is null ? L["New message"] : L["Draft"])</b>
+            <span class="lh-grow"></span>
+            <button type="submit" class="btn btn-p pcsend" disabled="@full"><LipiIcon Name="referral-out" Size="15" />@L["Send"]</button>
+        </div>
+        <section class="cletter" aria-label="@L["Message"]">
+            @if (Error is not null)
+            {
+                <div class="notice n-err readnotice">
+                    <LipiIcon Name="warning" Size="16" /><span><b>@L["Not sent."]</b> @L.Say(Error)</span>
+                </div>
+            }
+            <div class="notice n-err readnotice" data-client-error hidden></div>
+            @if (SavedFlag is not null && Error is null)
+            {
+                <div class="notice n-ok readnotice">
+                    <LipiIcon Name="check" Size="16" /><span>@L["Draft saved. It is in Drafts; carry on writing, or send when ready."]</span>
+                </div>
+            }
+            @if (TemplateSaved is not null)
+            {
+                <div class="notice n-ok readnotice">
+                    <LipiIcon Name="check" Size="16" /><span>@L["Saved as one of your templates. Find it under Yours in Templates."]</span>
+                </div>
+            }
+            @if (Undone is not null)
+            {
+                <div class="notice n-ok readnotice">
+                    <LipiIcon Name="undo" Size="16" /><span>@L["Not sent. Your message is back here to edit; it is also in Drafts."]</span>
+                </div>
+            }
+            @if (full)
+            {
+                <div class="notice n-err readnotice">
+                    <LipiIcon Name="warning" Size="16" />
+                    <span><b>@L["Mailbox full"] — @MainLayout.Size(used) / @MainLayout.Size(quota).</b>
+                          @L["Your mailbox is full. Delete or archive some mail to send again: a copy of every sent message is kept in Sent. Or ask your administrator for more space, then come back to this draft."]</span>
+                </div>
+            }
+            <input class="csubject" name="subject" type="text" value="@subject" placeholder="@L["Subject"]" aria-label="@L["Subject"]" />
+            @* Plain text box: what is sent when JavaScript is off. With it on,
+               the browser script replaces this with the formatting editor and
+               keeps both this box and bodyHtml filled in. *@
+            <textarea class="canvas cbody" name="body" aria-label="@L["Message"]" data-rte placeholder="@L["Write your message."]">@body</textarea>
+            <input type="hidden" name="bodyHtml" value="@bodyHtml" data-rte-html />
+            <div class="ctools">
+                <button type="submit" class="ctempl" formaction="/draft" name="templates" value="1" formnovalidate title="@L["Templates"]"><LipiIcon Name="email-template" Size="16" /><span>@L["Templates"]</span></button>
+                <FormatBar L="L" />
+                @* rc.15 (owner, 7 Oct; item 48): the same message in a small window over the Inbox, and back. *@
+                <button type="submit" class="ctempl cpop" formaction="/draft" name="dock" value="1" formnovalidate title="@L["Write in a small window over the Inbox"]"><LipiIcon Name="collapse" Size="16" /><span>@L["Small window"]</span></button>
+            </div>
+        </section>
+
+        <aside class="cenv" aria-label="@L["Sending"]">
+            <div class="cblock cfrom">
+                <label class="clabel" for="from">@L["From"]</label>
+                <select id="from" class="csel" name="from" aria-label="@L["From"]">
+                    <option value="@address">@FromLabel</option>
+                </select>
+            </div>
+
+            <div class="cblock" data-recips>
+                @* rc.15 (owner, 7 Oct; item 16): To, Cc and Bcc always on show, each label beside its box. *@
+                <label class="clabel" for="to">@L["To"] <span class="rcount" data-rcount></span></label>
+                <div class="rbox" data-rbox>
+                    <input class="rinput" id="to" name="to" type="text" value="@to" data-suggest autocomplete="off" autofocus="@(to.Length == 0)"
+                           placeholder="@L["Name or address"]" title="@L["Separate several addresses with commas."]" />
+                </div>
+                <div class="rsum" data-rsum hidden></div>
+            </div>
+            @* DES-11 F5 (owner, 10 Oct 2026, "b"): with Send one each, Cc and Bcc give way to one summary copy. *@
+            <div class="cblock" id="ccrow" data-recips data-merge-off>
+                <label class="clabel" for="cc">@L["Cc"]</label>
+                <div class="rbox" data-rbox>
+                    <input class="rinput" id="cc" name="cc" type="text" value="@cc" data-suggest autocomplete="off" placeholder="@L["Name or address"]" />
+                </div>
+                <div class="rsum" data-rsum hidden></div>
+            </div>
+            <div class="cblock" data-recips data-merge-off>
+                <label class="clabel" for="bcc">@L["Bcc"]</label>
+                <div class="rbox" data-rbox>
+                    <input class="rinput" id="bcc" name="bcc" type="text" value="@bcc" data-suggest autocomplete="off" placeholder="@L["Name or address"]" />
+                </div>
+                <div class="rsum" data-rsum hidden></div>
+            </div>
+
+            <div class="cwarn cpaste" data-paste-report hidden
+                 data-word-pasted="@L["You pasted {n} addresses"]" data-word-added="@L["{n} added"]"
+                 data-word-dupes="@L["{n} duplicate removed"]" data-word-bad="@L["{n} not valid:"]"></div>
+            <div class="cwarn" data-outside-warning hidden="@(!outsideWarning)"
+                 data-word-one="@L["{name} is outside {org}"]" data-word-many="@L["{n} of {total} recipients are outside {org}"]"
+                 data-word-attach="@L[", and there is an attachment."]">
+                <LipiIcon Name="warning" Size="15" /><span data-warn-text>@if (outsideWarning) { @OutsideText }</span>
+            </div>
+
+            <div class="cblock cattach">
+                <span class="clabel">@L["Attachments"]</span>
+                @if (carried.Count > 0 && carrySource is Guid src)
+                {
+                    @* Files already on the original (forward) or the draft. Ticked by
+                       default and sent with the message; untick one to leave it out
+                       (DEF-006, DEF-029). *@
+                    <input type="hidden" name="carryFrom" value="@src" />
+                    <p class="railnote">@L[Forward is not null || forwardingFile ? "From the original message:" : "Already attached:"]</p>
+                    @foreach (AttachmentView a in carried)
+                    {
+                        <label class="carry">
+                            <input type="checkbox" name="carry" value="@a.Index" checked />
+                            <LipiIcon Name="attachment" Size="14" /><span>@a.FileName</span> <span class="catmeta">@MainLayout.Size(a.SizeBytes)</span>
+                        </label>
+                    }
+                }
+                <ul class="cfiles" data-filelist></ul>
+                <label class="cdrop" data-drop>
+                    <input class="cfile" id="attachments" name="attachments" type="file" multiple aria-label="@L["Attach files"]" />
+                    <span>@L["Drop files, or"] <u>@L["choose"]</u></span>
+                </label>
+            </div>
+
+            @* Owner, 8 Oct 2026: Send one each only for people their organisation has given it to. *@
+            @if (mayMerge)
+            {
+                @* Item 64 (the board ComposeMerge): Send one each. *@
+                <div class="cblock cmerge">
+                    <label class="mtoggle">
+                        <input type="checkbox" name="merge" value="1" data-merge />
+                        <span class="toggle" aria-hidden="true"><i></i></span>
+                        <span><b>@L["Send one each"]</b> <span class="mnote">@L["(mail merge)"]</span></span>
+                    </label>
+                    <div class="mmore" data-merge-more>
+                        <p class="railnote">@L["Each person gets their own copy. No one sees anyone else's address. Write blanks such as {First name} or {Organisation}; they are filled from contacts, and anyone without a first name gets “colleague”."]</p>
+                        <label class="linkbtn mlist">@L["Use an uploaded list (CSV) instead"]
+                            <input type="file" name="mergeList" accept=".csv,text/csv" class="cfile" aria-label="@L["List of people (CSV)"]" />
+                        </label>
+                        <div class="mhint" data-merge-info
+                             data-word-noname="@L["{n} people have no first name. They will get “Dear colleague”."]"
+                             data-word-limit="@L["{org} allows {limit} merged messages a day; this uses {n}. Sent gradually, so receiving servers do not mistake it for spam."]"
+                             data-word-outside="@L["{n} of {total} are outside {org}."]"
+                             data-org="@orgName" data-limit="@mergeLimit"></div>
+                        @* rc.15 (item 64): each blank matched to a field of the list or of contacts, with what to write when it is empty. *@
+                        <div class="mmap" data-merge-map hidden
+                             data-word-head="@L["Fill each blank from"]" data-word-fallback="@L["When empty, write"]" data-word-unused="@L["(leave empty)"]"
+                             data-word-first="@L["First name"]" data-word-last="@L["Last name"]" data-word-org="@L["Organisation"]" data-word-colleague="@L["colleague"]"></div>
+                        @* DES-11 F5 (owner, 10 Oct 2026, "b"): one summary copy instead of Cc and Bcc on every copy. *@
+                        <div class="msummary">
+                            <label class="setlbl" for="msum">@L["Summary copy to"]</label>
+                            <input class="inp" id="msum" name="mergeSummary" type="text" value="@address" autocomplete="off" placeholder="@L["Name or address"]" />
+                            <p class="railnote">@L["Cc and Bcc are not used with Send one each, so no one gets every copy. One summary copy, listing who it went to, goes here instead. Leave it empty for none."]</p>
+                        </div>
+                        <button type="button" class="btn btn-s btn-sm" data-merge-preview>@L["Preview each copy"]</button>
+                    </div>
+                </div>
+            }
+
+            <span class="cgrow"></span>
+            @* rc.15 (item 63): counted on your dashboard if no answer comes within three days. *@
+            <label class="checkline cexpect" title="@L["Shown on your dashboard if no answer comes within three days."]"><input type="checkbox" name="expect" value="1" /><span>@L["Expect a reply"]</span></label>
+            <div class="csend">
+                <button type="submit" class="btn btn-p csendbtn" disabled="@full" data-send data-word-send="@L["Send"]" data-word-sendn="@L["Send to {n}"]">@L["Send"]</button>
+                <details class="pmenu clater">
+                    <summary class="btn btn-s"><LipiIcon Name="clock" Size="16" />@L["Send later"]</summary>
+                    <div class="pmenu-body pmenu-up">
+                        <SendLaterChoices L="L" Tomorrow="tomorrow" Monday="monday" Clock="clock" />
+                    </div>
+                </details>
+                <details class="pmenu confirm cdiscard">
+                    <summary class="btn btn-s iconsq" title="@L["Discard"]" aria-label="@L["Discard"]"><LipiIcon Name="trash" Size="16" /></summary>
+                    <div class="pmenu-body pmenu-up">
+                        <p class="pm-note">@L["Discard this message? A saved draft is removed too."]</p>
+                        <button type="submit" class="btn btn-d btn-sm" formaction="/draft/discard" formnovalidate data-discard>@L["Discard"]</button>
+                    </div>
+                </details>
+            </div>
+            <div class="cfoot">
+                <p class="cstate" data-draft-state>@(SavedFlag is not null ? L["Draft saved"] : L["Drafts are saved when you press Save draft"])</p>
+                <button type="submit" class="linkbtn" formaction="/draft" formnovalidate>@L["Save draft"]</button>
+                <button type="submit" class="linkbtn" formaction="/draft" name="savetemplate" value="1" formnovalidate>@L["Save as template"]</button>
+                @if (IsAdmin)
+                {
+                    <button type="submit" class="linkbtn" formaction="/draft" name="savetemplate" value="org" formnovalidate title="@L["Everyone in your organisation can use it; only administrators can remove it."]">@L["Save as template for everyone"]</button>
+                }
+                <a class="linkbtn" href="@Back" data-cancel>@L["Cancel"]</a>
+            </div>
+            <p class="railnote csign">@L["Anjal signs and sends from {address}."].Replace("{address}", address, StringComparison.Ordinal)</p>
+        </aside>
+        <KeepDraftDialog L="L" />
+        <ComposeTemplates L="L" />
+    </form>
+}
+
+@code {
+    /// <summary>The draft being edited, if any.</summary>
+    [Parameter] public Guid? DraftId { get; set; }
+
+    /// <summary>The small panel over the message being answered (item 48).</summary>
+    [Parameter] public bool Docked { get; set; }
+
+    /// <summary>Where Cancel and Close go, and where Send returns.</summary>
+    [Parameter] public string Back { get; set; } = "/folder/INBOX";
+
+    /// <summary>For the docked panel: the message being answered.</summary>
+    [Parameter] public Guid? ReplyId { get; set; }
+
+    /// <summary>For the docked panel: reply, replyall or forward.</summary>
+    [Parameter] public string? ReplyKind { get; set; }
+
+    [SupplyParameterFromQuery(Name = "saved")] private string? SavedFlag { get; set; }
+    [SupplyParameterFromQuery(Name = "undone")] private string? Undone { get; set; }
+    [SupplyParameterFromQuery(Name = "templates")] private string? TemplatesFlag { get; set; }
+    [SupplyParameterFromQuery(Name = "templatesaved")] private string? TemplateSaved { get; set; }
+
+    private bool Picking => TemplatesFlag == "1" && !Docked;
+    // Read as text and parsed here: a malformed id in a hand-edited link
+    // opens a blank compose instead of failing the request (DEF-019).
+    [SupplyParameterFromQuery(Name = "reply")] private string? ReplyText { get; set; }
+    [SupplyParameterFromQuery(Name = "replyall")] private string? ReplyAllText { get; set; }
+    [SupplyParameterFromQuery(Name = "forward")] private string? ForwardText { get; set; }
+    [SupplyParameterFromQuery(Name = "forwardatt")] private string? ForwardAttText { get; set; }
+    private Guid? ForwardAtt => ReplyKind is not null ? null : ParseId(ForwardAttText);
+    private Guid? Reply => ReplyKind is not null ? (ReplyKind == "reply" ? ReplyId : null) : ParseId(ReplyText);
+    private Guid? ReplyAll => ReplyKind is not null ? (ReplyKind == "replyall" ? ReplyId : null) : ParseId(ReplyAllText);
+    private Guid? Forward => ReplyKind is not null ? (ReplyKind == "forward" ? ReplyId : null) : ParseId(ForwardText);
+
+    private static Guid? ParseId(string? text) => Guid.TryParse(text, out Guid id) ? id : null;
+    [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "to")] private string? ToQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "cc")] private string? CcQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "subject")] private string? SubjectQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "body")] private string? BodyQuery { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private string to = string.Empty;
+    private string cc = string.Empty;
+    private string bcc = string.Empty;
+    private string subject = string.Empty;
+    private string body = string.Empty;
+    private string bodyHtml = string.Empty;
+    private string inReplyTo = string.Empty;
+    private bool full;
+    private int mergeLimit = MailboxService.DefaultDailyMergeLimit;
+    private bool mayMerge;
+    private Guid? carrySource;
+    private IReadOnlyList<AttachmentView> carried = System.Array.Empty<AttachmentView>();
+    private string address = string.Empty;
+    private string displayName = string.Empty;
+    private long used;
+    private long quota;
+    private IReadOnlyList<string> orgDomains = System.Array.Empty<string>();
+    private string orgName = string.Empty;
+    private IReadOnlyDictionary<string, string> names = new Dictionary<string, string>();
+    private DateTimeOffset tomorrow;
+    private DateTimeOffset monday;
+    private bool outsideWarning;
+    private bool forwardingFile;
+    private string OutsideText = string.Empty;
+
+    private string FromLabel => displayName.Length > 0 ? displayName + ", " + address : address;
+
+    private string Title => subject.Trim().Length > 0 ? subject.Trim() : L["New message"];
+
+    private bool IsAdmin { get; set; }
+
+    private string NamesJson => System.Text.Json.JsonSerializer.Serialize(names);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        to = ToQuery ?? string.Empty;
+        cc = CcQuery ?? string.Empty;
+        bcc = string.Empty;
+        subject = SubjectQuery ?? string.Empty;
+        body = BodyQuery ?? string.Empty;
+        bodyHtml = string.Empty;
+        inReplyTo = string.Empty;
+        carrySource = null;
+        carried = System.Array.Empty<AttachmentView>();
+
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        (tomorrow, monday) = MailboxService.SendLaterChoices(clock, DateTimeOffset.UtcNow);
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf(user);
+        if (mailboxId is null)
+        {
+            return;
+        }
+
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);
+        if (context is not null)
+        {
+            MailboxRow mb = context.Value.Mailbox;
+            // DES-11 D2: full under the organisation's storage plan (own size, shared total or reserve).
+            StorageState state = await Mail.StorageStateAsync(mb);
+            full = state.Full;
+            used = state.Plan == "shared" && state.OwnLimit == 0 ? state.SharedUsed : state.Used;
+            quota = state.Plan == "shared" && state.OwnLimit == 0 ? state.Shared : state.OwnLimit;
+            address = mb.Address;
+            displayName = mb.DisplayName ?? string.Empty;
+            orgName = context.Value.Tenant.DisplayName.Length > 0 ? context.Value.Tenant.DisplayName : context.Value.Tenant.Slug;
+        }
+        orgDomains = await Mail.OrganisationDomainsAsync(mailboxId.Value);
+        mergeLimit = await Mail.MergeLimitForAsync(mailboxId.Value);
+        mayMerge = WebmailAuthService.PersonIdOf(user) is Guid merger && await Mail.MayMergeAsync(merger);
+        IsAdmin = WebmailAuthService.PersonIdOf(user) is Guid person && await Mail.IsOrgAdminAsync(person);
+
+        if (DraftId is Guid draft)
+        {
+            ComposeRequest? loaded = await Mail.LoadDraftAsync(mailboxId.Value, draft);
+            if (loaded is not null)
+            {
+                to = loaded.To;
+                cc = loaded.Cc;
+                bcc = loaded.Bcc;
+                subject = loaded.Subject;
+                body = loaded.Body;
+                bodyHtml = loaded.BodyHtml;
+                inReplyTo = loaded.InReplyTo;
+                carrySource = draft;
+                carried = await Mail.ListAttachmentsAsync(mailboxId.Value, draft) ?? System.Array.Empty<AttachmentView>();
+            }
+        }
+        else
+        {
+            Guid? source = Reply ?? ReplyAll ?? Forward;
+            if (ForwardAtt is Guid wrapped && source is null)
+            {
+                // Item 23: the whole message travels as an attachment; the body is yours to write.
+                ComposePrefill? asFile = await Mail.PrefillAsync(mailboxId.Value, wrapped, MailboxService.PrefillKind.Forward);
+                if (asFile is not null)
+                {
+                    subject = asFile.Subject;
+                    (body, bodyHtml) = await Mail.StartBodyAsync(mailboxId.Value, string.Empty);
+                    if (await Mail.WholeMessageAttachmentAsync(mailboxId.Value, wrapped) is (AttachmentView whole, byte[] _))
+                    {
+                        carrySource = wrapped;
+                        carried = new[] { whole };
+                        forwardingFile = true;
+                    }
+                }
+            }
+            else if (source is null)
+            {
+                // A new message starts with the signature - unless this is a
+                // send error bringing back text already typed.
+                if (BodyQuery is null)
+                {
+                    (body, bodyHtml) = await Mail.StartBodyAsync(mailboxId.Value, string.Empty);
+                }
+            }
+            else
+            {
+                MailboxService.PrefillKind kind = Reply is not null ? MailboxService.PrefillKind.Reply
+                    : ReplyAll is not null ? MailboxService.PrefillKind.ReplyAll
+                    : MailboxService.PrefillKind.Forward;
+                ComposePrefill? prefill = await Mail.PrefillAsync(mailboxId.Value, source.Value, kind);
+                if (prefill is not null)
+                {
+                    to = prefill.To;
+                    cc = prefill.Cc;
+                    subject = prefill.Subject;
+                    (body, bodyHtml) = await Mail.StartBodyAsync(mailboxId.Value, prefill.Body);
+                    inReplyTo = prefill.InReplyTo;
+                }
+                if (Forward is Guid original)
+                {
+                    carrySource = original;
+                    carried = await Mail.ListAttachmentsAsync(mailboxId.Value, original) ?? System.Array.Empty<AttachmentView>();
+                }
+            }
+        }
+
+        // Names for the address cards (item 28), and the warning (UX-01).
+        var everyone = Anjal.Mime.AddressParser.Parse(to).Concat(Anjal.Mime.AddressParser.Parse(cc)).Concat(Anjal.Mime.AddressParser.Parse(bcc)).ToList();
+        var known = new Dictionary<string, string>(await Mail.NamesForAsync(mailboxId.Value, everyone.Select(a => a.Address)), StringComparer.OrdinalIgnoreCase);
+        foreach (Anjal.Mime.MailAddress a in everyone)
+        {
+            if (!known.ContainsKey(a.Address) && a.DisplayName.Length > 0)
+            {
+                known[a.Address] = a.DisplayName;
+            }
+        }
+        names = known;
+        var outside = everyone.Where(a => !orgDomains.Contains(Domain(a.Address), StringComparer.OrdinalIgnoreCase))
+            .Select(a => a.Address).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        int total = everyone.Select(a => a.Address).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+        outsideWarning = outside.Count > 0 && orgDomains.Count > 0;
+        if (outsideWarning)
+        {
+            string who = outside.Count == 1
+                ? L["{name} is outside {org}"].Replace("{name}", known.TryGetValue(outside[0], out string? n) ? n : outside[0], StringComparison.Ordinal)
+                : L["{n} of {total} recipients are outside {org}"].Replace("{n}", MailboxService.Count(outside.Count), StringComparison.Ordinal)
+                    .Replace("{total}", MailboxService.Count(total), StringComparison.Ordinal);
+            OutsideText = who.Replace("{org}", orgName, StringComparison.Ordinal) + (carried.Count > 0 ? L[", and there is an attachment."] : ".");
+        }
+    }
+
+    private static string Domain(string a)
+    {
+        int at = a.LastIndexOf('@');
+        return at < 0 ? string.Empty : a[(at + 1)..];
+    }
+}

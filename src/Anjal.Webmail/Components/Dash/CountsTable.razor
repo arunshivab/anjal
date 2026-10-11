@@ -1,0 +1,53 @@
+@* rc.15 (items 56, 58, 59, 61): received, sent and Junk for every period;
+   each number opens what it counts when there is a place to open it. On a
+   phone the same table turns: periods down, the three counts across. *@
+<table class="ctable" aria-label="@L["Received, sent and Junk by period"]">
+    <thead>
+        <tr><th scope="col"><span class="sr">@L["What"]</span></th>@foreach ((DashPeriod p, MailFigures _) in Rows){<th scope="col">@L[p.Label]</th>}</tr>
+    </thead>
+    <tbody>
+        <tr><th scope="row">@L["Received"]</th>@foreach ((DashPeriod p, MailFigures f) in Rows){<td>@Number(f.Received, Link?.Invoke("received", p))</td>}</tr>
+        <tr><th scope="row">@L["Sent"]</th>@foreach ((DashPeriod p, MailFigures f) in Rows){<td>@Number(f.Sent, Link?.Invoke("sent", p))</td>}</tr>
+        <tr class="junkrow"><th scope="row">@L["Junk"]</th>@foreach ((DashPeriod p, MailFigures f) in Rows){<td>@Number(f.Junk, Link?.Invoke("junk", p))</td>}</tr>
+    </tbody>
+</table>
+<table class="ctable ctable-turned" aria-label="@L["Received, sent and Junk by period"]">
+    <thead><tr><th scope="col"><span class="sr">@L["Period"]</span></th><th scope="col">@L["Received"]</th><th scope="col">@L["Sent"]</th><th scope="col">@L["Junk"]</th></tr></thead>
+    <tbody>
+        @foreach ((DashPeriod p, MailFigures f) in Rows)
+        {
+            <tr><th scope="row">@L[p.Label]</th><td>@Number(f.Received, Link?.Invoke("received", p))</td><td>@Number(f.Sent, Link?.Invoke("sent", p))</td><td class="junkcell">@Number(f.Junk, Link?.Invoke("junk", p))</td></tr>
+        }
+    </tbody>
+</table>
+@if (Note is not null)
+{
+    <p class="dnote">@Note</p>
+}
+
+@code {
+    /// <summary>Each period with its figures.</summary>
+    [Parameter] public IReadOnlyList<(DashPeriod Period, MailFigures Figures)> Rows { get; set; } = Array.Empty<(DashPeriod, MailFigures)>();
+
+    /// <summary>Where a count opens ("received", "sent" or "junk"), or null for none.</summary>
+    [Parameter] public Func<string, DashPeriod, string?>? Link { get; set; }
+
+    /// <summary>A line under the table.</summary>
+    [Parameter] public string? Note { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private static RenderFragment Number(long n, string? href) => __builder =>
+    {
+        string text = n.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        if (href is null || n == 0)
+        {
+            <span>@text</span>
+        }
+        else
+        {
+            <a href="@href">@text</a>
+        }
+    };
+}

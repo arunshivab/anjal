@@ -165,6 +165,9 @@ public sealed class OutboundMessage
     /// </summary>
     public static readonly System.TimeSpan DefaultGiveUp = System.TimeSpan.FromDays(5);
 
+    /// <summary>The reason recorded when the sender cancels a waiting message from the Outbox (rc.12).</summary>
+    public const string CancelledBySender = "Cancelled by the sender";
+
     /// <summary>
     /// Cutoff after which the message should be permanently failed regardless
     /// of remaining retry budget. Default is <see cref="DefaultGiveUp"/> after
@@ -329,7 +332,35 @@ public sealed class AuditEvent
 
     /// <summary>The client address the action came from, when known.</summary>
     public string RemoteAddress { get; set; } = string.Empty;
+
+    /// <summary>Its place in the trail, assigned by the store (rc.13).</summary>
+    public long Seq { get; set; }
+
+    /// <summary>
+    /// The chain (rc.13): SHA-256 of the previous entry's chain and this
+    /// entry, hex. An entry removed or changed breaks every chain after it.
+    /// Empty for entries written before rc.13.
+    /// </summary>
+    public string Chain { get; set; } = string.Empty;
+
+    /// <summary>The chain value for an entry following <paramref name="previous"/>.</summary>
+    /// <param name="previous">The previous entry's chain; empty for the first.</param>
+    /// <param name="e">The entry, with its time set.</param>
+    /// <returns>64 hex digits.</returns>
+    public static string ComputeChain(string previous, AuditEvent e)
+    {
+        System.ArgumentNullException.ThrowIfNull(e);
+        string line = string.Join("\u001f", previous ?? string.Empty, e.At.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            e.Actor, e.Action, e.Subject, e.Detail, e.RemoteAddress);
+        return System.Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(line)));
+    }
 }
+
+/// <summary>The result of checking the audit trail's chain (rc.13).</summary>
+/// <param name="Checked">Entries checked.</param>
+/// <param name="Intact">True when every chained entry follows from the one before.</param>
+/// <param name="BrokenAt">The first entry that does not, or null.</param>
+public sealed record AuditChainCheck(long Checked, bool Intact, long? BrokenAt);
 
 /// <summary>State of a queued webhook notification.</summary>
 public enum WebhookJobStatus

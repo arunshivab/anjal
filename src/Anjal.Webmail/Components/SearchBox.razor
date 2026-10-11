@@ -1,0 +1,101 @@
+@inject NavigationManager Nav
+
+@* rc.11: search sits at the head of the message list, not in a top bar.
+   rc.12 (UX-05, the board GapSearch): the funnel opens the filters - the
+   sender, a date range, the folder and "has an attachment".
+   rc.15 (owner, 9 Oct): the filters open only when the funnel is pressed. A search
+   that already has filters (a dashboard number with its days, say) shows them on the
+   line under the box and marks the funnel; the panel never covers the results. *@
+<form class="listsearch" method="get" action="/search" role="search">
+    <span class="sfield">
+        <LipiIcon Name="search" Size="15" Class="si" />
+        <input class="sbox" type="search" name="q" value="@SearchQuery" placeholder="@L["Search mail"]" aria-label="@L["Search mail"]" />
+        <details class="sfilters">
+            <summary class="sfunnel @(HasFilters ? "on" : "")" title="@L["Filters"]" aria-label="@L["Filters"]"><LipiIcon Name="filter" Size="15" /></summary>
+            <div class="sfpanel">
+                <label class="sfl sfwide">@L["From"]<input class="railinp" name="sender" value="@QueryValue("sender")" placeholder="@L["Name or address"]" /></label>
+                <label class="sfl">@L["From date"]<input class="railinp" type="date" name="after" value="@QueryValue("after")" /></label>
+                <label class="sfl">@L["To date"]<input class="railinp" type="date" name="before" value="@QueryValue("before")" /></label>
+                <label class="sfl sfwide">@L["Folder"]
+                    <select class="railinp scope" name="scope" aria-label="@L["Where to search"]">
+                        @if (Folders is not null)
+                        {
+                            @foreach (FolderView f in Folders)
+                            {
+                                <option value="@f.Name" selected="@(SearchScopeValue == f.Name)">@L.Folder(f.Name)</option>
+                            }
+                        }
+                        <option value="all" selected="@(SearchScopeValue == "all")">@L["All folders"]</option>
+                    </select>
+                </label>
+                <label class="checkline sfwide"><input type="checkbox" name="attach" value="1" checked="@(QueryValue("attach") == "1")" /><span>@L["Has an attachment"]</span></label>
+                <div class="sfbtns sfwide">
+                    <a class="btn btn-q btn-sm" href="/folder/@Uri.EscapeDataString(CurrentFolder)">@L["Clear"]</a>
+                    <button type="submit" class="btn btn-p btn-sm">@L["Search"]</button>
+                </div>
+            </div>
+        </details>
+    </span>
+    <input type="hidden" name="from" value="@CurrentFolder" />
+</form>
+
+@code {
+    /// <summary>The person's folders, for the "where to search" choice.</summary>
+    [Parameter] public IReadOnlyList<FolderView>? Folders { get; set; }
+
+    /// <summary>The words in the person's language; English when not given.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private bool HasFilters => QueryValue("sender").Length > 0 || QueryValue("after").Length > 0 || QueryValue("before").Length > 0 || QueryValue("attach") == "1";
+
+    private string CurrentFolder
+    {
+        get
+        {
+            string path = Nav.ToBaseRelativePath(Nav.Uri);
+            if (path.StartsWith("search", StringComparison.Ordinal) && QueryValue("from").Length > 0)
+            {
+                return QueryValue("from");
+            }
+            if (!path.StartsWith("folder/", StringComparison.Ordinal))
+            {
+                return FolderRow.Inbox;
+            }
+            string rest = path.Substring("folder/".Length);
+            int q = rest.IndexOf('?', StringComparison.Ordinal);
+            return Uri.UnescapeDataString(q < 0 ? rest : rest.Substring(0, q));
+        }
+    }
+
+    private string SearchQuery => QueryValue("q");
+
+    private string SearchScope => QueryValue("scope");
+
+    /// <summary>
+    /// What the scope selector should show: the scope of the search being
+    /// viewed, otherwise the folder the reader is in, so searching defaults
+    /// to where they already are.
+    /// </summary>
+    private string SearchScopeValue
+    {
+        get
+        {
+            string scope = SearchScope;
+            return scope.Length > 0 ? scope : CurrentFolder;
+        }
+    }
+
+    private string QueryValue(string name)
+    {
+        var uri = new Uri(Nav.Uri);
+        foreach (string pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            int eq = pair.IndexOf('=', StringComparison.Ordinal);
+            if (eq > 0 && Uri.UnescapeDataString(pair.Substring(0, eq)) == name)
+            {
+                return Uri.UnescapeDataString(pair.Substring(eq + 1).Replace('+', ' '));
+            }
+        }
+        return string.Empty;
+    }
+}

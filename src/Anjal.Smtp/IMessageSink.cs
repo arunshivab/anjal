@@ -46,6 +46,13 @@ public sealed class DeliveryContext
     /// <summary>The evidence copy of this message as received (v1.0.0-rc.8), or null when none is kept.</summary>
     public System.Guid? EvidenceId { get; init; }
 
+    /// <summary>
+    /// True only for Anjal's own security mail, delivered in-process by the webmail (DES-11 D2):
+    /// it arrives even in a full mailbox, so a full mailbox never hides a warning that someone is in
+    /// the account. Mail from the network never carries it.
+    /// </summary>
+    public bool AnjalSecurityMail { get; init; }
+
     /// <summary>A new, empty delivery context.</summary>
     public DeliveryContext()
     {
@@ -68,6 +75,7 @@ public sealed class DeliveryContext
         this.AuthResults = source.AuthResults;
         this.TransportTls = source.TransportTls;
         this.EvidenceId = source.EvidenceId;
+        this.AnjalSecurityMail = source.AnjalSecurityMail;
     }
 
     /// <summary>

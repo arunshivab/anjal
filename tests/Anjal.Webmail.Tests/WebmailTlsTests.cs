@@ -97,7 +97,7 @@ public sealed class WebmailTlsTests : IAsyncLifetime, System.IDisposable
         this.ca.Dispose();
         if (System.IO.Directory.Exists(this.root))
         {
-            System.IO.Directory.Delete(this.root, recursive: true);
+            TestFolders.Delete(this.root);
         }
     }
 

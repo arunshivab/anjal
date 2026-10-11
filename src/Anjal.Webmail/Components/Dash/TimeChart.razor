@@ -1,0 +1,51 @@
+@* rc.15 (item 56): received and sent, step by step - by hour for Today and
+   Yesterday, by day, by week, by month - one scale for both. *@
+<div class="tlegend"><span><i class="sw-r"></i>@L["Received"] @Total(b => b.Received)</span><span><i class="sw-s"></i>@L["Sent"] @Total(b => b.Sent)</span></div>
+<div class="tchart @(Bars.Count > 31 ? "dense" : null)" role="img" aria-label="@(L["Received {r}, sent {s}"].Replace("{r}", Total(b => b.Received), StringComparison.Ordinal).Replace("{s}", Total(b => b.Sent), StringComparison.Ordinal))">
+    @foreach (ChartBar b in Bars)
+    {
+        @* Item 56: each step opens its messages, where the viewer may see them. *@
+        @if (Link?.Invoke(b) is string href && b.Received + b.Sent > 0)
+        {
+            <a class="tcol" href="@href" title="@b.Title: @L["received"] @b.Received, @L["sent"] @b.Sent">
+                <span class="tbars"><i class="tb-r" style="height:@Height(b.Received)%"></i><i class="tb-s" style="height:@Height(b.Sent)%"></i></span>
+                <span class="tlabel">@(Show(b) ? b.Label : " ")</span>
+            </a>
+        }
+        else
+        {
+            <span class="tcol" title="@b.Title: @L["received"] @b.Received, @L["sent"] @b.Sent">
+                <span class="tbars"><i class="tb-r" style="height:@Height(b.Received)%"></i><i class="tb-s" style="height:@Height(b.Sent)%"></i></span>
+                <span class="tlabel">@(Show(b) ? b.Label : " ")</span>
+            </span>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The bars.</summary>
+    [Parameter] public IReadOnlyList<ChartBar> Bars { get; set; } = Array.Empty<ChartBar>();
+
+    /// <summary>Where a step opens its messages; null for totals only.</summary>
+    [Parameter] public Func<ChartBar, string?>? Link { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private long Peak => Math.Max(1, Bars.Count == 0 ? 0 : Bars.Max(b => Math.Max(b.Received, b.Sent)));
+
+    private string Total(Func<ChartBar, long> pick) => Bars.Sum(pick).ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+    private string Height(long n) => n == 0 ? "0" : Math.Max(2, n * 100 / Peak).ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    // A label under every bar when they fit; otherwise under every few.
+    private bool Show(ChartBar b)
+    {
+        int every = Bars.Count <= 14 ? 1 : Bars.Count <= 31 ? 3 : 4;
+        int i = 0;
+        for (; i < Bars.Count && !ReferenceEquals(Bars[i], b); i++)
+        {
+        }
+        return i % every == 0 || i == Bars.Count - 1;
+    }
+}

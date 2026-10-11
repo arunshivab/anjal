@@ -73,6 +73,14 @@ public static partial class HtmlSanitizer
     [GeneratedRegex(@"(expression\s*\(|url\s*\(|javascript:|@import|behavior\s*:)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, MatchTimeoutMs)]
     private static partial Regex DangerousCssRegex();
 
+    // rc.12 (item 15): a mail background picture - only an inline PNG, JPEG,
+    // GIF or WebP, nothing that can be fetched, and at most about 15 KB.
+    [GeneratedRegex(@"background-image\s*:\s*url\(\s*(?:&quot;|""|')?(data:image/(?:png|jpeg|gif|webp);base64,[A-Za-z0-9+/]+={0,2})(?:&quot;|""|')?\s*\)\s*;?", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, MatchTimeoutMs)]
+    private static partial Regex InlineImageRegex();
+
+    /// <summary>The longest inline background picture kept, in characters (about 15 KB of image).</summary>
+    public const int MaxInlinePicture = 20_000;
+
     /// <summary>
     /// Sanitise an HTML document or fragment.
     /// </summary>
@@ -329,7 +337,7 @@ public static partial class HtmlSanitizer
         "border-top", "border-right", "border-bottom", "border-left", "border-color", "border-width", "border-style",
         "border-collapse", "border-spacing", "border-radius", "width", "max-width", "min-width", "height", "max-height",
         "min-height", "vertical-align", "white-space", "word-break", "overflow-wrap", "display", "list-style-type",
-        "text-transform", "text-indent",
+        "text-transform", "text-indent", "background-repeat", "background-position", "background-size",
     };
 
     private static readonly string[] AllowedCssFunctions = { "rgb(", "rgba(", "hsl(", "hsla(" };
@@ -346,6 +354,15 @@ public static partial class HtmlSanitizer
     public static string SanitizeStyle(string style)
     {
         ArgumentNullException.ThrowIfNull(style);
+        // An inline background picture is lifted out first (its "data:...;base64,"
+        // would otherwise be split at the semicolon), checked exactly, and put back.
+        string? picture = null;
+        Match inline = InlineImageRegex().Match(style);
+        if (inline.Success && inline.Groups[1].Length <= MaxInlinePicture)
+        {
+            picture = inline.Groups[1].Value;
+            style = style.Remove(inline.Index, inline.Length);
+        }
         if (style.Contains('\\', StringComparison.Ordinal) || style.Contains("/*", StringComparison.Ordinal) ||
             style.Contains('@', StringComparison.Ordinal) || DangerousCssRegex().IsMatch(style))
         {
@@ -370,6 +387,14 @@ public static partial class HtmlSanitizer
                 kept.Append(';');
             }
             kept.Append(property.ToLowerInvariant()).Append(':').Append(value);
+        }
+        if (picture is not null)
+        {
+            if (kept.Length > 0)
+            {
+                kept.Append(';');
+            }
+            kept.Append("background-image:url(").Append(picture).Append(')');
         }
         return kept.ToString();
     }

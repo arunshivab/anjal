@@ -1,0 +1,56 @@
+@* rc.15: the sentences the browser script writes itself (draft state,
+   connection, passkey and attachment messages), in the person's language.
+   A data block, never run: the script reads it as JSON (W() in app.js),
+   and falls back to the English when a word is missing. *@
+<script type="application/json" id="anjal-words">@((MarkupString)Json)</script>
+
+@code {
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private static readonly System.Text.Json.JsonSerializerOptions Options = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default };
+
+    private string Json => System.Text.Json.JsonSerializer.Serialize(Map(), Options);
+
+    // Only the words this language says differently; the script keeps the English otherwise.
+    private Dictionary<string, string> Map()
+    {
+        var all = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["Anjal is reachable."] = L["Anjal is reachable."],
+            ["You are offline. This opens when Anjal can be reached again; what is on screen stays readable."] = L["You are offline. This opens when Anjal can be reached again; what is on screen stays readable."],
+            ["Anjal is not reachable from this browser. Anything you send will fail until it returns."] = L["Anjal is not reachable from this browser. Anything you send will fail until it returns."],
+            ["Not saved yet"] = L["Not saved yet"],
+            ["am"] = L["am"],
+            ["pm"] = L["pm"],
+            ["Saved as draft · {time}"] = L["Saved as draft · {time}"],
+            ["The attachments add up to more than 18 MB. Remove some, or send them in more than one message."] = L["The attachments add up to more than 18 MB. Remove some, or send them in more than one message."],
+            ["Not sent. {address} is not a valid mailbox address. Correct it and press Send again."] = L["Not sent. {address} is not a valid mailbox address. Correct it and press Send again."],
+            ["The server did not answer. Try again."] = L["The server did not answer. Try again."],
+            ["The passkey was not used. Try again, or use another way."] = L["The passkey was not used. Try again, or use another way."],
+            ["That did not work. Try again, or use another way."] = L["That did not work. Try again, or use another way."],
+            ["This device's passkey is already added."] = L["This device's passkey is already added."],
+            ["No passkey was added. Try again."] = L["No passkey was added. Try again."],
+            ["The authenticator did not confirm someone was present."] = L["The authenticator did not confirm someone was present."],
+            ["The authenticator's data was cut short."] = L["The authenticator's data was cut short."],
+            ["The browser's answer could not be read."] = L["The browser's answer could not be read."],
+            ["The browser's answer was for something else."] = L["The browser's answer was for something else."],
+            ["The passkey belongs to a different server."] = L["The passkey belongs to a different server."],
+            ["The passkey was used from a different web address."] = L["The passkey was used from a different web address."],
+            ["That passkey is already added."] = L["That passkey is already added."],
+            ["You have the most passkeys allowed. Remove one first."] = L["You have the most passkeys allowed. Remove one first."],
+            ["No passkey has been added to this account yet."] = L["No passkey has been added to this account yet."],
+            ["Link address"] = L["Link address"],
+            ["That passkey is not one of this account's."] = L["That passkey is not one of this account's."],
+            ["The browser's answer had no authenticator data."] = L["The browser's answer had no authenticator data."],
+            ["The browser did not return a new key."] = L["The browser did not return a new key."],
+            ["The key's id was cut short."] = L["The key's id was cut short."],
+            ["That kind of passkey is not supported. Use one made by this device, a phone or a security key."] = L["That kind of passkey is not supported. Use one made by this device, a phone or a security key."],
+            ["This passkey's counter went backwards, which happens when a key has been copied. It was not accepted."] = L["This passkey's counter went backwards, which happens when a key has been copied. It was not accepted."],
+            ["The passkey's signature did not match."] = L["The passkey's signature did not match."],
+            ["The request had expired. Try again."] = L["The request had expired. Try again."],
+            ["Sign in again."] = L["Sign in again."],
+        };
+        return all.Where(p => !string.Equals(p.Key, p.Value, StringComparison.Ordinal)).ToDictionary(p => p.Key, p => p.Value, StringComparer.Ordinal);
+    }
+}

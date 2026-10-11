@@ -1,0 +1,18 @@
+@* rc.12 (item 17): leaving a message that has been written in asks first.
+   Part of the page, opened by the browser script when Cancel, Close or any
+   other way out is used after something was typed; without the script the
+   page simply leaves, and what autosave kept stays in Drafts. *@
+<dialog class="keepdraft" data-keepdraft aria-labelledby="keepdraft-title">
+    <h2 id="keepdraft-title">@L["Keep this draft?"]</h2>
+    <p>@L["You closed a message with unsent text."]</p>
+    <div class="kd-actions">
+        <button type="submit" class="btn btn-p" formaction="/draft" formnovalidate data-needs-server>@L["Save draft"]</button>
+        <button type="submit" class="btn btn-s" formaction="/draft/discard" formnovalidate data-discard>@L["Discard"]</button>
+        <button type="button" class="btn btn-s" data-keepediting autofocus>@L["Keep editing"]</button>
+    </div>
+</dialog>
+
+@code {
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+}

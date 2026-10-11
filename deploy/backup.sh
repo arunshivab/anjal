@@ -24,6 +24,42 @@
 # (DEF-061). Any verification failure now fails the run.
 set -euo pipefail
 
+STATUS_FILE=${ANJAL_BACKUP_STATUS:-/var/lib/anjal/backup-status}
+
+# ---- D-88 (owner, 10 Oct 2026): try for about 30 minutes, then say so ----
+# A run that fails is tried again after 2, 4, 8 and 16 minutes - 30 minutes in
+# all - so a short network or Backblaze outage does not cost a night's backup.
+# When the last try fails too, a "failed" line is added to the status record,
+# beside the "ok" line of the last good backup: the Anjal console's "Last good
+# backup" turns red at once and the operators are mailed within 15 minutes,
+# instead of when the last good backup is 48 hours old. "Not configured"
+# (exit 3) is not tried again: waiting does not configure it.
+if [ -z "${ANJAL_BACKUP_TRY:-}" ]; then
+  WAITS=${ANJAL_BACKUP_RETRY_WAITS-120 240 480 960}
+  try=1
+  code=0
+  for wait in $WAITS last; do
+    if ANJAL_BACKUP_TRY=$try "$BASH" "$0" "$@"; then
+      exit 0
+    else
+      code=$?
+    fi
+    if [ "$code" -eq 3 ] || [ "$wait" = last ]; then
+      break
+    fi
+    echo "[backup $(date -u +%H:%M:%S)] try $try failed (exit $code); trying again in $wait s"
+    sleep "$wait"
+    try=$((try + 1))
+  done
+  good=$(grep -m1 '^ok ' "$STATUS_FILE" 2>/dev/null || true)
+  {
+    if [ -n "$good" ]; then echo "$good"; fi
+    printf 'failed %s after %s tries (exit %s)\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$try" "$code"
+  } > "$STATUS_FILE.tmp" && chmod 644 "$STATUS_FILE.tmp" && mv "$STATUS_FILE.tmp" "$STATUS_FILE"
+  echo "[backup $(date -u +%H:%M:%S)] FAILED after $try tries (exit $code); recorded in $STATUS_FILE for the Anjal console and the operators' alert"
+  exit "$code"
+fi
+
 RCLONE_CONFIG=${RCLONE_CONFIG:-/etc/anjal/rclone.conf}
 REMOTE=${ANJAL_BACKUP_REMOTE:-b2crypt:}
 MAILDIR_ROOT=${ANJAL_MAILDIR_ROOT:-/var/mail/anjal}
@@ -46,7 +82,7 @@ REMOTES=$(rclone listremotes 2>/dev/null || true)
 if [ ! -r "$RCLONE_CONFIG" ] || grep -q 'CHANGE-ME' "$RCLONE_CONFIG" \
    || ! grep -qxF "$REMOTE_NAME:" <<< "$REMOTES"; then
   log "backups are not configured: $RCLONE_CONFIG is missing, unreadable, still holds CHANGE-ME placeholders, or has no remote \"$REMOTE_NAME\" (DEPLOY.md section 11). Nothing was dumped."
-  exit 1
+  exit 3
 fi
 
 # Through a crypt remote only cryptcheck compares real checksums; plain
@@ -126,6 +162,16 @@ if [ -d "$ACME_DIR" ]; then
   verify "$ACME_DIR" "${REMOTE}acme/" --exclude 'renew.request' --exclude '*.tmp'
 fi
 
+# ---- 4b. DKIM seal key (rc.15, DES-11 S6) ----
+# The mail server's seal key locks every DKIM key in the database; without it
+# those keys cannot be opened, and every domain would need a new DKIM record.
+# It goes to the encrypted backup like the ACME keys.
+SEAL_KEY=${ANJAL_DKIM_SEAL_KEY:-/var/lib/anjal/dkim-seal.pem}
+if [ -r "$SEAL_KEY" ]; then
+  log "copy the DKIM seal key -> ${REMOTE}keys/"
+  rclone copyto "$SEAL_KEY" "${REMOTE}keys/dkim-seal.pem" --stats=0 --quiet
+  verify "$(dirname "$SEAL_KEY")" "${REMOTE}keys/" --include "$(basename "$SEAL_KEY")"
+fi
 # ---- 5. Prune old deleted-file archives (30 days) ----
 # Settings snapshot with every secret removed, and the greylist mirror
 # (v1.0.0-rc.7). Settings also live in the database dump; this copy covers
@@ -168,3 +214,8 @@ if [ -d "$EVIDENCE_ROOT" ]; then
 fi
 log "verify ok"
 log "done"
+
+# v1.0.0-rc.14: a readable mark of the last good run, for the Anjal console's
+# service health ("Last good backup"). Written only after everything verified;
+# it replaces any "failed" line (D-88).
+printf 'ok %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STATUS_FILE.tmp" && chmod 644 "$STATUS_FILE.tmp" && mv "$STATUS_FILE.tmp" "$STATUS_FILE"

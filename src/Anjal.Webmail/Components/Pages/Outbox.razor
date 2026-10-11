@@ -1,0 +1,151 @@
+@page "/outbox"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+
+@* rc.12 (item 9, the board ListOutbox): mail still being delivered to someone
+   outside. Each row is one recipient Anjal is still trying; when every
+   recipient has it, it leaves the Outbox. The copy stays in Sent. *@
+<PageTitle>@L["Outbox"] — Anjal</PageTitle>
+
+<div class="@(Open is null ? "fview layout-three" : "fview layout-three has-open")">
+    <section class="listcol">
+        <div class="listhead">
+            <div class="lh-row">
+                <h1>@L["Outbox"]</h1>
+                <span class="cnt">@L["Mail still being delivered"]</span>
+            </div>
+        </div>
+        @if (Cancelled is not null)
+        {
+            <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Cancelled for that recipient. Your copy stays in Sent."]</span></div></div>
+        }
+        @if (Retrying is not null)
+        {
+            <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="clock" Size="16" /><span>@L["Trying again now."]</span></div></div>
+        }
+        @if (items.Count == 0)
+        {
+            <p class="empty">@L["Nothing waiting. Everything you sent has been delivered."]</p>
+        }
+        else
+        {
+            <div class="mlist" data-list>
+                <section class="mgroup" aria-label="@L["Being delivered"]">
+                    <h2 class="mgroup-day">@L["Being delivered"]</h2>
+                    @foreach (OutboxItem o in items)
+                    {
+                        <div class="@(o.Id == Open?.Id ? "mrow open" : "mrow")" aria-current="@(o.Id == Open?.Id ? "true" : null)">
+                            <span class="spine" aria-hidden="true"><i></i></span>
+                            <div class="mbody">
+                                <div class="mline1"><span class="sto">@L["To"]</span><span class="sname">@o.To</span><time title="@clock.Full(o.Queued)"><span class="tt">@clock.Time(o.Queued)</span><small class="td">@clock.ListDay(o.Queued, DateTimeOffset.UtcNow)</small></time></div>
+                                <div class="mline2"><a class="subj" href="/outbox?open=@o.Id">@(string.IsNullOrWhiteSpace(o.Subject) ? L["(no subject)"] : o.Subject)</a></div>
+                                <div class="mline3 msends"><span class="@(o.Attempts > 0 ? "sendpill retry" : "sendpill")">@State(o)</span></div>
+                            </div>
+                        </div>
+                    }
+                </section>
+            </div>
+        }
+    </section>
+    @if (Open is OutboxItem shown)
+    {
+        <section class="readcol">
+            <div class="focusbar phoneonly"><a class="linkbtn" href="/outbox"><LipiIcon Name="chevron-left" Size="15" />@L["Outbox"]</a></div>
+            <div class="mview">
+                <article class="letter" aria-label="@L["Message"]">
+                    <h1 class="lsubj">@(string.IsNullOrWhiteSpace(shown.Subject) ? L["(no subject)"] : shown.Subject)</h1>
+                    <div class="lbody lplain">@shown.Text</div>
+                </article>
+                <aside class="envelope" aria-label="@L["Envelope"]">
+                    <section class="ecard">
+                        <span class="elabel">@L["Delivery"]</span>
+                        <div class="edeliv">
+                            <LipiIcon Name="clock" Size="15" />
+                            <span><b>@shown.To</b><br />
+                                <span class="eaddr">@Detail(shown)</span></span>
+                        </div>
+                    </section>
+                    <section class="ecard etime">
+                        <span class="elabel">@L["Sent"]</span><span>@clock.Full(shown.Queued)</span>
+                    </section>
+                    <div class="eactions">
+                        <form method="post" action="/outbox/@shown.Id/retry" class="inline">
+                            <AntiforgeryToken />
+                            <button type="submit" class="eb" data-needs-server>@L["Try now"]</button>
+                        </form>
+                        <details class="pmenu confirm">
+                            <summary class="eb eb-danger">@L["Cancel for {name}"].Replace("{name}", shown.To, StringComparison.Ordinal)</summary>
+                            <form method="post" action="/outbox/@shown.Id/cancel" class="pmenu-body">
+                                <AntiforgeryToken />
+                                <p class="pm-note">@L["Stop delivering this message to {name}? Others who already have it keep it."].Replace("{name}", shown.To, StringComparison.Ordinal)</p>
+                                <button type="submit" class="btn btn-d btn-sm" data-needs-server>@L["Cancel delivery"]</button>
+                            </form>
+                        </details>
+                    </div>
+                    <p class="railnote">@L["When every recipient has it, the message leaves the Outbox. Your copy stays in Sent."]</p>
+                </aside>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "open")] private string? OpenText { get; set; }
+    [SupplyParameterFromQuery(Name = "cancelled")] private string? Cancelled { get; set; }
+    [SupplyParameterFromQuery(Name = "retrying")] private string? Retrying { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private IReadOnlyList<OutboxItem> items = Array.Empty<OutboxItem>();
+
+    private OutboxItem? Open => Guid.TryParse(OpenText, out Guid id) ? items.FirstOrDefault(o => o.Id == id) : null;
+
+    private string State(OutboxItem o) => o.Attempts == 0
+        ? L["Sending now"]
+        : L["Retrying: {reason}"].Replace("{reason}", Reason(o.LastReply), StringComparison.Ordinal);
+
+    private string Detail(OutboxItem o) => o.Attempts == 0
+        ? L["Being sent now."]
+        : L["{reason} (try {n}). Next try {time}. Anjal keeps trying until {giveup}, then tells you."]
+            .Replace("{reason}", Reason(o.LastReply), StringComparison.Ordinal)
+            .Replace("{n}", MailboxService.Count(o.Attempts), StringComparison.Ordinal)
+            .Replace("{time}", clock.List(o.NextTry, DateTimeOffset.UtcNow), StringComparison.Ordinal)
+            .Replace("{giveup}", clock.Full(o.GiveUp), StringComparison.Ordinal);
+
+    /// <summary>The receiving server's reply, in plain words where it is a common one.</summary>
+    private string Reason(string reply)
+    {
+        string r = reply.Trim();
+        if (r.StartsWith("4", StringComparison.Ordinal) && (r.Contains("greylist", StringComparison.OrdinalIgnoreCase) || r.Contains("try again", StringComparison.OrdinalIgnoreCase)))
+        {
+            return L["their server asked Anjal to try again later"];
+        }
+        if (r.Contains("timed out", StringComparison.OrdinalIgnoreCase) || r.Contains("timeout", StringComparison.OrdinalIgnoreCase) || r.Contains("refused", StringComparison.OrdinalIgnoreCase))
+        {
+            return L["their server is not answering"];
+        }
+        if (r.StartsWith("4", StringComparison.Ordinal))
+        {
+            return L["their server is busy"];
+        }
+        return r.Length == 0 ? L["waiting"] : r.Length > 120 ? r[..120] + "…" : r;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        Guid? mailboxId = WebmailAuthService.MailboxIdOf(user);
+        if (mailboxId is not null)
+        {
+            items = await Mail.ListOutboxAsync(mailboxId.Value);
+        }
+    }
+}

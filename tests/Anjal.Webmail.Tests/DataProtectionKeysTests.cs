@@ -39,7 +39,7 @@ public sealed class DataProtectionKeysTests : System.IDisposable
     {
         if (System.IO.Directory.Exists(this.dir))
         {
-            System.IO.Directory.Delete(this.dir, recursive: true);
+            TestFolders.Delete(this.dir);
         }
     }
 

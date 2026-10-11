@@ -1,74 +1,190 @@
 @page "/search"
 @attribute [Authorize]
 @inject MailboxService Mail
+@inject Words Words
 
-<PageTitle>Search — Anjal</PageTitle>
+<PageTitle>@L["Search"] — Anjal</PageTitle>
 
-<div class="qbar">
-    <span class="q">@(string.IsNullOrWhiteSpace(Q) ? "All messages" : "\u201c" + Q + "\u201d")</span>
-    <span class="cnt">@total result@(total == 1 ? "" : "s") in @(Scope == "all" ? "all folders" : SearchFolder)</span>
-    <span class="sp">
-        <a class="btn btn-q btn-sm" href="/folder/@Uri.EscapeDataString(SearchFolder)">Clear</a>
-    </span>
+<div class="@(OpenId is null ? "fview layout-three" : "fview layout-three has-open")">
+<section class="listcol">
+<div class="listhead">
+    <div class="lh-row">
+        <h1>@(string.IsNullOrWhiteSpace(Q) ? L["Search"] : "\u201c" + Q + "\u201d")</h1>
+        <span class="cnt">@L["{n} found in {where}"].Replace("{n}", total.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{where}", Scope == "all" ? L["All folders"] : L.Folder(SearchFolder), StringComparison.Ordinal)</span>
+        <span class="lh-grow"></span>
+        @* Owner, 9 Oct 2026: search results sort as a folder does; the order is remembered for search. *@
+        <SortMenu L="L" Folder="@MailboxService.SearchSortKey" Sort="@order" Back="@SortBack" />
+        <a class="btn btn-q btn-sm" href="/folder/@Uri.EscapeDataString(SearchFolder)">@L["Clear search"]</a>
+    </div>
+    <div class="lh-row lh-find">
+        <SearchBox Folders="folders" L="L" />
+    </div>
+    @if (FilterText.Length > 0)
+    {
+        <div class="lh-row sfsummary"><LipiIcon Name="filter" Size="13" /><span>@FilterText</span></div>
+    }
+    <SortHeadings L="L" Folder="@MailboxService.SearchSortKey" Sort="@order" Back="@SortBack" />
 </div>
 
 @if (items is null || items.Count == 0)
 {
-    <p class="empty">Nothing matched.</p>
+    <p class="empty">@L["Nothing matched."]</p>
 }
 else
 {
-    <table class="ml">
-        <thead>
-            <tr>
-                <th class="c-fld">Folder</th>
-                <th class="c-from">From</th>
-                <th class="c-att"><span class="sr-only">Attachments</span></th>
-                <th>Subject</th>
-                <th class="c-time right">Received</th>
-                <th class="c-size right">Size</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (MessageRow m in items)
-            {
-                <tr class="@(m.Seen ? "" : "unread")">
-                    <td class="c-fld"><span class="mono">@FolderName(m)</span></td>
-                    <td class="c-from"><span class="from">@Sender(m)</span></td>
-<td class="c-att">
-                        @if (m.HasAttachments)
-                        {
-                        <span data-attachment title="Has attachments" aria-label="Has attachments"><LipiIcon Name="attachment" Size="14" /></span>
-                        }
-                    </td>
-                    <td class="c-subject">
-                        <span class="subj">
-                            <a href="/message/@m.Id">@(string.IsNullOrWhiteSpace(m.Subject) ? "(no subject)" : m.Subject)</a>
-                        </span>
-                    </td>
-                    <td class="c-time num">@MainLayout.When(m.ReceivedAt)</td>
-                    <td class="c-size num">@MainLayout.Size(m.SizeBytes)</td>
-                </tr>
-            }
-        </tbody>
-    </table>
-    <div class="pg">
-        @if (pageIndex > 0)
-        {
-            <a href="@PageLink(pageIndex - 1)">&laquo; Newer</a>
-        }
-        @if ((pageIndex + 1) * MailboxService.PageSize < total)
-        {
-            <a href="@PageLink(pageIndex + 1)">Older &raquo;</a>
-        }
-        <span class="of">Page @(pageIndex + 1) of @Math.Max(1, (total + MailboxService.PageSize - 1) / MailboxService.PageSize)</span>
+    @* rc.15 (item 37, owner 7 Oct): search results can be ticked like any folder - one at a time,
+       Shift-click for a range - and acted on together, wherever each message lives. *@
+    <form method="post" action="/folder/INBOX/bulk" data-bulkform>
+    <AntiforgeryToken />
+    <input type="hidden" name="back" value="@PageLink(pageIndex)" />
+    <div class="selbar" data-selbar>
+        <div class="sel-row">
+            <input type="checkbox" data-selectall aria-label="@L["Select all on this page"]" />
+            <span class="sel-count" data-bulklabel data-word-selected="@L["{n} selected"]">@L["Select"]</span>
+            <span class="sel-grow"></span>
+            <button type="button" class="linkbtn sel-clear" data-selclear>@L["Clear"]</button>
+        </div>
+        <div class="sel-row sel-actions">
+            <button class="pbtn" name="action" value="read" type="submit" data-bulkaction data-needs-unread data-needs-server><LipiIcon Name="check" Size="15" />@L["Mark as read"]</button>
+            <button class="pbtn" name="action" value="unread" type="submit" data-bulkaction data-needs-read data-needs-server><LipiIcon Name="email" Size="15" />@L["Mark as unread"]</button>
+            <button class="pbtn" name="action" value="archive" type="submit" data-bulkaction data-needs-server><LipiIcon Name="archive" Size="15" />@L["Archive"]</button>
+            <button class="pbtn" name="action" value="spam" type="submit" data-bulkaction data-needs-server><LipiIcon Name="minus-circle" Size="15" />@L["Report junk"]</button>
+            <button class="pbtn picon" name="action" value="trash" type="submit" data-bulkaction data-needs-server title="@L["Delete"]" aria-label="@L["Delete"]"><LipiIcon Name="trash" Size="15" /></button>
+            <details class="pmenu">
+                <summary class="pbtn picon" title="@L["More"]" aria-label="@L["More"]"><LipiIcon Name="more-horizontal" Size="15" /></summary>
+                <div class="pmenu-body">
+                    <div class="pmi-row">
+                        <LipiIcon Name="folder" Size="15" />
+                        <select name="to" class="scope" aria-label="@L["Move to"]" data-bulkaction>
+                            @foreach (FolderView f in (folders ?? Array.Empty<FolderView>()).Where(f => f.Name is not ("Drafts" or "Sent" or "Trash")))
+                            {
+                                <option value="@f.Name">@L.Folder(f.Name)</option>
+                            }
+                        </select>
+                        <button class="btn btn-s btn-sm" name="action" value="move" type="submit" data-bulkaction data-needs-server>@L["Move to"]</button>
+                    </div>
+                </div>
+            </details>
+        </div>
     </div>
+    <div class="mlist noflag" data-list>
+        @foreach (IGrouping<string, MessageRow> group in items.GroupBy(m => Dated ? clock.DayGroup(m.ReceivedAt, DateTimeOffset.UtcNow, weekStart) : string.Empty))
+        {
+            <section class="mgroup" aria-label="@(Dated ? L.Heading(group.Key) : null)">
+                @if (Dated)
+                {
+                    <h2 class="mgroup-day">@L.Heading(group.Key)</h2>
+                }
+                @foreach (MessageRow m in group)
+                {
+                    <MessageListRow M="m" L="L" Clock="clock" FolderName="@FolderName(m)" FolderLabel="@L.Folder(FolderName(m))" Threshold="threshold" Trusted="trusted"
+                                    Category="@(m.CategoryId is Guid cid ? categories.FirstOrDefault(c => c.Row.Id == cid) : null)" Who="@Sender(m)"
+                                    OpenLink="@OpenLink(m)" IsOpen="@(m.Id == OpenId)" Selectable="true" BackLink="@PageLink(pageIndex)"
+                                    QuickUrl="/folder/INBOX/bulk" />
+                }
+            </section>
+        }
+    </div>
+    <div class="pager">
+        <span class="pg-grow"></span>
+        <PageSteps L="L" Index="pageIndex" Size="pageSize" Total="total" Link="PageLink" />
+    </div>
+    </form>
 }
+</section>
+@if (OpenId is Guid openId)
+{
+    <section class="readcol">
+        <div class="focusbar phoneonly"><a class="linkbtn" href="@PageLink(pageIndex)"><LipiIcon Name="chevron-left" Size="15" />@L["Search"]</a></div>
+        <MessageReader Id="openId" BackLink="@(PageLink(pageIndex) + "&open=" + openId)" />
+    </section>
+}
+</div>
 
 @code {
     [SupplyParameterFromQuery(Name = "q")] private string? Q { get; set; }
     [SupplyParameterFromQuery(Name = "scope")] private string? Scope { get; set; }
     [SupplyParameterFromQuery(Name = "from")] private string? From { get; set; }
+    [SupplyParameterFromQuery(Name = "sender")] private string? SenderFilter { get; set; }
+    [SupplyParameterFromQuery(Name = "after")] private string? AfterText { get; set; }
+    [SupplyParameterFromQuery(Name = "before")] private string? BeforeText { get; set; }
+    [SupplyParameterFromQuery(Name = "attach")] private string? Attach { get; set; }
+    [SupplyParameterFromQuery(Name = "score")] private int? ScoreFilter { get; set; }
+    [SupplyParameterFromQuery(Name = "open")] private string? OpenText { get; set; }
+    // rc.15 (items 56, 58): a dashboard number narrows by category, to mail rescued from Junk, or lists the biggest first.
+    [SupplyParameterFromQuery(Name = "cat")] private string? CategoryText { get; set; }
+    [SupplyParameterFromQuery(Name = "sort")] private string? Sort { get; set; }
+    [SupplyParameterFromQuery(Name = "rescued")] private string? Rescued { get; set; }
+
+    private Guid? CategoryFilter => Guid.TryParse(CategoryText, out Guid g) ? g : null;
+
+    // Days back for "rescued from Junk"; null when not asked.
+    private int? RescuedDays => int.TryParse(Rescued, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int d) && d > 0 ? Math.Min(d, 366) : null;
+
+    private Guid? OpenId => Guid.TryParse(OpenText, out Guid g) ? g : null;
+
+    /// <summary>A date typed in the filters, as the start of that day in the person's zone.</summary>
+    private DateTimeOffset? Day(string? text, int addDays) =>
+        DateTime.TryParseExact(text ?? string.Empty, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime d)
+            ? MailboxService.AtLocal(clock, d.AddDays(addDays))
+            : null;
+
+    private string FilterQuery =>
+        (string.IsNullOrWhiteSpace(SenderFilter) ? string.Empty : "&sender=" + Uri.EscapeDataString(SenderFilter))
+        + (string.IsNullOrWhiteSpace(AfterText) ? string.Empty : "&after=" + Uri.EscapeDataString(AfterText))
+        + (string.IsNullOrWhiteSpace(BeforeText) ? string.Empty : "&before=" + Uri.EscapeDataString(BeforeText))
+        + (Attach == "1" ? "&attach=1" : string.Empty)
+        + (ScoreFilter is int s ? "&score=" + s.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
+        + (CategoryFilter is Guid c ? "&cat=" + c : CategoryText == "none" ? "&cat=none" : string.Empty)
+        + (Sort == "size" ? "&sort=size" : string.Empty)
+        + (RescuedDays is int rd ? "&rescued=" + rd.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty);
+
+    private string FilterText
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(SenderFilter))
+            {
+                parts.Add(L["from {who}"].Replace("{who}", SenderFilter.Trim(), StringComparison.Ordinal));
+            }
+            if (Day(AfterText, 0) is DateTimeOffset a)
+            {
+                parts.Add(L["since {date}"].Replace("{date}", clock.Date(a), StringComparison.Ordinal));
+            }
+            if (Day(BeforeText, 0) is DateTimeOffset b)
+            {
+                parts.Add(L["until {date}"].Replace("{date}", clock.Date(b), StringComparison.Ordinal));
+            }
+            if (Attach == "1")
+            {
+                parts.Add(L["with an attachment"]);
+            }
+            if (ScoreFilter is int s)
+            {
+                parts.Add((s >= MailFigures.TopScore ? L["spam score {n} or more"] : L["spam score {n}"]).Replace("{n}", s.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal));
+            }
+            if (CategoryFilter is Guid c)
+            {
+                parts.Add(L["in category {name}"].Replace("{name}", categories.FirstOrDefault(x => x.Row.Id == c)?.Row.Name ?? "?", StringComparison.Ordinal));
+            }
+            else if (CategoryText == "none")
+            {
+                parts.Add(L["without a category"]);
+            }
+            if (RescuedDays is int rd)
+            {
+                parts.Add(L["rescued from Junk in the last {n} days"].Replace("{n}", rd.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal));
+            }
+            if (Sort == "size")
+            {
+                parts.Add(L["biggest first"]);
+            }
+            return string.Join(", ", parts);
+        }
+    }
+
+    private string OpenLink(MessageRow m) => PageLink(pageIndex) + "&open=" + m.Id;
     // Read as text and parsed here: a non-numeric or out-of-range value in a
     // hand-edited link falls back to the first page instead of failing the
     // request while the parameter is bound (DEF-019).
@@ -76,10 +192,19 @@ else
     private int? PageQuery => int.TryParse(PageText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int page) ? page : null;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
+    private ZonedClock clock = ZonedClock.Default;
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private IReadOnlyList<FolderView>? folders;
+
     private IReadOnlyList<MessageRow>? items;
     private IReadOnlyDictionary<Guid, string> folderNames = new Dictionary<Guid, string>();
     private long total;
     private int pageIndex;
+    private int pageSize = MailboxPreferences.DefaultPageSize;
+    private string weekStart = MailboxPreferences.DefaultWeekStart;
+    private int threshold = TenantRow.DefaultSpamThreshold;
+    private IReadOnlySet<string> trusted = new HashSet<string>();
+    private IReadOnlyList<CategoryView> categories = Array.Empty<CategoryView>();
 
     /// <summary>The folder searched: the chosen scope, else where the search started.</summary>
     private string SearchFolder =>
@@ -87,9 +212,18 @@ else
         : string.IsNullOrWhiteSpace(From) ? FolderRow.Inbox : From;
 
     private string PageLink(int p) =>
-        $"/search?q={Uri.EscapeDataString(Q ?? string.Empty)}&scope={Uri.EscapeDataString(Scope ?? "folder")}&from={Uri.EscapeDataString(SearchFolder)}&page={p}";
+        $"/search?q={Uri.EscapeDataString(Q ?? string.Empty)}&scope={Uri.EscapeDataString(string.IsNullOrWhiteSpace(Scope) ? SearchFolder : Scope)}&from={Uri.EscapeDataString(SearchFolder)}&page={p}" + FilterQuery;
 
     private string FolderName(MessageRow m) => folderNames.TryGetValue(m.FolderId, out string? n) ? n : "—";
+
+    // Owner, 9 Oct 2026: the order of the results - the dashboard's "biggest first" link, else the one remembered for search.
+    private string order = MailboxService.NewestFirst;
+
+    private bool Dated => MailboxService.SortsByDate(order);
+
+    // Choosing an order replaces the link's own "biggest first".
+    private string SortBack => PageLink(0).Replace("&sort=size", string.Empty, StringComparison.Ordinal);
+
 
     private static string Sender(MessageRow m)
     {
@@ -109,12 +243,14 @@ else
         {
             return;
         }
+        clock = WebmailAuthService.ClockOf((await AuthState).User);
+        L = Words.For(WebmailAuthService.LanguageOf((await AuthState).User, Words));
         Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
         if (mailboxId is null)
         {
             return;
         }
-        await Mail.ListFoldersAsync(mailboxId.Value);
+        folders = await Mail.ListFoldersAsync(mailboxId.Value);
         folderNames = await Mail.FolderNamesAsync(mailboxId.Value);
         Guid? folderId = null;
         if (Scope != "all")
@@ -123,6 +259,25 @@ else
             folderId = folder?.Id;
         }
         pageIndex = Math.Max(0, PageQuery ?? 0);
-        (items, total) = await Mail.SearchAsync(mailboxId.Value, folderId, Q ?? string.Empty, pageIndex);
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);
+        MailboxRow? prefs = WebmailAuthService.PersonIdOf((await AuthState!).User) is Guid me && me != mailboxId.Value
+            ? (await Mail.GetContextAsync(me))?.Mailbox
+            : context?.Mailbox;
+        if (prefs is not null)
+        {
+            pageSize = prefs.PageSize;
+            weekStart = prefs.WeekStart;
+        }
+        if (context is not null)
+        {
+            threshold = context.Value.Tenant.SpamThreshold is int t && t > 0 ? t : TenantRow.DefaultSpamThreshold;
+        }
+        trusted = await Mail.TrustedSendersAsync(mailboxId.Value);
+        categories = await Mail.ListCategoriesAsync(mailboxId.Value);
+        order = Sort == "size" ? "size" : await Mail.SortForAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value, MailboxService.SearchSortKey);
+        (items, total) = await Mail.SearchFilteredAsync(mailboxId.Value, folderId, Q ?? string.Empty, SenderFilter ?? string.Empty,
+            Day(AfterText, 0), Day(BeforeText, 1), Attach == "1", pageIndex, pageSize, ScoreFilter is int sc ? Math.Clamp(sc, 0, MailFigures.TopScore) : null,
+            new SearchNarrowing(CategoryFilter, CategoryText == "none", Sort == "size",
+                RescuedDays is int days ? (await Mail.RescuedSinceAsync(mailboxId.Value, DateTimeOffset.UtcNow.AddDays(-days))).Select(r => r.Id).ToHashSet() : null, order));
     }
 }

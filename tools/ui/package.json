@@ -1,0 +1,13 @@
+{
+  "name": "anjal-screen-checks",
+  "private": true,
+  "description": "Opens every webmail screen in a real browser and checks it (rc.15, items 47 and UX-09).",
+  "license": "UNLICENSED",
+  "scripts": {
+    "check": "node check.js"
+  },
+  "dependencies": {
+    "axe-core": "4.14.0",
+    "playwright": "1.56.1"
+  }
+}

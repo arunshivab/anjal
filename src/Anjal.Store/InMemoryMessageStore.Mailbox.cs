@@ -369,6 +369,12 @@ public sealed partial class InMemoryMessageStore
         }
     }
 
+    /// <summary>
+    /// The clock that stamps a saved message's arrival time. Real time unless a
+    /// test pins it, so no test depends on the day it runs (DEF-090, rc.11).
+    /// </summary>
+    public System.Func<System.DateTimeOffset> MessageClock { get; set; } = () => System.DateTimeOffset.UtcNow;
+
     /// <inheritdoc/>
     public Task<MessageRow> SaveMessageAsync(MessageRow message, CancellationToken ct = default)
     {
@@ -377,7 +383,7 @@ public sealed partial class InMemoryMessageStore
         {
             var row = Clone(message);
             row.Id = System.Guid.NewGuid();
-            row.ReceivedAt = System.DateTimeOffset.UtcNow;
+            row.ReceivedAt = this.MessageClock();
             this.mailboxMessages.Add(row);
             return Task.FromResult(Clone(row));
         }
@@ -419,6 +425,32 @@ public sealed partial class InMemoryMessageStore
             }
             return Task.FromResult<IReadOnlyList<MessageRow>>(page);
         }
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<MessageRow>> ListMessagesBySeenAsync(System.Guid mailboxId, System.Guid folderId, bool seen, int limit, int offset, CancellationToken ct = default)
+    {
+        // The same order as the full list, filtered by read state.
+        IReadOnlyList<MessageRow> all = await this.ListMessagesAsync(mailboxId, folderId, int.MaxValue, 0, ct).ConfigureAwait(false);
+        var page = new List<MessageRow>();
+        int skipped = 0;
+        foreach (MessageRow m in all)
+        {
+            if (m.Seen != seen)
+            {
+                continue;
+            }
+            if (skipped++ < System.Math.Max(0, offset))
+            {
+                continue;
+            }
+            if (page.Count >= System.Math.Max(0, limit))
+            {
+                break;
+            }
+            page.Add(m);
+        }
+        return page;
     }
 
     /// <inheritdoc/>
@@ -746,12 +778,51 @@ public sealed partial class InMemoryMessageStore
         PasswordPbkdf2 = m.PasswordPbkdf2,
         DisplayName = m.DisplayName,
         Theme = m.Theme,
+        TimeZone = m.TimeZone,
+        Language = m.Language,
+        Density = m.Density,
+        Layout = m.Layout,
+        RailFolded = m.RailFolded,
+        RailChosen = m.RailChosen,
+        DateFormat = m.DateFormat,
+        WeekStart = m.WeekStart,
+        PageSize = m.PageSize,
+        NewMailSound = m.NewMailSound,
+        WelcomeDone = m.WelcomeDone,
         Enabled = m.Enabled,
         QuotaBytes = m.QuotaBytes,
         UsedBytes = m.UsedBytes,
         CreatedAt = m.CreatedAt,
         UpdatedAt = m.UpdatedAt,
     };
+
+    /// <inheritdoc/>
+    public Task<bool> SetMailboxPreferencesAsync(System.Guid mailboxId, MailboxPreferences preferences, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(preferences);
+        MailboxPreferences p = preferences.Normalized();
+        lock (this.gate)
+        {
+            MailboxRow? m = this.mailboxes.FirstOrDefault(x => x.Id == mailboxId);
+            if (m is null)
+            {
+                return Task.FromResult(false);
+            }
+            m.TimeZone = p.TimeZone;
+            m.Language = p.Language;
+            m.Density = p.Density;
+            m.Layout = p.Layout;
+            m.RailFolded = p.RailFolded;
+            m.RailChosen = p.RailChosen;
+            m.DateFormat = p.DateFormat;
+            m.WeekStart = p.WeekStart;
+            m.PageSize = p.PageSize;
+            m.NewMailSound = p.NewMailSound;
+            m.WelcomeDone = p.WelcomeDone;
+            m.UpdatedAt = System.DateTimeOffset.UtcNow;
+            return Task.FromResult(true);
+        }
+    }
 
     private static FolderRow Clone(FolderRow f) => new()
     {
@@ -786,6 +857,7 @@ public sealed partial class InMemoryMessageStore
         CategoryId = m.CategoryId,
         HasAttachments = m.HasAttachments,
         BodyText = m.BodyText,
+        Preview = MessageRow.PreviewOf(m.BodyText),
     };
 
     // ================= Categories (v0.15.0) =================
@@ -957,8 +1029,9 @@ public sealed partial class InMemoryMessageStore
     }
 
     /// <inheritdoc/>
-    public Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, CancellationToken ct = default)
+    public Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, string timeZone, CancellationToken ct = default)
     {
+        System.TimeZoneInfo zone = System.TimeZoneInfo.FindSystemTimeZoneById(MailboxPreferences.IsKnownTimeZone(timeZone) ? timeZone.Trim() : "UTC");
         lock (this.gate)
         {
             var folders = new Dictionary<System.Guid, string>();
@@ -991,7 +1064,7 @@ public sealed partial class InMemoryMessageStore
                 bool sent = string.Equals(folder, "Sent", System.StringComparison.Ordinal);
                 bool junk = string.Equals(folder, "Junk", System.StringComparison.Ordinal);
                 bool draft = string.Equals(folder, "Drafts", System.StringComparison.Ordinal);
-                System.DateTimeOffset day = new(m.ReceivedAt.UtcDateTime.Date, System.TimeSpan.Zero);
+                System.DateTimeOffset day = new(System.TimeZoneInfo.ConvertTime(m.ReceivedAt, zone).Date, System.TimeSpan.Zero);
                 byDay.TryGetValue(day, out (long Received, long Sent) counts);
 
                 if (sent)

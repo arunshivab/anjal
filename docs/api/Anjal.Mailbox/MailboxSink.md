@@ -8,7 +8,6 @@ that delivers accepted SMTP messages into tenant mailboxes. For each recipient: 
 
 - **JunkFolder** *(field)* - Name of the folder spam is filed in.
 - **#ctor** *(method)* - Construct the sink.
-- **CategoryForAsync** *(method)* - The category a mailbox's rules put this sender in, or null. An exact address beats a domain rule, the same precedence sender rules use.
 - **ChooseFolder** *(method)* - Decide the destination folder: a sender rule wins outright; otherwise the score is compared with the tenant threshold (a threshold of 0 or less disables junk filing for the tenant).
 - **DeliverAsync** *(method)* - _(no description)_
 - **DescribeServerRoleAddresses** *(method)* - One line for the start-up log: where postmaster@ and abuse@ at this server's own name are delivered (v1.0.0-rc.10, DEF-082). Built from the same rule the delivery uses, so the two cannot disagree.
@@ -16,6 +15,7 @@ that delivers accepted SMTP messages into tenant mailboxes. For each recipient: 
 - **FileSentCopyWithEvidenceAsync** *(method)* - , also linking the copy to the evidence of the submission as received (v1.0.0-rc.8), and returning the copy's id.
 - **HasAttachment** *(method)* - Whether a parsed message carries an attachment: any part with a filename, or any non-text part inside a multipart body. A plain text or HTML message on its own does not count.
 - **IsRoleAddress** *(method)* - Whether a local part is one every mail domain must accept (postmaster, abuse).
+- **IsRuleTarget** *(method)* - The category a mailbox's rules put this sender in, or null. An exact address beats a domain rule, the same precedence sender rules use.
 - **IsTrustedAsync** *(method)* - Whether the mailbox trusts the sender although their mail arrives unencrypted.
 - **ResolveAsync** *(method)* - Resolve a recipient address to an enabled mailbox of an enabled tenant whose domain is registered. Returns when any link in that chain is missing.
 - **TrySplitAddress** *(method)* - Split an address into (local-part without "+tag", domain), both lowercased. Returns if the address has no "@" or an empty side.

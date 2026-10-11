@@ -1,147 +1,494 @@
 @inherits LayoutComponentBase
 @inject MailboxService Mail
 @inject NavigationManager Nav
+@inject Words Words
 
+@if (AuthPage)
+{
+    @* rc.13: the sign-in, reset, invitation and signed-out pages stand alone,
+       even for someone already signed in (an invitation opened in a signed-in browser). *@
+    <div class="frame">
+        <main class="pane" id="main"><CascadingValue Value="this" IsFixed="true">@Body</CascadingValue></main>
+    </div>
+}
+else
+{
 <AuthorizeView>
     <Authorized>
-        <div class="shell">
-            <a class="skip" href="#main">Skip to content</a>
-            <header class="top">
-                <a class="wm" href="/folder/INBOX" aria-label="Anjal, go to inbox">
-                    <img src="/logos/anjal-mark.svg" alt="" aria-hidden="true" />
-                    <span>anjal</span>
-                </a>
-                <form class="search" method="get" action="/search" role="search">
-                    <span class="sfield">
-                        <LipiIcon Name="search" Size="15" Class="si" />
-                        <input class="sbox" type="search" name="q" value="@SearchQuery" placeholder="Search mail" aria-label="Search mail" />
-                    </span>
-                    <select class="scope" name="scope" aria-label="Where to search">
-                        @if (folders is not null)
-                        {
-                            @foreach (FolderView f in folders)
-                            {
-                                <option value="@f.Name" selected="@(SearchScopeValue == f.Name)">@f.Name</option>
-                            }
-                        }
-                        <option value="all" selected="@(SearchScopeValue == "all")">All folders</option>
-                    </select>
-                    <input type="hidden" name="from" value="@CurrentFolder" />
-                </form>
-                <span class="sp">
-                    <span class="lite" data-connectivity></span>
-                    <span class="who" title="Signed in as @context.User.Identity?.Name">@context.User.Identity?.Name</span>
-                    <a href="/dashboard" class="iconbtn" title="Dashboard" aria-label="Dashboard"><LipiIcon Name="chart-bar" Size="17" /></a>
-                    <a href="/settings" class="iconbtn" title="Settings" aria-label="Settings"><LipiIcon Name="sliders" Size="17" /></a>
-                    <form method="post" action="/sign-out" class="inline signout">
+        <div class="@FrameClass" data-offline-mail="@(offlineMail ? "on" : "off")" data-offline-words="@(offlineMail ? OfflineWords : null)">
+            <a class="skip" href="#main">@L["Skip to content"]</a>
+            <div class="frame-body">
+                <nav class="rail @(Folded ? "folded" : RailAuto ? "auto" : "")" aria-label="@L["Folders"]">
+                    <div class="rail-head">
+                    <a class="rail-mark" href="/folder/INBOX" aria-label="@L["Anjal, go to inbox"]">
+                        <span class="mark-tile" aria-hidden="true">
+                            <svg viewBox="0 0 148 148" width="34" height="34"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg>
+                            <span class="mt-letter" lang="@L.Language">@Words.MarkLetter(L.Language)</span>
+                        </span>
+                        <span class="rl rail-name">Anjal</span>
+                    </a>
+                        <form method="post" action="/settings/rail" class="rail-fold">
                         <AntiforgeryToken />
-                        <button type="submit" class="iconbtn" title="Sign out" aria-label="Sign out"><LipiIcon Name="log-out" Size="17" /></button>
+                        <input type="hidden" name="back" value="@BackPath" />
+                        @* Until the person chooses, the rail folds itself up to laptop width; both buttons are drawn and the screen's width decides which shows. *@
+                        @if (Folded || RailAuto)
+                        {
+                            <button type="submit" name="folded" value="0" class="rail-item rf-open" title="@L["Show folder names"]" aria-label="@L["Show folder names"]"><LipiIcon Name="chevrons-right" Size="18" /></button>
+                        }
+                        @if (!Folded)
+                        {
+                            <button type="submit" name="folded" value="1" class="rail-item rf-fold" title="@L["Show icons only"]" aria-label="@L["Show icons only"]"><LipiIcon Name="chevrons-left" Size="18" /></button>
+                        }
                     </form>
-                </span>
-            </header>
-            <div class="app">
-                <nav class="side" aria-label="Folders">
-                    <a class="btn btn-p compose" href="/compose">Compose</a>
+                    </div>
+                    <div class="rail-composewrap">
+                        <a class="rail-compose" href="/compose" title="@L["Compose"]"><LipiIcon Name="edit" Size="18" /><span class="rl">@L["Compose"]</span></a>
+                        @* rc.15 (item 62, owner 7 Oct): the Compose button's arrow - start from a template, or in the small window. *@
+                        <details class="pmenu composemore">
+                            <summary class="composearrow" title="@L["More ways to write"]" aria-label="@L["More ways to write"]"><LipiIcon Name="chevron-down" Size="12" /></summary>
+                            <div class="pmenu-body">
+                                <form method="post" action="/draft" enctype="multipart/form-data" class="inline">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="to" value="" />
+                                    <button type="submit" class="pmi" name="templates" value="1" data-needs-server><LipiIcon Name="email-template" Size="15" />@L["From a template"]</button>
+                                </form>
+                                <form method="post" action="/draft" enctype="multipart/form-data" class="inline">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="to" value="" />
+                                    <input type="hidden" name="back" value="/folder/INBOX" />
+                                    <button type="submit" class="pmi" name="dock" value="1" data-needs-server><LipiIcon Name="collapse" Size="15" />@L["Small window"]</button>
+                                </form>
+                            </div>
+                        </details>
+                    </div>
                     @if (folders is not null)
                     {
                         @foreach (FolderView f in folders)
                         {
-                            <a class="fd @(IsCurrent(f.Name) ? "on" : "")" href="/folder/@Uri.EscapeDataString(f.Name)">
-                                <LipiIcon Name="@IconFor(f.Name)" Size="17" />
-                                <span>@f.Name</span>
+                            <a class="rail-item @(IsCurrent(f.Name) ? "on" : "")" href="/folder/@Uri.EscapeDataString(f.Name)" title="@L.Folder(f.Name)" aria-current="@(IsCurrent(f.Name) ? "page" : null)">
+                                <LipiIcon Name="@IconFor(f.Name)" Size="18" />
+                                <span class="rl">@L.Folder(f.Name)</span>
                                 @if (Badge(f) is string badge)
                                 {
                                     <span class="n @(f.Name == FolderRow.Inbox && f.Unread > 0 ? "unreadn" : "")"
                                           data-unread-badge="@(f.Name == FolderRow.Inbox ? "1" : null)">@badge</span>
                                 }
                             </a>
+                            @if (f.Name == MailboxService.ScheduledFolder)
+                            {
+                                @* rc.12 (item 9): the Outbox - mail still being delivered - after Scheduled. *@
+                                <a class="rail-item @(OnOutbox ? "on" : "")" href="/outbox" title="@L["Outbox"]" aria-current="@(OnOutbox ? "page" : null)">
+                                    <LipiIcon Name="upload" Size="18" />
+                                    <span class="rl">@L["Outbox"]</span>
+                                    @if (outboxCount > 0)
+                                    {
+                                        <span class="n">@outboxCount</span>
+                                    }
+                                </a>
+                            }
                         }
                     }
-                    @if (mailbox is not null)
+                    @if (sharedBoxes.Count > 0)
                     {
-                        <div class="quota">
-                            <div class="meter @(Full ? "hot" : "")"><i style="width:@UsagePercent%"></i></div>
-                            <div class="qr"><span>Mailbox</span><span>@Size(mailbox.UsedBytes) of @QuotaText</span></div>
-                            @if (Full)
+                        @* rc.14 (board OrgShared): shared mailboxes open beside the person's own. *@
+                        <span class="rail-group rl">@L["Shared mailboxes"]</span>
+                        @foreach ((MailboxRow box, string right, long unread) in sharedBoxes)
+                        {
+                            <form method="post" action="/shared/open" class="rail-form">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="id" value="@box.Id" />
+                                <button type="submit" class="rail-item @(acting?.Id == box.Id ? "on" : "")" title="@box.Address" aria-current="@(acting?.Id == box.Id ? "true" : null)">
+                                    <LipiIcon Name="users" Size="18" />
+                                    <span class="rl">@(box.DisplayName.Length > 0 ? box.DisplayName : box.LocalPart)</span>
+                                    @if (unread > 0)
+                                    {
+                                        <span class="n">@unread</span>
+                                    }
+                                </button>
+                            </form>
+                        }
+                    }
+                    <span class="rail-gap"></span>
+                    @if (isAdmin)
+                    {
+                        <a class="rail-item @(OnPath("/org") ? "on" : "")" href="/org" title="@L["Organisation"]"><LipiIcon Name="home" Size="18" /><span class="rl">@L["Organisation"]</span></a>
+                    }
+                    @if (isOperator)
+                    {
+                        <a class="rail-item @(OnPath("/ops") ? "on" : "")" href="/ops" title="@L["Anjal console"]"><LipiIcon Name="monitoring" Size="18" /><span class="rl">@L["Anjal console"]</span></a>
+                    }
+                    <a class="rail-item @(Nav.Uri.Contains("/contacts", StringComparison.OrdinalIgnoreCase) ? "on" : "")" href="/contacts" title="@L["Contacts"]"><LipiIcon Name="users" Size="18" /><span class="rl">@L["Contacts"]</span></a>
+                    <a class="rail-item" href="/dashboard" title="@L["Dashboard"]"><LipiIcon Name="chart-bar" Size="18" /><span class="rl">@L["Dashboard"]</span></a>
+                    <a class="rail-item" href="/settings" title="@L["Settings"]"><LipiIcon Name="sliders" Size="18" /><span class="rl">@L["Settings"]</span></a>
+                    <a class="rail-item" href="#shortcuts" title="@L["Keyboard shortcuts"]"><LipiIcon Name="help" Size="18" /><span class="rl">@L["Help"]</span></a>
+                </nav>
+                <main class="pane" id="main">
+                    <CascadingValue Value="this" IsFixed="true">@Body</CascadingValue>
+                </main>
+            </div>
+            @* The phone (A11, the approved boards): a top bar, a bottom bar with Compose
+               in the middle, and the folders sheet with the account and Sign out.
+               Shown only on narrow screens; both sheets open without the script. *@
+            <header class="phonetop">
+                <a class="rail-mark" href="/folder/INBOX" aria-label="@L["Anjal, go to inbox"]">
+                    <span class="mark-tile" aria-hidden="true">
+                        <svg viewBox="0 0 148 148" width="30" height="30"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg>
+                        <span class="mt-letter" lang="@L.Language">@Words.MarkLetter(L.Language)</span>
+                    </span>
+                </a>
+                <span class="lh-grow"></span>
+                <a class="initials" href="#folders" aria-label="@L["Your account"]" title="@DisplayName">@Initials</a>
+            </header>
+            <nav class="phonenav" aria-label="@L["Main"]">
+                <a href="/folder/INBOX" class="@(IsCurrent(FolderRow.Inbox) ? "on" : "")"><LipiIcon Name="email" Size="20" /><span>@L["Inbox"]</span></a>
+                <a href="#folders"><LipiIcon Name="folder" Size="20" /><span>@L["Folders"]</span></a>
+                <a href="/compose" class="pcompose" aria-label="@L["Compose"]"><LipiIcon Name="edit" Size="22" /></a>
+                <a href="/dashboard"><LipiIcon Name="chart-bar" Size="20" /><span>@L["Dashboard"]</span></a>
+                <a href="/settings"><LipiIcon Name="sliders" Size="20" /><span>@L["Settings"]</span></a>
+            </nav>
+            <div id="folders" class="phonesheet" role="dialog" aria-modal="true" aria-label="@L["Folders"]">
+                <div class="psheet">
+                    <div class="pshead"><b>@L["Folders"]</b><span class="lh-grow"></span><a class="iconbtn" href="#close" aria-label="@L["Close"]"><LipiIcon Name="close" Size="17" /></a></div>
+                    <div class="paccount">
+                        <span class="initials">@Initials</span>
+                        <span class="pwho"><b>@DisplayName</b><span>@context.User.Identity?.Name</span></span>
+                        <form method="post" action="/sign-out" class="inline"><AntiforgeryToken /><button type="submit" class="st-signout">@L["Sign out"]</button></form>
+                    </div>
+                    @if (folders is not null)
+                    {
+                        @foreach (FolderView f in folders.Where(f => MailboxService.DefaultFolders.Contains(f.Name)))
+                        {
+                            <a class="pfolder" href="/folder/@Uri.EscapeDataString(f.Name)"><LipiIcon Name="@IconFor(f.Name)" Size="18" /><span>@L.Folder(f.Name)</span>@if (Badge(f) is string pb) { <span class="n">@pb</span> }</a>
+                        }
+                        @if (folders.Any(f => !MailboxService.DefaultFolders.Contains(f.Name)))
+                        {
+                            <span class="pgroup">@L["Your folders"]</span>
+                            @foreach (FolderView f in folders.Where(f => !MailboxService.DefaultFolders.Contains(f.Name)))
                             {
-                                <div class="qr"><span class="sub">Full — delete something to receive more</span></div>
+                                <a class="pfolder" href="/folder/@Uri.EscapeDataString(f.Name)"><LipiIcon Name="folder" Size="18" /><span>@f.Name</span>@if (Badge(f) is string ob) { <span class="n">@ob</span> }</a>
+                            }
+                        }
+                    }
+                    <a class="pfolder" href="/outbox"><LipiIcon Name="upload" Size="18" /><span>@L["Outbox"]</span>@if (outboxCount > 0) { <span class="n">@outboxCount</span> }</a>
+                    <a class="pfolder" href="/contacts"><LipiIcon Name="users" Size="18" /><span>@L["Contacts"]</span></a>
+                    @foreach ((MailboxRow box, string right, long unread) in sharedBoxes)
+                    {
+                        <form method="post" action="/shared/open" class="pfolder-form">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="id" value="@box.Id" />
+                            <button type="submit" class="pfolder"><LipiIcon Name="users" Size="18" /><span>@box.Address</span>@if (unread > 0) { <span class="n">@unread</span> }</button>
+                        </form>
+                    }
+                    @if (isAdmin)
+                    {
+                        <a class="pfolder" href="/org"><LipiIcon Name="home" Size="18" /><span>@L["Organisation"]</span></a>
+                    }
+                    <div class="pstatus">
+                        <span class="lite" data-connectivity data-online="@L["Connected"]" data-offline="@L["Offline"]"><i></i>@L["Connected"]</span>
+                        @if (mailbox is not null)
+                        {
+                            <span>@StorageText</span>
+                        }
+                    </div>
+                </div>
+            </div>
+            @* Item 5 and D-105: the welcome screen, once; then the tour, or skip. *@
+            @if (acting is not null)
+            {
+                @* rc.14: whose mail this is, always in view while a shared mailbox is open. *@
+                <form method="post" action="/shared/close" class="actingbar" role="status">
+                    <AntiforgeryToken />
+                    <LipiIcon Name="users" Size="16" />
+                    <span>@L["You are in {address}, with {right}."].Replace("{address}", acting.Address, StringComparison.Ordinal).Replace("{right}", L[RightWord(actingRight)], StringComparison.Ordinal)</span>
+                    <button type="submit" class="linkbtn">@L["Back to my mailbox"]</button>
+                </form>
+            }
+            @if (person is not null && !person.WelcomeDone && !OnTwoStepSetup)
+            {
+                <div class="welcome" role="dialog" aria-modal="true" aria-labelledby="welcometitle">
+                    <div class="wcard">
+                        <h2 id="welcometitle">@L["Welcome to Anjal"]</h2>
+                        <div class="wgrid">
+                            @foreach ((string icon, string title, string text) in WelcomeCards)
+                            {
+                                <section class="wfeat"><LipiIcon Name="@icon" Size="20" /><h3>@L[title]</h3><p>@L[text]</p></section>
                             }
                         </div>
-                    }
-                </nav>
-                <section class="pane" id="main">
-                    <CascadingValue Value="this" IsFixed="true">@Body</CascadingValue>
-                </section>
+                        <div class="wactions">
+                            <form method="post" action="/settings/welcome" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="tour" value="1" />
+                                <button type="submit" class="btn btn-p">@L["Show me around"]</button>
+                            </form>
+                            <form method="post" action="/settings/welcome" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="back" value="@BackPath" />
+                                <button type="submit" class="btn btn-q">@L["Skip"]</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            }
+            @* The tour's steps: each points at a real button; one missing from the page is skipped. *@
+            <div hidden id="tour" data-steps="@TourJson"></div>
+            @* The bubble is page markup, like every button (review 3); the script fills it in. *@
+            <div class="tourtip" id="tourtip" role="dialog" aria-live="polite" aria-labelledby="tourtitle" hidden>
+                <b id="tourtitle" data-tour-title></b>
+                <p data-tour-text></p>
+                <span class="tourcount" data-tour-count></span>
+                <div class="tourbar">
+                    <button type="button" class="btn btn-q btn-sm" data-tour-skip>@L["Skip"]</button>
+                    <button type="button" class="btn btn-s btn-sm" data-tour-back>@L["Back"]</button>
+                    <button type="button" class="btn btn-p btn-sm" data-tour-next data-word-next="@L["Next"]" data-word-done="@L["Done"]">@L["Next"]</button>
+                </div>
             </div>
+            @* The "?" panel (SPEC-11 item 38, UX-03): the approved board's shortcuts.
+               It opens from any "?" link even without the script (:target). *@
+            <div id="shortcuts" class="kbpanel" role="dialog" aria-modal="true" aria-labelledby="kbtitle">
+                <div class="kbcard">
+                    <div class="kbhead">
+                        <h2 id="kbtitle">@L["Keyboard shortcuts"]</h2>
+                        <a class="linkbtn kbtour" href="/folder/INBOX#tour">@L["Restart the tour"]</a>
+                        <a class="iconbtn" href="#close" aria-label="@L["Close"]" title="@L["Close"]"><LipiIcon Name="close" Size="17" /></a>
+                    </div>
+                    <div class="kbgrid">
+                        @foreach ((string group, (string What, string[] Keys)[] keys) in ShortcutGroups)
+                        {
+                            <section>
+                                <h3>@L[group]</h3>
+                                @foreach ((string what, string[] combo) in keys)
+                                {
+                                    <div class="kbrow"><span>@L[what]</span><span class="kbkeys">@for (int k = 0; k < combo.Length; k++) { @if (k > 0) { <i>@(combo[k - 1] == "g" ? L["then"] : "+")</i> }<kbd>@combo[k]</kbd> }</span></div>
+                                }
+                            </section>
+                        }
+                    </div>
+                    <p class="hint">@L["Shortcuts work in every language. Press ? anywhere to open this panel."]</p>
+                </div>
+            </div>
+            @* rc.13 (board AuthIdle): a minute before an idle sign-out, this asks. Unsent
+               text is saved as a draft first. The script shows it; without the script,
+               the server still signs the session out when its time is up. *@
+            <div class="idlewrap" data-idle hidden>
+                <div class="idlebox" role="alertdialog" aria-modal="true" aria-labelledby="idletitle" aria-describedby="idletext">
+                    <h2 id="idletitle"><LipiIcon Name="clock" Size="22" /><span data-idle-title data-word="@L["Signing out in {time}"]">@L["Signing out in {time}"].Replace("{time}", "1:00", StringComparison.Ordinal)</span></h2>
+                    <p id="idletext">@(Shared ? L["You have been idle on a shared computer. Your unsent text is saved as a draft, so nothing is lost."] : L["You have been idle for a long time. Your unsent text is saved as a draft, so nothing is lost."])</p>
+                    <div class="idlebtns">
+                        <button type="button" class="btn btn-p" data-idle-stay>@L["Stay signed in"]</button>
+                        <button type="button" class="btn btn-s" data-idle-out>@L["Sign out now"]</button>
+                    </div>
+                </div>
+            </div>
+            <form method="post" action="/sign-out" data-idle-form hidden>
+                <AntiforgeryToken />
+                <input type="hidden" name="reason" value="idle" data-idle-reason />
+            </form>
+            @* rc.13: another device asks this one to approve a sign-in or a password reset. *@
+            <template data-approval-template>
+                <div class="approvebar" role="alertdialog" aria-live="assertive">
+                    <LipiIcon Name="two-factor" Size="20" />
+                    <span class="approvetext" data-approve-text
+                          data-word-signin="@L["Someone is signing in to your mailbox on {device} ({address}). Is it you?"]"
+                          data-word-reset="@L["Someone asks to reset your password on {device} ({address}). Is it you?"]"></span>
+                    <button type="button" class="btn btn-p btn-sm" data-approve="approve">@L["Yes, it is me"]</button>
+                    <button type="button" class="btn btn-danger-q btn-sm" data-approve="refuse">@L["No"]</button>
+                </div>
+            </template>
+            <footer class="statusbar" data-statusbar data-me="@mailbox?.Id" data-shared="@(Shared ? "1" : "0")" data-tz="@clock.ZoneId" data-hours="@clock.Hours" data-sound="@((person?.NewMailSound ?? true) ? "1" : "0")" data-idle-limit="@((int)SessionRegistry.IdleLimit(Shared).TotalSeconds)"
+                    data-word-updated="@L["Updated {time}"]" data-word-offline="@L["Offline: showing mail as of {time}"]"
+                    data-word-needs-server="@L["Needs a connection. Try again when you are back online."]"
+                    data-word-new="@L["{n} new messages just arrived."]">
+                <span class="lite" data-connectivity data-online="@L["Connected"]" data-offline="@L["Offline"]"><i></i>@L["Connected"]</span>
+                <span class="st-sub" data-updated>@L["Updated {time}"].Replace("{time}", clock.Time(now), StringComparison.Ordinal)</span>
+                @if (mailbox is not null)
+                {
+                    <span class="st-sep" aria-hidden="true"></span>
+                    @* DES-11 D2: the storage plan - own size, shared total or reserve; amber from 80%, red when full. *@
+                    <span class="st-sub @(Full ? "st-full" : storage?.Percent >= 80 ? "st-warn" : "")" title="@StorageTip">@StorageText</span>
+                }
+                @* Item 46: the draft state, while writing (filled by the script as drafts are saved). *@
+                <span class="st-sub st-draft" data-st-draft hidden></span>
+                <span class="st-grow"></span>
+                @if (lastSignIn is not null)
+                {
+                    <a class="st-sub st-last" href="/settings/security" title="@L["Your sign-in before this one, from {device}. Not you? Open Security to sign other devices out."].Replace("{device}", lastSignIn.Device, StringComparison.Ordinal)">@LastSignInText</a>
+                    <span class="st-sep st-last" aria-hidden="true"></span>
+                }
+                <span class="st-sub">@clock.Full(now)</span>
+                <span class="st-sep" aria-hidden="true"></span>
+                <a class="st-link" href="#shortcuts">? @L["Keyboard shortcuts"]</a>
+                <span class="st-sep" aria-hidden="true"></span>
+                @if (Shared)
+                {
+                    <span class="st-shared"><LipiIcon Name="lock" Size="13" />@L["Shared computer"]</span>
+                    <span class="st-sep" aria-hidden="true"></span>
+                }
+                <span class="who"><b>@DisplayName</b> @context.User.Identity?.Name</span>
+                <form method="post" action="/sign-out" class="inline signout">
+                    <AntiforgeryToken />
+                    <button type="submit" class="st-signout">@L["Sign out"]</button>
+                </form>
+            </footer>
+            <JsWords L="L" />
+            <ButtonTips L="L" Admin="isAdmin" Operator="isOperator" />
         </div>
     </Authorized>
     <NotAuthorized>
-        <div class="shell">
-            <section class="pane" id="main"><CascadingValue Value="this" IsFixed="true">@Body</CascadingValue></section>
+        <div class="frame">
+            <main class="pane" id="main"><CascadingValue Value="this" IsFixed="true">@Body</CascadingValue></main>
         </div>
     </NotAuthorized>
 </AuthorizeView>
+}
 
 @code {
+    // rc.14: the console a page belongs to, by its path (not a substring: /ops/orgs is not /org).
+    private string FrameClass => "frame density-" + (person?.Density ?? MailboxPreferences.DefaultDensity) + (acting is not null ? " acting" : string.Empty);
+
+    private bool OnPath(string root)
+    {
+        string path = "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0];
+        return path == root || path.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase);
+    }
+
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private IReadOnlyList<FolderView>? folders;
     private MailboxRow? mailbox;
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private DateTimeOffset now = DateTimeOffset.UtcNow;
 
-    private string CurrentFolder
+    private bool Folded => person?.RailFolded ?? false;
+
+    // rc.15: the boards draw the rail as icons on a laptop; until the person folds or opens it, it does so by itself.
+    private bool RailAuto => !(person?.RailChosen ?? false);
+
+    private MailboxRow? person;
+
+    // DES-11 D5: the offline pages the worker draws speak the person's language too.
+    private string OfflineWords => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["You are offline. Your mail list on this device is locked."] = L["You are offline. Your mail list on this device is locked."],
+        ["Offline code"] = L["Offline code"],
+        ["Open the list"] = L["Open the list"],
+        ["Use my passkey"] = L["Use my passkey"],
+        ["Five wrong tries remove the list from this device."] = L["Five wrong tries remove the list from this device."],
+        ["You are offline."] = L["You are offline."],
+        ["No mail list is kept on this device. Anjal opens when it can be reached again."] = L["No mail list is kept on this device. Anjal opens when it can be reached again."],
+        ["The mail list on this device was removed: it had not reached Anjal for seven days. It is kept again once Anjal can be reached."] = L["The mail list on this device was removed: it had not reached Anjal for seven days. It is kept again once Anjal can be reached."],
+        ["This mail opens when Anjal can be reached again. Only the list is kept on this device."] = L["This mail opens when Anjal can be reached again. Only the list is kept on this device."],
+        ["Back to the list"] = L["Back to the list"],
+        ["You are offline. This is the list kept on this device at {time}. Mail opens when Anjal can be reached again."] = L["You are offline. This is the list kept on this device at {time}. Mail opens when Anjal can be reached again."],
+        ["Inbox"] = L["Inbox"],
+        ["Sent"] = L["Sent"],
+        ["Nothing kept."] = L["Nothing kept."],
+        ["The mail list was removed from this device after five wrong tries. It is kept again, under a new offline code, once Anjal can be reached."] = L["The mail list was removed from this device after five wrong tries. It is kept again, under a new offline code, once Anjal can be reached."],
+        ["That code is not right."] = L["That code is not right."],
+    });
+    private StorageState? storage;
+    private SignInMark? lastSignIn;
+
+    // DES-11 S5: "Last sign-in: 09:12, Pune, India" - the sign-in before this one, so a stranger's shows.
+    private string LastSignInText => lastSignIn is null ? string.Empty
+        : L["Last sign-in: {when}{place}"].Replace("{when}", clock.Local(lastSignIn.At).Date == clock.Local(DateTimeOffset.UtcNow).Date ? clock.Time(lastSignIn.At) : clock.Time(lastSignIn.At) + ", " + clock.Date(lastSignIn.At), StringComparison.Ordinal)
+            .Replace("{place}", lastSignIn.Place.Length > 0 ? ", " + lastSignIn.Place : string.Empty, StringComparison.Ordinal);
+    private MailboxRow? acting;
+    private string actingRight = "read";
+    private bool isAdmin;
+    private bool isOperator;
+    private bool offlineMail;
+    private IReadOnlyList<(MailboxRow Box, string Right, long Unread)> sharedBoxes = System.Array.Empty<(MailboxRow, string, long)>();
+
+    private static string RightWord(string right) => right switch { "manage" => "manage rights", "send" => "read and send rights", _ => "read-only rights" };
+
+    private bool shared;
+
+    private string PathNow => "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0];
+
+    // DES-11 S4: "Confirm it is you" stands alone like the sign-in pages.
+    private bool AuthPage => PathNow is "/sign-in" or "/login" or "/signed-out" or "/settings/security/confirm" || PathNow.StartsWith("/sign-in/", StringComparison.Ordinal) || PathNow.StartsWith("/invite/", StringComparison.Ordinal);
+
+    private bool OnTwoStepSetup => PathNow.StartsWith("/settings/security/two-step", StringComparison.Ordinal);
+
+    /// <summary>True when signed in on a shared computer (rc.13).</summary>
+    private bool Shared => shared;
+
+    /// <summary>What is different about Anjal: the welcome screen's cards (D-105).</summary>
+    private static readonly (string Icon, string Title, string Text)[] WelcomeCards =
+    {
+        ("security", "The seal of trust", "Green stamps show what Anjal has proved: a verified sender, mail that arrived encrypted, an original kept unchanged."),
+        ("bell", "New mail arrives by itself", "The list updates on its own, with a soft chime you can turn off."),
+        ("columns", "Read your way", "Three panes, focus, or the list alone - switch at the head of the list."),
+        ("help", "Keyboard shortcuts", "Press ? anywhere to see them all."),
+        ("sliders", "Your language and time", "Choose your language, time zone and theme in Settings."),
+    };
+
+    /// <summary>The tour's steps (item 5): where each points, and what it says.</summary>
+    private string TourJson => System.Text.Json.JsonSerializer.Serialize(new[]
+    {
+        new { at = ".rail-compose", title = L["Compose"], text = L["Write a new message."] },
+        new { at = ".rail .rail-item", title = L["Your folders"], text = L["Inbox, Drafts, Sent, Archive, Junk and Trash, then your own. Fold the rail to icons with the arrow at the bottom."] },
+        new { at = ".listsearch", title = L["Search"], text = L["Search this folder or all of them. Press / to jump here."] },
+        new { at = ".listhead nav.seg", title = L["All, Unread, Read"], text = L["One click shows only what you want."] },
+        new { at = "form[action='/settings/layout']", title = L["Layout"], text = L["Three panes, focus, or the list alone."] },
+        new { at = "form[action='/settings/sound']", title = L["New mail sound"], text = L["A soft chime when new mail arrives. Turn it off here."] },
+        new { at = ".mrow .score", title = L["Spam score"], text = L["0 means checked and clean; amber, some doubt; red, at or over your organisation's Junk line."] },
+        new { at = "button[value='archive']", title = L["Archive"], text = L["Done with a message? Archive keeps it, out of your Inbox. Press e."] },
+        new { at = ".statusbar .who", title = L["Signed in"], text = L["Who is signed in. On a shared computer, always sign out."] },
+        new { at = ".statusbar .st-link", title = L["Keyboard shortcuts"], text = L["Press ? anywhere for every shortcut, and to restart this tour."] },
+    });
+
+    /// <summary>The approved shortcuts board, group by group (item 38).</summary>
+    private static readonly (string Group, (string What, string[] Keys)[] Keys)[] ShortcutGroups =
+    {
+        ("Move around", new[] { ("Next / previous message", new[] { "j", "k" }), ("Open", new[] { "Enter" }), ("Back, or leave focus", new[] { "Esc" }), ("Go to Inbox", new[] { "g", "i" }), ("Search", new[] { "/" }) }),
+        ("Act on mail", new[] { ("Reply", new[] { "r" }), ("Reply all", new[] { "a" }), ("Forward", new[] { "f" }), ("Archive", new[] { "e" }), ("Delete", new[] { "#" }), ("Flag", new[] { "s" }) }),
+        ("Select", new[] { ("Tick a message", new[] { "x" }), ("Tick a range", new[] { "Shift", "click" }), ("Tick all on the page", new[] { "Ctrl", "A" }) }),
+        ("Compose", new[] { ("Compose", new[] { "c" }), ("Send", new[] { "Ctrl", "Enter" }), ("Undo", new[] { "Ctrl", "Z" }) }),
+        ("Layout", new[] { ("Focus", new[] { "Shift", "F" }), ("Fold or open the rail", new[] { "[" }), ("This panel", new[] { "?" }) }),
+    };
+
+    private string DisplayName => person is null || person.DisplayName.Length == 0 ? string.Empty : person.DisplayName;
+
+    /// <summary>The person's initials for the phone's top bar (the board's "AS"); the address's first letter when there is no name.</summary>
+    private string Initials
     {
         get
         {
-            string path = Nav.ToBaseRelativePath(Nav.Uri);
-            if (!path.StartsWith("folder/", StringComparison.Ordinal))
+            string[] parts = DisplayName.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0)
             {
-                return FolderRow.Inbox;
+                string address = person?.Address ?? "?";
+                return address.Length > 0 ? address[..1].ToUpperInvariant() : "?";
             }
-            string rest = path.Substring("folder/".Length);
-            int q = rest.IndexOf('?', StringComparison.Ordinal);
-            return Uri.UnescapeDataString(q < 0 ? rest : rest.Substring(0, q));
+            string first = parts[0][..1];
+            string last = parts.Length > 1 ? parts[^1][..1] : string.Empty;
+            return (first + last).ToUpperInvariant();
         }
     }
 
-    private string SearchQuery => QueryValue("q");
+    /// <summary>The page to come back to after folding the rail.</summary>
+    private string BackPath => "/" + Nav.ToBaseRelativePath(Nav.Uri);
 
-    private string SearchScope => QueryValue("scope");
 
-    /// <summary>
-    /// What the scope selector should show: the scope of the search being
-    /// viewed, otherwise the folder the reader is in, so searching defaults
-    /// to where they already are.
-    /// </summary>
-    private string SearchScopeValue
-    {
-        get
-        {
-            string scope = SearchScope;
-            return scope.Length > 0 ? scope : CurrentFolder;
-        }
-    }
+    private bool Full => storage?.Full == true;
 
-    private string QueryValue(string name)
-    {
-        var uri = new Uri(Nav.Uri);
-        foreach (string pair in uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
-        {
-            int eq = pair.IndexOf('=', StringComparison.Ordinal);
-            if (eq > 0 && Uri.UnescapeDataString(pair.Substring(0, eq)) == name)
-            {
-                return Uri.UnescapeDataString(pair.Substring(eq + 1).Replace('+', ' '));
-            }
-        }
-        return string.Empty;
-    }
+    private int UsagePercent => storage?.Percent ?? 0;
 
-    private bool Full => mailbox is not null && Anjal.Mailbox.QuotaPolicy.IsFull(mailbox);
+    private string StorageText => storage is null || mailbox is null ? string.Empty
+        : storage.Plan == "shared" && storage.OwnLimit == 0
+            ? L["{used}; shared {sharedUsed} of {shared}"].Replace("{used}", Size(storage.Used), StringComparison.Ordinal).Replace("{sharedUsed}", Size(storage.SharedUsed), StringComparison.Ordinal).Replace("{shared}", Size(storage.Shared), StringComparison.Ordinal)
+        : storage.Plan == "mixed" && storage.OwnLimit > 0 && storage.Used >= storage.OwnLimit && !storage.Full
+            ? L["{used} of {quota}, drawing on the shared reserve"].Replace("{used}", Size(storage.Used), StringComparison.Ordinal).Replace("{quota}", Size(storage.OwnLimit), StringComparison.Ordinal)
+            : L["{used} of {quota}"].Replace("{used}", Size(storage.Used), StringComparison.Ordinal).Replace("{quota}", QuotaText, StringComparison.Ordinal);
 
-    private int UsagePercent => mailbox is null || mailbox.QuotaBytes <= 0
-        ? 0
-        : (int)Math.Min(100, mailbox.UsedBytes * 100 / mailbox.QuotaBytes);
+    private string StorageTip => storage is null ? string.Empty
+        : storage.Full ? L["Your mailbox is full: nothing more arrives, and you cannot send. Delete or archive some mail."]
+        : storage.Percent >= 80 ? L["{p}% full. Delete or archive some mail before it fills."].Replace("{p}", storage.Percent.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+        : string.Empty;
 
-    private string QuotaText => mailbox is null || mailbox.QuotaBytes <= 0 ? "unlimited" : Size(mailbox.QuotaBytes);
+    private string QuotaText => storage is null || storage.OwnLimit <= 0 ? L["no limit"] : Size(storage.OwnLimit);
 
     /// <summary>INBOX shows unread (what needs attention); every other folder shows its total.</summary>
     private static string? Badge(FolderView f)
@@ -159,31 +506,23 @@
         "Drafts" => "draft",
         "Junk" => "compliance-shield",
         "Trash" => "trash",
-        _ => "email",
+        "Archive" => "archive",
+        "Scheduled" => "scheduled",
+        "Outbox" => "referral-out",
+        FolderRow.Inbox => "email",
+        _ => "folder",
     };
 
     /// <summary>
     /// When a message arrived, as short as it can be while still clear: the
     /// time today, "Yesterday", the weekday this week, the day and month this
-    /// year, the full date otherwise. Shared by every list so they agree.
+    /// year, the full date otherwise - all decided in the person's own time
+    /// zone (DEF-088). Shared by every list so they agree.
     /// </summary>
-    internal static string When(DateTimeOffset at)
-    {
-        DateTime local = at.ToLocalTime().DateTime;
-        DateTime today = DateTime.Now.Date;
-        var inv = System.Globalization.CultureInfo.InvariantCulture;
-        if (local.Date == today) { return local.ToString("HH:mm", inv); }
-        if (local.Date == today.AddDays(-1)) { return "Yesterday"; }
-        if (local.Date > today.AddDays(-7)) { return local.ToString("ddd", inv); }
-        if (local.Year == today.Year) { return local.ToString("d MMM", inv); }
-        return local.ToString("d MMM yyyy", inv);
-    }
+    internal static string When(DateTimeOffset at, ZonedClock clock) => clock.List(at, DateTimeOffset.UtcNow);
 
-    internal static string Size(long bytes) =>
-        bytes < 1024 ? $"{bytes} B"
-        : bytes < 1024 * 1024 ? $"{bytes / 1024.0:0.#} KB"
-        : bytes < 1024L * 1024 * 1024 ? $"{bytes / (1024.0 * 1024.0):0.#} MB"
-        : $"{bytes / (1024.0 * 1024.0 * 1024.0):0.##} GB";
+    // Owner, 9 Oct 2026: every size is written one way, with two decimals (Services/Sizes.cs).
+    internal static string Size(long bytes) => Sizes.Text(bytes);
 
     protected override async Task OnInitializedAsync()
     {
@@ -192,6 +531,10 @@
             return;
         }
         AuthenticationState state = await AuthState;
+        L = Words.For(WebmailAuthService.LanguageOf(state.User, Words));
+        clock = WebmailAuthService.ClockOf(state.User);
+        shared = SessionRegistry.IsShared(state.User);
+        now = DateTimeOffset.UtcNow;
         Guid? mailboxId = WebmailAuthService.MailboxIdOf(state.User);
         if (mailboxId is null)
         {
@@ -200,7 +543,27 @@
         this.currentMailbox ??= mailboxId;
         await this.LoadFoldersAsync(mailboxId.Value);
         mailbox = (await Mail.GetContextAsync(mailboxId.Value))?.Mailbox;
+        storage = mailbox is null ? null : await Mail.StorageStateAsync(mailbox);
+        Guid? personId = WebmailAuthService.PersonIdOf(state.User);
+        person = personId == mailboxId ? mailbox : personId is Guid pid ? (await Mail.GetContextAsync(pid))?.Mailbox : null;
+        if (personId is Guid me)
+        {
+            sharedBoxes = await Mail.SharedForPersonAsync(me);
+            isAdmin = await Mail.IsOrgAdminAsync(me);
+            lastSignIn = (await Mail.GetSecurityAsync(me)).PreviousSignIn;
+            isOperator = Operators.Is(person?.Address);
+            offlineMail = (await Mail.OfflineMailAsync(me, shared)).On;
+            if (WebmailAuthService.ActingOf(state.User) is Guid open && sharedBoxes.FirstOrDefault(b => b.Box.Id == open) is { Box: not null } found)
+            {
+                acting = found.Box;
+                actingRight = found.Right;
+            }
+        }
     }
+
+    private int outboxCount;
+
+    private bool OnOutbox => Nav.Uri.Contains("/outbox", StringComparison.OrdinalIgnoreCase);
 
     private Guid? currentMailbox;
     private int foldersGeneration;
@@ -225,9 +588,11 @@
     {
         int mine = System.Threading.Interlocked.Increment(ref this.foldersGeneration);
         IReadOnlyList<FolderView> result = await Mail.ListFoldersAsync(mailboxId);
+        int waiting = await Mail.CountOutboxAsync(mailboxId);
         if (mine == System.Threading.Volatile.Read(ref this.foldersGeneration))
         {
             folders = result;
+            outboxCount = waiting;
         }
     }
 

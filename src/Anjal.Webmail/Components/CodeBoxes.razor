@@ -1,0 +1,28 @@
+@* rc.13 (AuthReset, AuthTwoStep): six boxes for a six-digit code. Each box is a
+   field named "code", so the server reads the digits joined; the script moves
+   from box to box, takes a pasted code whole, and sends a complete code. *@
+<div class="codeboxes @(Large ? "lg" : null)" role="group" aria-label="@Label" data-codeboxes data-autosubmit="@(AutoSubmit ? "1" : null)">
+    @for (int i = 1; i <= 6; i++)
+    {
+        <input class="codebox" type="text" name="code" inputmode="numeric" pattern="[0-9]" maxlength="1"
+               autocomplete="@(i == 1 ? "one-time-code" : "off")" aria-label="@L["Digit {n}"].Replace("{n}", i.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)"
+               autofocus="@(i == 1 && Focus)" required />
+    }
+</div>
+
+@code {
+    /// <summary>What the group is called for a screen reader.</summary>
+    [Parameter] public string Label { get; set; } = "Code";
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The larger boxes of the two-step board.</summary>
+    [Parameter] public bool Large { get; set; }
+
+    /// <summary>Send the form when the sixth digit is typed.</summary>
+    [Parameter] public bool AutoSubmit { get; set; }
+
+    /// <summary>Put the cursor in the first box.</summary>
+    [Parameter] public bool Focus { get; set; } = true;
+}

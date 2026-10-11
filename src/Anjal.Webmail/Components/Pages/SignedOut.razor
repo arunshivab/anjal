@@ -1,0 +1,52 @@
+@page "/signed-out"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+
+<PageTitle>@L["Signed out"] — Anjal</PageTitle>
+
+@* The approved signed-out board (AuthSignedOut, rc.13). Nothing of the mailbox
+   is kept in this browser: the sign-out asked it to clear this site's cache and
+   storage, and no page is cached while signed in. *@
+<AuthFrame L="L" Org="org">
+    <span class="authdone" aria-hidden="true"><LipiIcon Name="check" Size="30" /></span>
+    <h1 class="authtitle">@(Idle is not null ? L["You were signed out"] : L["You have signed out"])</h1>
+    <p class="authlead">@(Idle is not null
+        ? L["You were idle for too long, so Anjal signed you out. Unsent text was saved as a draft. Nothing from your mailbox is kept on this computer."]
+        : L["Nothing from your mailbox is kept on this computer: no messages, no attachments, no drafts."])</p>
+    <div class="authtip">@L["On a shared computer, also close the browser window before you leave."]</div>
+    <a class="authbtn" href="/sign-in">@L["Sign in again"]</a>
+    @if (when is DateTimeOffset at)
+    {
+        <p class="authnote">@L["Signed out at {time}."].Replace("{time}", clock.Full(at), StringComparison.Ordinal)</p>
+    }
+</AuthFrame>
+
+@code {
+    [SupplyParameterFromQuery] private string? Idle { get; set; }
+    [SupplyParameterFromQuery(Name = "at")] private long? At { get; set; }
+    [SupplyParameterFromQuery(Name = "tz")] private string? Tz { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private ZonedClock clock = ZonedClock.Default;
+    private DateTimeOffset? when;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        clock = ZonedClock.For(Tz, null);
+        // Only a moment in the last day is shown; anything else is not this sign-out.
+        if (At is long seconds && seconds > 0)
+        {
+            DateTimeOffset at = DateTimeOffset.FromUnixTimeSeconds(Math.Min(seconds, 253402300799));
+            if ((DateTimeOffset.UtcNow - at).Duration() < TimeSpan.FromDays(1))
+            {
+                when = at;
+            }
+        }
+    }
+}

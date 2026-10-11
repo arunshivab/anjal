@@ -1,0 +1,31 @@
+@* rc.12: pieces the browser script copies - an address card, a file in the
+   attachment list, and the Send one each preview - so every button on the
+   page is the page's own markup, never made by the script (review 3). *@
+<template data-chip-template>
+    <span class="rchip" data-chip><span class="rchip-t"><b data-chip-name></b><span class="rchip-a" data-chip-addr></span></span><button type="button" class="chip-x" data-chip-remove aria-label="@L["Remove"]"><LipiIcon Name="close" Size="12" /></button></span>
+</template>
+<template data-file-template>
+    <li class="cfileitem"><LipiIcon Name="attachment" Size="14" /><span class="cfname" data-fname></span><span class="catmeta" data-fsize></span><button type="button" class="chip-x" data-fremove aria-label="@L["Remove"]"><LipiIcon Name="close" Size="12" /></button></li>
+</template>
+<template data-icon-ok><LipiIcon Name="check" Size="13" /></template>
+<template data-icon-no><LipiIcon Name="close" Size="13" /></template>
+<template data-icon-group><LipiIcon Name="users" Size="14" /></template>
+<template data-merge-template>
+    <div class="mergeview" role="region" aria-label="@L["Each person's copy"]">
+        <div class="mv-bar">
+            <LipiIcon Name="users" Size="16" />
+            <b>@L["Previewing"]</b> <span data-mv-who></span>
+            <span class="lh-grow"></span>
+            <button type="button" class="iconbtn" data-mv-prev title="@L["Previous"]" aria-label="@L["Previous"]"><LipiIcon Name="chevron-left" Size="16" /></button>
+            <button type="button" class="iconbtn" data-mv-next title="@L["Next"]" aria-label="@L["Next"]"><LipiIcon Name="chevron-right" Size="16" /></button>
+            <button type="button" class="iconbtn" data-mv-close title="@L["Close"]" aria-label="@L["Close"]"><LipiIcon Name="close" Size="16" /></button>
+        </div>
+        <h2 class="mv-subject" data-mv-subject></h2>
+        <div class="mv-body" data-mv-body></div>
+    </div>
+</template>
+
+@code {
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+}

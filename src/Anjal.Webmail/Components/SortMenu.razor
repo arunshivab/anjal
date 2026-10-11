@@ -1,0 +1,60 @@
+@using Anjal.Webmail.Services
+@* Owner, 9 Oct 2026: a Sort menu in the head of every folder and of search - newest or oldest
+   first, by sender (recipient in Sent, Drafts and Scheduled), by subject, biggest first, unread
+   first or with attachments first. The choice is remembered for the folder (or for search). *@
+<details class="pmenu pmenu-right lhsort">
+    <summary class="iconbtn @(Sort == MailboxService.NewestFirst ? null : "on")" title="@L["Sort"]: @L[SortWord(Sort, Outgoing)]" aria-label="@L["Sort"]: @L[SortWord(Sort, Outgoing)]"><LipiIcon Name="sort" Size="16" /></summary>
+    <div class="pmenu-body">
+        <form method="post" action="/settings/sort" class="inline sortlist">
+            <AntiforgeryToken />
+            <input type="hidden" name="folder" value="@Folder" />
+            <input type="hidden" name="back" value="@Back" />
+            @foreach (string choice in MailboxService.SortChoices)
+            {
+                <button type="submit" name="sort" value="@choice" class="pmi" aria-pressed="@(choice == Sort ? "true" : "false")" title="@L[SortWord(choice, Outgoing)]" data-needs-server>
+                    @if (choice == Sort)
+                    {
+                        <LipiIcon Name="check" Size="15" />
+                    }
+                    else
+                    {
+                        <span class="pmi-gap" aria-hidden="true"></span>
+                    }
+                    @L[SortWord(choice, Outgoing)]
+                </button>
+            }
+        </form>
+    </div>
+</details>
+
+@code {
+    /// <summary>The words in the person's language.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The folder's name, or the search key.</summary>
+    [Parameter] public string Folder { get; set; } = string.Empty;
+
+    /// <summary>The order now.</summary>
+    [Parameter] public string Sort { get; set; } = MailboxService.NewestFirst;
+
+    /// <summary>True in Sent, Drafts and Scheduled: by name is by recipient.</summary>
+    [Parameter] public bool Outgoing { get; set; }
+
+    /// <summary>Where to come back to: the list's first page.</summary>
+    [Parameter] public string Back { get; set; } = "/folder/INBOX";
+
+    /// <summary>The words for an order.</summary>
+    /// <param name="sort">The order.</param>
+    /// <param name="outgoing">True when by name is by recipient.</param>
+    /// <returns>The English words, looked up in the word list.</returns>
+    internal static string SortWord(string sort, bool outgoing) => sort switch
+    {
+        "oldest" => "Oldest first",
+        "sender" => outgoing ? "Recipient A to Z" : "Sender A to Z",
+        "subject" => "Subject A to Z",
+        "size" => "Biggest first",
+        "unread" => "Unread first",
+        "attachments" => "With attachments first",
+        _ => "Newest first",
+    };
+}

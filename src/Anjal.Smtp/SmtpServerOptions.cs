@@ -128,6 +128,15 @@ public sealed class SmtpServerOptions
     public System.Func<X509Certificate2?>? TlsCertificateSource { get; init; }
 
     /// <summary>
+    /// rc.15 (item 59): told of each submission this server refuses - a wrong
+    /// password for a user name, a sender the user may not send as, or a
+    /// policy refusal after signing in - so an organisation can see what was
+    /// refused for its applications. Null means nobody is told. Called on the
+    /// session's thread; an exception it throws is ignored.
+    /// </summary>
+    public System.Action<SubmissionRefusal>? Refused { get; init; }
+
+    /// <summary>
     /// The certificate to use for a session starting now: the
     /// <see cref="TlsCertificateSource"/> result if a source is set,
     /// otherwise <see cref="TlsCertificate"/>.

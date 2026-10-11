@@ -1,0 +1,75 @@
+@page "/invite/{Token}"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+<PageTitle>@L["Invitation"] — Anjal</PageTitle>
+
+@* The approved invitation board (AuthInvite, rc.13): step 1 of 2, choosing a
+   password (and, if wanted, a recovery address); step 2 is setting up two-step
+   sign-in, in Security settings, which can be skipped. *@
+<AuthFrame L="L" Org="org">
+    @if (found is null)
+    {
+        <h1 class="authtitle">@L["This invitation cannot be used"]</h1>
+        <p class="authlead">@L["It has expired, or it has already been used. Invitations work for 7 days and once only. Ask your administrator to send a new one."]</p>
+        <p class="authnote"><a class="authlink" href="/sign-in">@L["Go to sign in"]</a></p>
+    }
+    else
+    {
+        <ol class="authsteps" aria-label="@L["Steps"]">
+            <li class="on" aria-current="step">@L["1 Password"]</li>
+            <li aria-hidden="true" class="bar"></li>
+            <li>@L["2 Two-step sign-in"]</li>
+        </ol>
+        <h1 class="authtitle">@L["Welcome to {organisation} mail, {name}"].Replace("{organisation}", found.Value.Organisation, StringComparison.Ordinal).Replace("{name}", FirstName, StringComparison.Ordinal)</h1>
+        <p class="authlead">@L["Your address is {address}. Choose a password to start."].Replace("{address}", found.Value.Mailbox.Address, StringComparison.Ordinal)</p>
+        @if (error is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+        }
+        <form method="post" action="/auth/invite" class="authfields" data-pwform>
+            <AntiforgeryToken />
+            <input type="hidden" name="token" value="@Token" data-invite />
+            <input type="text" name="username" value="@found.Value.Mailbox.Address" autocomplete="username" hidden />
+            <label class="authlbl" for="password">@L["Password"]</label>
+            <div class="authinpwrap"><input class="authinp-in" id="password" name="password" type="password" autocomplete="new-password" required autofocus data-pwinput /></div>
+            <PasswordRules L="L" For="password" MinLength="minLength" />
+            <label class="authlbl" for="recovery">@L["Recovery address (optional)"]</label>
+            <div class="authinpwrap"><input class="authinp-in" id="recovery" name="recovery" type="email" autocomplete="email" placeholder="@L["A personal address, for a forgotten password"]" /></div>
+            <button type="submit" class="authbtn">@L["Continue"]</button>
+        </form>
+        <p class="authnote">@L["This invitation from {name} expires on {date}."].Replace("{name}", found.Value.Invitation.InvitedBy.Length > 0 ? found.Value.Invitation.InvitedBy : L["your administrator"], StringComparison.Ordinal).Replace("{date}", ZonedClock.Default.Date(found.Value.Invitation.Expires), StringComparison.Ordinal)</p>
+    }
+</AuthFrame>
+
+@code {
+    /// <summary>The invitation's token.</summary>
+    [Parameter] public string Token { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private (MailboxRow Mailbox, InvitationState Invitation, string Organisation)? found;
+    private int minLength = Anjal.Smtp.PasswordPolicy.AloneLength;
+    private string? error;
+
+    private string FirstName => found is null ? string.Empty
+        : found.Value.Mailbox.DisplayName.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? found.Value.Mailbox.LocalPart;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        found = await Mail.FindInvitationAsync(Token);
+        if (found is not null)
+        {
+            minLength = await Mail.PasswordLengthForAsync(found.Value.Mailbox, null);
+        }
+        error = AuthEndpoints.ReadNote(Protection, E);
+    }
+}

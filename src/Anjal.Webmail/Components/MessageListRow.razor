@@ -1,0 +1,162 @@
+@* rc.11: one message row, shared by every message list (folders and search),
+   so the score, preview, marks and time never differ between them (items 50, 57). *@
+<div class="@RowClass" aria-current="@(IsOpen ? "true" : null)" data-message="@M.Id" data-reply="/compose?reply=@M.Id" data-seen="@(M.Seen ? "1" : "0")">
+    @if (Selectable)
+    {
+        <input type="checkbox" name="id" value="@M.Id" data-rowcheck aria-label="@L["Select"] @Who" />
+    }
+    <span class="spine" aria-hidden="true"><i class="@(M.Seen ? "" : "on")"></i></span>
+    <div class="mbody">
+        <div class="mline1">
+            @if (Outgoing)
+            {
+                <span class="sto">@L["To"]</span>
+            }
+            <span class="sname">@Who</span>
+            @if (!M.Seen)
+            {
+                <span class="sr-only">@L["Unread"]</span>
+            }
+            @if (FolderLabel is not null)
+            {
+                <span class="mfolder">@FolderLabel</span>
+            }
+            @if (M.HasAttachments)
+            {
+                <span data-attachment role="img" title="@L["Has attachments"]" aria-label="@L["Has attachments"]"><LipiIcon Name="attachment" Size="13" /></span>
+            }
+            @if (Conversation > 1)
+            {
+                <span class="ccount" title="@L["{n} messages in this conversation"].Replace("{n}", MailboxService.Count(Conversation), StringComparison.Ordinal)">@Conversation</span>
+            }
+            <time title="@Clock.Full(M.ReceivedAt)" datetime="@M.ReceivedAt.ToString("o", System.Globalization.CultureInfo.InvariantCulture)"><span class="tt">@Clock.Time(M.ReceivedAt)</span><small class="td">@Clock.ListDay(M.ReceivedAt, DateTimeOffset.UtcNow)</small></time>
+        </div>
+        <div class="mline2">
+            @if (MailboxService.ShowsUnencryptedWarning(M, Trusted))
+            {
+                <span class="unenc" data-unencrypted role="img" title="@L["Arrived unencrypted: anyone on the network path could have read it"]" aria-label="@L["Arrived unencrypted"]"><LipiIcon Name="unlock" Size="13" /></span>
+            }
+            <a class="subj" href="@OpenLink" data-open>@(string.IsNullOrWhiteSpace(M.Subject) ? L["(no subject)"] : M.Subject)</a>
+            @if (Category is not null)
+            {
+                <span class="chip slot-@Category.Row.Slot"><i></i>@Category.Row.Name</span>
+            }
+            @if (ShowFlag)
+            {
+                <button type="submit" class="fav @(M.Flagged ? "on" : "")"
+                        formaction="/message/@M.Id/flag" formnovalidate
+                        name="back" value="@BackLink" data-needs-server
+                        title="@(M.Flagged ? L["Remove flag"] : L["Flag"])"
+                        aria-label="@(M.Flagged ? L["Remove flag"] : L["Flag"])"><span lang="ta">அ</span></button>
+            }
+            @* rc.15: the score follows the subject, small; the first line is who, the clip (reviews 1 and 2) and when. *@
+            @* Decision 1B: 0 means checked and clean; a dash means never checked. *@
+            @if (Sends is not null)
+            {
+                @* Waiting to be sent: no score to show. *@
+            }
+            else if (!SpamCheck.WasChecked(M, FolderName))
+            {
+                <span class="score s-none" title="@L["Not checked: your own mail or mail from this server"]">&ndash;</span>
+            }
+            else if (M.SpamScore > 0)
+            {
+                <span class="score @(M.SpamScore >= Threshold ? "s-hi" : "s-mid")" title="@L["Checked on arrival: spam score {n}"].Replace("{n}", M.SpamScore.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)">@M.SpamScore</span>
+            }
+            else
+            {
+                <span class="score s-zero" title="@L["Checked on arrival: nothing suspicious"]">0</span>
+            }
+        </div>
+        @if (Sends is not null)
+        {
+            <div class="mline3 msends"><span class="sendpill"><LipiIcon Name="clock" Size="12" />@Sends</span></div>
+        }
+        else if (M.Preview.Length > 0)
+        {
+            <div class="mline3">@System.Text.RegularExpressions.Regex.Replace(M.Preview, @"\s+", " ").Trim()</div>
+        }
+    </div>
+    @* rc.12 (D-116): the row's own actions, shown on hover or keyboard focus.
+       Each acts on this message alone, through the folder's bulk path, so
+       Archive and Delete can be undone like any other move. *@
+    @if (QuickUrl is not null)
+    {
+        <span class="rowacts">
+            @if (FolderName == "Trash")
+            {
+                <button type="submit" class="rowact" formaction="@QuickAction" formnovalidate name="action" value="restore" data-needs-server title="@L["Restore to INBOX"]" aria-label="@L["Restore to INBOX"]"><LipiIcon Name="undo" Size="15" /></button>
+            }
+            else
+            {
+                @if (FolderName != "Archive" && FolderName != Anjal.Mailbox.MailboxSink.JunkFolder && FolderName != "Drafts")
+                {
+                    <button type="submit" class="rowact" formaction="@QuickAction" formnovalidate name="action" value="archive" data-needs-server title="@L["Archive"]" aria-label="@L["Archive"]"><LipiIcon Name="archive" Size="15" /></button>
+                }
+                <button type="submit" class="rowact" formaction="@QuickAction" formnovalidate name="action" value="trash" data-needs-server title="@L["Delete"]" aria-label="@L["Delete"]"><LipiIcon Name="trash" Size="15" /></button>
+                <button type="submit" class="rowact" formaction="@QuickAction" formnovalidate name="action" value="@(M.Seen ? "unread" : "read")" data-needs-server
+                        title="@(M.Seen ? L["Mark as unread"] : L["Mark as read"])" aria-label="@(M.Seen ? L["Mark as unread"] : L["Mark as read"])"><LipiIcon Name="@(M.Seen ? "email" : "check")" Size="15" /></button>
+            }
+        </span>
+    }
+</div>
+
+@code {
+    private string QuickAction => QuickUrl + (QuickUrl!.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "one=" + M.Id;
+
+    private string RowClass => "mrow" + (M.Seen ? string.Empty : " unread") + (IsOpen ? " open" : string.Empty);
+
+    /// <summary>The message.</summary>
+    [Parameter, EditorRequired] public MessageRow M { get; set; } = new();
+
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The person's clock.</summary>
+    [Parameter] public ZonedClock Clock { get; set; } = ZonedClock.Default;
+
+    /// <summary>The folder the message is in (decides whether it was checked for spam).</summary>
+    [Parameter] public string FolderName { get; set; } = FolderRow.Inbox;
+
+    /// <summary>Shown beside the sender in search results; null in a folder.</summary>
+    [Parameter] public string? FolderLabel { get; set; }
+
+    /// <summary>The organisation's Junk threshold.</summary>
+    [Parameter] public int Threshold { get; set; } = TenantRow.DefaultSpamThreshold;
+
+    /// <summary>Senders whose mail is trusted not to warn about encryption.</summary>
+    [Parameter] public IReadOnlySet<string> Trusted { get; set; } = new HashSet<string>();
+
+    /// <summary>The message's category, if any.</summary>
+    [Parameter] public CategoryView? Category { get; set; }
+
+    /// <summary>Who to show: the sender, or the recipient in Sent and Drafts.</summary>
+    [Parameter] public string Who { get; set; } = string.Empty;
+
+    /// <summary>True in Sent and Drafts: the name is a recipient, labelled "To" (DEF-009).</summary>
+    [Parameter] public bool Outgoing { get; set; }
+
+    /// <summary>True where the row has a checkbox for selection.</summary>
+    [Parameter] public bool Selectable { get; set; }
+
+    /// <summary>True where flagging is offered (INBOX and Sent).</summary>
+    [Parameter] public bool ShowFlag { get; set; }
+
+    /// <summary>Where opening the message goes.</summary>
+    [Parameter] public string OpenLink { get; set; } = string.Empty;
+
+    /// <summary>True for the message open beside the list: marked by the flap point (item 50).</summary>
+    [Parameter] public bool IsOpen { get; set; }
+
+    /// <summary>How many messages its conversation holds (UX-04); 1 when alone.</summary>
+    [Parameter] public int Conversation { get; set; } = 1;
+
+    /// <summary>In Scheduled: when the message will be sent, in words.</summary>
+    [Parameter] public string? Sends { get; set; }
+
+    /// <summary>The folder's bulk action address; when set, the row shows its own hover actions (D-116).</summary>
+    [Parameter] public string? QuickUrl { get; set; }
+
+    /// <summary>The page to come back to after flagging.</summary>
+    [Parameter] public string BackLink { get; set; } = string.Empty;
+}

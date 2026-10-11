@@ -1,0 +1,62 @@
+@page "/settings/security/confirm"
+@layout MainLayout
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+
+<PageTitle>@L["Confirm it is you"] — Anjal</PageTitle>
+
+@* DES-11 S4 (owner, 10 Oct 2026, "A"): every change to how the account is protected asks for the
+   password, or a passkey, unless one was given in the last five minutes. *@
+<AuthFrame L="L" Org="org">
+    <h1 class="authtitle">@L["Confirm it is you"]</h1>
+    <p class="authlead">@L["Changes to how your account is protected ask for your password, or your passkey, if you have not given it in the last five minutes."]</p>
+    @if (Wrong is not null)
+    {
+        <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["That password is not right."]</span></div>
+    }
+    @if (Throttled is not null)
+    {
+        <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["Too many unsuccessful attempts. Wait fifteen minutes and try again."]</span></div>
+    }
+    <form method="post" action="/settings/security/confirm" class="authfields">
+        <AntiforgeryToken />
+        <input type="hidden" name="next" value="@Next" />
+        <label class="authlbl" for="password">@L["Password"]</label>
+        <div class="authinpwrap"><input class="authinp-in" id="password" name="password" type="password" autocomplete="current-password" required autofocus /></div>
+        <button type="submit" class="authbtn">@L["Confirm"]</button>
+    </form>
+    @if (hasPasskey)
+    {
+        <div class="err" role="alert" data-passkey-error hidden><LipiIcon Name="warning" Size="16" /><span></span></div>
+        <form method="post" class="inline" data-passkey-signin data-passkey-options="/settings/security/confirm/passkey/options" data-passkey-verify="/settings/security/confirm/passkey/verify">
+            <AntiforgeryToken />
+            <input type="hidden" name="next" value="@Next" />
+            <button type="button" class="authlink linkbtn" data-passkey-go>@L["Use a passkey instead"]</button>
+        </form>
+    }
+    <p class="authnote"><a class="authlink" href="@Next">@L["Cancel"]</a></p>
+</AuthFrame>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [SupplyParameterFromQuery(Name = "next")] private string? NextQuery { get; set; }
+    [SupplyParameterFromQuery] private string? Wrong { get; set; }
+    [SupplyParameterFromQuery] private string? Throttled { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private bool hasPasskey;
+
+    private string Next => Program.SafeBack(NextQuery, "/settings/security");
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        if (AuthState is not null && WebmailAuthService.PersonIdOf((await AuthState).User) is Guid me)
+        {
+            hasPasskey = (await Mail.GetSecurityAsync(me)).Passkeys.Count > 0;
+        }
+    }
+}

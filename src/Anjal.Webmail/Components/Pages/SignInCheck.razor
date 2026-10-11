@@ -1,0 +1,59 @@
+@page "/sign-in/check"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+<PageTitle>@L["New sign-in"] — Anjal</PageTitle>
+
+@* DES-11 S5 (owner, 10 Oct 2026, "A"): the two links in a sign-in alert. "This was me" changes
+   nothing; "This wasn't me" signs that device out at once and leads to a new password. *@
+<AuthFrame L="L" Org="org">
+    @if (!valid)
+    {
+        <h1 class="authtitle">@L["This link has expired"]</h1>
+        <p class="authlead">@L["Links in a sign-in alert work for seven days. If you think someone else is using your account, change your password now, or ask your administrator."]</p>
+        <p class="authnote"><a class="authlink" href="/sign-in/forgot">@L["Change your password"]</a></p>
+    }
+    else if (Done is not null)
+    {
+        <h1 class="authtitle">@L["That device is signed out"]</h1>
+        <p class="authlead">@L["Now choose a new password, so whoever signed in cannot again. Every trusted device will ask for the second step once more."]</p>
+        <p class="authnote"><a class="authlink" href="/sign-in/forgot">@L["Choose a new password"]</a></p>
+    }
+    else if (A == "not-me")
+    {
+        <h1 class="authtitle">@L["It wasn't you?"]</h1>
+        <p class="authlead">@L["Sign that device out at once. Then choose a new password."]</p>
+        <form method="post" action="/auth/not-me" class="authfields">
+            <AntiforgeryToken />
+            <input type="hidden" name="t" value="@T" />
+            <button type="submit" class="authbtn">@L["Sign that device out"]</button>
+        </form>
+    }
+    else
+    {
+        <h1 class="authtitle">@L["Thank you"]</h1>
+        <p class="authlead">@L["Nothing more is needed. You will be told again whenever your account is used from a network or a device not seen before."]</p>
+        <p class="authnote"><a class="authlink" href="/sign-in">@L["Sign in"]</a></p>
+    }
+</AuthFrame>
+
+@code {
+    [SupplyParameterFromQuery] private string? A { get; set; }
+    [SupplyParameterFromQuery] private string? T { get; set; }
+    [SupplyParameterFromQuery] private string? Done { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private bool valid;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        valid = Done is not null || AuthEndpoints.ReadSignInCheck(Protection, T) is not null;
+    }
+}

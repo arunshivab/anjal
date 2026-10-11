@@ -1,0 +1,177 @@
+@* rc.15 (item 5, owner 7 Oct): a short tip on every text button, in the person's language. A data
+   block, never run: the script reads it as JSON and gives each text button whose words match a
+   tip, unless it already has one. *@
+<script type="application/json" id="anjal-tips">@((MarkupString)Json)</script>
+
+@code {
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>True for an organisation's administrator: the organisation console's buttons get tips too.</summary>
+    [Parameter] public bool Admin { get; set; }
+
+    /// <summary>True for an operator of this Anjal service: the Anjal console's buttons get tips too.</summary>
+    [Parameter] public bool Operator { get; set; }
+
+    private static readonly System.Text.Json.JsonSerializerOptions Options = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.Default };
+
+    private string Json => System.Text.Json.JsonSerializer.Serialize(Map(), Options);
+
+    // The button's words, as shown, to its tip.
+    private Dictionary<string, string> Map()
+    {
+        var all = new Dictionary<string, string>(StringComparer.Ordinal);
+        IEnumerable<(string Label, string Tip)> pairs = Pairs();
+        if (Admin)
+        {
+            pairs = pairs.Concat(AdminPairs());
+        }
+        if (Operator)
+        {
+            pairs = pairs.Concat(OperatorPairs());
+        }
+        foreach ((string label, string tip) in pairs)
+        {
+            all.TryAdd(label, tip);
+        }
+        return all;
+    }
+
+    private IEnumerable<(string Label, string Tip)> Pairs() => new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [L["Archive"]] = L["Keep it, out of the Inbox. Find it in Archive or by search."],
+            [L["Reply all"]] = L["Answer the sender and everyone else it went to."],
+            [L["Flag"]] = L["Mark it to come back to."],
+            [L["Remove flag"]] = L["Take the mark off."],
+            [L["Back to your dashboard"]] = L["Return to your dashboard."],
+            [L["No reply needed"]] = L["Take it off the list of mail waiting for an answer."],
+            [L["Back"]] = L["Go back to the step before."],
+            [L["Back to Inbox"]] = L["Close this mail and return to the Inbox list."],
+            [L["Back to the letter"]] = L["Close the attachment and return to the mail."],
+            [L["Back to your message"]] = L["Leave the templates and return to what you were writing."],
+            [L["Cancel"]] = L["Stop without saving."],
+            [L["Cancel delivery"]] = L["Stop this mail; it goes back to Drafts."],
+            [L["Change password"]] = L["Choose a new password for signing in."],
+            [L["Change send time"]] = L["Pick a different time for this scheduled mail."],
+            [L["Clear"]] = L["Untick everything."],
+            [L["Clear search"]] = L["Leave the results and go back to the folder."],
+            [L["Compose"]] = L["Write a new mail to this person."],
+            [L["Create"]] = L["Make it now."],
+            [L["Create the rule"]] = L["File mail like this automatically from now on."],
+            [L["Delete"]] = L["Move to Trash. Undo appears for a few seconds."],
+            [L["Delete contact"]] = L["Remove this person from your contacts; their mail stays."],
+            [L["Delete group"]] = L["Remove the group; the people stay in your contacts."],
+            [L["Delete permanently…"]] = L["Delete for good. Asks first."],
+            [L["Delete rule"]] = L["Remove this rule; mail already filed stays where it is."],
+            [L["Discard"]] = L["Throw this message away, with its saved draft."],
+            [L["Edit"]] = L["Change these details."],
+            [L["Export"]] = L["Save your contacts as a file (vCard or CSV)."],
+            [L["Forget"]] = L["Stop filing this sender's mail automatically."],
+            [L["Forward"]] = L["Send this mail on to someone else."],
+            [L["Import"]] = L["Add contacts from a vCard or CSV file."],
+            [L["Import (vCard, CSV)"]] = L["Add contacts from a vCard or CSV file."],
+            [L["Keep editing"]] = L["Go back to your message."],
+            [L["Mark all as read"]] = L["Mark every mail in this folder as read."],
+            [L["Mark all as unread"]] = L["Mark every mail in this folder as unread."],
+            [L["Mark as read"]] = L["Mark the ticked mail as read."],
+            [L["Mark as unread"]] = L["Show it as new again, with its dot."],
+            [L["Merge duplicates"]] = L["Join contacts that have the same address."],
+            [L["Move to"]] = L["Put the ticked mail in another folder."],
+            [L["Never for this sender"]] = L["Do not offer to save this sender again."],
+            [L["New category"]] = L["Add a category of your own."],
+            [L["New folder"]] = L["Add a folder of your own."],
+            [L["New rule"]] = L["Make a rule that files mail as it arrives."],
+            [L["New sender rule"]] = L["Always or never send a sender's mail to Junk."],
+            [L["Not junk"]] = L["Move it to the Inbox and trust this sender's mail."],
+            [L["Not now"]] = L["Skip this time; their next mail asks again."],
+            [L["Play it now"]] = L["Hear the new-mail sound."],
+            [L["Set the offline code"]] = L["Lock the mail list kept on this device with this code."],
+            [L["Also open it with my passkey"]] = L["Let this device's passkey open the list too."],
+            [L["Preview each copy"]] = L["See exactly what each person will receive."],
+            [L["Print"]] = L["Print this mail, or save it as a PDF."],
+            [L["Remove"]] = L["Take this away."],
+            [L["Reply"]] = L["Answer the sender only."],
+            [L["Reply to the sender only"]] = L["Answer only the person who wrote."],
+            [L["Report junk"]] = L["Move it to Junk and send this sender's future mail there."],
+            [L["Reset all to Today"]] = L["Show every chart for today again."],
+            [L["Reset to organisation default"]] = L["Go back to your organisation's look."],
+            [L["Restart the tour"]] = L["Show the short tour of the main controls again."],
+            [L["Restore"]] = L["Put it back in the Inbox."],
+            [L["Restore to INBOX"]] = L["Put the ticked mail back in the Inbox."],
+            [L["Save"]] = L["Keep this change."],
+            [L["Save as template"]] = L["Keep this message to start others from."],
+            [L["Save category"]] = L["File this mail under the chosen category."],
+            [L["Save contact"]] = L["Keep these details."],
+            [L["Save draft"]] = L["Keep it in Drafts to finish later."],
+            [L["Save group"]] = L["Keep this group."],
+            [L["Save rule"]] = L["Keep this rule; it acts on mail that arrives from now on."],
+            [L["Save signature"]] = L["Use this signature at the end of new mail."],
+            [L["Save to contacts"]] = L["Add this person to your contacts."],
+            [L["Search"]] = L["Find mail by words, sender or date."],
+            [L["Send"]] = L["Send now. Undo appears for a few seconds."],
+            [L["Send later"]] = L["Choose a time; it waits in Scheduled until then."],
+            [L["Send now"]] = L["Send it now instead of waiting."],
+            [L["Sign out"]] = L["End this session on this device."],
+            [L["Sign out everywhere else"]] = L["End your sessions on every other device."],
+            [L["Skip"]] = L["Close this; you can find it again under Help."],
+            [L["Small window"]] = L["Write in a small window over the Inbox."],
+            [L["Take the tour again"]] = L["Show the short tour of the main controls again."],
+            [L["Templates"]] = L["Start from a ready-made message."],
+            [L["Trust this sender"]] = L["Stop warning about this sender's unencrypted mail."],
+            [L["Try now"]] = L["Try to deliver it again now."],
+            [L["Try on the last 30 days"]] = L["See what this rule would have done to the last 30 days of mail."],
+            [L["Turn off"]] = L["Switch this off."],
+            [L["Turn on"]] = L["Switch this on."],
+            [L["Undo"]] = L["Put it back as it was."],
+            [L["Use this"]] = L["Fill your message from this template."],
+            [L["Write to the group"]] = L["Start a mail to everyone in this group."],
+            [L["Empty Trash"]] = L["Delete everything in Trash for good. Asks first."],
+            [L["Empty Junk"]] = L["Delete everything in Junk for good. Asks first."],
+            [L["Set up an authenticator app"]] = L["Add a second step at sign-in: a code from an app on your phone."],
+            [L["Add a passkey"]] = L["Confirm it is you with a fingerprint, face or PIN on this device."],
+            [L["Export (CSV)"]] = L["Save this list as a CSV file."],
+            [L["Keyboard shortcuts"]] = L["See the keys that work in the webmail."],
+            [L["Save changes"]] = L["Keep these settings."],
+            [L["Download the original (.eml)"]] = L["Save this mail's original as a file."],
+        }.Select(kv => (kv.Key, kv.Value));
+
+    // UX-09 (owner, 7 Oct 2026): the organisation console's buttons, only on administrators' pages.
+    private IEnumerable<(string Label, string Tip)> AdminPairs() => new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [L["Import list (CSV)"]] = L["Invite many people at once from a CSV file."],
+            [L["Invite people"]] = L["Make mailboxes for new people and send each an invitation."],
+            [L["Download all records"]] = L["Save all the records shown here as one text file."],
+            [L["Add a domain"]] = L["Receive and send mail at another domain your organisation owns."],
+            [L["Add an application"]] = L["Let one of your applications send mail through Anjal."],
+            [L["Check the chain"]] = L["Confirm that no entry in the log has been changed or removed."],
+            [L["New shared mailbox"]] = L["Make a mailbox that several people read together."],
+            [L["Place a hold"]] = L["Keep a person's mail from being deleted, for a legal or audit reason."],
+            [L["Upload logo"]] = L["Show your organisation's logo in the webmail."],
+            [L["Import and invite"]] = L["Invite everyone in the file."],
+            [L["Invite"]] = L["Make the mailbox and send the invitation now."],
+            [L["Reset password"]] = L["Sign them out everywhere and make a link to choose a new password."],
+            [L["Set limit"]] = L["Give this person a smaller mailbox than the plan gives."],
+            [L["Sign out all devices"]] = L["End this person's sessions on every device."],
+            [L["Change role"]] = L["Make this person an administrator, or a member again."],
+            [L["Change shared mailboxes"]] = L["Choose which shared mailboxes this person can read."],
+            [L["Add and make a key"]] = L["Add the application and make its key."],
+            [L["Make it"]] = L["Make the shared mailbox now."],
+            [L["Place the hold"]] = L["Start the hold: their mail cannot be deleted while it lasts."],
+            [L["Allow Send one each"]] = L["Let this person send separate copies to many people at once."],
+            [L["Turn on and tell everyone"]] = L["Show each person's mail counts on the dashboard, and mail everyone why."],
+            [L["Turn off and tell everyone"]] = L["Stop showing each person's mail counts, and tell everyone by mail."],
+            [L["Stop Send one each"]] = L["Take Send one each away from this person."],
+        }.Select(kv => (kv.Key, kv.Value));
+
+    // UX-09: the Anjal console's buttons, only on operators' pages.
+    private IEnumerable<(string Label, string Tip)> OperatorPairs() => new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [L["Add an organisation"]] = L["Set up a new organisation on this Anjal service."],
+            [L["Send it now"]] = L["Send the summary to the operators now."],
+            [L["Record the drill"]] = L["Keep this restore drill in the service's record; the next is due six months after it."],
+            [L["Change limits"]] = L["Change this organisation's status, people allowed and storage."],
+            [L["Message the administrator"]] = L["Write to this organisation's administrator."],
+            [L["Add"]] = L["Add it now."],
+            [L["Save limits"]] = L["Keep these limits for this organisation."],
+        }.Select(kv => (kv.Key, kv.Value));
+}

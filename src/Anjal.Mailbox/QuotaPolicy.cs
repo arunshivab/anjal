@@ -74,7 +74,8 @@ public sealed class QuotaPolicy : Anjal.Smtp.ISmtpPolicy
             return Anjal.Smtp.PolicyDecision.Allow;
         }
         Anjal.Store.MailboxRow? mailbox = await this.store.GetMailboxAsync(local, domain, ct).ConfigureAwait(false);
-        if (mailbox is null || !IsFull(mailbox))
+        // DES-11 D2: the organisation's storage plan - the mailbox's own limit, and a shared total or reserve.
+        if (mailbox is null || !(await Anjal.Store.StoragePlan.StateOfAsync(this.store, mailbox, ct).ConfigureAwait(false)).Full)
         {
             return Anjal.Smtp.PolicyDecision.Allow;
         }

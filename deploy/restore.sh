@@ -17,6 +17,7 @@ REMOTE=${ANJAL_BACKUP_REMOTE:-b2crypt:}
 MAILDIR_ROOT=${ANJAL_MAILDIR_ROOT:-/var/mail/anjal}
 EVIDENCE_ROOT=${ANJAL_EVIDENCE_ROOT:-/var/lib/anjal/evidence}
 ACME_DIR=${ANJAL_ACME_DIR:-/var/lib/anjal/acme}
+SEAL_KEY=${ANJAL_DKIM_SEAL_KEY:-/var/lib/anjal/dkim-seal.pem}
 SCRATCH=${ANJAL_BACKUP_SCRATCH:-/var/lib/anjal/backup}
 export RCLONE_CONFIG
 
@@ -48,6 +49,14 @@ rclone sync "${REMOTE}acme/" "$ACME_DIR" --stats=0 --quiet
 chown -R anjal:anjal "$MAILDIR_ROOT" "$ACME_DIR"
 chmod 700 "$ACME_DIR"
 find "$ACME_DIR" -name '*.key.pem' -exec chmod 600 {} +
+# The DKIM seal key (rc.15, DES-11 S6): it opens every DKIM key in the database.
+if rclone lsf "${REMOTE}keys/" 2>/dev/null | grep -qx 'dkim-seal.pem'; then
+  log "restore ${REMOTE}keys/dkim-seal.pem -> $SEAL_KEY"
+  mkdir -p "$(dirname "$SEAL_KEY")"
+  rclone copyto "${REMOTE}keys/dkim-seal.pem" "$SEAL_KEY" --stats=0 --quiet
+  chown anjal:anjal "$SEAL_KEY"
+  chmod 600 "$SEAL_KEY"
+fi
 find "$MAILDIR_ROOT" -type d -exec chmod 700 {} +
 find "$MAILDIR_ROOT" -type f -exec chmod 600 {} +
 # Evidence (v1.0.0-rc.8): the originals and the manifest chain, read-only again.

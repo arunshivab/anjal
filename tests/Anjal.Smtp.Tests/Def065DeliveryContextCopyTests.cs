@@ -45,6 +45,7 @@ public sealed class Def065DeliveryContextCopyTests
         : p.PropertyType == typeof(IReadOnlyList<string>) ? new[] { "rcpt-" + p.Name }
         : p.PropertyType == typeof(object) ? new object()
         : p.PropertyType == typeof(System.Guid?) ? System.Guid.NewGuid()
+        : p.PropertyType == typeof(bool) ? true
         : throw new InvalidOperationException("Give the test a sample value for " + p.Name + " (" + p.PropertyType + ")");
 
     [Fact]
@@ -59,6 +60,7 @@ public sealed class Def065DeliveryContextCopyTests
                 : p.PropertyType == typeof(IReadOnlyList<string>) ? new[] { "rcpt-" + p.Name }
                 : p.PropertyType == typeof(object) ? new object()
                 : p.PropertyType == typeof(System.Guid?) ? System.Guid.NewGuid()
+                : p.PropertyType == typeof(bool) ? true
                 : throw new InvalidOperationException("Give the test a sample value for " + p.Name + " (" + p.PropertyType + ")");
             p.SetValue(source, value);
         }

@@ -10,6 +10,22 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.15** (11 October 2026) - the webmail release: rc.11 to rc.15 built
+and evaluated as one (ANJAL-SPEC-11, SPEC-11B v1.1, DES-11, decisions D-111 to
+D-148 in ANJAL-PRJ-03c). The "every script" look in 21 colours with light and
+dark; the letter and envelope layout with three panes, Focus and a phone
+layout; no full page reloads and live new mail with one chiming tab; compose
+in the letter or docked, templates, Send one each, Send later; contacts,
+rules, categories and conversations; sign-in with two-step (authenticator,
+passkeys, backup codes), invitations, password reset and sign-in alerts; the
+organisation console and the Anjal console with dashboards, storage plans,
+operator alerts and service health; the mail list kept offline, locked; six
+languages ready (English switched on). Passwords follow NIST SP 800-63B-4: 15
+characters alone or 12 with two-step, no character-type rule, no forced
+change, leaked passwords refused. A failed backup is retried for about 30
+minutes, then reported at once (D-88). Three control heights across the app.
+Upgrade notes: DEPLOY.md 13d.
+
 **v1.0.0-rc.10** (2 October 2026) - the open defects and MTA-STS (ANJAL-SPEC-10).
 After Back, a page the browser restores from its back-forward cache reloads, so
 a message just read no longer shows as unread (DEF-078). A message whose content
@@ -544,7 +560,8 @@ the local Lipi instance). Add more users via the API as needed.
 | `ANJAL_RELAY_PORT` | `587` | Relay port (when mode=relay) |
 | `ANJAL_API_PORT` | (disabled) | HTTP API port |
 | `ANJAL_API_BIND` | `ANJAL_BIND` | HTTP API bind address |
-| `ANJAL_API_TOKEN` | - | Bearer token for the API |
+| `ANJAL_API_TOKEN` | - | Bearer token for the API (24 characters or more) |
+| `ANJAL_API_TOKEN_PREVIOUS` | - | The token being replaced, still accepted until every caller uses the new one (rotation, DEPLOY.md) |
 | `ANJAL_TLS_CERT_PATH` | (disabled) | Path to fullchain.pem |
 | `ANJAL_TLS_KEY_PATH` | - | Path to privkey.pem (if not in fullchain) |
 | `ANJAL_TLS_REQUIRE` | `false` | MTA port requires STARTTLS before MAIL |
@@ -622,12 +639,18 @@ axis. Every number is repeated in a plain table.
 
 ### Quota
 
-Each mailbox has `quotaBytes` (default 2 GiB, `0` = unlimited). At or
-above it, RCPT TO that mailbox is deferred with `452 4.2.2 Mailbox
-full`, so the sending server retries for a few days while the owner
-frees space; the webmail shows usage in the sidebar and refuses to send
-while full. Deleting permanently (Trash → Delete permanently) releases
-the bytes.
+Each mailbox has a size limit: 1 GiB by default (DES-11 D2), or what
+its organisation's storage plan gives - one size for each person, one
+shared total, or both (a size each plus a shared reserve) - set by the
+operator in the Anjal console; the organisation's administrator may give
+some people a smaller limit, never a larger one. Junk and Trash count.
+At or above the limit, RCPT TO that mailbox is deferred with `452 4.2.2
+Mailbox full`, so the sending server retries for a few days while the
+owner frees space; colleagues' mail is refused the same way; the webmail
+warns the person (and the administrators) at 80, 90 and 100% and
+refuses to send while full. Anjal's own security mail always arrives.
+Deleting permanently (Trash → Delete permanently) releases the bytes.
+Through the API, `quotaBytes` null or `0` gives the default.
 
 ### TLS and ACME
 
@@ -710,6 +733,50 @@ Run it alongside the mail server:
 Sign in with a mailbox address and its password (created via
 `POST /api/mailboxes`). The webmail talks to the store and Maildir
 directly - it does not go through the HTTP API and needs no API token.
+
+### Further settings
+
+Every `ANJAL_*` setting the code reads is described in this README; a test holds it. These are the ones not described above. **`ANJAL_OPERATORS` is needed in production**: without it nobody can open the Anjal console and the service summary goes to nobody. Settings other than secrets (`ANJAL_POSTGRES`, and anything containing PASSWORD, TOKEN, SECRET or KEK) can also be kept in the database with the admin API, so that they are in the backups.
+
+| Variable | Read by | Default | Values | Purpose |
+|---|---|---|---|---|
+| `ANJAL_DKIM_SEAL_KEY` | Server | `/var/lib/anjal/dkim-seal.pem` on Linux, `%LOCALAPPDATA%\Anjal\dkim-seal.pem` elsewhere | File path | The mail server's seal key (rc.15, DES-11 S6), made at the first start. Its public half is published in the database; the webmail locks every DKIM key it makes with it, and only the mail server can open them, to sign. Keys kept unlocked (or under `ANJAL_KEK`) are locked with it at start. `backup.sh` copies it to the encrypted backup. Losing it unbacked means new DKIM keys and DNS records for every domain. |
+| `ANJAL_ALLOW_PLAINTEXT_KEYS` | Both | false | `true` (case-insensitive) or anything else | When ANJAL_KEK is unset and the store is PostgreSQL, DKIM private keys are refused (API returns 409 `kek_required`; Webmail says it cannot make keys). `true` allows storing them unencrypted anyway. Has no effect when ANJAL_KEK is set or the store is in-memory. |
+| `ANJAL_API_ALLOW_NO_AUTH` | Server | false | `true` or anything else | Lets the admin API start with no ANJAL_API_TOKEN. Without it, a missing token stops the server (exit 1). Meant for local development only. Only checked when ANJAL_API_PORT > 0. |
+| `ANJAL_API_ALLOW_PUBLIC` | Server | false | `true` or anything else | Lets ANJAL_API_BIND be a non-loopback address. Without it, a non-loopback bind stops the server (exit 1), because the API is plain HTTP. Only checked when ANJAL_API_PORT > 0. |
+| `ANJAL_BACKUP_SCRATCH` | Webmail | `/var/lib/anjal/backup` (also when set to empty) | Folder path | Folder where backup copies wait before they are sent off. Webmail only measures its size for the operator capacity view; backup.sh is what actually writes there. |
+| `ANJAL_BACKUP_RETRY_WAITS` | Backup | `120 240 480 960` (set to empty: no new tries) | Seconds, separated by spaces | How long backup.sh waits before each new try after a failed run (D-88): by default 2, 4, 8 and 16 minutes, about 30 minutes in all. When the last try fails, a `failed` line is added to the status file. "Not configured" is never tried again. |
+| `ANJAL_BACKUP_STATUS` | Both | `/var/lib/anjal/backup-status` (but set to empty, it is used as "" and so reads as missing) | File path. Expected contents: a line `ok <timestamp>`, and a line `failed <timestamp> ...` when a run failed since | Status file written by backup.sh. Webmail reads it for the "Last good backup" health tile: over 26 h shows warn; over 48 h, missing, or a run failed after its 30 minutes of tries (D-88) shows bad at once, and the operators are mailed within 15 minutes. |
+| `ANJAL_DNS_CHECK` | Webmail | On (the check runs) | `off` (case-insensitive) turns it off. Any other value leaves it on | Daily check of every organisation's DNS records (MX, SPF, DKIM, DMARC, MTA-STS, TLS-RPT). |
+| `ANJAL_EVIDENCE_ROOT` | Both | `EvidenceVault.DefaultRoot`: `/var/lib/anjal/evidence` on any non-Windows OS, `%LOCALAPPDATA%\Anjal\evidence` on … | Folder path | Evidence store: SHA-256-fingerprinted originals of every message received or sent, plus a daily manifest chain. Server records always (when the store supports evidence) and passes the path to the admin API. Webmail records its sends only if the folder already … |
+| `ANJAL_GEO_FILE` | Webmail | `/var/lib/anjal/ip-locations.bin` on Linux, otherwise `%LOCALAPPDATA%/Anjal/ip-locations.bin`. An empty value also … | File path | Where the packed DB-IP "IP to City Lite" list is kept. It is used to show where sign-ins come from. |
+| `ANJAL_GEO_MODE` | Webmail | `download` on Linux, `off` on any other OS. Unknown values also get this default | `download` (fetch the list monthly), `file` (use a list placed by hand, never download), `off`. Trimmed, case-insensitive | Controls the sign-in IP-location lookup and whether its list is downloaded. Lookups are always local, so no address leaves the server. |
+| `ANJAL_GREYLIST_REMEMBER_DAYS` | Server | 35 | Integer days. An unparsable value gives 35. No range check | How long a sender that passed greylisting is remembered, so it is not delayed again. Only used when greylisting is on (ANJAL_GREYLIST is not `false`). |
+| `ANJAL_GREYLIST_SKIP_SPF_PASS` | Server | true (the exemption is on) | `false` (case-insensitive) turns it off. Anything else leaves it on | A sender whose connecting IP passes SPF for the MAIL FROM domain is not greylisted. Results are cached for 10 minutes per (IP, domain). |
+| `ANJAL_GREYLIST_STATE` | Server | `/var/lib/anjal/greylist.tsv` if the folder `/var/lib/anjal` exists (on any OS), otherwise none (memory only). Empty or … | File path, or `none` (case-insensitive) for memory only | Mirror file for remembered greylist senders. The database stays the primary record (log text at 934). |
+| `ANJAL_MTA_STS_DOMAINS` | Webmail | The parent domain of ANJAL_HOSTNAME (text after the first dot), or the host name itself if it has no dot | Comma-separated domains, trimmed | Domains whose `mta-sts.<domain>` policy host this webmail serves. Only read when ANJAL_MTA_STS_MODE turns MTA-STS on. |
+| `ANJAL_MTA_STS_MAX_AGE` | Webmail | 604800 (1 week) when mode is `enforce`; 86400 (1 day) for `testing` or `none` | Integer seconds, clamped to 60..31557600. Parsed with `NumberStyles.None`, so a sign or spaces make it unparsable and the default is used | `max_age` in the served MTA-STS policy. |
+| `ANJAL_MTA_STS_MODE` | Webmail | off in MtaStsPolicy: no policy is served. Inconsistency: the operator health tile treats unset as `testing` and shows … | `off`, `testing`, `enforce`, `none` (trimmed, case-insensitive in MtaStsPolicy). Any other value means off, with a log note | Mode of the MTA-STS policy (RFC 8461) served at `https://mta-sts.<domain>/.well-known/mta-sts.txt`. |
+| `ANJAL_MTA_STS_MX` | Webmail | ANJAL_HOSTNAME | Comma-separated MX host names, trimmed | `mx:` lines in the served MTA-STS policy. |
+| `ANJAL_OPERATORS` | Webmail | Empty, so nobody is an operator | Comma-separated email addresses, trimmed, compared case-insensitively | People allowed to open the Anjal operator console (`/ops`). They manage the service, not anyone's mail. The service summary mail is also sent to each of them. |
+| `ANJAL_POSTMASTER` | Server | Unset: `postmaster@` and `abuse@` at the server's own host name go to `postmaster@<parent domain of ANJAL_HOSTNAME>`, … | Email address (trimmed; empty or whitespace is treated as unset) | The operator's mailbox for `postmaster@` and `abuse@` at the server's own host name. It is ignored (resolves to nothing) if it points at a role address on that same host, to avoid a loop. |
+| `ANJAL_PWNED_FILE` | Both | `/var/lib/anjal/pwned-passwords.bin` on Linux, otherwise `%LOCALAPPDATA%/Anjal/pwned-passwords.bin`. Empty also gives … | File path | The leaked-password list file. Server downloads and refreshes it. Both processes check passwords against it and pick up a replaced file within about a minute. |
+| `ANJAL_PWNED_MIN_COUNT` | Server | 3 | Integer ≥ 1. A value < 1 or unparsable gives 3 | When building the downloaded list, a password is kept only if it appears in at least this many leaks. |
+| `ANJAL_PWNED_MODE` | Both | `both` | `both`, `download` (nothing is sent out when a password is set), `online`, `off`. Trimmed, case-insensitive; unknown values mean `both` | Which leaked-password checks run: the local downloaded list, the online HIBP k-anonymity range check, both, or neither. |
+| `ANJAL_PWNED_ONLINE_MIN_COUNT` | Both | 1 (any leak) | Integer ≥ 1. A value < 1 or unparsable gives 1 | Smallest leak count that makes the online check refuse a password. |
+| `ANJAL_PWNED_REFRESH_DAYS` | Server | 182 | Integer days. ≤ 0 turns refreshing off | Re-downloads the list when it is at least this old (checked every 6 hours, first check 5 minutes after start; needs about 8 GB free). Not used when the mode doesn't use the download or the source is `off`. |
+| `ANJAL_PWNED_SOURCE` | Server | Download is on, from the HIBP range API (the hard-coded `https://api.pwnedpasswords.com/range/`) | Only `off` (case-insensitive) is recognised. Any other value is ignored; it is not a URL or path | `off` stops the server downloading or refreshing the list. A file placed by hand is still used. |
+| `ANJAL_SMTP_AUTH_FAILURES_PER_IP` | Server | 10 | Integer ≥ 1. A value < 1 makes `AuthFailureLimiter` throw `ArgumentOutOfRangeException` at startup (no try/catch, so the server fails to … | Failed logins allowed from one IP in a 15-minute sliding window before that IP is refused before any password check. Shared by ports 587 and 465. Only read when ANJAL_SUBMISSION_PORT > 0. |
+| `ANJAL_SMTP_IDLE_TIMEOUT_SECONDS` | Server | 300 | Integer seconds. No range check: unclear what ≤ 0 does, because it goes straight into `CancelAfter` (SmtpSession.cs:1265) | Per-command idle timeout, also used as the TLS handshake timeout. Applies to all SMTP listeners (25/587/465). |
+| `ANJAL_SMTP_MAX_CONNECTIONS` | Server | 200 | Integer. No range check (0 or less would refuse every connection, SmtpServer.cs:191) | Maximum concurrent SMTP sessions per listener (the 587/465 listeners copy the port-25 value). |
+| `ANJAL_SMTP_MAX_CONNECTIONS_PER_IP` | Server | 10 | Integer. No range check | Maximum concurrent SMTP sessions from one IP address. |
+| `ANJAL_SMTP_MAX_SESSION_MINUTES` | Server | 15 | Integer minutes. No range check (unclear for ≤ 0: `CancelAfter`, SmtpSession.cs:129) | Hard cap on one SMTP session's total length, however active it is. Stops slow-drip clients. |
+| `ANJAL_SUBMISSION_TLS_PORT` | Server | 0 (disabled) | Integer port > 0. Empty, unparsable or ≤ 0 gives 0 | Port for implicit-TLS submission (RFC 8314, normally 465), with the same auth, limits and policy as 587. Only read inside the ANJAL_SUBMISSION_PORT > 0 block, so it does nothing unless ANJAL_SUBMISSION_PORT is also set. |
+| `ANJAL_TLS_ALLOW_PLAINTEXT` | Server | false. Outbound mail is never sent unencrypted: if TLS fails, the message is held, retried and finally bounced | `true` or anything else | `true` allows outbound SMTP to fall back to plaintext when TLS can't be used. For test rigs only. Not related to inbound AUTH (that is ANJAL_AUTH_ALLOW_PLAINTEXT). |
+| `ANJAL_TLS_REVOCATION` | Server | `online` (CRL/OCSP checked; soft-fails only when status can't be obtained) | `nocheck` (case-insensitive) skips revocation. Any other value means online | Certificate revocation checking when validating the receiving server's certificate on outbound delivery. |
+| `ANJAL_WEBHOOK_ALLOW_HTTP` | Server | false (https only) | `true` or anything else | Allows plain `http://` webhook URLs, for a receiver on a private network. |
+| `ANJAL_WEBHOOK_ALLOW_PRIVATE` | Server | false | `true` or anything else | Allows webhook targets on loopback or private addresses (RFC 1918, RFC 4193, link-local). This is checked both when a rule is saved and on the address actually connected to (anti-SSRF and anti-DNS-rebinding). Needed when SIGMA or Lipi run on the same host or … |
+| `ANJAL_WEBMAIL_HTTP3` | Webmail | On (if QUIC is available) | `false` (case-insensitive) turns it off. Anything else means on | Offers HTTP/3 (QUIC on the HTTPS port over UDP). Only matters when HTTPS is on (ANJAL_WEBMAIL_HTTPS_PORT > 0). If QUIC is missing (Linux needs libmsquic and IPv6), it falls back to HTTP/1.1 and HTTP/2 rather than failing. |
 
 ## SMTP submission authentication
 
@@ -954,8 +1021,8 @@ consulted by the local-domain resolver alongside `local_domains` and
 Creating a mailbox lays out `<root>/<tenant-slug>/<local@domain>/` with
 `tmp/`, `new/`, `cur/` and the Maildir++ folders `.Sent`, `.Drafts`,
 `.Junk`, `.Trash`. An empty password makes the mailbox receive-only; on update, an
-omitted password keeps the existing one. The default quota is 2 GiB and
-is soft in this release (exceeding it is logged, not enforced).
+omitted password keeps the existing one. The default size is 1 GiB and
+is enforced (see Quota).
 
 A mailbox authenticates on the submission port with its full address as
 the username and is allowed to send `MAIL FROM` its own domain only.
@@ -965,6 +1032,18 @@ from-domain authority.
 ## Regenerate API docs
 
     python tools/gen_api_docs.py
+
+## Line endings
+
+Every tracked file has an explicit rule in `.gitattributes` (CRLF for sources, docs and
+web files; LF for scripts, workflows, systemd units and env templates; binary for
+images, fonts and packages), and `.editorconfig` gives the same ending. Check or fix:
+
+    python tools/check_eol.py          # lists any fault and fails
+    python tools/check_eol.py --fix    # rewrites working files to their rule
+
+CI runs the check in the style workflow; `deploy.ps1` runs `--fix` before formatting.
+A new file type needs a line in both files.
 
 ## Pre-push verification (Windows)
 

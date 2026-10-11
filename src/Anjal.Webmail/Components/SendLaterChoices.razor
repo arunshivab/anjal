@@ -1,0 +1,24 @@
+@* rc.12 (item 8, the board's "Send later" menu): tomorrow at 09:00, next
+   Monday at 09:00, or a date and time picked - in the person's own zone. *@
+<span class="pm-head">@L["Send later"]</span>
+<button type="submit" class="pmi" name="sendAt" value="tomorrow" data-later><LipiIcon Name="clock" Size="15" />@Clock.Full(Tomorrow)</button>
+<button type="submit" class="pmi" name="sendAt" value="monday" data-later><LipiIcon Name="clock" Size="15" />@Clock.Full(Monday)</button>
+<div class="pmi-row pm-pick">
+    <LipiIcon Name="calendar" Size="15" />
+    <input type="datetime-local" name="sendAtLocal" aria-label="@L["Pick a date and time"]" value="@Clock.Local(Tomorrow).ToString("yyyy-MM-dd'T'HH:mm", System.Globalization.CultureInfo.InvariantCulture)" />
+    <button type="submit" class="btn btn-s btn-sm" name="sendAt" value="pick" data-later>@L["Schedule"]</button>
+</div>
+
+@code {
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The person's clock.</summary>
+    [Parameter] public ZonedClock Clock { get; set; } = ZonedClock.Default;
+
+    /// <summary>Tomorrow at 09:00.</summary>
+    [Parameter] public DateTimeOffset Tomorrow { get; set; }
+
+    /// <summary>Next Monday at 09:00.</summary>
+    [Parameter] public DateTimeOffset Monday { get; set; }
+}
