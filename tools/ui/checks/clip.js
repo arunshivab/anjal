@@ -80,6 +80,9 @@ function check() {
     if (worst > 1.5) { out.push(['table: something reaches past its cell', name(c), `"${what}" goes ${Math.round(worst)}px into the next cell`]); }
   }
   // The middle box of Settings and the consoles never scrolls sideways: nothing in it is wider than it.
+  // rc.17 (12 Oct 2026): a figure tile never lets its words or number spill out ("100%" left its tile in
+  // Sending systems with the rail open; nothing above looked at tiles).
+  for (const b of document.querySelectorAll('.sskpi, .keyfig, .cfig, .healthtile, .figure')) { if (vis(b) && b.scrollWidth > b.clientWidth + 1) { out.push(['tile: words or a number spill out', name(b), `${b.scrollWidth - b.clientWidth}px too wide`]); } }
   for (const b of document.querySelectorAll('.setmain, .formcard')) { if (vis(b) && b.scrollWidth > b.clientWidth + 1) { out.push(['box: something in it is wider than the box', name(b), `${b.scrollWidth - b.clientWidth}px too wide`]); } }
   return out;
 }

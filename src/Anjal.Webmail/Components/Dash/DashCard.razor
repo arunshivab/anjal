@@ -1,0 +1,66 @@
+@* rc.16 (design review 7): every card can switch between its chart and a plain table - a
+   two-button switch at the top right, remembered per card (app.js). "Show all as tables" on the
+   page, for print and audits, opens every card as its table. Without the script both show. *@
+<section class="dcard dcard2 @Class" id="@Id" data-card="@Id" data-view="@(Tables ? "table" : "chart")">
+    <div class="dc-head">
+        <div class="dc-title">
+            <h2>@Title</h2>
+            @if (Sub is not null)
+            {
+                <p class="dc-sub">@Sub</p>
+            }
+        </div>
+        @if (Actions is not null)
+        {
+            @Actions
+        }
+        @if (Chart is not null && Table is not null)
+        {
+            <span class="dc-switch" role="group" aria-label="@L["Chart or table"]">
+                <button type="button" class="dc-sw" data-view-pick="chart" title="@L["Chart"]" aria-label="@L["Chart"]" aria-pressed="@(Tables ? "false" : "true")"><LipiIcon Name="chart-bar" Size="15" /></button>
+                <button type="button" class="dc-sw" data-view-pick="table" title="@L["Table"]" aria-label="@L["Table"]" aria-pressed="@(Tables ? "true" : "false")"><LipiIcon Name="list-view" Size="15" /></button>
+            </span>
+        }
+    </div>
+    @if (Chart is not null)
+    {
+        <div class="dc-chart">@Chart</div>
+    }
+    @if (Table is not null)
+    {
+        <div class="dc-table">@Table</div>
+    }
+    @Body
+</section>
+
+@code {
+    /// <summary>The card's id: its anchor, and the key its chosen view is remembered by.</summary>
+    [Parameter, EditorRequired] public string Id { get; set; } = string.Empty;
+
+    /// <summary>The heading.</summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>The line under the heading (and the card's own period, when it keeps one).</summary>
+    [Parameter] public string? Sub { get; set; }
+
+    /// <summary>The chart.</summary>
+    [Parameter] public RenderFragment? Chart { get; set; }
+
+    /// <summary>The same figures as a table.</summary>
+    [Parameter] public RenderFragment? Table { get; set; }
+
+    /// <summary>Content shown in both views.</summary>
+    [Parameter] public RenderFragment? Body { get; set; }
+
+    /// <summary>Extra controls in the card's head.</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>Open as the table ("Show all as tables").</summary>
+    [Parameter] public bool Tables { get; set; }
+
+    /// <summary>More classes (span2, nophone).</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+}

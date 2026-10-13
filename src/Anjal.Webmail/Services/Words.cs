@@ -123,6 +123,20 @@ public sealed class Words
         _ => "latn",
     };
 
+    /// <summary>
+    /// Anjal's name written in a language's script, for the sign-in page's line under the promise
+    /// (design review 1d, 11 Oct 2026). English shows the Tamil word the name comes from.
+    /// </summary>
+    /// <param name="code">A language code.</param>
+    /// <returns>The name.</returns>
+    public static string ProductName(string? code) => code switch
+    {
+        "ml" => "\u0D05\u0D1E\u0D4D\u0D1A\u0D7D",
+        "hi" or "mr" => "\u0905\u0902\u091C\u0932",
+        "gu" => "\u0A85\u0A82\u0A9C\u0AB2",
+        _ => "\u0B85\u0B9E\u0BCD\u0B9A\u0BB2\u0BCD",
+    };
+
     /// <summary>A language's own name, written in its own script, such as \u0BA4\u0BAE\u0BBF\u0BB4\u0BCD for Tamil.</summary>
     /// <param name="code">A language code.</param>
     /// <returns>The name, or the code when unknown.</returns>

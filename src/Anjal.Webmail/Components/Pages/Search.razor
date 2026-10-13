@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject MailboxService Mail
 @inject Words Words
+@inject NavigationManager Nav
 
 <PageTitle>@L["Search"] — Anjal</PageTitle>
 
@@ -19,9 +20,17 @@
     <div class="lh-row lh-find">
         <SearchBox Folders="folders" L="L" />
     </div>
-    @if (FilterText.Length > 0)
+    @* rc.16, design review [6g] and 5b.2: each filter is a chip that can be taken off; operators
+       typed in the box (from:, has:, after:, before:, in:all, "last week") become chips too. *@
+    @if (Chips.Count > 0)
     {
-        <div class="lh-row sfsummary"><LipiIcon Name="filter" Size="13" /><span>@FilterText</span></div>
+        <div class="lh-row schips" role="list" aria-label="@L["Filters"]">
+            @foreach ((string label, string remove) in Chips)
+            {
+                <span class="schip" role="listitem">@label<a href="@remove" class="schip-x" title="@L["Remove this filter"]" aria-label="@L["Remove this filter"]"><LipiIcon Name="close" Size="13" /></a></span>
+            }
+            <span class="schip-n">@L["{n} found"].Replace("{n}", total.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span>
+        </div>
     }
     <SortHeadings L="L" Folder="@MailboxService.SearchSortKey" Sort="@order" Back="@SortBack" />
 </div>
@@ -139,48 +148,61 @@ else
         + (Sort == "size" ? "&sort=size" : string.Empty)
         + (RescuedDays is int rd ? "&rescued=" + rd.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty);
 
-    private string FilterText
+    // rc.16 [6g]: the filters as chips, each with the address of the same search without it.
+    private List<(string Label, string Remove)> Chips
     {
         get
         {
-            var parts = new List<string>();
+            var chips = new List<(string, string)>();
+            string q = "/search?q=" + Uri.EscapeDataString(Q ?? string.Empty) + "&from=" + Uri.EscapeDataString(SearchFolder);
+            string scope = "&scope=" + Uri.EscapeDataString(string.IsNullOrWhiteSpace(Scope) ? SearchFolder : Scope);
+            string Without(string param) => q + (param == "scope" ? "&scope=" + Uri.EscapeDataString(SearchFolder) : scope)
+                + string.Concat(FilterQuery.Split('&', StringSplitOptions.RemoveEmptyEntries).Where(x => !x.StartsWith(param + "=", StringComparison.Ordinal)).Select(x => "&" + x));
             if (!string.IsNullOrWhiteSpace(SenderFilter))
             {
-                parts.Add(L["from {who}"].Replace("{who}", SenderFilter.Trim(), StringComparison.Ordinal));
-            }
-            if (Day(AfterText, 0) is DateTimeOffset a)
-            {
-                parts.Add(L["since {date}"].Replace("{date}", clock.Date(a), StringComparison.Ordinal));
-            }
-            if (Day(BeforeText, 0) is DateTimeOffset b)
-            {
-                parts.Add(L["until {date}"].Replace("{date}", clock.Date(b), StringComparison.Ordinal));
+                chips.Add((L["From: {who}"].Replace("{who}", SenderFilter.Trim(), StringComparison.Ordinal), Without("sender")));
             }
             if (Attach == "1")
             {
-                parts.Add(L["with an attachment"]);
+                chips.Add((L["Has: attachment"], Without("attach")));
             }
-            if (ScoreFilter is int s)
+            if (Day(AfterText, 0) is DateTimeOffset a)
             {
-                parts.Add((s >= MailFigures.TopScore ? L["spam score {n} or more"] : L["spam score {n}"]).Replace("{n}", s.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal));
+                chips.Add((L["since {date}"].Replace("{date}", clock.Date(a), StringComparison.Ordinal), Without("after")));
+            }
+            if (Day(BeforeText, 0) is DateTimeOffset b)
+            {
+                chips.Add((L["until {date}"].Replace("{date}", clock.Date(b), StringComparison.Ordinal), Without("before")));
+            }
+            if (ScoreFilter is int sc)
+            {
+                chips.Add(((sc >= MailFigures.TopScore ? L["spam score {n} or more"] : L["spam score {n}"]).Replace("{n}", sc.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal), Without("score")));
             }
             if (CategoryFilter is Guid c)
             {
-                parts.Add(L["in category {name}"].Replace("{name}", categories.FirstOrDefault(x => x.Row.Id == c)?.Row.Name ?? "?", StringComparison.Ordinal));
+                chips.Add((L["in category {name}"].Replace("{name}", categories.FirstOrDefault(x => x.Row.Id == c)?.Row.Name ?? "?", StringComparison.Ordinal), Without("cat")));
             }
             else if (CategoryText == "none")
             {
-                parts.Add(L["without a category"]);
+                chips.Add((L["without a category"], Without("cat")));
             }
             if (RescuedDays is int rd)
             {
-                parts.Add(L["rescued from Junk in the last {n} days"].Replace("{n}", rd.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal));
+                chips.Add((L["rescued from Junk in the last {n} days"].Replace("{n}", rd.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal), Without("rescued")));
             }
             if (Sort == "size")
             {
-                parts.Add(L["biggest first"]);
+                chips.Add((L["biggest first"], Without("sort")));
             }
-            return string.Join(", ", parts);
+            if (!string.IsNullOrWhiteSpace(Q))
+            {
+                chips.Insert(0, ("\u201c" + Q.Trim() + "\u201d", "/search?q=&from=" + Uri.EscapeDataString(SearchFolder) + scope + FilterQuery));
+            }
+            if (Scope == "all")
+            {
+                chips.Add((L["All folders"], Without("scope")));
+            }
+            return chips;
         }
     }
 
@@ -245,6 +267,25 @@ else
         }
         clock = WebmailAuthService.ClockOf((await AuthState).User);
         L = Words.For(WebmailAuthService.LanguageOf((await AuthState).User, Words));
+        // rc.16 [6g]: operators typed in the box become filters, so each shows as a chip.
+        SearchAsk ask = SearchOperators.Parse(Q, DateOnly.FromDateTime(clock.Local(DateTimeOffset.UtcNow).DateTime), weekStart);
+        if (ask.HasOperators)
+        {
+            ask = ask with
+            {
+                Sender = ask.Sender ?? (string.IsNullOrWhiteSpace(SenderFilter) ? null : SenderFilter),
+                After = ask.After ?? (string.IsNullOrWhiteSpace(AfterText) ? null : AfterText),
+                Before = ask.Before ?? (string.IsNullOrWhiteSpace(BeforeText) ? null : BeforeText),
+                Attachment = ask.Attachment || Attach == "1",
+                AllFolders = ask.AllFolders || Scope == "all",
+            };
+            Nav.NavigateTo(SearchOperators.Link(ask, string.IsNullOrWhiteSpace(Scope) ? SearchFolder : Scope, SearchFolder)
+                + (ScoreFilter is int sf ? "&score=" + sf.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
+                + (CategoryFilter is Guid cf ? "&cat=" + cf : CategoryText == "none" ? "&cat=none" : string.Empty)
+                + (Sort == "size" ? "&sort=size" : string.Empty)
+                + (RescuedDays is int rf ? "&rescued=" + rf.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty));
+            return;
+        }
         Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
         if (mailboxId is null)
         {

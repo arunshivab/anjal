@@ -65,6 +65,8 @@ else
                         </details>
                         }
                     </div>
+                    @* rc.16, design review 8 (owner, 11 Oct 2026): Today, the landing page, sits above Inbox. *@
+                    <a class="rail-item @(OnPath("/dashboard/today") ? "on" : "")" href="/dashboard/today" title="@L["Today"]" aria-current="@(OnPath("/dashboard/today") ? "page" : null)"><LipiIcon Name="home" Size="18" /><span class="rl">@L["Today"]</span></a>
                     @if (folders is not null)
                     {
                         @foreach (FolderView f in folders)
@@ -112,19 +114,40 @@ else
                             </form>
                         }
                     }
+                    @* Design review 5: Contacts is used daily, so it sits with the mail, with its own icon. *@
+                    <a class="rail-item @(Nav.Uri.Contains("/contacts", StringComparison.OrdinalIgnoreCase) ? "on" : "")" href="/contacts" title="@L["Contacts"]"><LipiIcon Name="user" Size="18" /><span class="rl">@L["Contacts"]</span></a>
                     <span class="rail-gap"></span>
+                    <a class="rail-item @(OnPath("/dashboard") && !OnPath("/dashboard/today") ? "on" : "")" href="/dashboard" title="@L["Dashboard"]"><LipiIcon Name="chart-bar" Size="18" /><span class="rl">@L["Dashboard"]</span></a>
                     @if (isAdmin)
                     {
-                        <a class="rail-item @(OnPath("/org") ? "on" : "")" href="/org" title="@L["Organisation"]"><LipiIcon Name="home" Size="18" /><span class="rl">@L["Organisation"]</span></a>
+                        <a class="rail-item @(OnPath("/org") ? "on" : "")" href="/org" title="@L["Organisation"]"><LipiIcon Name="department-master" Size="18" /><span class="rl">@L["Organisation"]</span></a>
                     }
                     @if (isOperator)
                     {
                         <a class="rail-item @(OnPath("/ops") ? "on" : "")" href="/ops" title="@L["Anjal console"]"><LipiIcon Name="monitoring" Size="18" /><span class="rl">@L["Anjal console"]</span></a>
                     }
-                    <a class="rail-item @(Nav.Uri.Contains("/contacts", StringComparison.OrdinalIgnoreCase) ? "on" : "")" href="/contacts" title="@L["Contacts"]"><LipiIcon Name="users" Size="18" /><span class="rl">@L["Contacts"]</span></a>
-                    <a class="rail-item" href="/dashboard" title="@L["Dashboard"]"><LipiIcon Name="chart-bar" Size="18" /><span class="rl">@L["Dashboard"]</span></a>
-                    <a class="rail-item" href="/settings" title="@L["Settings"]"><LipiIcon Name="sliders" Size="18" /><span class="rl">@L["Settings"]</span></a>
-                    <a class="rail-item" href="#shortcuts" title="@L["Keyboard shortcuts"]"><LipiIcon Name="help" Size="18" /><span class="rl">@L["Help"]</span></a>
+                    <a class="rail-item @(OnPath("/settings") ? "on" : "")" href="/settings" title="@L["Settings"]"><LipiIcon Name="sliders" Size="18" /><span class="rl">@L["Settings"]</span></a>
+                    @* Design review 4.5: the account menu under the initials holds who is signed in, the
+                       last sign-in, the date and Sign out; Help left the rail, "?" opens it. *@
+                    <details class="pmenu rail-account">
+                        <summary class="rail-item rail-me" title="@DisplayName" aria-label="@L["Your account"]"><span class="initials" aria-hidden="true">@Initials</span><span class="rl">@DisplayName</span></summary>
+                        <div class="pmenu-body accountmenu" role="menu">
+                            <p class="acct-who"><b>@DisplayName</b><span>@context.User.Identity?.Name</span></p>
+                            @if (lastSignIn is not null)
+                            {
+                                <a class="pmi st-last" role="menuitem" href="/settings/security" title="@L["Your sign-in before this one, from {device}. Not you? Open Security to sign other devices out."].Replace("{device}", lastSignIn.Device, StringComparison.Ordinal)"><LipiIcon Name="clock" Size="15" />@LastSignInText</a>
+                            }
+                            <span class="acct-date"><LipiIcon Name="calendar" Size="15" />@clock.Full(now)</span>
+                            @if (Shared)
+                            {
+                                <span class="acct-date st-shared"><LipiIcon Name="lock" Size="15" />@L["Shared computer"]</span>
+                            }
+                            <form method="post" action="/sign-out" class="inline signout">
+                                <AntiforgeryToken />
+                                <button type="submit" class="st-signout" role="menuitem"><LipiIcon Name="log-out" Size="15" />@L["Sign out"]</button>
+                            </form>
+                        </div>
+                    </details>
                 </nav>
                 <main class="pane" id="main">
                     <CascadingValue Value="this" IsFixed="true">@Body</CascadingValue>
@@ -143,12 +166,14 @@ else
                 <span class="lh-grow"></span>
                 <a class="initials" href="#folders" aria-label="@L["Your account"]" title="@DisplayName">@Initials</a>
             </header>
+            @* rc.16, design review 5 and 8 [5d]: the phone's bar is Today, Inbox, Compose, Search and More;
+               More opens the sheet with the folders, Dashboard, Settings and the account. *@
             <nav class="phonenav" aria-label="@L["Main"]">
+                <a href="/dashboard/today" class="@(OnPath("/dashboard/today") ? "on" : "")"><LipiIcon Name="home" Size="20" /><span>@L["Today"]</span></a>
                 <a href="/folder/INBOX" class="@(IsCurrent(FolderRow.Inbox) ? "on" : "")"><LipiIcon Name="email" Size="20" /><span>@L["Inbox"]</span></a>
-                <a href="#folders"><LipiIcon Name="folder" Size="20" /><span>@L["Folders"]</span></a>
                 <a href="/compose" class="pcompose" aria-label="@L["Compose"]"><LipiIcon Name="edit" Size="22" /></a>
-                <a href="/dashboard"><LipiIcon Name="chart-bar" Size="20" /><span>@L["Dashboard"]</span></a>
-                <a href="/settings"><LipiIcon Name="sliders" Size="20" /><span>@L["Settings"]</span></a>
+                <a href="/search?scope=all" class="@(OnPath("/search") ? "on" : "")"><LipiIcon Name="search" Size="20" /><span>@L["Search"]</span></a>
+                <a href="#folders"><LipiIcon Name="more-horizontal" Size="20" /><span>@L["More"]</span></a>
             </nav>
             <div id="folders" class="phonesheet" role="dialog" aria-modal="true" aria-label="@L["Folders"]">
                 <div class="psheet">
@@ -174,7 +199,9 @@ else
                         }
                     }
                     <a class="pfolder" href="/outbox"><LipiIcon Name="upload" Size="18" /><span>@L["Outbox"]</span>@if (outboxCount > 0) { <span class="n">@outboxCount</span> }</a>
-                    <a class="pfolder" href="/contacts"><LipiIcon Name="users" Size="18" /><span>@L["Contacts"]</span></a>
+                    <a class="pfolder" href="/contacts"><LipiIcon Name="user" Size="18" /><span>@L["Contacts"]</span></a>
+                    <a class="pfolder" href="/dashboard"><LipiIcon Name="chart-bar" Size="18" /><span>@L["Dashboard"]</span></a>
+                    <a class="pfolder" href="/settings"><LipiIcon Name="sliders" Size="18" /><span>@L["Settings"]</span></a>
                     @foreach ((MailboxRow box, string right, long unread) in sharedBoxes)
                     {
                         <form method="post" action="/shared/open" class="pfolder-form">
@@ -185,7 +212,7 @@ else
                     }
                     @if (isAdmin)
                     {
-                        <a class="pfolder" href="/org"><LipiIcon Name="home" Size="18" /><span>@L["Organisation"]</span></a>
+                        <a class="pfolder" href="/org"><LipiIcon Name="department-master" Size="18" /><span>@L["Organisation"]</span></a>
                     }
                     <div class="pstatus">
                         <span class="lite" data-connectivity data-online="@L["Connected"]" data-offline="@L["Offline"]"><i></i>@L["Connected"]</span>
@@ -212,19 +239,27 @@ else
             @if (person is not null && !person.WelcomeDone && !OnTwoStepSetup && signInDemand is null)
             {
                 <div class="welcome" role="dialog" aria-modal="true" aria-labelledby="welcometitle">
+                    @* rc.16, design review [6j]: a brand header with the person's name, three cards, and a
+                       four-step tour. *@
                     <div class="wcard">
-                        <h2 id="welcometitle">@L["Welcome to Anjal"]</h2>
+                        <header class="whead">
+                            <span class="mark-tile" aria-hidden="true"><svg viewBox="0 0 148 148" width="44" height="44"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg></span>
+                            <div>
+                                <h2 id="welcometitle">@L["Welcome, {name}"].Replace("{name}", MailboxService.FirstName(person.DisplayName, person.Address), StringComparison.Ordinal)</h2>
+                                <p>@L["Three things to know before you start."]</p>
+                            </div>
+                        </header>
                         <div class="wgrid">
                             @foreach ((string icon, string title, string text) in WelcomeCards)
                             {
-                                <section class="wfeat"><LipiIcon Name="@icon" Size="20" /><h3>@L[title]</h3><p>@L[text]</p></section>
+                                <section class="wfeat"><span class="wicon"><LipiIcon Name="@icon" Size="20" /></span><h3>@L[title]</h3><p>@L[text]</p></section>
                             }
                         </div>
                         <div class="wactions">
                             <form method="post" action="/settings/welcome" class="inline">
                                 <AntiforgeryToken />
                                 <input type="hidden" name="tour" value="1" />
-                                <button type="submit" class="btn btn-p">@L["Show me around"]</button>
+                                <button type="submit" class="btn btn-p">@L["Show me around · {n} steps"].Replace("{n}", "4", StringComparison.Ordinal)</button>
                             </form>
                             <form method="post" action="/settings/welcome" class="inline">
                                 <AntiforgeryToken />
@@ -254,7 +289,7 @@ else
                 <div class="kbcard">
                     <div class="kbhead">
                         <h2 id="kbtitle">@L["Keyboard shortcuts"]</h2>
-                        <a class="linkbtn kbtour" href="/folder/INBOX#tour">@L["Restart the tour"]</a>
+                        <a class="linkbtn kbtour" href="/dashboard/today#tour">@L["Restart the tour"]</a>
                         <a class="iconbtn" href="#close" aria-label="@L["Close"]" title="@L["Close"]"><LipiIcon Name="close" Size="17" /></a>
                     </div>
                     <div class="kbgrid">
@@ -306,34 +341,17 @@ else
                     data-word-new="@L["{n} new messages just arrived."]">
                 <span class="lite" data-connectivity data-online="@L["Connected"]" data-offline="@L["Offline"]"><i></i>@L["Connected"]</span>
                 <span class="st-sub" data-updated>@L["Updated {time}"].Replace("{time}", clock.Time(now), StringComparison.Ordinal)</span>
+                @* Design review 4.5: the status bar keeps the connection and the time it last looked,
+                   a storage meter, the draft state while writing, and "? Shortcuts". *@
+                <span class="st-grow"></span>
+                <span class="st-sub st-draft" data-st-draft hidden></span>
                 @if (mailbox is not null)
                 {
-                    <span class="st-sep" aria-hidden="true"></span>
                     @* DES-11 D2: the storage plan - own size, shared total or reserve; amber from 80%, red when full. *@
-                    <span class="st-sub @(Full ? "st-full" : storage?.Percent >= 80 ? "st-warn" : "")" title="@StorageTip">@StorageText</span>
-                }
-                @* Item 46: the draft state, while writing (filled by the script as drafts are saved). *@
-                <span class="st-sub st-draft" data-st-draft hidden></span>
-                <span class="st-grow"></span>
-                @if (lastSignIn is not null)
-                {
-                    <a class="st-sub st-last" href="/settings/security" title="@L["Your sign-in before this one, from {device}. Not you? Open Security to sign other devices out."].Replace("{device}", lastSignIn.Device, StringComparison.Ordinal)">@LastSignInText</a>
-                    <span class="st-sep st-last" aria-hidden="true"></span>
-                }
-                <span class="st-sub">@clock.Full(now)</span>
-                <span class="st-sep" aria-hidden="true"></span>
-                <a class="st-link" href="#shortcuts">? @L["Keyboard shortcuts"]</a>
-                <span class="st-sep" aria-hidden="true"></span>
-                @if (Shared)
-                {
-                    <span class="st-shared"><LipiIcon Name="lock" Size="13" />@L["Shared computer"]</span>
+                    <span class="st-sub st-store @(Full ? "st-full" : storage?.Percent >= 80 ? "st-warn" : "")" title="@StorageTip">@StorageText<span class="st-meter" aria-hidden="true"><i style="width:@(Math.Min(100, storage?.Percent ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></i></span></span>
                     <span class="st-sep" aria-hidden="true"></span>
                 }
-                <span class="who"><b>@DisplayName</b> @context.User.Identity?.Name</span>
-                <form method="post" action="/sign-out" class="inline signout">
-                    <AntiforgeryToken />
-                    <button type="submit" class="st-signout">@L["Sign out"]</button>
-                </form>
+                <a class="st-link" href="#shortcuts" title="@L["Keyboard shortcuts"]">? @L["Shortcuts"]</a>
             </footer>
             <JsWords L="L" />
             <ButtonTips L="L" Admin="isAdmin" Operator="isOperator" />
@@ -424,26 +442,20 @@ else
     /// <summary>What is different about Anjal: the welcome screen's cards (D-105).</summary>
     private static readonly (string Icon, string Title, string Text)[] WelcomeCards =
     {
-        ("security", "The seal of trust", "Green stamps show what Anjal has proved: a verified sender, mail that arrived encrypted, an original kept unchanged."),
-        ("bell", "New mail arrives by itself", "The list updates on its own, with a soft chime you can turn off."),
-        ("columns", "Read your way", "Three panes, focus, or the list alone - switch at the head of the list."),
-        ("help", "Keyboard shortcuts", "Press ? anywhere to see them all."),
-        ("sliders", "Your language and time", "Choose your language, time zone and theme in Settings."),
+        ("home", "Today", "Anjal opens on Today: your unread mail, with what needs you first and why."),
+        ("security", "Stamps", "Green stamps on the envelope show what Anjal has proved: a verified sender, mail that arrived encrypted, an original kept unchanged."),
+        ("lock", "Patient mail stays safe", "Mail is encrypted both ways and every original is kept as proof. Your organisation decides who may write outside."),
     };
 
     /// <summary>The tour's steps (item 5): where each points, and what it says.</summary>
     private string TourJson => System.Text.Json.JsonSerializer.Serialize(new[]
     {
+        // rc.16, design review [6j]: four steps - Today, the envelope (or the list, where no letter is
+        // open), Compose, and who is signed in.
+        new { at = ".rail a[href='/dashboard/today']", title = L["Today"], text = L["Your unread mail, what needs you first, and why. Anjal opens here."] },
+        new { at = ".eaddress, .tdunread, .mlist", title = L["The envelope"], text = L["Who it is from and to, with the stamps: what Anjal has proved about each message."] },
         new { at = ".rail-compose", title = L["Compose"], text = L["Write a new message."] },
-        new { at = ".rail .rail-item", title = L["Your folders"], text = L["Inbox, Drafts, Sent, Archive, Junk and Trash, then your own. Fold the rail to icons with the arrow at the bottom."] },
-        new { at = ".listsearch", title = L["Search"], text = L["Search this folder or all of them. Press / to jump here."] },
-        new { at = ".listhead nav.seg", title = L["All, Unread, Read"], text = L["One click shows only what you want."] },
-        new { at = "form[action='/settings/layout']", title = L["Layout"], text = L["Three panes, focus, or the list alone."] },
-        new { at = "form[action='/settings/sound']", title = L["New mail sound"], text = L["A soft chime when new mail arrives. Turn it off here."] },
-        new { at = ".mrow .score", title = L["Spam score"], text = L["0 means checked and clean; amber, some doubt; red, at or over your organisation's Junk line."] },
-        new { at = "button[value='archive']", title = L["Archive"], text = L["Done with a message? Archive keeps it, out of your Inbox. Press e."] },
-        new { at = ".statusbar .who", title = L["Signed in"], text = L["Who is signed in. On a shared computer, always sign out."] },
-        new { at = ".statusbar .st-link", title = L["Keyboard shortcuts"], text = L["Press ? anywhere for every shortcut, and to restart this tour."] },
+        new { at = ".rail-account", title = L["Signed in"], text = L["Who is signed in. On a shared computer, always sign out."] },
     });
 
     /// <summary>The approved shortcuts board, group by group (item 38).</summary>

@@ -1,4 +1,3 @@
-@page "/"
 @page "/folder/{FolderName}"
 @attribute [Authorize]
 @inject MailboxService Mail
@@ -20,16 +19,13 @@
 <div class="listhead">
     <div class="lh-row">
         <h1>@FolderLabel</h1>
-        <span class="cnt" data-count data-total="@total">@CountText</span>
+        @* Design review 4.1: "Inbox  3 new"; the full count stays for screen readers and the script. *@
+        <span class="cnt sr-only" data-count data-total="@total">@CountText</span>
+        @if (unread > 0)
+        {
+            <span class="lhnew" data-newpill title="@CountText">@L["{n} new"].Replace("{n}", unread.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span>
+        }
         <span class="lh-grow"></span>
-        <form method="post" action="/settings/layout" class="inline seg segicons" aria-label="@L["Layout"]">
-            <AntiforgeryToken />
-            <input type="hidden" name="back" value="@BackLink" />
-            @foreach ((string key, string icon, string word) in LayoutChoices)
-            {
-                <button type="submit" name="layout" value="@key" class="iconbtn" aria-pressed="@(viewLayout == key ? "true" : "false")" title="@L[word]" aria-label="@L[word]" data-needs-server><LipiIcon Name="@icon" Size="16" /></button>
-            }
-        </form>
         @if (Name == "Trash" || Name == Anjal.Mailbox.MailboxSink.JunkFolder)
         {
             @* rc.15 (owner, 7 Oct: "where is the Empty button"): item 25 as a real button in the folder's
@@ -56,7 +52,7 @@
            three more icons. Each is still its own small form - it needs no selection, and
            buttons never reach into another form (the bulk-form rule). *@
         @* Owner, 9 Oct 2026: sort any folder; the choice is remembered for this folder. *@
-        <SortMenu L="L" Folder="@Name" Sort="@sort" Outgoing="IsOutgoing" Back="@SortBack" />
+        <ListFilterMenu L="L" Show="@Show" FilterLink="FilterLink" Layout="@viewLayout" Back="@BackLink" Folder="@Name" Sort="@sort" Outgoing="IsOutgoing" SortBack="@SortBack" />
         <details class="pmenu lhmore">
             <summary class="iconbtn" title="@L["More"]" aria-label="@L["More"]"><LipiIcon Name="more-horizontal" Size="16" /></summary>
             <div class="pmenu-body">
@@ -81,14 +77,10 @@
             </div>
         </details>
     </div>
-    @* Your instruction (6 Oct): the search on the same row as All, Unread, Read. *@
+    @* Design review 4.1: search goes the full width under the head; All, Unread and Read moved
+       into the menu (their choice still shows as the menu's mark when not All). *@
     <div class="lh-row lh-find">
         <SearchBox Folders="folders" L="L" />
-        <nav class="seg" aria-label="@L["Show"]">
-            <a href="@FilterLink("all")" aria-current="@(Show == "all" ? "page" : null)">@L["All"]</a>
-            <a href="@FilterLink("unread")" aria-current="@(Show == "unread" ? "page" : null)">@L["Unread"]</a>
-            <a href="@FilterLink("read")" aria-current="@(Show == "read" ? "page" : null)">@L["Read"]</a>
-        </nav>
     </div>
     <SortHeadings L="L" Folder="@Name" Sort="@sort" Outgoing="IsOutgoing" Back="@SortBack" />
 </div>
@@ -132,25 +124,27 @@
         <button type="submit" class="linkbtn" data-heldundo><LipiIcon Name="undo" Size="15" />@L["Undo"]</button>
     </form>
 }
+@* rc.16, design review 5b.1 and 5b.4: what just happened goes in the one bar at the bottom of the
+   screen, not in green boxes above the list; it leaves by itself after a few seconds. *@
 @if (Merged is not null && !Writing)
 {
-    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="users" Size="16" /><span>@L["{n} separate messages wait here and go out one by one over the next few minutes. Each person gets their own copy."].Replace("{n}", Merged, StringComparison.Ordinal)</span></div></div>
+    <div class="undobar notebar" role="status" data-notebar><LipiIcon Name="users" Size="16" /><span>@L["{n} separate messages wait here and go out one by one over the next few minutes. Each person gets their own copy."].Replace("{n}", Merged, StringComparison.Ordinal)</span></div>
 }
 @if (Scheduled is not null && !Writing)
 {
-    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="clock" Size="16" /><span>@L["Scheduled. It waits here until its send time; you can change or cancel it until then."]</span></div></div>
+    <div class="undobar notebar" role="status" data-notebar><LipiIcon Name="clock" Size="16" /><span>@L["Scheduled. It waits here until its send time; you can change or cancel it until then."]</span></div>
 }
 @if (Cancelled is not null && !Writing)
 {
-    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Not sent. It is in Drafts."]</span></div></div>
+    <div class="undobar notebar" role="status" data-notebar><LipiIcon Name="check" Size="16" /><span>@L["Not sent. It is in Drafts."]</span></div>
 }
 @if (Sent is not null && !Writing)
 {
-    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Message queued for delivery. A copy is in Sent."]</span></div></div>
+    <div class="undobar notebar" role="status" data-notebar><LipiIcon Name="check" Size="16" /><span>@L["Message queued for delivery. A copy is in Sent."]</span></div>
 }
 @if (Saved is not null && !Writing)
 {
-    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Draft saved."]</span></div></div>
+    <div class="undobar notebar" role="status" data-notebar><LipiIcon Name="check" Size="16" /><span>@L["Draft saved."]</span></div>
 }
 @if (UndoToken is Guid token && Moved > 0)
 {
@@ -164,7 +158,7 @@
 }
 @if (Undone is not null && !Writing)
 {
-    <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Put back where they were."]</span></div></div>
+    <div class="undobar notebar" role="status" data-notebar><LipiIcon Name="check" Size="16" /><span>@L["Put back where they were."]</span></div>
 }
 
 @if (folder is null)
@@ -271,9 +265,28 @@ else
             </div>
         </div>
 
+        @if (mailboxFull)
+        {
+            @* rc.16, design review [6i]: a full mailbox says so where the mail is, with the way out. *@
+            <div class="statecard st-full" role="alert">
+                <span class="statetile bad" aria-hidden="true"><LipiIcon Name="archive" Size="22" /></span>
+                <div><b>@L["Your mailbox is full: nothing more arrives, and you cannot send. Delete or archive some mail."]</b></div>
+                <a class="btn btn-s btn-sm" href="/search?scope=all&amp;sort=size">@L["Show biggest mail"]</a>
+            </div>
+        }
         @if (items is null || items.Count == 0)
         {
-            <p class="empty">@(Show == "unread" ? L["No unread messages."] : L["No messages here."])</p>
+            @* rc.16, design review 5b.3 and [6i]: an empty folder says what goes there and the next step. *@
+            (string icon, string title, string what, string? next, string? nextHref) = EmptyState();
+            <div class="emptyfolder">
+                <span class="statetile" aria-hidden="true"><LipiIcon Name="@icon" Size="24" /></span>
+                <p class="empty">@title</p>
+                <p class="emptywhat">@what</p>
+                @if (next is not null)
+                {
+                    <a class="btn btn-s btn-sm" href="@nextHref">@next</a>
+                }
+            </div>
         }
         else
         {
@@ -417,13 +430,6 @@ else
     private string ViewClass => "fview layout-" + viewLayout
         + (Writing ? " has-open writing" : OpenId is not null && viewLayout != "list" ? " has-open" : string.Empty);
 
-    private static readonly (string Key, string Icon, string Word)[] LayoutChoices =
-    {
-        ("three", "columns", "Three panes"),
-        ("focus", "expand", "Focus"),
-        ("list", "list-view", "List only"),
-    };
-
     /// <summary>This folder view with a message open in it.</summary>
     private string OpenHere(Guid id) => PageLink(pageIndex) + "&open=" + id;
 
@@ -498,6 +504,31 @@ else
     }
 
     private string Name => string.IsNullOrEmpty(FolderName) ? FolderRow.Inbox : FolderName;
+
+    private bool mailboxFull;
+
+    // rc.16 (design review 5b.3, [6i]): what an empty folder is for, and what to do next.
+    private (string Icon, string Title, string What, string? Next, string? NextHref) EmptyState()
+    {
+        if (Show == "unread")
+        {
+            return ("check", L["No unread messages."], L["Everything here has been read."], L["Show all"], "/folder/" + Uri.EscapeDataString(Name));
+        }
+        if (Show == "read")
+        {
+            return ("email", L["No messages here."], L["Nothing here has been read yet."], L["Show all"], "/folder/" + Uri.EscapeDataString(Name));
+        }
+        return Name switch
+        {
+            "INBOX" => ("email", L["Nothing in your Inbox."], L["New mail arrives here. Mail you have dealt with can go to Archive."], L["Write a message"], "/compose"),
+            "Drafts" => ("edit", L["No drafts."], L["A message you start and do not send is kept here."], L["Write a message"], "/compose"),
+            "Sent" => ("email", L["Nothing sent yet."], L["Every message you send is kept here, with its original."], L["Write a message"], "/compose"),
+            "Archive" => ("archive", L["Nothing archived."], L["Archive keeps mail you are done with, out of the Inbox but never lost. Press e on a message."], null, null),
+            "Junk" => ("security", L["No junk."], L["Mail that looks unwanted comes here first, and empties itself after its time."], null, null),
+            "Trash" => ("trash", L["Trash is empty."], L["Deleted mail waits here for a while before it goes for good."], null, null),
+            _ => ("folder", L["This folder is empty."], L["Move messages here, or make a rule that files them for you."], L["Folders and rules"], "/settings/rules"),
+        };
+    }
 
     /// <summary>
     /// Flagging means "come back to this", which only has meaning where a
@@ -601,6 +632,7 @@ else
             sound = prefs.NewMailSound;
             weekStart = prefs.WeekStart;
         }
+        mailboxFull = context?.Mailbox is MailboxRow owner && (await Mail.StorageStateAsync(owner)).Full;
         sort = await Mail.SortForAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value, Name);
         (items, total) = await Mail.ListSortedAsync(mailboxId.Value, folder.Id, Show, sort, IsOutgoing, pageIndex, pageSize);
         // rc.15: a page past the end (an old link, or fewer messages now) shows the last page.

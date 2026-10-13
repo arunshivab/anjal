@@ -158,8 +158,10 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         string html = await this.client.GetStringAsync("folder/INBOX");
         Match button = Regex.Match(html, "<button[^>]*class=\"fav[^\"]*\"[^>]*>(.*?)</button>", RegexOptions.Singleline | RegexOptions.CultureInvariant);
         Assert.True(button.Success);
-        // The glyph stays (DEF-011), tagged as Tamil so screen readers pronounce it rightly (UX-09, item 41).
-        Assert.Equal("<span lang=\"ta\">அ</span>", button.Groups[1].Value.Trim());
+        // rc.16, design review 4.3 (owner, 12 Oct 2026): the flag is the LiPicons flag; அ stays the
+        // brand mark only, so a row never shows the brand letter as a control.
+        Assert.Contains("lipicon", button.Groups[1].Value, StringComparison.Ordinal);
+        Assert.DoesNotContain("அ", button.Groups[1].Value, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -473,13 +475,14 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         // every subject starts at the same place; dates stay compact (reviews 1 and 2).
         foreach (string page in new[] { inbox, await this.client.GetStringAsync("search?q=Report&scope=all") })
         {
-            Assert.Matches("<div class=\"mline1\">(?:(?!</div>).)*data-attachment", page);
+            // rc.16, design review 4.4: the clip sits on the quiet third line, after the preview.
+            Assert.Matches("<div class=\"mline3\">(?:(?!</div>).)*data-attachment", page);
             string subjects = string.Join("", Regex.Matches(page, "<a class=\"subj\"[^>]*>.*?</a>", RegexOptions.Singleline).Select(m => m.Value));
             Assert.NotEmpty(subjects);
             Assert.DoesNotContain("data-attachment", subjects, StringComparison.Ordinal);
             Assert.DoesNotMatch("datetime=\"[^\"]*\">\\d{1,2} \\w{3} \\d{4}</time>", page);
         }
-        Assert.Equal(1, Regex.Count(inbox, "<div class=\"mline1\">(?:(?!</div>).)*data-attachment", RegexOptions.Singleline));   // only the message with files
+        Assert.Equal(1, Regex.Count(inbox, "<div class=\"mline3\">(?:(?!</div>).)*data-attachment", RegexOptions.Singleline));   // only the message with files
     }
 
     [Fact]
@@ -551,7 +554,9 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         // misalign; each row carries its sender, time and score itself (review 6).
         Assert.DoesNotContain("<th", html, StringComparison.Ordinal);
         Assert.Contains("<div class=\"mline1\">", html, StringComparison.Ordinal);
-        Assert.Contains("class=\"score", html, StringComparison.Ordinal);
+        // rc.16, design review 4.2: a score of 0 is not shown; the row still carries its time.
+        Assert.DoesNotContain("class=\"score", html, StringComparison.Ordinal);
+        Assert.Contains("<time", html, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -582,7 +587,8 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         string html = await this.client.GetStringAsync($"message/{m.Id}");
         // rc.11: the envelope's order follows item 42 and the approved board -
         // attachments, then the category chooser, then Details (with the checks).
-        int attachments = html.IndexOf(">Attachments · 1</h2>", StringComparison.Ordinal);
+        // rc.16, design review 2c: the files are "Enclosed · N".
+        int attachments = html.IndexOf(">Enclosed · 1</h2>", StringComparison.Ordinal);
         int category = html.IndexOf(">Category</h2>", StringComparison.Ordinal);
         int details = html.IndexOf(">Details</summary>", StringComparison.Ordinal);
         Assert.True(attachments > 0 && attachments < category && category < details, $"order: {attachments} {category} {details}");
@@ -622,8 +628,9 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         {
             Assert.Contains($"href=\"/settings/{s}\"", first, StringComparison.Ordinal);
         }
-        Assert.Contains("<h2>Appearance</h2>", first, StringComparison.Ordinal);
-        Assert.DoesNotContain("<h2>Security</h2>", first, StringComparison.Ordinal);
+        // rc.16, design review 9: Settings opens on Mail, the section people use most.
+        Assert.Contains("<h2>Mail</h2>", first, StringComparison.Ordinal);
+        Assert.DoesNotContain("<h2>Appearance</h2>", first, StringComparison.Ordinal);
         // The addresses of before rc.13 still land where those settings now live.
         string profile = await this.client.GetStringAsync("settings/profile");
         Assert.Contains("<h2>Mail</h2>", profile, StringComparison.Ordinal);

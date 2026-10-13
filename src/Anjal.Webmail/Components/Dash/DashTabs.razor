@@ -1,0 +1,40 @@
+@* rc.16 (design review 7 and 8, owner 11 Oct 2026): the dashboard as tabs - Today first, then six
+   pages. The chosen period, comparison and mailbox travel with every tab. Replies carries a
+   small amber count when something waits for a reply. *@
+<nav class="dtabs" aria-label="@L["Dashboard pages"]">
+    @foreach ((string key, string href, string icon, string label) in Tabs)
+    {
+        <a href="@(href + (key == "today" ? string.Empty : Query))" aria-current="@(Current == key ? "page" : null)">
+            <LipiIcon Name="@icon" Size="16" /><span>@L[label]</span>
+            @if (key == "replies" && Waiting > 0)
+            {
+                <span class="dt-n" title="@L["{n} waiting for a reply"].Replace("{n}", Waiting.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)">@Waiting</span>
+            }
+        </a>
+    }
+</nav>
+
+@code {
+    private static readonly (string Key, string Href, string Icon, string Label)[] Tabs =
+    {
+        ("today", "/dashboard/today", "home", "Today"),
+        ("overview", "/dashboard", "chart-bar", "Overview"),
+        ("flow", "/dashboard/flow", "email", "Mail flow"),
+        ("people", "/dashboard/people", "users", "People"),
+        ("replies", "/dashboard/replies", "undo", "Replies"),
+        ("safety", "/dashboard/safety", "security", "Safety"),
+        ("storage", "/dashboard/storage", "archive", "Storage"),
+    };
+
+    /// <summary>The tab shown: today, overview, flow, people, replies, safety or storage.</summary>
+    [Parameter] public string Current { get; set; } = "overview";
+
+    /// <summary>The query the pages share (period, comparison, mailbox), with its "?", or empty.</summary>
+    [Parameter] public string Query { get; set; } = string.Empty;
+
+    /// <summary>Messages waiting for a reply: the amber count on Replies.</summary>
+    [Parameter] public int Waiting { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+}

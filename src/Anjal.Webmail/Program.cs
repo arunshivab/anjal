@@ -571,6 +571,7 @@ public static class Program
         app.MapGet("/logos/{file}", (string file, HttpContext http) => Asset("logos/" + file, http));
 
         ContactEndpoints.Map(app);
+        TodayEndpoints.Map(app);
 
         // ---- rc.15 (DES-11 F1, owner 10 Oct): rules and folders were written in rc.12 but never
         // connected, so saving a rule or creating a folder answered 400. ----
@@ -1415,7 +1416,7 @@ public static class Program
                 return Results.Redirect("/sign-in");
             }
             await svc.SetWelcomeDoneAsync(mailboxId.Value, ct).ConfigureAwait(false);
-            return Results.Redirect(string.Equals(tour, "1", StringComparison.Ordinal) ? "/folder/INBOX#tour" : LocalPath.Safe(back));
+            return Results.Redirect(string.Equals(tour, "1", StringComparison.Ordinal) ? "/dashboard/today#tour" : LocalPath.Safe(back));   // rc.16 [6j]: the tour starts on Today
         }).RequireAuthorization();
 
         // rc.13 (board SetMail): how long Send waits for Undo, and when Trash is emptied.
@@ -1440,6 +1441,18 @@ public static class Program
             }
             await svc.SetPageSizeAsync(mailboxId.Value, size, ct).ConfigureAwait(false);
             return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // rc.16 (design review 8): where Anjal opens after signing in - Today or the Inbox.
+        app.MapPost("/settings/openon", async (HttpContext http, [FromForm] string? where, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetOpenOnAsync(mailboxId.Value, where, ct).ConfigureAwait(false);
+            return Results.Redirect("/settings/mail?saved=mail");
         }).RequireAuthorization();
 
         // rc.11 (item 11): the new-mail sound on or off.
@@ -1932,7 +1945,8 @@ public static class Program
     internal static string? FromSearch(string? back)
     {
         string safe = SafeBack(back, string.Empty);
-        return safe.StartsWith("/search", StringComparison.Ordinal) ? safe : null;
+        // rc.16 (design review 8): Today's rows act through the folder's path and come back to Today.
+        return safe.StartsWith("/search", StringComparison.Ordinal) || safe.StartsWith("/dashboard/today", StringComparison.Ordinal) ? safe : null;
     }
 
     internal static string SafeBack(string? back, string fallback)

@@ -54,6 +54,30 @@ CONTRAST_PAIRS = [
 ]
 
 
+# rc.16, design review 2c and 6c (owner, 11 Oct 2026): the envelope pane is a manila envelope in
+# the theme's accent - accent-soft by day; by night a dark envelope tuned so its labels (warning),
+# its "outside" marks (danger) and its words (ink) keep their contrast. Worked out from each
+# theme's own colours, so every theme has one.
+ENVELOPE_PAIRS = [("ink", "env-bg", 4.5), ("ink-muted", "env-bg", 4.5), ("warning", "env-bg", 4.5), ("danger", "env-bg", 4.5)]
+
+
+def mix(a, b, t):
+    """a over b, t of a."""
+    a, b = a.lstrip("#"), b.lstrip("#")
+    out = [round(int(a[i:i + 2], 16) * t + int(b[i:i + 2], 16) * (1 - t)) for i in (0, 2, 4)]
+    return "#" + "".join(f"{c:02X}" for c in out)
+
+
+def envelope(values, tid):
+    dark = tid.endswith("-dark")
+    accent, soft = values["accent"][tid], values["accent-soft"][tid]
+    paper = values["surface-100"][tid]
+    if dark:
+        return {"env-bg": mix(accent, paper, 0.12), "env-flap": mix(accent, paper, 0.18),
+                "env-edge": accent, "env-row": values["surface-200"][tid]}
+    return {"env-bg": soft, "env-flap": mix(accent, soft, 0.16), "env-edge": accent, "env-row": "#FFFFFF"}
+
+
 def luminance(hex_colour):
     h = hex_colour.lstrip("#")
     channels = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
@@ -62,11 +86,14 @@ def luminance(hex_colour):
 
 
 def contrast_problems(themes, colours):
-    values = {tok["name"]: tok["value"] for tok in colours}
+    values = {tok["name"]: dict(tok["value"]) for tok in colours}
+    for theme in themes:
+        for name, value in envelope(values, theme["id"]).items():
+            values.setdefault(name, {})[theme["id"]] = value
     problems = []
     for theme in themes:
         tid = theme["id"]
-        for fg, bg, minimum in CONTRAST_PAIRS:
+        for fg, bg, minimum in CONTRAST_PAIRS + ENVELOPE_PAIRS:
             a, b = luminance(values[fg][tid]), luminance(values[bg][tid])
             ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
             if ratio < minimum:
@@ -108,6 +135,8 @@ def main():
             lines.append(f"  --{tok['name']}: {tok['value'][tid]};")
         for tok in shadows:
             lines.append(f"  --{tok['name']}: {tok['value'][tid]};")
+        for name, value in envelope({t["name"]: t["value"] for t in colours}, tid).items():
+            lines.append(f"  --{name}: {value};")
         lines.append("}")
         lines.append("")
     # "Follow this device": each colour's -auto theme takes the light values,
@@ -135,6 +164,8 @@ def main():
                 lines.append(f"{indent}  --{tok['name']}: {tok['value'][tid]};")
             for tok in shadows:
                 lines.append(f"{indent}  --{tok['name']}: {tok['value'][tid]};")
+            for name, value in envelope({t["name"]: t["value"] for t in colours}, tid).items():
+                lines.append(f"{indent}  --{name}: {value};")
             lines.append(f"{indent}}}")
             if wrap:
                 lines.append("}")

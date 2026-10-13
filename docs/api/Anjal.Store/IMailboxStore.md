@@ -40,6 +40,7 @@ Persistence interface for multi-tenant mailbox storage: tenants, their domains, 
 - **ListFoldersAsync** *(method)* - List a mailbox's folders ordered by name, INBOX first.
 - **ListMailboxSenderRulesAsync** *(method)* - A mailbox's personal sender rules, by pattern.
 - **ListMailboxesAsync** *(method)* - List mailboxes, optionally restricted to one tenant. Ordered by domain then local-part.
+- **ListMessageFactsAsync** *(method)* - rc.16: the facts of a mailbox's messages over a period, newest first and without their bodies, for the figures the dashboard and Today work out (design review 7 and 8).
 - **ListMessageNamesAsync** *(method)* - Each message's sender and recipients only, for every message in a folder (owner, 9 Oct 2026): enough to put them in order by name, which needs the names decoded first.
 - **ListMessagesAsync** *(method)* - Page through a folder's messages, newest first.
 - **ListMessagesByIdsAsync** *(method)* - The messages of a mailbox with these ids, in no particular order (one page of a list put in order by name).

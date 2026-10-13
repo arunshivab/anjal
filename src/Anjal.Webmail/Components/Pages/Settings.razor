@@ -17,9 +17,13 @@
 <div class="settings3 @(Aside ? "" : "noaside")">
     <nav class="setnav3" aria-label="@L["Settings sections"]">
         <h1 class="setnav-title">@L["Settings"]</h1>
-        @foreach ((string key, string label, string sub, string icon) in Sections)
+        <form method="get" action="/settings/@Current" class="setfind" role="search">
+            <LipiIcon Name="search" Size="15" />
+            <input type="search" name="find" value="@Find" placeholder="@L["Find a setting"]" aria-label="@L["Find a setting"]" data-setfind />
+        </form>
+        @foreach ((string key, string label, string sub, string icon) in Sections.Where(x => Found(x.Key, x.Label, x.Sub)))
         {
-            <a href="/settings/@key" class="setnav-item @(Current == key ? "on" : null)" aria-current="@(Current == key ? "page" : null)">
+            <a href="/settings/@key" class="setnav-item @(Current == key ? "on" : null)" aria-current="@(Current == key ? "page" : null)" data-find="@(L[label] + " " + L[sub] + " " + FindWords.GetValueOrDefault(key, string.Empty))">
                 <LipiIcon Name="@icon" Size="20" />
                 <span class="setnav-text"><b>@L[label]</b><span>@L[sub]</span></span>
             </a>
@@ -171,6 +175,16 @@
             <h2>@L["Mail"]</h2>
             <p class="hint">@L["How your mailbox behaves."]</p>
             <div class="setgrid">
+                @* rc.16 (design review 8): where Anjal opens after signing in. *@
+                <form method="post" action="/settings/openon" class="setfield">
+                    <AntiforgeryToken />
+                    <span class="setlbl" id="openon-lbl">@L["Open Anjal on"]</span>
+                    <div class="seg" role="radiogroup" aria-labelledby="openon-lbl">
+                        <label class="segopt"><input type="radio" name="where" value="today" checked="@(mailSettings.OpenOn != "inbox")" data-autosubmit /><span>@L["Today"]</span></label>
+                        <label class="segopt"><input type="radio" name="where" value="inbox" checked="@(mailSettings.OpenOn == "inbox")" data-autosubmit /><span>@L["Inbox"]</span></label>
+                    </div>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
                 <form method="post" action="/settings/pagesize" class="setfield">
                     <AntiforgeryToken />
                     <input type="hidden" name="back" value="/settings/mail?saved=mail" />
@@ -558,7 +572,7 @@
             <p class="hint">@L["Shortcuts, the tour, and where to get help."]</p>
             <div class="helplinks">
                 <a class="btn btn-s" href="#shortcuts"><LipiIcon Name="help" Size="16" />@L["Keyboard shortcuts"]</a>
-                <a class="btn btn-s" href="/folder/INBOX#tour"><LipiIcon Name="refresh" Size="16" />@L["Take the tour again"]</a>
+                <a class="btn btn-s" href="/dashboard/today#tour"><LipiIcon Name="refresh" Size="16" />@L["Take the tour again"]</a>
             </div>
             <p class="hint">@L["For anything else, ask your organisation's administrator."]</p>
         </section>
@@ -786,16 +800,31 @@
     /// <summary>A page within a section: /settings/security/two-step.</summary>
     [Parameter] public string? Sub { get; set; }
 
+    // rc.16, design review [6e] (owner, 11 Oct 2026): the list opens on what people change most -
+    // Mail (signature, sound) - then Security; "Senders" is named for what it is about, Junk.
     private static readonly (string Key, string Label, string Sub, string Icon)[] Sections =
     {
-        ("appearance", "Appearance", "Theme, density, layout", "contrast"),
-        ("language", "Language and time", "Language, time zone, dates", "world-route"),
-        ("mail", "Mail", "Per page, sound, signature, emptying", "email"),
+        ("mail", "Mail", "Open on, signature, sound, Undo send", "email"),
         ("security", "Security", "Password, two-step, devices", "lock"),
         ("rules", "Folders and rules", "Your folders, rules that file mail", "folder"),
+        ("senders", "Junk and senders", "Always or never to Junk", "security"),
         ("categories", "Categories", "Shared and your own", "tag"),
-        ("senders", "Senders", "Always or never to Junk", "security"),
+        ("appearance", "Appearance", "Theme, density, layout", "contrast"),
+        ("language", "Language and time", "Language, time zone, dates", "world-route"),
         ("help", "Help", "Shortcuts, tour, guide", "help"),
+    };
+
+    // "Find a setting": words that lead to each section, besides its name and line.
+    private static readonly IReadOnlyDictionary<string, string> FindWords = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["mail"] = "today inbox open signature sound undo send trash empty per page offline",
+        ["security"] = "password two-step authenticator passkey backup codes devices sign out recovery",
+        ["rules"] = "folder rule filter move file",
+        ["senders"] = "junk spam block trust allow sender",
+        ["categories"] = "category label colour",
+        ["appearance"] = "theme colour dark light density layout panes",
+        ["language"] = "language time zone date clock 24-hour",
+        ["help"] = "shortcuts keyboard tour guide",
     };
 
     // Addresses from before rc.13 still land in the right place.
@@ -804,8 +833,13 @@
         "profile" or "signature" => "mail",
         "password" => "security",
         _ when Sections.Any(x => x.Key == Section) => Section!,
-        _ => "appearance",
+        _ => "mail",
     };
+
+    // The sections a "Find a setting" search leads to (all when nothing is asked).
+    private bool Found(string key, string label, string sub) =>
+        string.IsNullOrWhiteSpace(Find)
+        || (L[label] + " " + L[sub] + " " + label + " " + sub + " " + FindWords.GetValueOrDefault(key, string.Empty)).Contains(Find.Trim(), StringComparison.OrdinalIgnoreCase);
 
     // rc.15 (owner, 7 Oct: "make the entire settings in a single design concept"): every section
     // has the same three columns - the sections, the card, and a right-hand column about it.
@@ -817,6 +851,7 @@
     private string signatureText = string.Empty;
 
     [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
+    [SupplyParameterFromQuery(Name = "find")] private string? Find { get; set; }
     [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
     [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
     [SupplyParameterFromQuery(Name = "welcome")] private string? Welcome { get; set; }

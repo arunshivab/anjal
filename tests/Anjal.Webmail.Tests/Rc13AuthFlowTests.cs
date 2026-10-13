@@ -80,7 +80,7 @@ public sealed class Rc13AuthFlowTests : IAsyncLifetime, IDisposable
         Assert.DoesNotContain("No password reset here", page, StringComparison.Ordinal);
 
         HttpResponseMessage res = await SignInAsync(c, "Arun", "correct horse battery");
-        Assert.Equal("/dashboard", res.Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today", res.Headers.Location!.ToString());
         // The person's own device: the cookie lasts (30 days), and it names a session.
         string cookie = res.Headers.GetValues("Set-Cookie").First(v => v.StartsWith("anjal.session=", StringComparison.Ordinal));
         Assert.Contains("expires=", cookie, StringComparison.OrdinalIgnoreCase);
@@ -136,13 +136,13 @@ public sealed class Rc13AuthFlowTests : IAsyncLifetime, IDisposable
         string code = Totp.Code(secret, step);
         var boxes = code.Select(ch => ("code", ch.ToString())).Append(("trust", "1")).ToArray();
         HttpResponseMessage right = await Post(c, "auth/two-step", token, boxes);
-        Assert.Equal("/dashboard", right.Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today", right.Headers.Location!.ToString());
         Assert.Contains(right.Headers.GetValues("Set-Cookie"), v => v.StartsWith("anjal.trust=", StringComparison.Ordinal));
         Assert.Equal(HttpStatusCode.OK, (await c.GetAsync("folder/INBOX")).StatusCode);
 
         // Same browser, next time: the trusted device goes straight in...
         await Post(c, "sign-out", Token(await c.GetStringAsync("folder/INBOX")));
-        Assert.Equal("/dashboard", (await SignInAsync(c, "arun", "correct horse battery")).Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today", (await SignInAsync(c, "arun", "correct horse battery")).Headers.Location!.ToString());
         // ...but never on a shared computer.
         await Post(c, "sign-out", Token(await c.GetStringAsync("folder/INBOX")));
         Assert.Equal("/sign-in/two-step", (await SignInAsync(c, "arun", "correct horse battery", ("device", "shared"))).Headers.Location!.ToString());
@@ -210,7 +210,7 @@ public sealed class Rc13AuthFlowTests : IAsyncLifetime, IDisposable
         string ticket = Uri.UnescapeDataString(Regex.Match(reset, "t=([^&]+)").Groups[1].Value);
         HttpResponseMessage done = await Post(c, "auth/reset", Token(page), ("t", ticket), ("code", code), ("password", "Brass-Lantern-77"));
         Assert.Equal("/sign-in?reset=1&u=arun", done.Headers.Location!.ToString());
-        Assert.Equal("/dashboard", (await SignInAsync(this.Client(), "arun", "Brass-Lantern-77")).Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today", (await SignInAsync(this.Client(), "arun", "Brass-Lantern-77")).Headers.Location!.ToString());
 
         // A forged message cannot be put on the reset page: only sealed notes are shown.
         string forged = await c.GetStringAsync(reset.TrimStart('/') + "&e=Call%20this%20number");

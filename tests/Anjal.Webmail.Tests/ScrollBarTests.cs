@@ -28,7 +28,8 @@ public sealed partial class ScrollBarTests
     public void ScreenReaderBoxes_ArePinned_SoTheyNeverGrowThePage()
     {
         string css = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Anjal.Webmail", "wwwroot", "app.css"));
-        Assert.Contains(".sr-only { top: 0; left: 0; }", css, StringComparison.Ordinal);
+        // rc.16: the stylesheet was consolidated (one rule per selector), so the rule may hold more.
+        Assert.Matches(@"\.sr-only \{[^}]*\btop: 0;[^}]*\bleft: 0;", css);
     }
 
     [GeneratedRegex("<table[^>]*class=\"[^\"]*\\bsr-only\\b")]

@@ -1,0 +1,361 @@
+@page "/"
+@page "/dashboard/today"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject NavigationManager Nav
+
+<PageTitle>@L["Today"] — Anjal</PageTitle>
+
+@* rc.16, design review section 8 (owner, 11 Oct 2026): Today, where Anjal opens after signing in.
+   Only unread mail, with what needs the person first - answers to their own mail, mail addressed
+   to them (not Cc), people they write to often - each with a small tag saying why; then
+   everything else; lists and notifications folded into one line. A row opens the letter and its
+   envelope right here, with a quick reply at the end of the letter; after Send, Archive or Mark
+   read the next unread opens. Rows already dealt with stay in the list, faded, until the person
+   leaves Today. No mail is ever shown on the sign-in page itself. *@
+@if (!loaded || view is null)
+{
+    <div class="dash"><p class="dnote">@L["Loading…"]</p></div>
+}
+else
+{
+<div class="dash today @(OpenId is not null ? "reading" : null)">
+    @if (OpenId is Guid openId)
+    {
+        @* [5b] Reading in place: the list narrows; the letter and the 2c envelope appear beside it. *@
+        <div class="tdread">
+            <aside class="tdlist" aria-label="@L["Unread"]">
+                <div class="tdlist-head">
+                    <a class="linkbtn" href="/dashboard/today@(DoneQuery(null))" title="@L["Back to the list for Today."]"><LipiIcon Name="arrow-left" Size="16" /><b>@L["Today"]</b></a>
+                    <span class="tdcount">· @L["{n} unread"].Replace("{n}", N(view.Unread), StringComparison.Ordinal)</span>
+                    <span class="lh-grow"></span>
+                    <a class="linkbtn" href="/folder/INBOX?show=unread" title="@L["Open the Inbox with unread mail only."]">@L["Inbox"]</a>
+                </div>
+                @foreach ((string group, IReadOnlyList<TodayRow> rows) in Groups)
+                {
+                    @if (rows.Count > 0)
+                    {
+                        <p class="tdgroup">@group · @rows.Count</p>
+                        @foreach (TodayRow r in rows)
+                        {
+                            bool done = Done.Contains(r.Message.Id);
+                            <a class="tdmini @(r.Message.Id == openId ? "on" : null) @(done ? "done" : null)" href="@OpenLink(r.Message.Id)" aria-current="@(r.Message.Id == openId ? "true" : null)">
+                                <span class="tddot" aria-hidden="true"></span>
+                                <span class="tdmini-main"><span class="tdmini-top"><b>@r.Who</b><time>@clock.Time(r.Message.ReceivedAt)</time></span><span class="tdmini-subj">@Subject(r.Message)</span>
+                                    @if (done)
+                                    {
+                                        <span class="tddone"><LipiIcon Name="check" Size="13" />@L[DoneWord(r.Message.Id)]</span>
+                                    }
+                                </span>
+                            </a>
+                        }
+                    }
+                }
+            </aside>
+            <section class="tdreader">
+                <p class="tdnext">
+                    <span>@L["{i} of {n} unread"].Replace("{i}", (Position(openId) + 1).ToString(Inv), StringComparison.Ordinal).Replace("{n}", Ordered.Count.ToString(Inv), StringComparison.Ordinal)</span>
+                    <span class="lh-grow"></span>
+                    @if (NextAfter(openId) is TodayRow next)
+                    {
+                        <a class="linkbtn" href="@OpenLink(next.Message.Id)" title="@L["Open the next unread mail."]">@L["Next: {name}"].Replace("{name}", next.Who, StringComparison.Ordinal)<LipiIcon Name="arrow-right" Size="15" /></a>
+                    }
+                </p>
+                @if (Ordered.FirstOrDefault(r => r.Message.Id == openId) is TodayRow why && WhyLine(why) is string whyText)
+                {
+                    <p class="tdwhy"><span class="tdtag tag-@why.Reason">@L[TagWord(why.Reason)]</span>@whyText</p>
+                }
+                <MessageReader Id="openId" BackLink="@OpenLink(openId)" ReturnTo="@("/dashboard/today" + DoneQuery(null))" QuickReply="@QuickReplyNext(openId)" />
+            </section>
+        </div>
+    }
+    else
+    {
+        <header class="dhead tdhead">
+            <div>
+                <h1>@L[MailboxService.Greeting(clock, now)].Replace("{name}", firstName, StringComparison.Ordinal)</h1>
+                <p class="dsub">@clock.Date(now) · <b>@L["{n} unread"].Replace("{n}", N(view.Unread), StringComparison.Ordinal)</b>, @L["{n} need you"].Replace("{n}", N(view.NeedsYou.Count), StringComparison.Ordinal)</p>
+            </div>
+            <form method="get" action="/search" class="tdsearch" role="search">
+                <LipiIcon Name="search" Size="15" />
+                <input type="search" name="q" placeholder="@L["Search all mail"]" aria-label="@L["Search all mail"]" data-kb-search />
+                <kbd aria-hidden="true">/</kbd>
+            </form>
+        </header>
+        <DashTabs Current="today" Waiting="waitingCount" L="L" />
+        @if (view.Unread == 0)
+        {
+            @* [5c] All caught up. *@
+            <section class="dcard tdcaught">
+                <span class="tdcheck" aria-hidden="true"><LipiIcon Name="check" Size="28" /></span>
+                <h2>@L["You're all caught up"]</h2>
+                <p>@CaughtUpLine</p>
+                <p class="tdcaught-acts">
+                    <a class="btn btn-s" href="/no-reply"><LipiIcon Name="clock" Size="15" />@L["Waiting for a reply"] · @waitingCount</a>
+                    <a class="btn btn-s" href="/folder/INBOX"><LipiIcon Name="email" Size="15" />@L["Open Inbox"]</a>
+                </p>
+            </section>
+        }
+        else
+        {
+            @* [5d] On a phone: chips first - waiting, drafts. *@
+            <nav class="tdchips phoneonly" aria-label="@L["Needs attention"]">
+                <a href="/no-reply" class="tdchip warn"><LipiIcon Name="clock" Size="14" />@L["{n} waiting"].Replace("{n}", waitingCount.ToString(Inv), StringComparison.Ordinal)</a>
+                @if (draftCount > 0)
+                {
+                    <a href="/folder/Drafts" class="tdchip"><LipiIcon Name="edit" Size="14" />@L["{n} drafts"].Replace("{n}", draftCount.ToString(Inv), StringComparison.Ordinal)</a>
+                }
+            </nav>
+            <div class="tdgrid">
+                <section class="dcard tdunread" aria-labelledby="td-unread">
+                    <div class="tdcard-head">
+                        <h2 id="td-unread">@L["Unread"] <span class="tdbadge">@N(view.Unread)</span></h2>
+                        <a class="linkbtn" href="/folder/INBOX?show=unread">@L["Open Inbox"]<LipiIcon Name="arrow-right" Size="15" /></a>
+                        <span class="lh-grow"></span>
+                        <form method="post" action="/folder/INBOX/readall">
+                            <AntiforgeryToken />
+                            <button type="submit" class="linkbtn" data-needs-server><LipiIcon Name="check" Size="15" />@L["Mark all read"]</button>
+                        </form>
+                    </div>
+                    @if (view.NeedsYou.Count > 0)
+                    {
+                        <p class="tdgroup"><LipiIcon Name="star" Size="14" /><b>@L["Needs you"] · @view.NeedsYou.Count</b><span>@L["answers to your mail, people you write with, mail addressed to you"]</span></p>
+                        <ul class="tdrows">
+                            @foreach (TodayRow r in view.NeedsYou)
+                            {
+                                <TodayRowView R="r" L="L" Clock="clock" Href="@OpenLink(r.Message.Id)" Back="DoneBack" />
+                            }
+                        </ul>
+                    }
+                    @if (view.Rest.Count > 0)
+                    {
+                        <p class="tdgroup"><b>@L["Everything else"] · @view.Rest.Count</b></p>
+                        <ul class="tdrows">
+                            @foreach (TodayRow r in view.Rest)
+                            {
+                                <TodayRowView R="r" L="L" Clock="clock" Href="@OpenLink(r.Message.Id)" Back="DoneBack" />
+                            }
+                        </ul>
+                    }
+                    @if (view.Lists.Count > 0)
+                    {
+                        @* Lists and notifications, folded into one line with Show and Mark read. *@
+                        <details class="tdlists">
+                            <summary><LipiIcon Name="users" Size="15" /><b>@L["Lists and notifications"] · @view.Lists.Count</b><span class="tdlistnames">(@string.Join(", ", view.Lists.Select(l => l.Who).Distinct(StringComparer.OrdinalIgnoreCase).Take(3)))</span><span class="lh-grow"></span><span class="linkbtn tdshow" title="@L["Show the mail in this group."]">@L["Show"]</span></summary>
+                            <ul class="tdrows">
+                                @foreach (TodayRow r in view.Lists)
+                                {
+                                    <TodayRowView R="r" L="L" Clock="clock" Href="@OpenLink(r.Message.Id)" Back="DoneBack" />
+                                }
+                            </ul>
+                        </details>
+                        <form method="post" action="/folder/INBOX/bulk" class="tdlistread">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="action" value="read" />
+                            <input type="hidden" name="back" value="@BackHere" />
+                            @foreach (TodayRow r in view.Lists)
+                            {
+                                <input type="hidden" name="id" value="@r.Message.Id" />
+                            }
+                            <button type="submit" class="linkbtn" data-needs-server>@L["Mark lists read"]</button>
+                        </form>
+                    }
+                </section>
+                <aside class="tdside">
+                    <section class="dcard">
+                        <h2>@L["Needs attention"]</h2>
+                        <DashLines Lines="attention" L="L" Empty="@L["Nothing needs you: no drafts left, nothing waiting in the Outbox, and every message you sent has had its reply."]" />
+                    </section>
+                    <section class="dcard tdmorning">
+                        <div class="tdcard-head"><h2>@L["Your morning"]</h2><span class="lh-grow"></span><a class="linkbtn" href="/dashboard">@L["Overview"]<LipiIcon Name="arrow-right" Size="15" /></a></div>
+                        <div class="tdnums">
+                            <a href="/search?scope=INBOX&after=@clock.Local(now.AddDays(-1)).ToString("yyyy-MM-dd", Inv)"><b>@N(view.ArrivedSinceEvening)</b><span>@L["arrived since 18:00"]</span></a>
+                            <a href="/folder/Junk"><b>@N(view.JunkSinceEvening)</b><span>@L["went to Junk"]</span></a>
+                            <a href="/dashboard/replies"><b>@(view.UsualReply is TimeSpan u ? SpanText(u) : "–")</b><span>@L["usual reply"]</span></a>
+                        </div>
+                    </section>
+                </aside>
+            </div>
+        }
+    }
+    @if (UndoToken is Guid token && Moved > 0)
+    {
+        <form method="post" action="/folder/undo" class="undobar" role="status">
+            <AntiforgeryToken />
+            <input type="hidden" name="token" value="@token" />
+            <input type="hidden" name="back" value="@("/dashboard/today" + DoneQuery(null))" />
+            <span>@L[Moved == 1 ? "1 message moved to {folder}" : "{n} messages moved to {folder}"].Replace("{n}", Moved.ToString(Inv), StringComparison.Ordinal).Replace("{folder}", L.Folder(MovedTo ?? "Archive"), StringComparison.Ordinal)</span>
+            <button type="submit" class="linkbtn" data-needs-server><LipiIcon Name="undo" Size="15" />@L["Undo"]</button>
+        </form>
+    }
+    @if (HeldId is Guid held)
+    {
+        <form method="post" action="/held/@held/undo" class="undobar" role="status" data-heldbar data-seconds="@HeldSeconds"
+              data-word-sending="@L["Sending in {n} seconds"]" data-word-sent="@L["Sent"]">
+            <AntiforgeryToken />
+            <span data-heldtext>@L["Sending in {n} seconds"].Replace("{n}", MailboxService.Count(HeldSeconds), StringComparison.Ordinal)</span>
+            <button type="submit" class="linkbtn" data-heldundo><LipiIcon Name="undo" Size="15" />@L["Undo"]</button>
+        </form>
+    }
+</div>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    [SupplyParameterFromQuery(Name = "open")] private string? OpenText { get; set; }
+    [SupplyParameterFromQuery(Name = "done")] private string? DoneText { get; set; }
+    [SupplyParameterFromQuery(Name = "undo")] private string? UndoText { get; set; }
+    [SupplyParameterFromQuery(Name = "moved")] private int Moved { get; set; }
+    [SupplyParameterFromQuery(Name = "to")] private string? MovedTo { get; set; }
+    [SupplyParameterFromQuery(Name = "held")] private string? HeldText { get; set; }
+    [SupplyParameterFromQuery(Name = "wait")] private int? Wait { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private DateTimeOffset now = DateTimeOffset.UtcNow;
+    private bool loaded;
+    private TodayView? view;
+    private string firstName = string.Empty;
+    private int waitingCount;
+    private long draftCount;
+    private IReadOnlyList<DashLine> attention = Array.Empty<DashLine>();
+
+    private Guid? OpenId => Guid.TryParse(OpenText, out Guid g) ? g : null;
+
+    private Guid? UndoToken => Guid.TryParse(UndoText, out Guid g) ? g : null;
+
+    private Guid? HeldId => Guid.TryParse(HeldText, out Guid g) ? g : null;
+
+    private int HeldSeconds => Math.Clamp(Wait ?? (int)MailboxService.UndoWindow.TotalSeconds, 1, 30);
+
+    // Rows already dealt with on this visit: "id:replied", "id:archived", "id:read", most recent last.
+    private IReadOnlyDictionary<Guid, string> DoneMarks
+    {
+        get
+        {
+            var marks = new Dictionary<Guid, string>();
+            foreach (string part in (DoneText ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries).TakeLast(40))
+            {
+                string[] bits = part.Split(':');
+                if (Guid.TryParse(bits[0], out Guid id))
+                {
+                    marks[id] = bits.Length > 1 && bits[1] is "replied" or "archived" or "read" ? bits[1] : "read";
+                }
+            }
+            return marks;
+        }
+    }
+
+    private HashSet<Guid> Done => DoneMarks.Keys.ToHashSet();
+
+    private string DoneWord(Guid id) => DoneMarks.GetValueOrDefault(id) switch
+    {
+        "replied" => "Replied just now",
+        "archived" => "Archived just now",
+        _ => "Read just now",
+    };
+
+    private string DoneQuery(string? add)
+    {
+        string list = string.Join(",", DoneMarks.Select(kv => kv.Key + ":" + kv.Value).Append(add).Where(x => !string.IsNullOrEmpty(x)));
+        return list.Length == 0 ? string.Empty : "?done=" + Uri.EscapeDataString(list);
+    }
+
+    private string OpenLink(Guid id) => "/dashboard/today?open=" + id + (DoneMarks.Count > 0 ? "&done=" + Uri.EscapeDataString(string.Join(",", DoneMarks.Select(kv => kv.Key + ":" + kv.Value))) : string.Empty);
+
+    private string BackHere => "/dashboard/today" + DoneQuery(null);
+
+    // Where a row's own action comes back to: Today, with that row marked as dealt with.
+    private string DoneBack(Guid id, string how) => "/dashboard/today" + DoneQuery(id + ":" + how);
+
+    private IReadOnlyList<TodayRow> Ordered => view?.InOrder.ToList() ?? new List<TodayRow>();
+
+    private IEnumerable<(string, IReadOnlyList<TodayRow>)> Groups => view is null ? Array.Empty<(string, IReadOnlyList<TodayRow>)>()
+        : new[] { (L["Needs you"], view.NeedsYou), (L["Everything else"], view.Rest), (L["Lists and notifications"], view.Lists) };
+
+    private int Position(Guid id) => Math.Max(0, Ordered.ToList().FindIndex(r => r.Message.Id == id));
+
+    // The next unread not yet dealt with, after this one (then from the top).
+    private TodayRow? NextAfter(Guid id)
+    {
+        IReadOnlyList<TodayRow> all = Ordered;
+        int at = Position(id);
+        return all.Skip(at + 1).Concat(all.Take(at)).FirstOrDefault(r => r.Message.Id != id && !Done.Contains(r.Message.Id));
+    }
+
+    // Where the quick reply goes after Send: the next unread, with this one marked as replied.
+    private string QuickReplyNext(Guid id)
+    {
+        TodayRow? next = NextAfter(id);
+        string done = DoneQuery(id + ":replied");
+        return next is null ? "/dashboard/today" + done : "/dashboard/today" + (done.Length == 0 ? "?" : done + "&") + "open=" + next.Message.Id;
+    }
+
+    private static string TagWord(string? reason) => reason switch
+    {
+        "answer" => "Answer to you",
+        "to" => "To you",
+        "often" => "You write often",
+        _ => string.Empty,
+    };
+
+    // The envelope's "Why" line for the reason tag.
+    private string? WhyLine(TodayRow r) => r.Reason switch
+    {
+        "answer" when r.AnswersSubject is not null && r.AnswersAt is DateTimeOffset at =>
+            L[r.Expected ? "An answer to {subject}, which you sent {when} and marked Expect a reply." : "An answer to {subject}, which you sent {when}."]
+                .Replace("{subject}", r.AnswersSubject, StringComparison.Ordinal).Replace("{when}", clock.List(at, now), StringComparison.Ordinal),
+        "to" => L["You are in To, not only in Cc."],
+        "often" => L["You wrote to {name} at least three times in the last 90 days."].Replace("{name}", r.Who, StringComparison.Ordinal),
+        _ => null,
+    };
+
+    private string CaughtUpLine =>
+        L["{n} arrived since yesterday evening; {j} went to Junk."].Replace("{n}", N(view?.ArrivedSinceEvening ?? 0), StringComparison.Ordinal).Replace("{j}", N(view?.JunkSinceEvening ?? 0), StringComparison.Ordinal);
+
+    private string N(long n) => n.ToString("N0", Inv);
+
+    private string SpanText(TimeSpan t) =>
+        t < TimeSpan.FromHours(1) ? L["{n} min"].Replace("{n}", Math.Max(1, (int)Math.Round(t.TotalMinutes)).ToString(Inv), StringComparison.Ordinal)
+        : t < TimeSpan.FromHours(48) ? L["{n} h"].Replace("{n}", ((int)Math.Round(t.TotalHours)).ToString(Inv), StringComparison.Ordinal)
+        : L["{n} days"].Replace("{n}", ((int)Math.Round(t.TotalDays)).ToString(Inv), StringComparison.Ordinal);
+
+    private string Subject(MessageRow m)
+    {
+        string s = Anjal.Mime.EncodedWordDecoder.Decode(m.Subject).Trim();
+        return s.Length > 0 ? s : L["(no subject)"];
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loaded = false;
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        now = DateTimeOffset.UtcNow;
+        if (WebmailAuthService.MailboxIdOf(user) is not Guid mailbox || await Mail.GetContextAsync(mailbox) is not { } context)
+        {
+            return;
+        }
+        // "/" opens where the person chose; a shared mailbox always opens on its Inbox.
+        bool atRoot = new Uri(Nav.Uri).AbsolutePath == "/";
+        if (atRoot && (mailbox != WebmailAuthService.PersonIdOf(user) || await Mail.LandingAsync(mailbox) != "/dashboard/today"))
+        {
+            Nav.NavigateTo("/folder/INBOX");
+            return;
+        }
+        view = await Mail.TodayAsync(mailbox, clock, now);
+        firstName = MailboxService.FirstName(context.Mailbox.DisplayName, context.Mailbox.Address);
+        waitingCount = (await Mail.NoReplyMessagesAsync(mailbox, now)).Count;
+        draftCount = (await Mail.ListFoldersAsync(mailbox)).FirstOrDefault(f => f.Name == "Drafts")?.Count ?? 0;
+        attention = (await Mail.PersonAttentionAsync(mailbox, clock, now)).Take(4).ToList();
+        loaded = true;
+    }
+}

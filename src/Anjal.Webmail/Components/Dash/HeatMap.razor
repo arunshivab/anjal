@@ -1,0 +1,64 @@
+@* rc.16 (design review 7, [4a]): when mail arrives - 7 rows (Monday first) by 24 hours, each cell
+   in brand teal from faint to full, with the busiest slot named. *@
+@{
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    long max = 1;
+    for (int d = 0; d < 7; d++) { for (int h = 0; h < 24; h++) { max = Math.Max(max, Cells[d, h]); } }
+}
+<div class="heat" role="img" aria-label="@L["Received by weekday and hour"]">
+    @for (int d = 0; d < 7; d++)
+    {
+        <span class="heat-day">@L[Days[d]]</span>
+        @for (int h = 0; h < 24; h++)
+        {
+            long n = Cells[d, h];
+            <i style="--o:@((n == 0 ? 0.06 : 0.12 + 0.88 * n / max).ToString("0.##", inv))" title="@L[Days[d]] @h.ToString("00", inv):00 · @n.ToString("N0", inv)"></i>
+        }
+    }
+    <span></span>
+    @for (int h = 0; h < 24; h++)
+    {
+        <span class="heat-hour">@(h % 6 == 0 || h == 23 ? h.ToString("00", inv) : string.Empty)</span>
+    }
+</div>
+<div class="heat-foot">
+    <span class="heat-scale">@L["Fewer"] <i style="--o:.12"></i><i style="--o:.4"></i><i style="--o:.7"></i><i style="--o:1"></i> @L["More"]</span>
+    @if (Busiest is string busy)
+    {
+        <span>@L["Busiest:"] <b>@busy</b></span>
+    }
+</div>
+
+@code {
+    private static readonly string[] Days = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+
+    /// <summary>Counts by weekday (Monday first) and hour.</summary>
+    [Parameter] public long[,] Cells { get; set; } = new long[7, 24];
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    // The busiest two-hour slot, such as "Mon 09-11".
+    private string? Busiest
+    {
+        get
+        {
+            long best = 0;
+            (int d, int h) at = (0, 0);
+            for (int d = 0; d < 7; d++)
+            {
+                for (int h = 0; h < 23; h++)
+                {
+                    long n = Cells[d, h] + Cells[d, h + 1];
+                    if (n > best)
+                    {
+                        best = n;
+                        at = (d, h);
+                    }
+                }
+            }
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            return best == 0 ? null : L[Days[at.d]] + " " + at.h.ToString("00", inv) + "–" + (at.h + 2).ToString("00", inv);
+        }
+    }
+}

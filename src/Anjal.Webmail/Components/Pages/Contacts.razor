@@ -24,14 +24,35 @@
             <div class="lh-row">
                 <h1>@L["Contacts"]</h1>
                 <span class="lh-grow"></span>
-                <nav class="seg" aria-label="@L["Show"]">
-                    <a href="/contacts" aria-current="@(Groups ? null : "page")">@L["All"] @contacts.Count</a>
-                    <a href="/contacts?tab=groups" aria-current="@(Groups ? "page" : null)">@L["Groups"] @groups.Count</a>
-                </nav>
+                @if (!OrgTab)
+                {
                 <a class="iconbtn" href="@(Groups ? "/contacts?tab=groups&new=1" : "/contacts?new=1")" title="@(Groups ? L["New group"] : L["New contact"])" aria-label="@(Groups ? L["New group"] : L["New contact"])"><LipiIcon Name="plus" Size="17" /></a>
+                }
             </div>
+            @* rc.16, design review [6h]: People, Groups and the Organisation's own directory, as tabs. *@
+            <nav class="ctabs" aria-label="@L["Show"]">
+                <a href="/contacts" aria-current="@(Groups || OrgTab ? null : "page")">@L["People"] <span>@contacts.Count</span></a>
+                <a href="/contacts?tab=groups" aria-current="@(Groups ? "page" : null)">@L["Groups"] <span>@groups.Count</span></a>
+                <a href="/contacts?tab=org" aria-current="@(OrgTab ? "page" : null)">@L["Organisation"] <span>@colleagues.Count</span></a>
+            </nav>
         </div>
-        @if (Groups)
+        @if (OrgTab)
+        {
+            @if (colleagues.Count == 0)
+            {
+                <p class="empty">@L["No one else in {org} yet."].Replace("{org}", orgName, StringComparison.Ordinal)</p>
+            }
+            <div class="mlist clist">
+                @foreach ((string address, string name) in colleagues.Where(x => Q.Length == 0 || x.Address.Contains(Q, StringComparison.OrdinalIgnoreCase) || x.Name.Contains(Q, StringComparison.OrdinalIgnoreCase)).OrderBy(x => x.Name.Length > 0 ? x.Name : x.Address, StringComparer.CurrentCultureIgnoreCase))
+                {
+                    <a class="crow" href="/compose?to=@Uri.EscapeDataString(address)" title="@L["Write to {name}"].Replace("{name}", name.Length > 0 ? name : address, StringComparison.Ordinal)">
+                        <span class="cavatar">@InitialsOf(name, address)</span>
+                        <span class="cwho"><b>@(name.Length > 0 ? name : address)</b><span>@address</span></span>
+                    </a>
+                }
+            </div>
+        }
+        else if (Groups)
         {
             @if (groups.Count == 0)
             {
@@ -62,7 +83,7 @@
                         {
                             <a class="@(OpenContact?.Id == c.Id ? "crow open" : "crow")" href="/contacts?open=@c.Id" aria-current="@(OpenContact?.Id == c.Id ? "true" : null)">
                                 <span class="cavatar">@Initials(c)</span>
-                                <span class="cwho"><b>@c.DisplayName</b><span>@c.Address</span></span>
+                                <span class="cwho"><b>@c.DisplayName</b><span>@c.Address@if (!Inside(c.Address)) { <i class="eout"> · @L["outside"]</i> }</span></span>
                             </a>
                         }
                     </section>
@@ -150,9 +171,19 @@
                                 }
                             </div>
                             <span class="lh-grow"></span>
-                            <a class="btn btn-p" href="/compose?to=@Uri.EscapeDataString(shown.Address)"><LipiIcon Name="edit" Size="15" />@L["Compose"]</a>
+                            <a class="btn btn-p" href="/compose?to=@Uri.EscapeDataString(shown.Address)"><LipiIcon Name="edit" Size="15" />@L["Write"]</a>
                             <a class="btn btn-s" href="/contacts?open=@shown.Id&edit=1">@L["Edit"]</a>
                         </div>
+                        @if (traffic is ContactTraffic ft)
+                        {
+                            @* [6h]: the figures, each opening what it counts. *@
+                            <div class="cfigs">
+                                <a class="cfig" href="/search?q=&scope=all&sender=@Uri.EscapeDataString(shown.Address)"><b>@MailboxService.Count(ft.Received)</b><span>@L["Received from them"]</span></a>
+                                <a class="cfig" href="/search?q=@Uri.EscapeDataString(shown.Address)&scope=Sent"><b>@MailboxService.Count(ft.Sent)</b><span>@L["Sent to them"]</span></a>
+                                <span class="cfig"><b>@(ft.Last is DateTimeOffset fl ? clock.List(fl, DateTimeOffset.UtcNow) : "–")</b><span>@L["Last mail"]</span></span>
+                                <span class="cfig"><b>@(GroupsOf(shown) is { Length: > 0 } fg ? fg.Split(", ").Length.ToString(System.Globalization.CultureInfo.InvariantCulture) : "0")</b><span>@L["Groups"]</span></span>
+                            </div>
+                        }
                         <dl class="cfields">
                             <div><dt>@L["Address"]</dt><dd>@shown.Address</dd></div>
                             <div><dt>@L["Phone"]</dt><dd>@(shown.Phone.Length > 0 ? shown.Phone : "—")</dd></div>
@@ -226,8 +257,8 @@
                             <section class="ecard ctraffic" aria-label="@L["Mail between you"]">
                                 <span class="elabel">@L["Mail between you"]</span>
                                 <div class="ctnums">
-                                    <a class="ctnum" href="/search?q=@Uri.EscapeDataString(who.Address)&amp;scope=Sent"><b>@MailboxService.Count(t.Sent)</b><span>@L["Sent to them"]</span></a>
-                                    <a class="ctnum" href="/search?q=&amp;scope=all&amp;sender=@Uri.EscapeDataString(who.Address)"><b>@MailboxService.Count(t.Received)</b><span>@L["Received from them"]</span></a>
+                                    <a class="ctnum" href="/search?q=@Uri.EscapeDataString(who.Address)&scope=Sent"><b>@MailboxService.Count(t.Sent)</b><span>@L["Sent to them"]</span></a>
+                                    <a class="ctnum" href="/search?q=&scope=all&sender=@Uri.EscapeDataString(who.Address)"><b>@MailboxService.Count(t.Received)</b><span>@L["Received from them"]</span></a>
                                 </div>
                                 @if (t.Last is DateTimeOffset at)
                                 {
@@ -294,6 +325,14 @@
 
     private string Q => (QText ?? string.Empty).Trim();
     private bool Groups => Tab == "groups";
+    private bool OrgTab => Tab == "org";
+    private IReadOnlyList<(string Address, string Name)> colleagues = Array.Empty<(string, string)>();
+
+    private static string InitialsOf(string name, string address)
+    {
+        string any = name.Length > 0 ? name : address;
+        return any.Length == 0 ? "?" : System.Globalization.StringInfo.GetNextTextElement(any, 0).ToUpperInvariant();
+    }
     private bool New => NewText == "1" || AddressQuery is not null;
     private bool Edit => EditText == "1";
     private Contact? OpenContact => Groups || !Guid.TryParse(OpenText, out Guid id) ? null : contacts.FirstOrDefault(c => c.Id == id);
@@ -365,6 +404,7 @@
         }
         contacts = await Mail.ListContactsAsync(mailboxId.Value);
         groups = await Mail.ListGroupsAsync(mailboxId.Value);
+        colleagues = await Mail.ColleaguesAsync(mailboxId.Value);
         settings = await Mail.GetContactSettingsAsync(mailboxId.Value);
         orgDomains = await Mail.OrganisationDomainsAsync(mailboxId.Value);
         (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);

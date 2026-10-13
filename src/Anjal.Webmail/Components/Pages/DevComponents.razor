@@ -1,0 +1,181 @@
+@page "/dev/components"
+@using Anjal.Webmail.Services
+@inject MailboxService Mail
+@inject Words Words
+
+<PageTitle>@L["Component sheet"] — Anjal</PageTitle>
+
+@* rc.16, design review [6n] (owner, 11 Oct 2026): every button, field, tag, file tag, corner, type
+   step and colour role, drawn from app.css and tokens.css themselves, so drift shows at a glance.
+   Operators only. The class names shown are the ones the pages use. *@
+@if (!ready)
+{
+    <div class="dash"><p class="dnote">@L["Loading…"]</p></div>
+}
+else if (!operatorHere)
+{
+    <div class="emptystate">
+        <h1>@L["Component sheet"]</h1>
+        <p>@L["Only an operator of this Anjal service can open this."]</p>
+        <a class="btn btn-s" href="/folder/INBOX">@L["Back to your mail"]</a>
+    </div>
+}
+else
+{
+    <div class="devsheet">
+        <header class="dhead"><h1>@L["Component sheet"]</h1><p class="dsub">@L["Every control drawn from the stylesheet, so drift shows."]</p></header>
+
+        <section class="devblock" aria-labelledby="dv-buttons">
+            <h2 id="dv-buttons">@L["Buttons"]</h2>
+            @foreach (string size in ButtonSizes)
+            {
+                <div class="devrow">
+                    <code>@(size.Length == 0 ? "btn" : size)</code>
+                    @foreach (string kind in ButtonKinds)
+                    {
+                        <button type="button" class="btn @kind @size">@L[kind == "btn-danger" ? "Delete" : kind == "btn-p" ? "Send" : kind == "btn-s" ? "Save" : "Cancel"]</button>
+                    }
+                    <button type="button" class="btn btn-p @size" disabled>@L["Send"]</button>
+                </div>
+            }
+            <div class="devrow">
+                <code>@IconClass</code>
+                @foreach (string icon in Icons)
+                {
+                    <button type="button" class="iconbtn" title="@L[icon == "archive" ? "Archive" : icon == "flag" ? "Flag" : icon == "trash" ? "Delete" : "Search mail"]" aria-label="@L[icon == "archive" ? "Archive" : icon == "flag" ? "Flag" : icon == "trash" ? "Delete" : "Search mail"]"><LipiIcon Name="@icon" Size="16" /></button>
+                }
+            </div>
+        </section>
+
+        <section class="devblock" aria-labelledby="dv-fields">
+            <h2 id="dv-fields">@L["Fields"]</h2>
+            <div class="devrow"><code>@InpClass</code><input class="inp" aria-label="@L["Name"]" value="@L["Name"]" /></div>
+            <div class="devrow"><code>@RailClass</code><input class="railinp" aria-label="@L["Address"]" value="@L["Address"]" /></div>
+            <div class="devrow"><code>@SelectClass</code><select class="railinp" aria-label="@L["Theme"]"><option>@L["Theme"]</option></select></div>
+        </section>
+
+        <section class="devblock" aria-labelledby="dv-tags">
+            <h2 id="dv-tags">@L["Tags"]</h2>
+            <div class="devrow">
+                <code>@ScoreClass</code>
+                <span class="score s-mid">@L["Spam {n}"].Replace("{n}", "2", StringComparison.Ordinal)</span>
+                <span class="score s-hi">@L["Junk risk {n}"].Replace("{n}", "7", StringComparison.Ordinal)</span>
+            </div>
+            <div class="devrow">
+                <code>@ChipClass</code>
+                @for (int slot = 1; slot <= 8; slot++)
+                {
+                    <span class="chip slot-@slot"><i></i>@L["Categories"] @slot</span>
+                }
+            </div>
+            <div class="devrow">
+                <code>@PillClass</code>
+                @foreach (string pill in Pills)
+                {
+                    <span class="pill @pill">@pill</span>
+                }
+            </div>
+        </section>
+
+        <section class="devblock" aria-labelledby="dv-files">
+            <h2 id="dv-files">@L["File tags"]</h2>
+            <div class="devrow">
+                @foreach ((string name, string type) in Files)
+                {
+                    (string tag, string kind) = FileTag.Of(name, type);
+                    <span class="devfile"><span class="ftag ftag-@kind">@tag</span><code>@kind</code></span>
+                }
+            </div>
+        </section>
+
+        <section class="devblock" aria-labelledby="dv-corners">
+            <h2 id="dv-corners">@L["Corners"]</h2>
+            <div class="devrow">
+                @foreach (string r in Radii)
+                {
+                    <span class="devradius" style="border-radius:var(@r)"><code>@r</code></span>
+                }
+            </div>
+            <div class="devrow">
+                @foreach (string h in Heights)
+                {
+                    <span class="devheight" style="height:var(@h)"><code>@h</code></span>
+                }
+            </div>
+        </section>
+
+        <section class="devblock" aria-labelledby="dv-type">
+            <h2 id="dv-type">@L["Type sizes"]</h2>
+            @foreach (int px in TypeSteps)
+            {
+                <p class="devtype" style="font-size:@(px)px"><code>@(px.ToString(System.Globalization.CultureInfo.InvariantCulture) + "px")</code> @Sample</p>
+            }
+        </section>
+
+        <section class="devblock" aria-labelledby="dv-colours">
+            <h2 id="dv-colours">@L["Colours"]</h2>
+            <div class="devswatches">
+                @foreach (string role in Roles)
+                {
+                    <span class="devswatch"><i style="background:var(@role)"></i><code>@role</code></span>
+                }
+            </div>
+        </section>
+
+        <section class="devblock" aria-labelledby="dv-notices">
+            <h2 id="dv-notices">@L["Notices"]</h2>
+            @foreach (string n in Notices)
+            {
+                <div class="notice @n" role="note"><LipiIcon Name="info" Size="16" /><span><code>@n</code></span></div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    private static readonly string[] ButtonKinds = { "btn-p", "btn-s", "btn-q", "btn-danger" };
+    private static readonly string[] ButtonSizes = { string.Empty, "btn-sm" };
+    private static readonly string[] Icons = { "archive", "flag", "trash", "search" };
+    private static readonly string[] Pills = { "pill-info", "pill-ok", "pill-warn", "pill-bad", "pill-mute" };
+    private static readonly string[] Notices = { "n-info", "n-ok", "n-warn", "n-err" };
+    private static readonly string[] Radii = { "--radius-xs", "--radius-sm", "--radius-md", "--radius-lg", "--radius-xl", "--r-control", "--r-panel" };
+    private static readonly string[] Heights = { "--h-sm", "--h-reg", "--h-lg" };
+    private static readonly int[] TypeSteps = { 12, 13, 14, 15, 16, 21, 24, 32 };
+    private static readonly string[] Roles =
+    {
+        "--brand", "--brand-hover", "--brand-soft", "--on-brand", "--accent", "--accent-soft", "--seal", "--seal-soft",
+        "--ink", "--ink-muted", "--line", "--line-strong", "--surface-100", "--surface-200", "--surface-inset",
+        "--success", "--success-soft", "--warning", "--warning-soft", "--danger", "--danger-soft", "--info", "--info-soft",
+        "--env-bg", "--env-flap", "--env-edge", "--env-row",
+    };
+    private static readonly (string Name, string Type)[] Files =
+    {
+        ("report.pdf", "application/pdf"), ("scan.dcm", "application/dicom"), ("photo.jpg", "image/jpeg"), ("letter.docx", string.Empty),
+        ("figures.xlsx", string.Empty), ("talk.pptx", string.Empty), ("bundle.zip", "application/zip"), ("notes.txt", "text/plain"),
+    };
+    private const string IconClass = "iconbtn";
+    private const string InpClass = "inp";
+    private const string RailClass = "railinp";
+    private const string SelectClass = "select.railinp";
+    private const string ScoreClass = "score s-mid / s-hi";
+    private const string ChipClass = "chip slot-N";
+    private const string PillClass = "pill";
+    private const string Sample = "அஞ்சல் · अंजल · അഞ്ചൽ · Anjal";
+
+    [CascadingParameter] private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private bool ready;
+    private bool operatorHere;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is not null)
+        {
+            System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+            L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+            operatorHere = WebmailAuthService.PersonIdOf(user) is Guid person && await Mail.GetMailboxAnyAsync(person) is MailboxRow mine && Operators.Is(mine.Address);
+        }
+        ready = true;
+    }
+}

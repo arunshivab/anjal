@@ -89,7 +89,7 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         string token = await this.TokenFromAsync("sign-in");
         HttpResponseMessage res = await this.PostFormAsync("auth/login", token, ("address", "arun@anjal.co.in"), ("password", "correct horse battery"));
         Assert.Equal(HttpStatusCode.Redirect, res.StatusCode);
-        Assert.Equal("/dashboard", res.Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today", res.Headers.Location!.ToString());
     }
 
     private async System.Threading.Tasks.Task<MessageRow> DeliverAsync(string raw)
@@ -369,7 +369,8 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         string unreadOnly = await this.client.GetStringAsync("folder/INBOX?show=unread");
         Assert.Contains("Unread one", unreadOnly, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Read one", unreadOnly, System.StringComparison.Ordinal);
-        Assert.Contains("aria-current=\"page\">Unread</a>", unreadOnly, System.StringComparison.Ordinal);
+        // rc.16, design review 4.1: All, Unread and Read live in the list's filter menu.
+        Assert.Matches("aria-current=\"page\">\\s*<svg[\\s\\S]*?</svg>\\s*Unread\\s*</a>", unreadOnly);
         string readOnly = await this.client.GetStringAsync("folder/INBOX?show=read");
         Assert.Contains("Read one", readOnly, System.StringComparison.Ordinal);
         Assert.DoesNotContain("Unread one", readOnly, System.StringComparison.Ordinal);
@@ -400,9 +401,10 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         Assert.Contains("data-sound=\"0\"", after, System.StringComparison.Ordinal);
         Assert.Contains("<option value=\"20\" selected", after, System.StringComparison.Ordinal);
 
-        // Search shows the score too (item 57: "every message list").
+        // Search draws its rows as every list does (item 57); a score of 0 is not shown (rc.16, 4.2).
         string search = await this.client.GetStringAsync("search?q=one&scope=all");
-        Assert.Contains("class=\"score", search, System.StringComparison.Ordinal);
+        Assert.Contains("<div class=\"mline1\">", search, System.StringComparison.Ordinal);
+        Assert.DoesNotContain("class=\"score", search, System.StringComparison.Ordinal);
         Assert.Contains("class=\"mfolder\">Inbox</span>", search, System.StringComparison.Ordinal);
     }
 
@@ -418,9 +420,10 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         Assert.Matches("<article class=\"letter\"[^>]*>\\s*<h1 class=\"lsubj\">", page);
         Assert.Contains("aria-label=\"Envelope\"", page, System.StringComparison.Ordinal);
         Assert.DoesNotContain("<aside class=\"rail\"", page, System.StringComparison.Ordinal);   // no clash with the left rail
-        // Item 19: the flag button carries its symbol. Item 20: name and address on one line.
-        Assert.Matches("<span class=\"fav[^\"]*\" aria-hidden=\"true\" lang=\"ta\">\u0B85</span>Flag", page);
-        Assert.Contains("<b>Meera Iyer</b><span class=\"eaddr\"> &lt;meera@partner.example&gt;</span>", page, System.StringComparison.Ordinal);
+        // Item 19: the flag button carries its symbol - the LiPicons flag and its word (rc.16, design
+        // review 2c and 4.3). Item 20, as the envelope of 2c: the name, with the address under it.
+        Assert.Matches("<button type=\"submit\" class=\"eb eflag [^\"]*\"[^>]*>\\s*<svg[^>]*class=\"lipicon[^\"]*\"[\\s\\S]*?</svg><span>Flag</span>", page);
+        Assert.Matches("<b>Meera Iyer</b>\\s*<span class=\"eaddr\">meera@partner.example</span>", page);
         Assert.Contains("href=\"/message/" + m.Id + "/original\"", page, System.StringComparison.Ordinal);
         Assert.Contains("href=\"/message/" + m.Id + "/print\"", page, System.StringComparison.Ordinal);
 
@@ -589,15 +592,18 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         await this.LoginAsync();
         string first = await this.client.GetStringAsync("folder/INBOX");
         Assert.Contains("class=\"welcome\"", first, System.StringComparison.Ordinal);
-        Assert.Contains("Welcome to Anjal", first, System.StringComparison.Ordinal);
+        // rc.16, design review [6j]: the person's name in the header, three cards, a four-step tour.
+        Assert.Contains("Welcome, ", first, System.StringComparison.Ordinal);
+        Assert.Equal(3, Regex.Count(first, "class=\"wfeat\""));
+        Assert.Matches("Show me around (·|&#xB7;) 4 steps", first);
         Assert.Contains("Restart the tour", first, System.StringComparison.Ordinal);
         Match steps = Regex.Match(first, "data-steps=\"([^\"]*)\"");
         Assert.True(steps.Success);
-        Assert.Equal(10, Regex.Count(System.Net.WebUtility.HtmlDecode(steps.Groups[1].Value), "\"at\":"));
+        Assert.Equal(4, Regex.Count(System.Net.WebUtility.HtmlDecode(steps.Groups[1].Value), "\"at\":"));
 
         string token = await this.TokenFromAsync("folder/INBOX");
         HttpResponseMessage around = await this.PostFormAsync("settings/welcome", token, ("tour", "1"));
-        Assert.Equal("/folder/INBOX#tour", around.Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today#tour", around.Headers.Location!.ToString());
         Assert.True((await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.WelcomeDone);
         Assert.DoesNotContain("class=\"welcome\"", await this.client.GetStringAsync("folder/INBOX"), System.StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"welcome\"", await this.client.GetStringAsync("settings/appearance"), System.StringComparison.Ordinal);

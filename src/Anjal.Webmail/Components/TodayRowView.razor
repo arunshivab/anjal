@@ -1,0 +1,76 @@
+@* rc.16 (design review 8, [5a]): one unread row on Today - a round mark, the sender, a small tag
+   saying why it needs the person, the subject, the start of the text, the clip and the time. On
+   hover or focus: Reply first, then Archive and Mark read; each comes back to Today with the
+   row marked as dealt with (and Archive can be undone). *@
+<li class="tdrow">
+    <a class="tdrow-open" href="@Href">
+        <span class="u-av" aria-hidden="true">@Initials</span>
+        <span class="tdrow-main">
+            <span class="tdrow-top"><b>@R.Who</b>@if (R.Reason is not null) { <span class="tdtag tag-@R.Reason">@L[Tag]</span> }<span class="tdrow-subj">@Subject</span></span>
+            <span class="tdrow-prev">@Preview</span>
+        </span>
+        @if (R.Message.HasAttachments)
+        {
+            <span class="mclip" role="img" title="@L["Has attachments"]" aria-label="@L["Has attachments"]"><LipiIcon Name="attachment" Size="13" /></span>
+        }
+        <time title="@Clock.Full(R.Message.ReceivedAt)">@Clock.List(R.Message.ReceivedAt, DateTimeOffset.UtcNow)</time>
+    </a>
+    <span class="tdacts">
+        <a class="btn btn-p btn-sm" href="/compose?reply=@R.Message.Id" title="@L["Reply"]"><LipiIcon Name="undo" Size="14" />@L["Reply"]</a>
+        <form method="post" action="/folder/INBOX/bulk?one=@R.Message.Id" class="inline">
+            <AntiforgeryToken />
+            <input type="hidden" name="back" value="@Back(R.Message.Id, "archived")" />
+            <button type="submit" class="rowact" name="action" value="archive" data-needs-server title="@L["Archive"]" aria-label="@L["Archive"]"><LipiIcon Name="archive" Size="15" /></button>
+        </form>
+        <form method="post" action="/folder/INBOX/bulk?one=@R.Message.Id" class="inline">
+            <AntiforgeryToken />
+            <input type="hidden" name="back" value="@Back(R.Message.Id, "read")" />
+            <button type="submit" class="rowact" name="action" value="read" data-needs-server title="@L["Mark as read"]" aria-label="@L["Mark as read"]"><LipiIcon Name="check" Size="15" /></button>
+        </form>
+    </span>
+</li>
+
+@code {
+    /// <summary>The row.</summary>
+    [Parameter, EditorRequired] public TodayRow R { get; set; } = null!;
+
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The person's clock.</summary>
+    [Parameter] public ZonedClock Clock { get; set; } = ZonedClock.Default;
+
+    /// <summary>Where the row opens (the letter, on Today).</summary>
+    [Parameter] public string Href { get; set; } = string.Empty;
+
+    /// <summary>Where an action returns, given the message and how it was dealt with.</summary>
+    [Parameter] public Func<Guid, string, string> Back { get; set; } = (id, how) => "/dashboard/today";
+
+    private string Tag => R.Reason switch
+    {
+        "answer" => "Answer to you",
+        "to" => "To you",
+        "often" => "You write often",
+        _ => string.Empty,
+    };
+
+    private string Initials
+    {
+        get
+        {
+            string[] words = R.Who.Split(new[] { ' ', '.', '_', '@' }, StringSplitOptions.RemoveEmptyEntries);
+            return words.Length == 0 ? "?" : string.Concat(words.Take(2).Select(w => char.ToUpperInvariant(w[0])));
+        }
+    }
+
+    private string Subject
+    {
+        get
+        {
+            string s = Anjal.Mime.EncodedWordDecoder.Decode(R.Message.Subject).Trim();
+            return s.Length > 0 ? s : L["(no subject)"];
+        }
+    }
+
+    private string Preview => System.Text.RegularExpressions.Regex.Replace(R.Message.Preview, @"\s+", " ").Trim();
+}

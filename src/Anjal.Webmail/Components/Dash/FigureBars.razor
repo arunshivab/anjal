@@ -1,0 +1,63 @@
+@* rc.16 (design review 7): names with a bar and a number - folders (with their share),
+   categories (with a small trend line each), attachment kinds (in their file-tag colours),
+   lists, senders. The number is always written; the bar only helps the eye. *@
+@{ var inv = System.Globalization.CultureInfo.InvariantCulture; }
+@if (Items.Count == 0)
+{
+    <p class="dnote">@Empty</p>
+}
+else
+{
+    long max = Math.Max(1, Items.Max(i => i.Count));
+    <ul class="hbars hbars2 @(Trends ? "withtrend" : null)">
+        @foreach (NamedFigure item in Items.Take(Limit))
+        {
+            string name = Folder ? L.Folder(item.Name) : item.Name == MailboxService.Uncategorised ? L[MailboxService.Uncategorised] : item.Name;
+            <li>
+                <span class="hname" title="@name">@if (item.Link is not null) {<a href="@item.Link">@name</a>} else {@name}</span>
+                <span class="htrack"><i class="@BarClass(item)" style="width:@Math.Max(2, item.Count * 100 / max).ToString(inv)%"></i></span>
+                <span class="hval">@(Show is null ? item.Count.ToString("N0", inv) : Show(item.Count))@if (Total > 0) { <small> · @Math.Round(100.0 * item.Count / Total).ToString(inv)%</small> }</span>
+                @if (Trends)
+                {
+                    <Spark Values="item.Trend" Tone="@(item.Slot > 0 ? "slot-" + item.Slot : "sp-ink")" W="56" H="20" />
+                }
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    /// <summary>The figures.</summary>
+    [Parameter] public IReadOnlyList<NamedFigure> Items { get; set; } = Array.Empty<NamedFigure>();
+
+    /// <summary>The bars' colour when there is no slot: h-brand, h-accent or h-warn.</summary>
+    [Parameter] public string Tone { get; set; } = "h-brand";
+
+    /// <summary>Names are folders (shown in the person's words).</summary>
+    [Parameter] public bool Folder { get; set; }
+
+    /// <summary>Names are attachment kinds (coloured as their file tags).</summary>
+    [Parameter] public bool Kinds { get; set; }
+
+    /// <summary>Draw each item's trend line.</summary>
+    [Parameter] public bool Trends { get; set; }
+
+    /// <summary>The whole, to write each share; 0 for none.</summary>
+    [Parameter] public long Total { get; set; }
+
+    /// <summary>At most this many rows.</summary>
+    [Parameter] public int Limit { get; set; } = 8;
+
+    /// <summary>How a number is written; null for a count.</summary>
+    [Parameter] public Func<long, string>? Show { get; set; }
+
+    /// <summary>What to say when there is nothing.</summary>
+    [Parameter] public string Empty { get; set; } = string.Empty;
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private string BarClass(NamedFigure item) =>
+        Kinds ? "ftbar-" + FileTag.Of("x." + item.Name.Split(' ')[0].ToLowerInvariant(), null).Kind
+        : item.Slot > 0 ? "slot-" + item.Slot : Tone;
+}

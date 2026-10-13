@@ -1071,6 +1071,32 @@ GROUP BY day ORDER BY day;";
         return activity;
     }
 
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<MessageFact>> ListMessageFactsAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, int limit, CancellationToken ct = default)
+    {
+        const string sql = @"
+SELECT m.id, f.name, m.from_header, m.to_header, m.envelope_from, m.subject, m.received_at, m.seen, m.answered,
+       m.has_attachments, m.size_bytes, m.spam_score, m.spam_checked, m.transport_encrypted, m.category_id
+FROM messages m JOIN folders f ON f.id = m.folder_id
+WHERE m.mailbox_id = @mailbox_id AND m.received_at >= @from AND m.received_at < @to
+ORDER BY m.received_at DESC
+LIMIT @limit;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        Bind(cmd, mailboxId, periodStart, periodEnd);
+        cmd.Parameters.AddWithValue("limit", System.Math.Max(0, limit));
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var list = new List<MessageFact>();
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
+        {
+            list.Add(new MessageFact(
+                r.GetGuid(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4), r.GetString(5),
+                r.GetFieldValue<System.DateTimeOffset>(6), r.GetBoolean(7), r.GetBoolean(8), r.GetBoolean(9), r.GetInt64(10), r.GetInt32(11),
+                r.IsDBNull(12) ? null : r.GetBoolean(12), r.IsDBNull(13) ? null : r.GetBoolean(13), r.IsDBNull(14) ? null : r.GetGuid(14)));
+        }
+        return list;
+    }
+
     private static async Task<IReadOnlyList<NamedCount>> NamedCountsAsync(NpgsqlConnection conn, string sql, System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, bool slotColumn, CancellationToken ct)
     {
         await using var cmd = new NpgsqlCommand(sql, conn);

@@ -44,6 +44,9 @@ public sealed class MailSettings
     /// <summary>"Your habits" on the person's dashboard (rc.15, item 58): on unless they turn it off; seen only by them.</summary>
     public bool Habits { get; set; } = true;
 
+    /// <summary>Where Anjal opens after signing in (rc.16, design review 8): "today" (the default) or "inbox".</summary>
+    public string OpenOn { get; set; } = "today";
+
     /// <summary>The order the person chose for each folder, and for search (owner, 9 Oct 2026); a folder not here is newest first.</summary>
     public Dictionary<string, string> Sorts { get; set; } = new(StringComparer.Ordinal);
 }
@@ -93,6 +96,24 @@ public sealed partial class MailboxService
         await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
         return s.Clock;
     }
+
+    /// <summary>Where Anjal opens after signing in: Today (the default) or the Inbox.</summary>
+    /// <param name="mailboxId">The person.</param>
+    /// <param name="where">"today" or "inbox".</param>
+    /// <param name="ct">Cancellation.</param>
+    public async Task SetOpenOnAsync(Guid mailboxId, string? where, CancellationToken ct = default)
+    {
+        MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);
+        s.OpenOn = where == "inbox" ? "inbox" : "today";
+        await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Where a person lands after signing in, and at "/": Today, or the Inbox if they chose it.</summary>
+    /// <param name="personId">The person.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The address.</returns>
+    public async Task<string> LandingAsync(Guid personId, CancellationToken ct = default) =>
+        (await this.GetMailSettingsAsync(personId, ct).ConfigureAwait(false)).OpenOn == "inbox" ? "/folder/INBOX" : "/dashboard/today";
 
     /// <summary>Turn "Your habits" on or off (rc.15, item 58).</summary>
     /// <param name="mailboxId">The mailbox.</param>

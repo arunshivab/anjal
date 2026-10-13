@@ -1029,6 +1029,30 @@ public sealed partial class InMemoryMessageStore
     }
 
     /// <inheritdoc/>
+    public Task<IReadOnlyList<MessageFact>> ListMessageFactsAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, int limit, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            var folders = new Dictionary<System.Guid, string>();
+            foreach (FolderRow f in this.folders)
+            {
+                if (f.MailboxId == mailboxId)
+                {
+                    folders[f.Id] = f.Name;
+                }
+            }
+            IReadOnlyList<MessageFact> list = this.mailboxMessages
+                .Where(m => m.MailboxId == mailboxId && m.ReceivedAt >= periodStart && m.ReceivedAt < periodEnd)
+                .OrderByDescending(m => m.ReceivedAt)
+                .Take(System.Math.Max(0, limit))
+                .Select(m => new MessageFact(m.Id, folders.TryGetValue(m.FolderId, out string? name) ? name : "Unknown", m.FromHeader, m.ToHeader, m.EnvelopeFrom, m.Subject,
+                    m.ReceivedAt, m.Seen, m.Answered, m.HasAttachments, m.SizeBytes, m.SpamScore, m.SpamChecked, m.TransportEncrypted, m.CategoryId))
+                .ToList();
+            return Task.FromResult(list);
+        }
+    }
+
+    /// <inheritdoc/>
     public Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, string timeZone, CancellationToken ct = default)
     {
         System.TimeZoneInfo zone = System.TimeZoneInfo.FindSystemTimeZoneById(MailboxPreferences.IsKnownTimeZone(timeZone) ? timeZone.Trim() : "UTC");

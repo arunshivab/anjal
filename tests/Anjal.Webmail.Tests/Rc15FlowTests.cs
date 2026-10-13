@@ -76,24 +76,29 @@ public sealed class Rc15FlowTests : IAsyncLifetime, IDisposable
         await this.DeliverAsync("From: Accounts <accounts@supplier.example>\r\nTo: arun@anjal.co.in\r\nSubject: Invoice 114\r\n\r\nThe invoice is attached.\r\n");
         HttpClient c = this.Client();
         await SignInAsync(c, "arun");
+        // rc.16 (design review 7 and 8, owner 11 Oct 2026): the dashboard is Today plus six pages;
+        // one period for the page, carried from tab to tab.
         string page = await c.GetStringAsync("dashboard");
         Assert.Contains("Your dashboard", page, StringComparison.Ordinal);
-        Assert.Contains("Received, sent and Junk", page, StringComparison.Ordinal);
-        Assert.Contains("Activity, by hour", page, StringComparison.Ordinal);
-        Assert.Contains("Messages by spam score", page, StringComparison.Ordinal);
-        Assert.Contains("Unread 1", page, StringComparison.Ordinal);
-        Assert.Contains("Invoice 114", page, StringComparison.Ordinal);
+        Assert.Contains("Received and sent", page, StringComparison.Ordinal);
+        Assert.Contains("Received, sent and Junk", await c.GetStringAsync("dashboard/flow"), StringComparison.Ordinal);
+        Assert.Contains("Unread in Inbox", page, StringComparison.Ordinal);
         Assert.Contains("Needs attention", page, StringComparison.Ordinal);
-        Assert.Contains("Who wrote to you most", page, StringComparison.Ordinal);
-        Assert.Contains("Mailbox health", page, StringComparison.Ordinal);
-        Assert.Contains("Your safety", page, StringComparison.Ordinal);
-        Assert.Contains("Junk from 5", page, StringComparison.Ordinal);
-        Assert.Contains(">Score<", page, StringComparison.Ordinal);
-        Assert.Contains(">Messages<", page, StringComparison.Ordinal);
-        // Changing one graph's period keeps the others.
-        Assert.Contains("href=\"/dashboard?a=7d&amp;s=12m#d-activity\"", await c.GetStringAsync("dashboard?s=12m"), StringComparison.Ordinal);
-        string month = await c.GetStringAsync("dashboard?a=12m");
-        Assert.Contains("Activity, by month", month, StringComparison.Ordinal);
+        Assert.Contains("href=\"/dashboard/today\"", page, StringComparison.Ordinal);
+        foreach (string tab in new[] { "flow", "people", "replies", "safety", "storage" })
+        {
+            Assert.Contains($"href=\"/dashboard/{tab}\"", page, StringComparison.Ordinal);
+        }
+        string today = await c.GetStringAsync("dashboard/today");
+        Assert.Contains("Invoice 114", today, StringComparison.Ordinal);
+        string safety = await c.GetStringAsync("dashboard/safety");
+        Assert.Contains("Messages by spam score", safety, StringComparison.Ordinal);
+        Assert.Contains("Junk caught", safety, StringComparison.Ordinal);
+        Assert.Contains("Who you write with most", await c.GetStringAsync("dashboard/people"), StringComparison.Ordinal);
+        // The period chosen on one page travels with every tab.
+        string year = await c.GetStringAsync("dashboard/flow?p=12m");
+        Assert.Contains("href=\"/dashboard/safety?p=12m\"", year, StringComparison.Ordinal);
+        Assert.Contains("href=\"/dashboard/today\"", year, StringComparison.Ordinal);
         // An administrator may switch to the organisation's figures; a member may not.
         Assert.Contains("href=\"/dashboard/org\"", page, StringComparison.Ordinal);
     }

@@ -86,6 +86,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **ListLocalDomainsAsync** *(method)* - _(no description)_
 - **ListMailboxSenderRulesAsync** *(method)* - _(no description)_
 - **ListMailboxesAsync** *(method)* - _(no description)_
+- **ListMessageFactsAsync** *(method)* - _(no description)_
 - **ListMessageNamesAsync** *(method)* - _(no description)_
 - **ListMessagesAsync** *(method)* - _(no description)_
 - **ListMessagesByIdsAsync** *(method)* - _(no description)_

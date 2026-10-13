@@ -12,7 +12,7 @@
    organisation's domain shown after it; Forgot password; and "This computer is"
    the person's own or shared, which decides how long the sign-in lasts. *@
 <AuthFrame L="L" Org="org">
-    <h1 class="authtitle">@L["Sign in"]</h1>
+    <h1 class="authtitle">@L["Sign in to your mail"]</h1>
 
     @if (Error is not null)
     {
@@ -68,15 +68,16 @@
         <div class="authinpwrap @(Error is not null ? "bad" : "")">
             <input class="authinp-in" id="password" name="password" type="password" autocomplete="current-password" required autofocus="@(!string.IsNullOrEmpty(User))" />
         </div>
+        @* Design review 1d: the device choice is two cards side by side; the selected one is ringed. *@
         <fieldset class="authdevice">
-            <legend>@L["This computer is"]</legend>
-            <label class="authradio">
+            <legend class="sr-only">@L["This computer is"]</legend>
+            <label class="authcardopt" title="@(org is null ? L["Stay signed in, within your organisation's limits"] : L["Stay signed in, within {organisation}'s limits"].Replace("{organisation}", org.Name, StringComparison.Ordinal))">
                 <input type="radio" name="device" value="own" checked="@(!SharedChosen)" />
-                <span><span>@L["My own device"]</span><span class="authhint">@(org is null ? L["Stay signed in, within your organisation's limits"] : L["Stay signed in, within {organisation}'s limits"].Replace("{organisation}", org.Name, StringComparison.Ordinal))</span></span>
+                <span><b>@L["My own device"]</b><span class="authhint">@L["Stay signed in"]</span></span>
             </label>
-            <label class="authradio">
+            <label class="authcardopt" title="@L["Signs out after 15 minutes idle and leaves nothing behind"]">
                 <input type="radio" name="device" value="shared" checked="@SharedChosen" />
-                <span><span>@L["Shared with others"]</span><span class="authhint">@L["Signs out after 15 minutes idle and leaves nothing behind"]</span></span>
+                <span><b>@L["Shared computer"]</b><span class="authhint">@L["Signs out after 15 min idle"]</span></span>
             </label>
         </fieldset>
         <button type="submit" class="authbtn">@L["Sign in"]</button>
@@ -85,7 +86,7 @@
     {
         <p class="authnote authorgmsg">@org.Message</p>
     }
-    <p class="authnote">@L["New accounts are created by your organisation's administrator, who sends you an invitation."]</p>
+    <p class="authnote">@L["No account yet? Your administrator sends an invitation."]</p>
 </AuthFrame>
 
 @code {

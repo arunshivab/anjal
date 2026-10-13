@@ -310,6 +310,7 @@
 - [Anjal.Store.MailboxActivity](Anjal.Store/MailboxActivity.md)
 - [Anjal.Store.MailboxPreferences](Anjal.Store/MailboxPreferences.md)
 - [Anjal.Store.MailboxRow](Anjal.Store/MailboxRow.md)
+- [Anjal.Store.MessageFact](Anjal.Store/MessageFact.md)
 - [Anjal.Store.MessageNames](Anjal.Store/MessageNames.md)
 - [Anjal.Store.MessageRow](Anjal.Store/MessageRow.md)
 - [Anjal.Store.ModuleInfo](Anjal.Store/ModuleInfo.md)

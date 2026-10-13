@@ -16,6 +16,20 @@
     try { var b = document.getElementById("anjal-words"); return b ? JSON.parse(b.textContent || "{}") : {}; } catch (e) { return {}; }
   }());
   var W = function (english) { return WORDS[english] || english; };
+  // rc.16 (2c): the words and kind of a file's type tag - the same rules as FileTag.Of on the server.
+  var fileTag = function (name, type) {
+    var ext = (/\.([^.]+)$/.exec(name || "") || ["", ""])[1].toLowerCase();
+    type = (type || "").toLowerCase();
+    if (type === "application/pdf" || ext === "pdf") { return ["PDF", "pdf"]; }
+    if (type === "application/dicom" || ext === "dcm" || (name || "").toUpperCase() === "DICOMDIR") { return ["DICOM", "dicom"]; }
+    if (type.indexOf("image/") === 0 || /^(jpe?g|png|gif|webp|bmp|tiff?|heic)$/.test(ext)) { return [/^jpe?g$/.test(ext) ? "JPG" : ext === "png" ? "PNG" : "IMG", "img"]; }
+    if (/^(docx?|odt|rtf)$/.test(ext)) { return ["DOC", "doc"]; }
+    if (/^(xlsx?|ods|csv)$/.test(ext)) { return ["XLS", "xls"]; }
+    if (/^(pptx?|odp)$/.test(ext)) { return ["PPT", "ppt"]; }
+    if (/^(zip|7z|rar|gz|tgz|tar|bz2|xz)$/.test(ext)) { return ["ZIP", "zip"]; }
+    var shown = ext ? ext.toUpperCase() : "FILE";
+    return [shown.slice(0, 4), "other"];
+  };
 
   /* ---------- 0. Swapping pages: no full reloads (owner, 9 Oct 2026, "C") ----------
      Following a link or sending a form fetches the next page and swaps the
@@ -413,8 +427,12 @@
       if (el === cur) { return; }
       hide();
       if (!el) { return; }
+      // rc.16 (design review 4.6): a rail item says its name at once, but only while the rail
+      // shows icons alone; with its name beside it, no tip.
+      var railName = el.hasAttribute("data-tiprail") ? el.querySelector(".rl, .lbl") : null;
+      if (railName && railName.offsetParent !== null && getComputedStyle(railName).display !== "none") { return; }
       cur = el;
-      timer = window.setTimeout(function () { timer = null; if (cur === el && document.contains(el)) { show(el); } }, 350);
+      timer = window.setTimeout(function () { timer = null; if (cur === el && document.contains(el)) { show(el); } }, el.hasAttribute("data-tiprail") ? 0 : 350);
     });
     document.addEventListener("focusin", function (e) {
       var el = e.target.closest ? e.target.closest("[data-tip]") : null;
@@ -478,6 +496,19 @@
     });
   });
 
+  // rc.16 (design review 5b.4): a note in the bottom bar leaves by itself after eight seconds,
+  // unless the pointer is on it.
+  page(function noteBars() {
+    $$("[data-notebar]").forEach(function (bar) {
+      var timer = window.setTimeout(function go() {
+        if (bar.matches(":hover")) { timer = window.setTimeout(go, 2000); return; }
+        bar.classList.add("leaving");
+        window.setTimeout(function () { bar.hidden = true; }, 300);
+      }, 8000);
+      scope.on(window, "pagehide", function () { window.clearTimeout(timer); });
+    });
+  });
+
   // rc.15: a form marked data-reveal shows only its choice; the rest appears once that choice changes.
   page(function reveal() {
     $$("form[data-reveal]").forEach(function (f) {
@@ -494,6 +525,30 @@
       if (!t) { return; }
       if (!b.getAttribute("aria-label")) { b.setAttribute("aria-label", t); }
       b.setAttribute("data-tip", t);
+      b.removeAttribute("title");
+    });
+    // rc.16 (design review 4.6): the rail's items, by name, the moment the pointer is on them.
+    $$("nav.rail .rail-item[title]").forEach(function (b) {
+      var t = b.getAttribute("title");
+      if (!t) { return; }
+      // Its name stays with it even when the rail shows icons alone (the words are hidden then).
+      if (!b.getAttribute("aria-label")) { b.setAttribute("aria-label", t); }
+      b.setAttribute("data-tip", t);
+      b.setAttribute("data-tiprail", "");
+      b.removeAttribute("title");
+    });
+    // rc.16 (design review 5b.5): a control with a keyboard shortcut names it in its tip,
+    // "Archive · e"; the row's flag too.
+    var keys = { archive: "e", "delete": "#", flag: "s" };
+    $$("[data-kb], .mrow button.fav").forEach(function (b) {
+      var key = keys[b.getAttribute("data-kb") || "flag"];
+      if (!key || b.hasAttribute("data-tipkey")) { return; }
+      var t = b.getAttribute("data-tip") || b.getAttribute("title") || b.getAttribute("aria-label") || (b.textContent || "").trim();
+      if (!t) { return; }
+      if (!b.getAttribute("aria-label") && !(b.textContent || "").trim()) { b.setAttribute("aria-label", t); }
+      b.setAttribute("data-tip", t + " · " + key);
+      b.setAttribute("aria-keyshortcuts", key === "#" ? "Shift+3" : key);
+      b.setAttribute("data-tipkey", "");
       b.removeAttribute("title");
     });
   });
@@ -998,6 +1053,9 @@
         var n = $("[data-fname]", li), s = $("[data-fsize]", li), x = $("[data-fremove]", li);
         if (n) { n.textContent = f.name; }
         if (s) { s.textContent = size(f.size); }
+        // rc.16 (6a): the file's type tag, as in the envelope (FileTag on the server).
+        var tag = $("[data-ftag]", li);
+        if (tag) { var k = fileTag(f.name, f.type); tag.textContent = k[0]; tag.className = "ftag ftag-" + k[1]; }
         if (x) {
           x.setAttribute("aria-label", (x.getAttribute("aria-label") || "Remove") + " " + f.name);
           x.addEventListener("click", function () {
@@ -1009,6 +1067,14 @@
       });
     }
     input.addEventListener("change", function (e) { if (e.isTrusted) { render(); } });
+    // rc.16 (6a): "Enclosed \u00b7 N" counts what goes with the message.
+    var count = $("[data-filecount]", form);
+    if (count && window.MutationObserver) {
+      var carried = $$("input[name='carry']", form);
+      var recount = function () { count.textContent = String(carried.filter(function (c) { return c.checked; }).length + (input.files ? input.files.length : 0)); };
+      new MutationObserver(recount).observe(listEl, { childList: true });
+      carried.forEach(function (c) { c.addEventListener("change", recount); });
+    }
     var drop = $("[data-drop]", form);
     var depth = 0;
     form.addEventListener("dragenter", function (e) {
@@ -1489,6 +1555,8 @@
             var total = count.getAttribute("data-total") || "0";
             count.textContent = total + (total === "1" ? " message" : " messages");
           }
+          // rc.16: the head's "N new" pill goes with the last unread.
+          $$("[data-newpill]").forEach(function (p) { p.hidden = true; });
         })
         .catch(function () { window.location.reload(); });
     });
@@ -1602,7 +1670,7 @@
         case "g": pendingG = true; window.setTimeout(function () { pendingG = false; }, 1500); break;
         case "/":
           e.preventDefault();
-          var box = $(".sbox");
+          var box = $(".sbox") || $("[data-kb-search]");
           if (box) { box.focus(); } else { window.location.href = "/search"; }
           break;
         case "c": e.preventDefault(); window.location.href = "/compose"; break;
@@ -3205,6 +3273,116 @@
   window.addEventListener('pageshow', function (event) {
     if (event.persisted) {
       window.location.reload();
+    }
+  });
+
+  /* ---------- rc.16: the design review (owner, 11 Oct 2026) ----------
+     Dashboard cards switch between their chart and their table, each card
+     remembering its choice on this browser; a table can be sorted by a click
+     on its heading and downloaded as CSV. Today's quick reply sends on
+     Ctrl+Enter and waits for Undo like any Send. "Find a setting" narrows the
+     list of sections as it is typed. Without the script both views show, the
+     tables keep their order, and the forms post as they are. */
+  page(function () {
+    var KEY = "anjal.dash.view.";
+    var remember = function (id, view) { try { window.localStorage.setItem(KEY + id, view); } catch (e) { /* storage refused */ } };
+    var recall = function (id) { try { return window.localStorage.getItem(KEY + id); } catch (e) { return null; } };
+    var all = !!$(".dash2.alltables");
+    $$("[data-card]").forEach(function (card) {
+      var show = function (view) {
+        card.setAttribute("data-view", view);
+        $$("[data-view-pick]", card).forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-view-pick") === view ? "true" : "false"); });
+      };
+      var kept = recall(card.getAttribute("data-card"));
+      if (!all && (kept === "table" || kept === "chart")) { show(kept); }
+      $$("[data-view-pick]", card).forEach(function (b) {
+        b.addEventListener("click", function () {
+          var view = b.getAttribute("data-view-pick");
+          show(view);
+          remember(card.getAttribute("data-card"), view);
+        });
+      });
+    });
+    $$("table[data-sortable]").forEach(function (table) {
+      $$("thead th", table).forEach(function (th, col) {
+        th.setAttribute("tabindex", "0");
+        var sort = function () {
+          var body = table.tBodies[0];
+          if (!body) { return; }
+          var down = th.getAttribute("aria-sort") !== "descending";
+          $$("thead th", table).forEach(function (h) { h.removeAttribute("aria-sort"); });
+          th.setAttribute("aria-sort", down ? "descending" : "ascending");
+          var rows = Array.prototype.slice.call(body.rows);
+          var value = function (row) {
+            var text = (row.cells[col] ? row.cells[col].textContent : "").trim();
+            var n = parseFloat(text.replace(/[^0-9.\-]/g, ""));
+            return isNaN(n) || /[a-z]{3,}/i.test(text.replace(/\b(min|h|days?|MB|KB|GB)\b/g, "")) ? text.toLowerCase() : n;
+          };
+          rows.sort(function (a, b) {
+            var x = value(a), y = value(b);
+            var c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y));
+            return down ? -c : c;
+          });
+          rows.forEach(function (r) { body.appendChild(r); });
+        };
+        th.addEventListener("click", sort);
+        th.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sort(); } });
+      });
+    });
+    $$("[data-csv]").forEach(function (link) {
+      link.addEventListener("click", function (e) {
+        e.preventDefault();
+        var holder = link.closest(".dc-table");
+        var table = holder ? $("table", holder) : null;
+        if (!table) { return; }
+        var quote = function (t) { t = t.replace(/\s+/g, " ").trim(); return /[",\n]/.test(t) ? "\"" + t.replace(/"/g, "\"\"") + "\"" : t; };
+        var lines = $$("tr", table).map(function (tr) { return $$("th, td", tr).map(function (c) { return quote(c.textContent || ""); }).join(","); });
+        var card = link.closest("[data-card]");
+        var blob = new Blob(["\ufeff" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+        var a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "anjal-" + (card ? card.getAttribute("data-card") : "table") + ".csv";
+        document.body.appendChild(a);
+        a.click();
+        window.setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      });
+    });
+    $$("form[data-quickreply]").forEach(function (form) {
+      var flag = $("[data-undo-flag]", form);
+      if (flag) { flag.value = "1"; }
+      var box = $("textarea[data-ctrl-enter]", form);
+      if (box) {
+        box.addEventListener("keydown", function (e) {
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && box.value.trim().length > 0) {
+            e.preventDefault();
+            if (form.requestSubmit) { form.requestSubmit(); } else { form.submit(); }
+          }
+        });
+      }
+    });
+    $$("[data-bcc-open]").forEach(function (link) {
+      link.addEventListener("click", function (e) {
+        e.preventDefault();
+        var row = $("#bccrow");
+        if (!row) { return; }
+        row.classList.add("open");
+        link.hidden = true;
+        var input = $("input", row);
+        if (input) { input.focus(); }
+      });
+    });
+    var find = $("[data-setfind]");
+    if (find) {
+      var items = $$(".setnav-item[data-find]");
+      var narrow = function () {
+        var q = find.value.trim().toLowerCase();
+        items.forEach(function (it) { it.hidden = q.length > 0 && it.getAttribute("data-find").toLowerCase().indexOf(q) < 0; });
+      };
+      find.addEventListener("input", narrow);
+      find.form.addEventListener("submit", function (e) {
+        var first = items.filter(function (it) { return !it.hidden; })[0];
+        if (first) { e.preventDefault(); window.location.href = first.getAttribute("href"); }
+      });
     }
   });
 }());

@@ -43,7 +43,7 @@ module.exports = {
       const arrive = (href) => p.waitForFunction((h) => location.pathname + location.search === h, href, { timeout: 15000 }).catch(() => {}).then(settle);
 
       // 1. Every link in the rail swaps, and the page is the one a full load shows.
-      const rail = await p.$$eval('nav.rail a[href^="/"]', (a) => [...new Set(a.map((x) => x.getAttribute('href')))].filter((h) => !h.startsWith('/compose')));
+      const rail = await p.$$eval('nav.rail a[href^="/"]', (a) => [...new Set(a.filter((x) => x.checkVisibility()).map((x) => x.getAttribute('href')))].filter((h) => !h.startsWith('/compose')));
       const visited = [];
       for (const href of rail) {
         const before = p.url();

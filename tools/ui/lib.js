@@ -66,6 +66,11 @@ async function newPage(b, size) {
   page.scriptErrors = [];
   page.on('pageerror', (e) => page.scriptErrors.push(e.message));
   page.on('dialog', (d) => (d.type() === 'prompt' ? d.dismiss() : d.accept()).catch(() => {}));
+  if (process.env.ANJAL_UI_CSS) {
+    // styles.js: a stylesheet used instead of the one the webmail serves.
+    const css = require('fs').readFileSync(process.env.ANJAL_UI_CSS, 'utf8');
+    await page.route(/\/app\.css(\?|$)/, (route) => route.fulfill({ status: 200, contentType: 'text/css', body: css }));
+  }
   await signIn(page);
   return page;
 }

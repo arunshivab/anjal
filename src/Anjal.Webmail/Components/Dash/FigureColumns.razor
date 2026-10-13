@@ -1,0 +1,22 @@
+@* rc.16 (design review 7, Storage): space used at the end of each month, as columns. *@
+@{ var inv = System.Globalization.CultureInfo.InvariantCulture; long max = Math.Max(1, Items.Count == 0 ? 0 : Items.Max(p => p.Count)); }
+<div class="cols" role="img" aria-label="@string.Join(", ", Items.Select(i => i.Name + " " + Show(i.Count)))">
+    @foreach (NamedFigure p in Items)
+    {
+        <span class="col" title="@p.Name · @Show(p.Count)"><i style="height:@(p.Count == 0 ? "0" : Math.Max(3, p.Count * 100 / max).ToString(inv))%"></i></span>
+    }
+</div>
+<div class="lc-axis" aria-hidden="true">
+    @foreach (NamedFigure p in Items)
+    {
+        <span>@p.Name</span>
+    }
+</div>
+
+@code {
+    /// <summary>The columns, oldest first.</summary>
+    [Parameter] public IReadOnlyList<NamedFigure> Items { get; set; } = Array.Empty<NamedFigure>();
+
+    /// <summary>How a value is written.</summary>
+    [Parameter] public Func<long, string> Show { get; set; } = n => n.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+}

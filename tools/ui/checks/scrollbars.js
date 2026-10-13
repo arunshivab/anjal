@@ -41,7 +41,9 @@ function measure() {
         const h = Math.min(r.bottom, st.b) - Math.max(r.top, st.t);
         if (w > 1 && h > 1) {
           // Behind the scrolling box, not over it: a background the box is laid on.
-          const z = (x) => { const v = getComputedStyle(x).zIndex; return v === 'auto' ? 0 : Number(v); };
+          // rc.16 (12 Oct 2026): the level that counts is the nearest one set on the mark or what holds it
+          // - the reply's small window (z-index 40) lies over the envelope beside it, scroll bar and all.
+          const z = (x) => { for (let n = x; n && n !== document.body; n = n.parentElement) { const v = getComputedStyle(n).zIndex; if (v !== 'auto') { return Number(v); } } return 0; };
           // Laid out in the normal flow beside the box, it cannot be over it; only positioned or
           // moved marks can.
           const es = getComputedStyle(e);
