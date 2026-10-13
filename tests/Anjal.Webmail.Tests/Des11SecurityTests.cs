@@ -83,6 +83,21 @@ public sealed class Des11SecurityTests : IAsyncLifetime, IDisposable
         Assert.Contains(this.Subjects(), s => s == "Your password was changed");
     }
 
+    /// <summary>rc.15.1: when the organisation asks for longer passwords, the Security card names its rule, not Anjal's 15/12.</summary>
+    [Fact]
+    public async Task ThePasswordCard_FollowsTheOrganisationsLength_WhenItIsLonger()
+    {
+        MailboxService svc = this.app.Services.GetRequiredService<MailboxService>();
+        HttpClient c = await this.SignedInAsync(Laptop);
+        string before = await c.GetStringAsync(new Uri("settings/security", UriKind.Relative));
+        Assert.Contains("15 without two-step sign-in, 12 with it", before, StringComparison.Ordinal);
+
+        Assert.Null(await svc.SaveSignInPolicyAsync(this.tenant.Id, new SignInPolicy { MinLength = 20 }));
+        string after = await c.GetStringAsync(new Uri("settings/security", UriKind.Relative));
+        Assert.Contains("At least 20 characters for you, as your organisation asks.", after, StringComparison.Ordinal);
+        Assert.DoesNotContain("15 without two-step sign-in, 12 with it", after, StringComparison.Ordinal);
+    }
+
     /// <summary>S3: five wrong codes lock the second step for fifteen minutes on every device; the person is mailed.</summary>
     [Fact]
     public async Task S3_FiveWrongCodes_LockTheSecondStep_OnEveryDevice()

@@ -2215,6 +2215,8 @@
     "Not mostly your name or address": "കൂടുതലും നിങ്ങളുടെ പേരോ വിലാസമോ അല്ല",
     "The password must not be mostly your name or your address.": "പാസ്‌വേഡ് കൂടുതലും നിങ്ങളുടെ പേരോ വിലാസമോ ആകരുത്.",
     "That password is too easy to guess. Choose something that is not mostly a common word or this product's name.": "ആ പാസ്‌വേഡ് എളുപ്പത്തിൽ ഊഹിക്കാം. കൂടുതലും സാധാരണ വാക്കോ ഈ ഉൽപ്പന്നത്തിന്റെ പേരോ അല്ലാത്ത ഒന്ന് തിരഞ്ഞെടുക്കുക.",
-    "Wrong passwords": "തെറ്റായ പാസ്‌വേഡുകൾ"
+    "Wrong passwords": "തെറ്റായ പാസ്‌വേഡുകൾ",
+    "Not downloaded yet; checked online meanwhile": "ഇതുവരെ ഡൗൺലോഡ് ചെയ്തിട്ടില്ല; അതുവരെ ഓൺലൈനായി പരിശോധിക്കുന്നു",
+    "At least {n} characters for you, as your organisation asks. Any characters; a phrase of ordinary words works well.": "നിങ്ങൾക്ക് കുറഞ്ഞത് {n} അക്ഷരങ്ങൾ, നിങ്ങളുടെ സ്ഥാപനം ആവശ്യപ്പെടുന്നതുപോലെ. ഏത് അക്ഷരങ്ങളും; സാധാരണ വാക്കുകളുള്ള ഒരു വാചകം നന്നായി പ്രവർത്തിക്കും."
   }
 }

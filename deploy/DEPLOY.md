@@ -1646,6 +1646,10 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.15 to rc.15.1** (hotfix DEF-095 to DEF-098): the usual steps only (backup first). No schema change,
+no setting to change. People stuck behind the welcome screen on the Security page can sign in
+again afterwards and set their longer password; the welcome follows.
+
 **rc.10 to rc.15** (the webmail release), in addition to the usual steps
 (backup first): `schema.sql` adds what the release needs, among it the
 `service_records` table (rc.15, item 61: the operator's daily disk record,

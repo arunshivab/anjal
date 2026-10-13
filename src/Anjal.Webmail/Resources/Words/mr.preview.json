@@ -2215,6 +2215,8 @@
     "Not mostly your name or address": "बहुतांश तुमचे नाव किंवा पत्ता नाही",
     "The password must not be mostly your name or your address.": "पासवर्ड बहुतांश तुमचे नाव किंवा पत्ता नसावा.",
     "That password is too easy to guess. Choose something that is not mostly a common word or this product's name.": "तो पासवर्ड ओळखणे खूप सोपे आहे. बहुतांश सामान्य शब्द किंवा या उत्पादनाचे नाव नसलेला निवडा.",
-    "Wrong passwords": "चुकीचे पासवर्ड"
+    "Wrong passwords": "चुकीचे पासवर्ड",
+    "Not downloaded yet; checked online meanwhile": "अद्याप डाउनलोड झालेले नाही; तोपर्यंत ऑनलाइन तपासले जात आहे",
+    "At least {n} characters for you, as your organisation asks. Any characters; a phrase of ordinary words works well.": "तुमच्यासाठी किमान {n} अक्षरे, तुमची संस्था सांगते त्याप्रमाणे. कोणतीही अक्षरे; साध्या शब्दांचा एक वाक्प्रचार चांगला चालतो."
   }
 }

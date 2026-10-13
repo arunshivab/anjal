@@ -587,9 +587,13 @@ internal static class AuthEndpoints
         || path.StartsWith("/auth/", StringComparison.Ordinal) || path == "/sign-out" || path.StartsWith("/contacts", StringComparison.Ordinal)
         || (path.StartsWith("/message/", StringComparison.Ordinal) && (path.EndsWith("/read", StringComparison.Ordinal) || path.EndsWith("/flag", StringComparison.Ordinal)));
 
+    // rc.15.1 (DEF-095): /settings/welcome and /settings/rail too - the welcome screen's buttons only
+    // record that it was seen, and folding the rail only changes the layout. A sign-in step must
+    // never trap a person on a screen they cannot close (Rc13AuthFlowTests checks every form).
     private static bool DemandAllows(string path) =>
         path.StartsWith("/auth/", StringComparison.Ordinal) || path == "/sign-out" || path == "/signed-out"
-        || path.StartsWith("/sign-in", StringComparison.Ordinal) || path.StartsWith("/invite/", StringComparison.Ordinal);
+        || path.StartsWith("/sign-in", StringComparison.Ordinal) || path.StartsWith("/invite/", StringComparison.Ordinal)
+        || path == "/settings/welcome" || path == "/settings/rail";
 
     /// <summary>The signed-out page for a sign-out at this moment.</summary>
     /// <param name="idle">True when it was for being idle.</param>

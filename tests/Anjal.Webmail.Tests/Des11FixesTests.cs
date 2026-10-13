@@ -130,8 +130,10 @@ public sealed class Des11FixesTests : IAsyncLifetime, IDisposable
     {
         Environment.SetEnvironmentVariable("ANJAL_OPERATORS", "arun@anjal.co.in");
         MailboxService svc = this.app.Services.GetRequiredService<MailboxService>();
-        DateTimeOffset monday = new(2026, 10, 12, 11, 0, 0, TimeSpan.FromHours(5.5));
-        await svc.RecordDrillAsync(new RestoreDrill { Date = "2026-10-12", Passed = true, By = "arun@anjal.co.in" });
+        // A day in the past (12 Jan 2026, a Monday): the alert mails this test sends are stored at the
+        // real time, so a fixed day that is today would count them as arrivals (failed on 12 Oct 2026).
+        DateTimeOffset monday = new(2026, 1, 12, 11, 0, 0, TimeSpan.FromHours(5.5));
+        await svc.RecordDrillAsync(new RestoreDrill { Date = "2026-01-12", Passed = true, By = "arun@anjal.co.in" });
         FolderRow inbox = await this.store.EnsureFolderAsync(this.arun.Id, "INBOX");
         Func<DateTimeOffset> was = this.store.MessageClock;
         async Task ArriveAsync(int n, DateTimeOffset at)

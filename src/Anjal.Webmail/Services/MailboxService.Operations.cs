@@ -382,24 +382,49 @@ public sealed partial class MailboxService
     /// </summary>
     /// <param name="now">Now.</param>
     /// <returns>The tile.</returns>
-    public static HealthTile LeakedPasswordsTile(DateTimeOffset now)
+    public static HealthTile LeakedPasswordsTile(DateTimeOffset now) =>
+        LeakedPasswordsTile(
+            now,
+            Anjal.Smtp.PwnedPasswords.Mode,
+            Anjal.Smtp.PwnedPasswords.UsesDownload ? Anjal.Smtp.PwnedPasswords.Current : null,
+            Anjal.Smtp.PwnedPasswords.UsesDownload ? Anjal.Smtp.PwnedRefreshStatus.Read(Anjal.Smtp.PwnedPasswords.ConfiguredPath) : null);
+
+    /// <summary>
+    /// The leaked-password tile for a given mode, list and download state (what
+    /// <see cref="LeakedPasswordsTile(DateTimeOffset)"/> reads from the server).
+    /// </summary>
+    /// <param name="now">Now.</param>
+    /// <param name="mode">"both", "download", "online" or "off".</param>
+    /// <param name="list">The downloaded list, or null when there is none yet.</param>
+    /// <param name="status">The download's state, or null when none has run.</param>
+    /// <returns>The tile.</returns>
+    public static HealthTile LeakedPasswordsTile(DateTimeOffset now, string mode, Anjal.Smtp.PwnedPasswordList? list, Anjal.Smtp.PwnedRefreshStatus? status)
     {
-        if (!Anjal.Smtp.PwnedPasswords.UsesDownload)
+        ArgumentNullException.ThrowIfNull(mode);
+        bool usesDownload = mode is "both" or "download";
+        bool coveredOnline = mode is "both" or "online";
+        if (!usesDownload)
         {
-            return Anjal.Smtp.PwnedPasswords.ChecksOnline
+            return coveredOnline
                 ? new HealthTile("Leaked passwords", "Checked online only; no list kept here", "ok")
                 : new HealthTile("Leaked passwords", "Not checked (switched off)", "warn");
         }
-        Anjal.Smtp.PwnedPasswordList? list = Anjal.Smtp.PwnedPasswords.Current;
-        Anjal.Smtp.PwnedRefreshStatus? status = Anjal.Smtp.PwnedRefreshStatus.Read(Anjal.Smtp.PwnedPasswords.ConfiguredPath);
+
+        // rc.15.1 (owner, 12 Oct): the first download on a new server is expected work, not a
+        // fault. While every new password is also checked online, "downloading" and "not yet"
+        // are fine, so no operator alert (and no "resolved" mail an hour later) is sent.
         if (status is { State: "building" })
         {
-            return new HealthTile("Leaked passwords", "Downloading: {n}% done", list is null ? "warn" : "ok", N(status.Percent));
+            return new HealthTile("Leaked passwords", "Downloading: {n}% done", list is null && !coveredOnline ? "warn" : "ok", N(status.Percent));
         }
         if (list is null)
         {
-            return status is { State: "failed" }
-                ? new HealthTile("Leaked passwords", "Download failed; the server will try again in six hours", "bad")
+            if (status is { State: "failed" })
+            {
+                return new HealthTile("Leaked passwords", "Download failed; the server will try again in six hours", coveredOnline ? "warn" : "bad");
+            }
+            return coveredOnline
+                ? new HealthTile("Leaked passwords", "Not downloaded yet; checked online meanwhile", "ok")
                 : new HealthTile("Leaked passwords", "Not downloaded yet; the short built-in list is used", "warn");
         }
         bool billions = list.Count >= 1_000_000_000;

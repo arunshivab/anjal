@@ -2215,6 +2215,8 @@
     "Not mostly your name or address": "பெரும்பாலும் உங்கள் பெயரோ முகவரியோ அல்ல",
     "The password must not be mostly your name or your address.": "கடவுச்சொல் பெரும்பாலும் உங்கள் பெயராகவோ முகவரியாகவோ இருக்கக் கூடாது.",
     "That password is too easy to guess. Choose something that is not mostly a common word or this product's name.": "அந்தக் கடவுச்சொல்லை எளிதில் ஊகிக்கலாம். பெரும்பாலும் பொதுவான சொல்லாகவோ இந்தத் தயாரிப்பின் பெயராகவோ இல்லாத ஒன்றைத் தேர்ந்தெடுங்கள்.",
-    "Wrong passwords": "தவறான கடவுச்சொற்கள்"
+    "Wrong passwords": "தவறான கடவுச்சொற்கள்",
+    "Not downloaded yet; checked online meanwhile": "இன்னும் பதிவிறக்கப்படவில்லை; இடையில் இணையத்தில் சரிபார்க்கப்படுகிறது",
+    "At least {n} characters for you, as your organisation asks. Any characters; a phrase of ordinary words works well.": "உங்களுக்குக் குறைந்தது {n} எழுத்துகள், உங்கள் நிறுவனம் கேட்டபடி. எந்த எழுத்துகளும்; சாதாரணச் சொற்களாலான ஒரு தொடர் நன்றாக வேலை செய்யும்."
   }
 }

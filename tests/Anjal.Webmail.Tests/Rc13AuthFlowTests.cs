@@ -19,6 +19,9 @@ namespace Anjal.Webmail.Tests;
 /// </summary>
 public sealed class Rc13AuthFlowTests : IAsyncLifetime, IDisposable
 {
+    private static readonly Regex FormRegex = new("<form[^>]*method=\"post\"[^>]*action=\"(/[^\"]*)\"", RegexOptions.CultureInvariant);
+    private static readonly string[] DemandPages = ["/settings/security?change=1", "/settings/security/two-step?required=1"];
+
     private static readonly Regex TokenRegex = new("name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"", RegexOptions.CultureInvariant);
 
     private readonly string root = Path.Combine(Path.GetTempPath(), "anjal-rc13e-" + Guid.NewGuid().ToString("N"));
@@ -358,6 +361,66 @@ public sealed class Rc13AuthFlowTests : IAsyncLifetime, IDisposable
         await SignInAsync(three, "arun", "correct horse battery");
         HttpResponseMessage again = await Post(three, "auth/two-step", Token(await three.GetStringAsync("sign-in/two-step")), ("code", backup[0]), ("method", "backup"));
         Assert.Equal("/sign-in/two-step?error=1&method=backup", again.Headers.Location!.ToString());
+    }
+
+    [Fact]
+    public async Task ASignInStep_NeverTrapsAPerson_EveryFormOnItsPageWorks_AndTheWelcomeWaits()
+    {
+        // DEF-095 (owner, 11 Oct 2026, on the server): a person who had not yet seen the welcome
+        // screen and whose password was shorter than the new rule was sent to Security, where the
+        // welcome screen covered the page and both its buttons were sent back to Security.
+        MailboxService svc = this.app.Services.GetRequiredService<MailboxService>();
+        MailboxRow meera = await this.store.UpsertMailboxAsync(new MailboxRow
+        {
+            TenantId = this.mailbox.TenantId,
+            LocalPart = "meera",
+            Domain = "anjal.co.in",
+            DisplayName = "Meera",
+            PasswordPbkdf2 = Pbkdf2Hasher.Hash("Ward#Round7", 1000),
+        });
+        Assert.False(meera.WelcomeDone);
+        HttpClient c = this.Client();
+        await SignInAsync(c, "meera", "Ward#Round7");
+        Assert.Equal("password", await svc.SignInDemandAsync(meera.Id));
+
+        var trapped = new List<string>();
+        foreach (string demandPage in DemandPages)
+        {
+            if (demandPage.Contains("two-step", StringComparison.Ordinal))
+            {
+                Assert.Null(await svc.SetPasswordAsync(meera, "quiet harbour morning tea"));
+                Assert.Null(await svc.SaveSignInPolicyAsync(this.mailbox.TenantId, new SignInPolicy { TwoStep = "everyone" }));
+                Assert.Equal("twostep", await svc.SignInDemandAsync(meera.Id));
+            }
+            using HttpResponseMessage elsewhere = await c.GetAsync("folder/INBOX");
+            Assert.Equal(demandPage, elsewhere.Headers.Location!.ToString());
+            string page = await c.GetStringAsync(demandPage.TrimStart('/'));
+            Assert.DoesNotContain("welcometitle", page, StringComparison.Ordinal);
+            // Every form the page offers is answered by its own handler, never sent back here.
+            foreach (Match form in FormRegex.Matches(page))
+            {
+                string action = form.Groups[1].Value;
+                if (action is "/sign-out")
+                {
+                    continue;
+                }
+                using HttpResponseMessage res = await Post(c, action.TrimStart('/'), Token(page));
+                if (res.Headers.Location?.ToString() == demandPage)
+                {
+                    trapped.Add(action + " on " + demandPage);
+                }
+            }
+        }
+        Assert.Empty(trapped);
+
+        // The welcome screen's own button is never trapped either, and once the step is done the
+        // welcome appears.
+        string security = await c.GetStringAsync("settings/security/two-step?required=1");
+        using (HttpResponseMessage skip = await Post(c, "settings/welcome", Token(security), ("back", "/folder/INBOX")))
+        {
+            Assert.Equal("/folder/INBOX", skip.Headers.Location!.ToString());
+        }
+        Assert.True((await this.store.GetMailboxByIdAsync(meera.Id))!.WelcomeDone);
     }
 
     private static string Token(string html)
