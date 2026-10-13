@@ -1,0 +1,62 @@
+@page "/lajna"
+@attribute [Authorize]
+@inject Lajna Helper
+@inject Words Words
+
+<PageTitle>@L["Lajna"] — Anjal</PageTitle>
+
+@* rc.18, design review section 11: Lajna as a page - the same answers the floating panel shows,
+   for a browser without the script (and the panel's source: /lajna/answer is the answer alone). *@
+    <div class="ljpage">
+        <header class="ljhead">
+            <span aria-hidden="true">@((MarkupString)LajnaMarkSvg.Large)</span>
+            <div><h1>@L["Lajna"]</h1><p>@L["Anjal's helper. It reads only your own mail and settings, here in Anjal, and never sends or changes anything without your Yes."]</p></div>
+        </header>
+        @if (answer is not null)
+        {
+            <LajnaReply A="answer" L="L" Clock="clock" Page="@PageFrom" />
+        }
+        <form method="get" action="/lajna" class="ljform" role="search">
+            <input type="hidden" name="page" value="@PageFrom" />
+            <input class="inp" name="q" value="@Q" maxlength="300" placeholder="@L["Ask Lajna"]" aria-label="@L["Ask Lajna"]" autofocus />
+            <button type="submit" class="btn btn-p" title="@L["Send your question to Lajna."]">@L["Ask"]</button>
+        </form>
+        <p class="ljchips">
+            @foreach (string s in Suggestions)
+            {
+                <a href="/lajna?q=@Uri.EscapeDataString(L[s])&page=@Uri.EscapeDataString(PageFrom)">@L[s]</a>
+            }
+        </p>
+    </div>
+
+@code {
+    /// <summary>The questions offered to start with.</summary>
+    public static readonly string[] Suggestions = { "How do I turn on two-step?", "Turn on dark mode", "How do I send later?", "How do I find a colleague?" };
+
+    [SupplyParameterFromQuery(Name = "q")] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] private string? PageText { get; set; }
+    [SupplyParameterFromQuery(Name = "style")] private string? Style { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private LajnaAnswer? answer;
+
+    private string PageFrom => LocalPath.Safe(PageText);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        answer = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        if (!string.IsNullOrWhiteSpace(Q))
+        {
+            answer = await Helper.AskAsync(user, Q.Length > 300 ? Q[..300] : Q, PageFrom, Style, L);
+        }
+    }
+}

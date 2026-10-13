@@ -189,6 +189,8 @@
         }
         return r.text().then(function (html) {
           var to = method === "GET" || r.redirected ? r.url : window.location.href;
+          // rc.18: a fetched address has no #part, so the asked-for one is kept (Show me's #ring=..., #devices).
+          if (method === "GET" && !r.redirected) { try { var asked = new URL(url, window.location.href).hash; if (asked) { to = to.split("#")[0] + asked; } } catch (err) { /* keep the fetched address */ } }
           var done = apply(html, to, { push: how.push && to !== window.location.href ? true : false, replace: !how.push || to === window.location.href, restore: how.restore, keepScroll: how.keepScroll || (method !== "GET" && to === window.location.href), keepFocus: how.keepFocus });
           if (done) { return; }
           // Not a mail screen (signing in, an error): shown as a page load would show it.
@@ -347,6 +349,8 @@
     if (e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) { return; }
     var a = e.target.closest ? e.target.closest("a[href]") : null;
     if (!a || a.target || a.hasAttribute("download")) { return; }
+    // rc.18: Lajna's button and the links that ask it are handled by its panel (below), not swapped.
+    if (a.closest("[data-lajna-open], [data-lajna-ask], #lajna [data-lajna-q]")) { return; }
     // A message in the list: the double-click handler below decides (and checks the same way).
     var row = a.matches(".mlist a[data-open]") ? a.closest(".mrow") : null;
     if (row && row.getAttribute("data-message") && !/^\/draft\//.test(a.getAttribute("href") || "")) { return; }
@@ -1767,7 +1771,7 @@
 
     function show() {
       var step = live[i];
-      var el = document.querySelector(step.at);
+      var el = shown(step.at);
       if (!el) { next(); return; }
       if (mark) { mark.classList.remove("tourmark"); }
       mark = el;
@@ -1798,9 +1802,17 @@
       if (window.history && window.history.replaceState) { window.history.replaceState(null, "", window.location.pathname + window.location.search); }
     }
 
+    // rc.18: a step may name several places (Lajna sits in the status bar, or floats on a phone):
+    // the first one showing is used.
+    function shown(sel) {
+      var all = document.querySelectorAll(sel);
+      for (var k = 0; k < all.length; k++) { if (all[k].getClientRects().length > 0) { return all[k]; } }
+      return null;
+    }
+
     function start() {
       if (running) { return; }
-      live = steps.filter(function (s) { return !!document.querySelector(s.at); });
+      live = steps.filter(function (s) { return !!shown(s.at); });
       if (!live.length) { return; }
       running = true;
       i = 0;
@@ -3384,5 +3396,128 @@
         if (first) { e.preventDefault(); window.location.href = first.getAttribute("href"); }
       });
     }
+  });
+  // rc.18 (design review section 11): Lajna's panel. The button opens it; a question is answered by
+  // /lajna/answer, a page with the answer alone, which is added to the conversation. Links that ask
+  // again (a chip, "Only with attachments", "More formal") ask in the panel. Without the script, the
+  // button and every link open /lajna as a page.
+  (function lajna() {
+    var thinking = null;
+    function panel() { return $("#lajna"); }
+    function open(ask) {
+      var p = panel();
+      if (!p) { return false; }
+      p.hidden = false;
+      document.documentElement.classList.add("lajna-open");
+      var input = $("[data-lajna-form] input[name=q]", p);
+      if (typeof ask === "string" && ask.length > 0) { send(ask, null); }
+      else if (input) { input.focus(); }
+      return true;
+    }
+    function close() {
+      var p = panel();
+      if (!p) { return; }
+      p.hidden = true;
+      document.documentElement.classList.remove("lajna-open");
+      var all = document.querySelectorAll("[data-lajna-open]");
+      for (var k = 0; k < all.length; k++) { if (all[k].getClientRects().length > 0) { all[k].focus(); break; } }
+    }
+    function send(q, style) {
+      var p = panel();
+      var log = p ? $("[data-lajna-log]", p) : null;
+      var form = p ? $("[data-lajna-form]", p) : null;
+      if (!log || !form || !q) { return; }
+      var page = $("input[name=page]", form);
+      var url = "/lajna/answer?q=" + encodeURIComponent(q) + "&page=" + encodeURIComponent(page ? page.value : "/") + (style ? "&style=" + encodeURIComponent(style) : "");
+      thinking = document.createElement("p");
+      thinking.className = "ljthinking";
+      thinking.setAttribute("aria-hidden", "true");
+      thinking.innerHTML = "<i></i><i></i><i></i>";
+      log.appendChild(thinking);
+      log.scrollTop = log.scrollHeight;
+      fetch(url, { credentials: "same-origin", headers: { "Accept": "text/html" } })
+        .then(function (r) { if (!r.ok) { throw new Error(String(r.status)); } return r.text(); })
+        .then(function (html) {
+          var doc = new DOMParser().parseFromString(html, "text/html");
+          var answer = doc.querySelector("[data-lajna-answer]");
+          if (thinking) { thinking.remove(); thinking = null; }
+          if (!answer) { window.location.href = url.replace("/lajna/answer", "/lajna"); return; }
+          log.appendChild(document.importNode(answer, true));
+          log.scrollTop = log.scrollHeight;
+        })
+        .catch(function () {
+          if (thinking) { thinking.remove(); thinking = null; }
+          window.location.href = url.replace("/lajna/answer", "/lajna");
+        });
+    }
+    document.addEventListener("click", function (e) {
+      var t = e.target.closest ? e.target : null;
+      if (!t) { return; }
+      var opener = t.closest("[data-lajna-open]");
+      if (opener && e.button === 0 && !e.ctrlKey && !e.metaKey) {
+        if (open(null)) { e.preventDefault(); }
+        return;
+      }
+      var asker = t.closest("[data-lajna-ask]");
+      if (asker && e.button === 0 && !e.ctrlKey && !e.metaKey) {
+        if (open(asker.getAttribute("data-lajna-ask"))) { e.preventDefault(); }
+        return;
+      }
+      if (t.closest("[data-lajna-close]")) { e.preventDefault(); close(); return; }
+      var again = t.closest("#lajna [data-lajna-q]");
+      if (again && e.button === 0 && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        send(again.getAttribute("data-lajna-q"), again.getAttribute("data-lajna-style"));
+      }
+    });
+    document.addEventListener("submit", function (e) {
+      var form = e.target.closest ? e.target.closest("[data-lajna-form]") : null;
+      if (!form) { return; }
+      var input = $("input[name=q]", form);
+      var q = input ? input.value.trim() : "";
+      if (!q) { e.preventDefault(); return; }
+      e.preventDefault();
+      input.value = "";
+      send(q, null);
+    });
+    document.addEventListener("keydown", function (e) {
+      var p = panel();
+      if (e.key === "Escape" && p && !p.hidden && p.contains(document.activeElement)) { close(); }
+    });
+  }());
+
+  // rc.18 (design review [8b], "Show me in Anjal"): a page opened with #ring=<control>|<line> dims
+  // itself and rings the real control, with its line beside it, until a click or Escape.
+  page(function ring() {
+    var h = window.location.hash;
+    if (h.indexOf("#ring=") !== 0) { return; }
+    var parts = h.slice(6).split("|");
+    var selector = decodeURIComponent(parts[0] || "");
+    var line = decodeURIComponent(parts[1] || "");
+    var el = null;
+    try { el = selector ? document.querySelector(selector) : null; } catch (err) { el = null; }
+    if (!el) { return; }
+    el.scrollIntoView({ block: "center" });
+    var veil = document.createElement("div");
+    veil.className = "ringveil";
+    var note = document.createElement("div");
+    note.className = "ringnote";
+    note.setAttribute("role", "status");
+    note.textContent = line;
+    document.body.appendChild(veil);
+    document.body.appendChild(note);
+    el.classList.add("ringed");
+    var r = el.getBoundingClientRect();
+    var top = r.bottom + 10 + note.offsetHeight > window.innerHeight ? r.top - note.offsetHeight - 10 : r.bottom + 10;
+    note.style.top = Math.max(8, top) + "px";
+    note.style.left = Math.max(8, Math.min(r.left, document.documentElement.clientWidth - note.offsetWidth - 8)) + "px";
+    function done() {
+      el.classList.remove("ringed");
+      veil.remove();
+      note.remove();
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    veil.addEventListener("click", done);
+    scope.on(document, "keydown", function (e) { if (e.key === "Escape") { done(); } });
   });
 }());

@@ -255,6 +255,7 @@ else
                                 <section class="wfeat"><span class="wicon"><LipiIcon Name="@icon" Size="20" /></span><h3>@L[title]</h3><p>@L[text]</p></section>
                             }
                         </div>
+                        <p class="wlajna">@((MarkupString)LajnaMarkSvg.Small)<span>@L["Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft."]</span></p>
                         <div class="wactions">
                             <form method="post" action="/settings/welcome" class="inline">
                                 <AntiforgeryToken />
@@ -270,6 +271,34 @@ else
                     </div>
                 </div>
             }
+            @* rc.18, design review section 11: Lajna - a button on every page and its panel. It reads only
+               your own mail and settings, here in Anjal; it never sends or changes anything without your Yes.
+               Without the script the button opens /lajna as a page. *@
+            <a class="lajnabtn" href="/lajna?page=@Uri.EscapeDataString(PathNow)" data-lajna-open aria-controls="lajna" title="@L["Ask Lajna"]">@((MarkupString)LajnaMarkSvg.Small)<span>@L["Ask Lajna"]</span></a>
+            <aside id="lajna" class="lajna" role="dialog" aria-modal="false" aria-labelledby="lajnatitle" hidden>
+                <header class="ljpanelhead">
+                    <span aria-hidden="true">@((MarkupString)LajnaMarkSvg.Large)</span>
+                    <div><b id="lajnatitle">@L["Lajna"]</b><span>@L["Anjal's helper"]</span></div>
+                    <span class="lh-grow"></span>
+                    <a class="iconbtn" href="/lajna?page=@Uri.EscapeDataString(PathNow)" title="@L["Open as a page"]" aria-label="@L["Open as a page"]"><LipiIcon Name="expand" Size="16" /></a>
+                    <button type="button" class="iconbtn" data-lajna-close title="@L["Close"]" aria-label="@L["Close"]"><LipiIcon Name="close" Size="16" /></button>
+                </header>
+                <div class="ljlog" data-lajna-log>
+                    <p class="ljhello">@L["Hello {name}. Ask me how to do something in Anjal, to find your mail, or to write a draft. I read only your own mail and settings, here in Anjal, and I never send or change anything without your Yes."].Replace("{name}", MailboxService.FirstName(DisplayName, context.User.Identity?.Name), StringComparison.Ordinal)</p>
+                    <p class="ljchips">
+                        @foreach (string q in Pages.LajnaPage.Suggestions)
+                        {
+                            <a href="/lajna?q=@Uri.EscapeDataString(L[q])&page=@Uri.EscapeDataString(PathNow)" data-lajna-q="@L[q]">@L[q]</a>
+                        }
+                    </p>
+                </div>
+                <form class="ljform" method="get" action="/lajna" data-lajna-form data-noswap>
+                    <input type="hidden" name="page" value="@PathNow" />
+                    <input class="inp" name="q" maxlength="300" autocomplete="off" placeholder="@L["Ask Lajna"]" aria-label="@L["Ask Lajna"]" />
+                    <button type="submit" class="btn btn-p" title="@L["Ask"]">@L["Ask"]</button>
+                </form>
+                <p class="ljfine">@L["Lajna works inside Anjal: nothing you ask leaves this server, and nothing is kept."]</p>
+            </aside>
             @* The tour's steps: each points at a real button; one missing from the page is skipped. *@
             <div hidden id="tour" data-steps="@TourJson"></div>
             @* The bubble is page markup, like every button (review 3); the script fills it in. *@
@@ -289,6 +318,7 @@ else
                 <div class="kbcard">
                     <div class="kbhead">
                         <h2 id="kbtitle">@L["Keyboard shortcuts"]</h2>
+                        <a class="linkbtn kbtour" href="/help" title="@L["Read how to do things in Anjal."]">@L["Help guide"]</a>
                         <a class="linkbtn kbtour" href="/dashboard/today#tour">@L["Restart the tour"]</a>
                         <a class="iconbtn" href="#close" aria-label="@L["Close"]" title="@L["Close"]"><LipiIcon Name="close" Size="17" /></a>
                     </div>
@@ -351,6 +381,9 @@ else
                     <span class="st-sub st-store @(Full ? "st-full" : storage?.Percent >= 80 ? "st-warn" : "")" title="@StorageTip">@StorageText<span class="st-meter" aria-hidden="true"><i style="width:@(Math.Min(100, storage?.Percent ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture))%"></i></span></span>
                     <span class="st-sep" aria-hidden="true"></span>
                 }
+                @* rc.18 screen check: on a computer Lajna opens from here, so no floating button covers the envelope's
+                   actions; a phone keeps the floating button. *@
+                <a class="st-link st-lajna" href="/lajna?page=@Uri.EscapeDataString(PathNow)" data-lajna-open aria-controls="lajna" title="@L["Ask Lajna"]">@((MarkupString)LajnaMarkSvg.Small)@L["Ask Lajna"]</a>
                 <a class="st-link" href="#shortcuts" title="@L["Keyboard shortcuts"]">? @L["Shortcuts"]</a>
             </footer>
             <JsWords L="L" />
@@ -450,12 +483,12 @@ else
     /// <summary>The tour's steps (item 5): where each points, and what it says.</summary>
     private string TourJson => System.Text.Json.JsonSerializer.Serialize(new[]
     {
-        // rc.16, design review [6j]: four steps - Today, the envelope (or the list, where no letter is
-        // open), Compose, and who is signed in.
+        // rc.16 and rc.18, design review [6j]: four steps - Today, the envelope (or the list, where no
+        // letter is open), Compose, and Lajna.
         new { at = ".rail a[href='/dashboard/today']", title = L["Today"], text = L["Your unread mail, what needs you first, and why. Anjal opens here."] },
         new { at = ".eaddress, .tdunread, .mlist", title = L["The envelope"], text = L["Who it is from and to, with the stamps: what Anjal has proved about each message."] },
         new { at = ".rail-compose", title = L["Compose"], text = L["Write a new message."] },
-        new { at = ".rail-account", title = L["Signed in"], text = L["Who is signed in. On a shared computer, always sign out."] },
+        new { at = ".st-lajna, .lajnabtn", title = L["Lajna"], text = L["Ask Lajna how to do something, to find your mail, or to write a draft. It works inside Anjal and never sends anything."] },
     });
 
     /// <summary>The approved shortcuts board, group by group (item 38).</summary>

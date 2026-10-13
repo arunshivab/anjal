@@ -284,6 +284,9 @@ public static class Program
         builder.Services.AddHostedService(sp => new ScheduledSender(sp.GetRequiredService<MailboxService>(), OpsEndpoints.RootOf(sp.GetRequiredService<IMaildirStore>())));
         builder.Services.AddSingleton(new HostInfo(hostName));
         builder.Services.AddSingleton(Words.Load());
+        // rc.18 (design review section 11): the help guide, and Lajna, which reads it and the person's own mail - inside Anjal.
+        builder.Services.AddSingleton(HelpGuide.Load());
+        builder.Services.AddSingleton<Lajna>();
         builder.Services.AddHttpContextAccessor();
 
         bool secure = string.Equals(Environment.GetEnvironmentVariable("ANJAL_WEBMAIL_SECURE"), "true", StringComparison.OrdinalIgnoreCase);
@@ -1444,6 +1447,17 @@ public static class Program
         }).RequireAuthorization();
 
         // rc.16 (design review 8): where Anjal opens after signing in - Today or the Inbox.
+        // rc.18 (design review [8b]): "Did this help?" - counted per article for the weekly review; nothing about who answered is kept.
+        app.MapPost("/help/feedback", async (HttpContext http, [FromForm] string? id, [FromForm] string? helped, HelpGuide guide, IMessageStore records, CancellationToken ct) =>
+        {
+            if (guide.Get(id) is not HelpArticle article)
+            {
+                return Results.Redirect("/help");
+            }
+            await HelpFeedback.CountAsync(records, article.Id, helped == "1", ct).ConfigureAwait(false);
+            return Results.Redirect("/help/" + article.Id + "?thanks=1");
+        }).RequireAuthorization();
+
         app.MapPost("/settings/openon", async (HttpContext http, [FromForm] string? where, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);

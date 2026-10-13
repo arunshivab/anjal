@@ -10,6 +10,15 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.18** (12 October 2026) - Help and Lajna (design review section 11, [8a]-[8g]).
+A **help guide** at `/help`: 11 parts and 54 short articles, searchable, each with its steps and a
+**Show me in Anjal** link that opens the page with the control ringed; "Did this help?" is
+counted. **Lajna**, Anjal's helper, opens from a button on every page and at `/lajna`. Lajna runs
+inside Anjal with no outside connection and no language model: it answers from the guide, finds
+mail ("the last 5 mails from Priya with attachments"), explains where a sent mail is, drafts a
+leave letter naming who covered last time (read from the person's own Sent mail), and changes a
+setting only after the person says Yes. Lajna never sends. No schema change.
+
 **v1.0.0-rc.17** (12 October 2026) - Sending systems (design review section 10, [7a]-[7e]).
 Organisation > Applications became **Sending systems**: an overview of what the organisation's
 applications sent in the last hour, day, week or month (accepted, delivered with the usual time,

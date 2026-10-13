@@ -1,0 +1,37 @@
+@page "/lajna/answer"
+@layout Anjal.Webmail.Components.Layout.BareLayout
+@attribute [Authorize]
+@inject Lajna Helper
+@inject Words Words
+
+@* rc.18: one answer from Lajna and nothing around it, for the floating panel's script. *@
+@if (answer is not null)
+{
+    <LajnaReply A="answer" L="L" Clock="clock" Page="@PageFrom" />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "q")] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "page")] private string? PageText { get; set; }
+    [SupplyParameterFromQuery(Name = "style")] private string? Style { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private LajnaAnswer? answer;
+
+    private string PageFrom => LocalPath.Safe(PageText);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        answer = null;
+        if (AuthState is null || string.IsNullOrWhiteSpace(Q))
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        answer = await Helper.AskAsync(user, Q.Length > 300 ? Q[..300] : Q, PageFrom, Style, L);
+    }
+}

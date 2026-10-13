@@ -1,0 +1,1218 @@
+{
+ "parts": [
+  {
+   "id": "start",
+   "title": "Getting started",
+   "icon": "home"
+  },
+  {
+   "id": "today",
+   "title": "Today and the dashboard",
+   "icon": "chart-bar"
+  },
+  {
+   "id": "reading",
+   "title": "Reading and replying",
+   "icon": "email"
+  },
+  {
+   "id": "writing",
+   "title": "Writing",
+   "icon": "edit"
+  },
+  {
+   "id": "folders",
+   "title": "Folders, rules and categories",
+   "icon": "folder"
+  },
+  {
+   "id": "contacts",
+   "title": "Contacts and search",
+   "icon": "users"
+  },
+  {
+   "id": "security",
+   "title": "Security and sign-in",
+   "icon": "lock"
+  },
+  {
+   "id": "patient",
+   "title": "Patient information",
+   "icon": "security"
+  },
+  {
+   "id": "phone",
+   "title": "Phone and offline",
+   "icon": "monitoring"
+  },
+  {
+   "id": "admin",
+   "title": "For administrators",
+   "icon": "department-master"
+  },
+  {
+   "id": "sending",
+   "title": "Sending systems (developers)",
+   "icon": "server-stack"
+  }
+ ],
+ "articles": [
+  {
+   "id": "sign-in",
+   "part": "start",
+   "title": "Sign in to your mail",
+   "summary": "Sign in with your address and password; choose whether this is your own device or a shared computer.",
+   "steps": [
+    "Open your organisation's mail address in a browser. The page says \"Sign in to your mail\" with your organisation's name.",
+    "Type your address (or just the part before @, on your organisation's own page) and your password, then press Sign in.",
+    "Under \"This computer is\", choose My own device (stay signed in) or Shared computer (signs out after 15 minutes idle).",
+    "If you set up two-step sign-in, type the code from your authenticator app, use your passkey, or use a backup code."
+   ],
+   "tip": "On a shared computer, always choose Shared computer: nothing is kept on it, and you are signed out when you leave it.",
+   "show": null,
+   "related": [
+    "sign-out",
+    "two-step",
+    "password"
+   ],
+   "keywords": "login log in password signin",
+   "release": "rc.13",
+   "org": null
+  },
+  {
+   "id": "language",
+   "part": "start",
+   "title": "Choose your language",
+   "summary": "Anjal speaks the languages your organisation has switched on.",
+   "steps": [
+    "On the sign-in page, open the language menu at the top right and pick your language.",
+    "Once signed in, open Settings, then Language and time.",
+    "Choose your language, your time zone and how dates look, then save."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/language",
+    "at": ".setmain",
+    "line": "Your language, time zone and dates are here."
+   },
+   "related": [
+    "theme"
+   ],
+   "keywords": "tamil hindi malayalam marathi gujarati language time zone date format",
+   "release": "rc.13",
+   "org": null
+  },
+  {
+   "id": "first-look",
+   "part": "start",
+   "title": "Find your way around",
+   "summary": "The rail on the left holds Today, your folders, Contacts, the dashboard and Settings.",
+   "steps": [
+    "Today, at the top of the rail, shows your unread mail and what needs you first.",
+    "Below it are Inbox, Drafts, Sent, Scheduled, Archive, Junk, Trash and your own folders.",
+    "At the bottom: Dashboard, Organisation (for administrators), Settings and your initials, which open your account menu.",
+    "Press ? anywhere to see every keyboard shortcut, or Settings, Help, Take the tour again."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/dashboard/today",
+    "at": "nav.rail",
+    "line": "Everything starts from the rail."
+   },
+   "related": [
+    "today",
+    "shortcuts"
+   ],
+   "keywords": "rail menu navigation tour",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "sign-out",
+   "part": "start",
+   "title": "Sign out, here or everywhere",
+   "summary": "Sign out from the account menu; sign out of every other device from Security.",
+   "steps": [
+    "Click your initials at the bottom of the rail.",
+    "Choose Sign out.",
+    "To sign out on every other device, open Settings, Security, and press Sign out everywhere else."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/dashboard/today",
+    "at": ".rail-account",
+    "line": "Your account menu, with Sign out."
+   },
+   "related": [
+    "devices",
+    "sign-in"
+   ],
+   "keywords": "logout log out signout shared computer",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "theme",
+   "part": "start",
+   "title": "Change the colours and density",
+   "summary": "Pick light or dark, a colour, and how much fits on the screen.",
+   "steps": [
+    "Open Settings, then Appearance.",
+    "Under Light or dark choose Light, Dark or Follow the device.",
+    "Pick a colour, then choose Comfortable or Compact density and your layout (three panes, Focus or List only).",
+    "Changes apply at once. Only you see them."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/appearance",
+    "at": ".setmain",
+    "line": "Theme, density and layout."
+   },
+   "related": [
+    "language"
+   ],
+   "keywords": "dark mode light mode colour color theme density compact layout",
+   "release": "rc.15",
+   "org": null
+  },
+  {
+   "id": "shortcuts",
+   "part": "start",
+   "title": "Use the keyboard",
+   "summary": "Press ? anywhere for every shortcut. The most used: j and k to move, e to archive, # to delete, r to reply.",
+   "steps": [
+    "Press ? to open the shortcuts panel.",
+    "In a list: j and k move down and up, Enter opens, x ticks.",
+    "On a message: r replies, a replies to all, f forwards, e archives, # deletes, s flags.",
+    "Tips on the buttons name their shortcut, for example \"Archive · e\"."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "first-look"
+   ],
+   "keywords": "keyboard shortcut keys hotkeys",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "today",
+   "part": "today",
+   "title": "Start your day on Today",
+   "summary": "Today shows only your unread mail: what needs you first, everything else, then lists and notifications.",
+   "steps": [
+    "After you sign in, Anjal opens on Today.",
+    "Needs you holds answers to your own mail, mail with you in To, and people you write to often. Each row says why.",
+    "Everything else follows; lists and notifications are folded into one line you can open or mark read.",
+    "The side shows what needs attention and your morning: what arrived since yesterday evening and what went to Junk."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/dashboard/today",
+    "at": ".tdhead",
+    "line": "Today: your unread mail, grouped by why it needs you."
+   },
+   "related": [
+    "reply-today",
+    "open-on"
+   ],
+   "keywords": "today home landing unread needs you",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "reply-today",
+   "part": "today",
+   "title": "Read and reply without leaving Today",
+   "summary": "Click a row: the letter opens beside the list, with a quick reply at its end.",
+   "steps": [
+    "On Today, click a message. The letter and its envelope open beside the list.",
+    "Type in the box at the end of the letter and press Send, or Ctrl + Enter.",
+    "The next unread message opens by itself. Messages you dealt with stay in the list, faded, until you leave Today.",
+    "Press Full reply to write with formatting, attachments or more people."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/dashboard/today",
+    "at": ".tdhead",
+    "line": "Click a row below to read it here."
+   },
+   "related": [
+    "today",
+    "reply"
+   ],
+   "keywords": "quick reply ctrl enter next unread",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "open-on",
+   "part": "today",
+   "title": "Open Anjal on the Inbox instead",
+   "summary": "If you prefer, Anjal can open on your Inbox rather than Today.",
+   "steps": [
+    "Open Settings, then Mail.",
+    "Under Open Anjal on, choose Inbox.",
+    "Shared mailboxes always open on their Inbox."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/mail",
+    "at": ".setmain",
+    "line": "Open Anjal on: Today or Inbox."
+   },
+   "related": [
+    "today"
+   ],
+   "keywords": "start page landing inbox first",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "dashboard",
+   "part": "today",
+   "title": "Read your dashboard",
+   "summary": "Six pages of figures about your own mail: Overview, Mail flow, People, Replies, Safety and Storage.",
+   "steps": [
+    "Open Dashboard from the rail.",
+    "Choose a page from the tabs, and a period at the top: Today, 7 days, 30 days, 90 days, 12 months or Custom.",
+    "Every card has a Chart and a Table switch; the table can be sorted and taken as CSV.",
+    "Every number opens the messages it counts."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/dashboard",
+    "at": ".dtabs",
+    "line": "Six pages, each with its own figures."
+   },
+   "related": [
+    "today"
+   ],
+   "keywords": "dashboard figures charts statistics reply time storage",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "envelope",
+   "part": "reading",
+   "title": "Read a message and its envelope",
+   "summary": "The letter shows the subject and the text; the envelope beside it shows who sent it, to whom, the files and the stamps.",
+   "steps": [
+    "Open a message. The letter is on the left, the envelope on the right.",
+    "The envelope's address block shows From, To and Cc; people outside your organisation are marked \"· outside\".",
+    "Enclosed lists the files, each with its type (PDF, JPG, DICOM...).",
+    "The stamps show what Anjal proved: a verified sender, mail that arrived encrypted, an original kept unchanged."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "stamps",
+    "print"
+   ],
+   "keywords": "envelope stamps from to cc attachments enclosed",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "stamps",
+   "part": "reading",
+   "title": "What the stamps mean",
+   "summary": "Green stamps are what Anjal could prove about a message.",
+   "steps": [
+    "Verified sender: the sending domain's records (SPF, DKIM, DMARC) agree that this sender is who they say.",
+    "Arrived encrypted: the message came over an encrypted connection.",
+    "Original kept: Anjal keeps the exact message as it arrived, with its fingerprint, as proof.",
+    "No stamp means it could not be proved; be careful with links and attachments."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "envelope",
+    "junk"
+   ],
+   "keywords": "verified encrypted original proof seal",
+   "release": "rc.11",
+   "org": null
+  },
+  {
+   "id": "reply",
+   "part": "reading",
+   "title": "Reply, reply all or forward",
+   "summary": "Use the buttons at the end of the letter, or r, a and f.",
+   "steps": [
+    "Open the message.",
+    "Press Reply (r), Reply all (a) or Forward (f).",
+    "When many people, or anyone outside your organisation, would get a reply all, Anjal asks first."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "reply-today",
+    "write"
+   ],
+   "keywords": "reply all forward respond",
+   "release": "rc.11",
+   "org": null
+  },
+  {
+   "id": "flag",
+   "part": "reading",
+   "title": "Flag a message to come back to",
+   "summary": "The flag marks a message; flagged mail is easy to find again.",
+   "steps": [
+    "Open the message and press Flag in the envelope, or press s.",
+    "In a list, click the flag on the row.",
+    "Press it again to take the flag off."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "archive"
+   ],
+   "keywords": "flag star mark important",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "archive",
+   "part": "reading",
+   "title": "Archive or delete",
+   "summary": "Archive keeps mail you are done with, out of the Inbox; Delete moves it to Trash.",
+   "steps": [
+    "Open the message, or tick it in a list.",
+    "Press Archive (e) to keep it out of the way, or Delete (#) to move it to Trash.",
+    "The bar at the bottom of the screen offers Undo for a few seconds.",
+    "Trash empties itself after its time (Settings, Mail, Empty Trash after)."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "undo"
+   ],
+   "keywords": "archive delete trash remove bin",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "undo",
+   "part": "reading",
+   "title": "Undo what you just did",
+   "summary": "Archive, Delete, Move and Send can be undone from the bar at the bottom of the screen.",
+   "steps": [
+    "After an action, the bar at the bottom says what happened.",
+    "Press Undo while it is shown.",
+    "For Send, the wait is set in Settings, Mail, Undo Send."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "archive",
+    "send-later"
+   ],
+   "keywords": "undo mistake take back unsend",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "print",
+   "part": "reading",
+   "title": "Print a message or see its original",
+   "summary": "Print gives a clean page; Show original gives the message exactly as it arrived.",
+   "steps": [
+    "Open the message.",
+    "Press Print in the envelope for a printable page.",
+    "Under More, choose Show original to see the raw message and download it."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "stamps"
+   ],
+   "keywords": "print original raw source eml",
+   "release": "rc.11",
+   "org": null
+  },
+  {
+   "id": "write",
+   "part": "writing",
+   "title": "Write a new message",
+   "summary": "Compose is two sheets: the letter for the subject and text, the envelope for who gets it and the files.",
+   "steps": [
+    "Press Compose at the top of the rail, or c.",
+    "In the envelope, type the people in To and Cc; press + Bcc for blind copies. People outside your organisation are marked.",
+    "Write the subject and the text in the letter. The formatting bar is above the text.",
+    "Press Send (Ctrl + Enter). The bar at the bottom offers Undo for a few seconds."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/compose",
+    "at": ".csend",
+    "line": "Send, Send later and More are here."
+   },
+   "related": [
+    "attach",
+    "send-later",
+    "templates"
+   ],
+   "keywords": "compose new message write email",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "attach",
+   "part": "writing",
+   "title": "Add files",
+   "summary": "Drop files on the envelope or press Attach. Each file shows its type.",
+   "steps": [
+    "In Compose, drag files onto the dashed area in the envelope, or click it to choose files.",
+    "Each file shows its type and size under Enclosed.",
+    "Your organisation may limit the total size of a message."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "write",
+    "outside"
+   ],
+   "keywords": "attach attachment file upload pdf",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "send-later",
+   "part": "writing",
+   "title": "Send later",
+   "summary": "Choose when a message goes; it waits in Scheduled until then.",
+   "steps": [
+    "In Compose, press the clock beside Send.",
+    "Pick a time, or type a date and time.",
+    "The message waits in Scheduled; you can change or cancel it until it goes."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/compose",
+    "at": ".csend",
+    "line": "The clock beside Send."
+   },
+   "related": [
+    "write",
+    "undo"
+   ],
+   "keywords": "schedule send later timer delay",
+   "release": "rc.12",
+   "org": null
+  },
+  {
+   "id": "expect-reply",
+   "part": "writing",
+   "title": "Expect a reply",
+   "summary": "Mark a message you need an answer to; Anjal shows it in Waiting for a reply.",
+   "steps": [
+    "In Compose, switch on Expect a reply at the bottom of the letter.",
+    "After you send it, it appears in the dashboard's Replies page under Waiting for a reply until someone answers."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "dashboard"
+   ],
+   "keywords": "follow up waiting reply reminder",
+   "release": "rc.15",
+   "org": null
+  },
+  {
+   "id": "templates",
+   "part": "writing",
+   "title": "Use a template",
+   "summary": "Start a message from a template your organisation or you saved.",
+   "steps": [
+    "In Compose, press More, then Templates, and pick one.",
+    "To make your own, write the message and choose More, Save as template.",
+    "Administrators can save a template for everyone."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "write"
+   ],
+   "keywords": "template canned reply standard letter",
+   "release": "rc.12",
+   "org": null
+  },
+  {
+   "id": "send-one-each",
+   "part": "writing",
+   "title": "Send one each",
+   "summary": "Send the same message to many people, each getting their own copy with their name.",
+   "steps": [
+    "In Compose, put a group or many people in To.",
+    "Press More, then Send one each.",
+    "Each person gets their own copy; the copies go out over a few minutes."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "groups"
+   ],
+   "keywords": "mail merge bulk personal copies",
+   "release": "rc.12",
+   "org": null
+  },
+  {
+   "id": "folders",
+   "part": "folders",
+   "title": "Make a folder",
+   "summary": "Your own folders sit under the standard ones in the rail.",
+   "steps": [
+    "Open Settings, then Folders and rules.",
+    "Type a name under Your folders and press Create.",
+    "A folder can be removed once it is empty."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/rules",
+    "at": ".setmain",
+    "line": "Your folders and your rules."
+   },
+   "related": [
+    "rules"
+   ],
+   "keywords": "folder create new label organise",
+   "release": "rc.12",
+   "org": null
+  },
+  {
+   "id": "rules",
+   "part": "folders",
+   "title": "File mail automatically with a rule",
+   "summary": "A rule moves, files or marks mail as it arrives.",
+   "steps": [
+    "Open Settings, then Folders and rules.",
+    "Press Add rule, say which mail (from, subject, words) and what to do with it.",
+    "Rules run top first; the first that matches acts. They apply to mail arriving from now on."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/rules",
+    "at": ".setmain",
+    "line": "Add rule is here."
+   },
+   "related": [
+    "folders",
+    "categories"
+   ],
+   "keywords": "rule filter automatic move sort",
+   "release": "rc.12",
+   "org": null
+  },
+  {
+   "id": "categories",
+   "part": "folders",
+   "title": "Use categories",
+   "summary": "A category is a coloured label; your organisation shares some, and you can add your own.",
+   "steps": [
+    "Open a message and choose a category in the envelope.",
+    "To make your own, open Settings, Categories, and press New category.",
+    "A sender can be filed in a category automatically."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "rules"
+   ],
+   "keywords": "category label colour tag",
+   "release": "rc.11",
+   "org": null
+  },
+  {
+   "id": "junk",
+   "part": "folders",
+   "title": "Keep junk out, or let a sender in",
+   "summary": "Mark a message as junk, or tell Anjal a sender is always welcome.",
+   "steps": [
+    "On a message in Junk, press Not junk to move it back and trust the sender.",
+    "On unwanted mail, press Mark as junk.",
+    "Open Settings, Junk and senders to see who is always or never sent to Junk.",
+    "Junk empties itself after its time."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/senders",
+    "at": ".setmain",
+    "line": "Always or never to Junk."
+   },
+   "related": [
+    "stamps"
+   ],
+   "keywords": "spam junk block allow sender whitelist",
+   "release": "rc.13",
+   "org": null
+  },
+  {
+   "id": "search",
+   "part": "contacts",
+   "title": "Search your mail",
+   "summary": "Type words, or use filters: from:meera has:attachment last week.",
+   "steps": [
+    "Type in the search box at the top of the list, or press /.",
+    "Add filters by typing them: from:name, has:attachment, after:2026-10-01, before:..., in:all, or words like \"last week\".",
+    "Each filter shows as a chip under the box; press its × to take it off.",
+    "Search looks in the folder you are in; in:all, or All folders, looks everywhere."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "contacts"
+   ],
+   "keywords": "search find filter from has attachment date",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "contacts",
+   "part": "contacts",
+   "title": "Save a contact",
+   "summary": "Contacts give names to addresses and come first in suggestions.",
+   "steps": [
+    "Open Contacts from the rail.",
+    "Press + to add a person, or save a sender from any message's envelope.",
+    "Contacts outside your organisation are marked \"· outside\".",
+    "Import and export with vCard or CSV."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/contacts",
+    "at": ".ctabs",
+    "line": "People, Groups and Organisation."
+   },
+   "related": [
+    "groups",
+    "directory"
+   ],
+   "keywords": "contact address book people save",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "groups",
+   "part": "contacts",
+   "title": "Make a group",
+   "summary": "A group is many people as one recipient.",
+   "steps": [
+    "Open Contacts, then Groups.",
+    "Press +, name the group and list the addresses, one a line.",
+    "Write to the group from its page, or type its name in To."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "contacts",
+    "send-one-each"
+   ],
+   "keywords": "group distribution list team",
+   "release": "rc.12",
+   "org": null
+  },
+  {
+   "id": "directory",
+   "part": "contacts",
+   "title": "Find a colleague",
+   "summary": "The Organisation tab lists everyone in your organisation.",
+   "steps": [
+    "Open Contacts, then Organisation.",
+    "Type a name in the search box.",
+    "Click a person to write to them."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "contacts"
+   ],
+   "keywords": "colleague directory staff organisation",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "password",
+   "part": "security",
+   "title": "Change your password",
+   "summary": "A long password is the best one: 15 characters alone, or 12 with two-step.",
+   "steps": [
+    "Open Settings, then Security.",
+    "Type your current password and the new one twice, then press Change password.",
+    "Anjal refuses passwords known from leaks; a sentence of a few words works well."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/security",
+    "at": ".setmain",
+    "line": "Password, two-step and devices."
+   },
+   "related": [
+    "two-step",
+    "recovery"
+   ],
+   "keywords": "password change reset forgot",
+   "release": "rc.15",
+   "org": null
+  },
+  {
+   "id": "two-step",
+   "part": "security",
+   "title": "Turn on two-step sign-in",
+   "summary": "After your password, Anjal asks for a code from your phone or your passkey.",
+   "steps": [
+    "Open Settings, Security, and press Set up two-step sign-in.",
+    "Scan the picture with your authenticator app, or type the key into it.",
+    "Type the code it shows to finish, then save your backup codes somewhere safe."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/security",
+    "at": ".setmain",
+    "line": "Set up two-step sign-in is here."
+   },
+   "related": [
+    "passkey",
+    "backup-codes"
+   ],
+   "keywords": "2fa two factor authenticator otp code",
+   "release": "rc.13",
+   "org": "Your organisation may require two-step for administrators or everyone."
+  },
+  {
+   "id": "passkey",
+   "part": "security",
+   "title": "Add a passkey",
+   "summary": "A passkey on your phone or computer can be your second step.",
+   "steps": [
+    "Open Settings, Security.",
+    "Press Add a passkey and follow your device.",
+    "Next time, choose Use a passkey at the second step."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "two-step"
+   ],
+   "keywords": "passkey fingerprint face webauthn",
+   "release": "rc.13",
+   "org": null
+  },
+  {
+   "id": "backup-codes",
+   "part": "security",
+   "title": "Keep backup codes",
+   "summary": "Backup codes let you in when your phone is not with you.",
+   "steps": [
+    "Open Settings, Security, Backup codes.",
+    "Press Make new backup codes, then Download or print them.",
+    "Each code works once. Keep them away from your computer."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "two-step"
+   ],
+   "keywords": "backup codes recovery lost phone",
+   "release": "rc.13",
+   "org": null
+  },
+  {
+   "id": "recovery",
+   "part": "security",
+   "title": "Set a recovery address",
+   "summary": "A forgotten password is reset with a code sent to your personal address.",
+   "steps": [
+    "Open Settings, Security, Recovery address.",
+    "Type a personal address (not this one) and save.",
+    "If you forget your password, press Forgot password on the sign-in page; the code goes there."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "password"
+   ],
+   "keywords": "forgot password reset code personal email",
+   "release": "rc.13",
+   "org": null
+  },
+  {
+   "id": "devices",
+   "part": "security",
+   "title": "See where you are signed in",
+   "summary": "Signed-in devices lists each browser; sign one out, or all others.",
+   "steps": [
+    "Open Settings, Security, Signed-in devices.",
+    "Each device shows where and when it was last used.",
+    "Press Sign out beside one, or Sign out everywhere else."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "sign-out"
+   ],
+   "keywords": "devices sessions signed in sign out lost",
+   "release": "rc.13",
+   "org": null
+  },
+  {
+   "id": "outside",
+   "part": "patient",
+   "title": "Mail to people outside the organisation",
+   "summary": "Compose warns when someone is outside your organisation, and says so again when there is an attachment.",
+   "steps": [
+    "In Compose, a warning under the addresses names anyone outside your organisation.",
+    "When there is an attachment as well, the warning says so. Check the addresses before you send patient information.",
+    "In a message you received, the envelope marks outside people \"· outside\".",
+    "Your organisation decides who may write outside."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "write",
+    "stamps"
+   ],
+   "keywords": "outside external patient privacy confidential",
+   "release": "rc.16",
+   "org": "Your organisation may limit who can write outside."
+  },
+  {
+   "id": "originals",
+   "part": "patient",
+   "title": "Originals kept as proof",
+   "summary": "Anjal keeps every message exactly as it was sent or received, with its fingerprint.",
+   "steps": [
+    "Every message you send or receive is kept as it was, with a SHA-256 fingerprint.",
+    "The Original kept stamp on the envelope says so.",
+    "Your organisation's retention rules decide how long; a legal hold keeps everything."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "stamps",
+    "retention"
+   ],
+   "keywords": "evidence proof original legal hold audit",
+   "release": "rc.8",
+   "org": null
+  },
+  {
+   "id": "phone",
+   "part": "phone",
+   "title": "Use Anjal on your phone",
+   "summary": "The same address works on a phone: Today, Inbox, Compose, Search and More at the bottom.",
+   "steps": [
+    "Open your organisation's mail address in the phone's browser and sign in.",
+    "The bar at the bottom has Today, Inbox, Compose, Search and More.",
+    "On a message, the envelope strip under the back bar opens the full envelope."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "offline"
+   ],
+   "keywords": "mobile phone android iphone",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "offline",
+   "part": "phone",
+   "title": "Read your list offline",
+   "summary": "On your own device, Anjal can keep your list, locked with an offline code.",
+   "steps": [
+    "Open Settings, Security, Offline mail.",
+    "Set the offline code (at least 6 characters).",
+    "When there is no connection, open Anjal and type the code to see your list.",
+    "Mail is never kept on a shared computer."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "phone"
+   ],
+   "keywords": "offline no internet connection",
+   "release": "rc.14",
+   "org": null
+  },
+  {
+   "id": "invite",
+   "part": "admin",
+   "title": "Invite people",
+   "summary": "Invite each person; they choose their own password from the link.",
+   "steps": [
+    "Open Organisation, then People.",
+    "Press Invite people, type the name and address (and a personal address for the link).",
+    "Give them the link, or let Anjal send it; it works once, for 7 days.",
+    "To invite many at once, import a CSV with a Name and an Address column."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/people",
+    "at": ".setmain",
+    "line": "Invite people is here."
+   },
+   "related": [
+    "setup",
+    "signin-rules"
+   ],
+   "keywords": "invite add user person staff account",
+   "release": "rc.14",
+   "org": null
+  },
+  {
+   "id": "setup",
+   "part": "admin",
+   "title": "Set up your organisation",
+   "summary": "The Set up page lists six steps; each shows when it was done.",
+   "steps": [
+    "Open Organisation; until everything is done it opens on Set up.",
+    "Do the steps in order: Name and logo, Add your domain, Prove the domain, Invite your first people, Shared mailboxes, Applications that send mail.",
+    "The step to do now has its button; finished steps show their date."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/setup",
+    "at": ".setmain",
+    "line": "Six steps to set up."
+   },
+   "related": [
+    "domain",
+    "invite"
+   ],
+   "keywords": "setup onboarding checklist start organisation",
+   "release": "rc.16",
+   "org": null
+  },
+  {
+   "id": "domain",
+   "part": "admin",
+   "title": "Add and prove a domain",
+   "summary": "Your domain's DNS records tell the world your mail is real.",
+   "steps": [
+    "Open Organisation, Domains, and add your domain.",
+    "Publish the records Anjal shows (MX, SPF, DKIM, DMARC) at your DNS provider.",
+    "Press Check the records; each turns green when it is right. Anjal checks them every day."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/domains",
+    "at": ".setmain",
+    "line": "Your domains and their records."
+   },
+   "related": [
+    "setup",
+    "sending-dns"
+   ],
+   "keywords": "domain dns mx spf dkim dmarc records",
+   "release": "rc.14",
+   "org": null
+  },
+  {
+   "id": "shared",
+   "part": "admin",
+   "title": "Make a shared mailbox",
+   "summary": "A shared mailbox (reception@, opd@) is read and answered by several people.",
+   "steps": [
+    "Open Organisation, Shared mailboxes.",
+    "Add one, then give people read only, read and send, or manage.",
+    "People open it from the rail; it always opens on its Inbox."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "invite"
+   ],
+   "keywords": "shared mailbox reception team inbox delegate",
+   "release": "rc.14",
+   "org": null
+  },
+  {
+   "id": "signin-rules",
+   "part": "admin",
+   "title": "Set sign-in rules",
+   "summary": "Decide two-step, idle times and password length for your organisation.",
+   "steps": [
+    "Open Organisation, Sign-in and sessions.",
+    "Choose who must use two-step, how long idle sessions last, and a longer password if you wish.",
+    "Rules apply at each person's next sign-in."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "two-step",
+    "invite"
+   ],
+   "keywords": "policy two-step required idle session timeout",
+   "release": "rc.14",
+   "org": null
+  },
+  {
+   "id": "retention",
+   "part": "admin",
+   "title": "Retention and legal hold",
+   "summary": "How long mail is kept, and holding a mailbox when a case needs it.",
+   "steps": [
+    "Open Organisation, Retention.",
+    "Set how long Junk and Trash keep mail, and copies passed to applications.",
+    "Place a legal hold on a mailbox: nothing is deleted from it until the hold is lifted."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "originals"
+   ],
+   "keywords": "retention legal hold keep delete compliance",
+   "release": "rc.14",
+   "org": null
+  },
+  {
+   "id": "activity",
+   "part": "admin",
+   "title": "Read the activity log",
+   "summary": "Every sign-in and administrator action, with a chain that shows nothing was changed.",
+   "steps": [
+    "Open Organisation, Activity log.",
+    "Filter by person or action, and export as CSV.",
+    "Press Check the chain to prove no entry was changed or removed."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "retention"
+   ],
+   "keywords": "audit log activity history who did",
+   "release": "rc.14",
+   "org": null
+  },
+  {
+   "id": "app-add",
+   "part": "sending",
+   "title": "Add an application",
+   "summary": "Each system that sends mail gets its own address and send-only keys.",
+   "steps": [
+    "Open Organisation, Sending systems, and press Add an application.",
+    "Give it a name, what it does, and the one address it sends as.",
+    "Make a key. It is shown once: copy it into the application.",
+    "Rotate a key by making a new one, switching the application over, then ending the old one."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/apps",
+    "at": ".sendsys",
+    "line": "Sending systems, with Add an application."
+   },
+   "related": [
+    "app-smtp",
+    "app-messages"
+   ],
+   "keywords": "application key api smtp integration his",
+   "release": "rc.17",
+   "org": null
+  },
+  {
+   "id": "app-smtp",
+   "part": "sending",
+   "title": "Send from an application",
+   "summary": "Applications sign in on port 587 with their key and send as their own address.",
+   "steps": [
+    "Open Organisation, Sending systems, Applications, for the sample.",
+    "Point the application at your mail host on port 587, with STARTTLS.",
+    "Sign in with the key's user name and the key; send as the application's address.",
+    "Press Send a test to check delivery end to end."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-add",
+    "app-messages"
+   ],
+   "keywords": "smtp 587 port curl integration send",
+   "release": "rc.17",
+   "org": null
+  },
+  {
+   "id": "app-messages",
+   "part": "sending",
+   "title": "Find out what happened to a message",
+   "summary": "Messages shows every message an application sent, with every attempt and the receiving server's own reply.",
+   "steps": [
+    "Open Organisation, Sending systems, Messages.",
+    "Search by address, subject or message id; filter by status and application.",
+    "Click a message: the timeline shows each try, the server, the TLS used and its exact reply.",
+    "While it is still being tried you can press Try now or Stop trying; .eml downloads the original."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/apps?tab=messages",
+    "at": ".sendsys",
+    "line": "Every message, with its tries."
+   },
+   "related": [
+    "app-donotsend"
+   ],
+   "keywords": "delivery delayed bounced failed status tries log",
+   "release": "rc.17",
+   "org": null
+  },
+  {
+   "id": "app-donotsend",
+   "part": "sending",
+   "title": "The do-not-send list",
+   "summary": "Addresses that bounced hard or were given up on three times are not sent to again.",
+   "steps": [
+    "Open Organisation, Sending systems, Do not send.",
+    "Anjal adds an address after a hard bounce (the mailbox or domain does not exist), or when it gives up three times.",
+    "The API answers suppressed for such an address; mail sent by SMTP is marked Suppressed.",
+    "Add an address yourself, or remove one that works again. People's own mail is never held."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-messages"
+   ],
+   "keywords": "suppression bounce do not send blocklist",
+   "release": "rc.17",
+   "org": null
+  },
+  {
+   "id": "app-webhooks",
+   "part": "sending",
+   "title": "Webhooks and Replay",
+   "summary": "Mail to an application's +tag addresses is posted to its webhook; failed deliveries can be replayed.",
+   "steps": [
+    "Open Organisation, Sending systems, Webhooks.",
+    "Each delivery shows the time, the webhook's answer and the tries.",
+    "When a delivery failed, press Replay once the webhook is working again."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-add"
+   ],
+   "keywords": "webhook inbound replay callback",
+   "release": "rc.17",
+   "org": null
+  },
+  {
+   "id": "sending-dns",
+   "part": "sending",
+   "title": "Check your sending domain",
+   "summary": "SPF, DKIM, DMARC and MTA-STS decide whether receiving servers trust your applications' mail.",
+   "steps": [
+    "Open Organisation, Sending systems, Domains and DNS.",
+    "Each record shows Correct, Missing or Differs.",
+    "Fix a record at your DNS provider, then check again from Domains."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "domain"
+   ],
+   "keywords": "spf dkim dmarc mta-sts dns deliverability",
+   "release": "rc.17",
+   "org": null
+  }
+ ]
+}

@@ -3134,10 +3134,12 @@ time > .td { font-size: 11px; font-weight: 400; color: var(--ink-subtle); }
 /* The activity log has six columns: it changes to blocks a little sooner. */
 @container (max-width: 760px) {
   .logtable thead { display: none; }
-  .logtable tbody tr { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) auto; grid-template-areas: "time who result" ". action action" ". on from";
+  .logtable tbody tr { display: grid; grid-template-columns: 6.5em minmax(0, 1fr) auto; grid-template-areas: "time who result" ". action action" ". on from";
                        column-gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
   .logtable tbody td { display: block; padding: 0; border: 0; }
-  .logtable tbody td:nth-child(1) { grid-area: time; }
+  /* CI, 14 Oct 2026: an entry from an earlier day reads "Yesterday 23:56" or "8 Oct 23:56", which reached
+     41px into the next column; the day goes above the time and the column is a little wider. */
+  .logtable tbody td:nth-child(1) { grid-area: time; white-space: normal; overflow-wrap: anywhere; }
   .logtable tbody td:nth-child(2) { grid-area: who; }
   .logtable tbody td:nth-child(3) { grid-area: action; color: var(--ink-muted); }
   .logtable tbody td:nth-child(4) { grid-area: on; color: var(--ink-muted); }
@@ -3918,6 +3920,152 @@ a.cfig:hover { border-color: var(--brand); }
 .sendsys { container-type: inline-size; }
 @container (max-width: 820px) { .sskpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 720px) { .sskpis, .sskpis.three { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ===================================================================
+   rc.18 - the help guide and Lajna (design review section 11, [8a]-[8g]).
+   =================================================================== */
+.helphome { max-width: 1180px; margin: 0 auto; padding: 20px 24px 40px; }
+.helphead { padding: 28px 30px; border-radius: 20px; background: var(--brand); color: var(--on-brand); display: flex; flex-direction: column; gap: 14px; }
+.helphead h1 { margin: 0; font-size: 30px; font-weight: 750; letter-spacing: -0.02em; color: var(--on-brand); }
+.helpsearch { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.helpsearch .sfield { flex: 1 1 360px; position: relative; display: flex; align-items: center; }
+.helpsearch .sbox { width: 100%; height: 36px; border-radius: 12px; padding-left: 38px; font-size: 15px; }
+.helpsearch .si { position: absolute; left: 13px; color: var(--ink-muted); }
+.helplajna { background: var(--accent); color: var(--ink); border: 0; gap: 8px; }
+.helplajna:hover { background: color-mix(in srgb, var(--accent) 85%, var(--ink)); }
+.helpchips { display: flex; flex-wrap: wrap; gap: 8px; }
+.helpchips a { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px; background: color-mix(in srgb, var(--on-brand) 14%, transparent); color: var(--on-brand); font-size: 13px; text-decoration: none; }
+.helpchips a:hover { background: color-mix(in srgb, var(--on-brand) 24%, transparent); }
+.helpgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin: 20px 0; }
+.helpcard { display: flex; flex-direction: column; gap: 6px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-200); color: var(--ink); text-decoration: none; }
+.helpcard:hover { border-color: var(--brand); }
+.helpcard b { font-size: 15px; }
+.helpcard > span:last-child { font-size: 13px; color: var(--ink-muted); }
+.helpicon { width: 38px; height: 38px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--brand-soft); color: var(--brand); }
+.helpfoot { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; }
+.helpnew, .helpstuck { padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-200); }
+.helpresults { margin-top: 16px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-200); }
+.helpnew h2, .helpstuck h2, .helpresults h2 { margin: 0 0 10px; font-size: 16px; }
+.helprow { display: flex; flex-direction: column; gap: 2px; padding: 9px 0; border-top: 1px solid var(--line); color: var(--ink); text-decoration: none; }
+.helprow:first-of-type { border-top: 0; }
+.helprow b { font-size: 14px; color: var(--brand); }
+.helprow span { font-size: 13px; color: var(--ink-muted); }
+.helpstuck p { font-size: 13.5px; color: var(--ink-muted); }
+.helpadmin { display: flex; align-items: center; gap: 6px; color: var(--ink) !important; }
+.helpart { max-width: 1180px; margin: 0 auto; padding: 20px 24px 40px; display: grid; grid-template-columns: 240px minmax(0, 1fr) 200px; gap: 24px; align-items: start; }
+.helpnav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 12px; font-size: 13.5px; }
+.helpnav a { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--ink-muted); text-decoration: none; }
+.helpnav a:hover { background: var(--surface-inset); color: var(--ink); }
+.helpnav .helpnav-home { color: var(--brand); font-weight: 600; margin-bottom: 6px; }
+.helpnav .helpnav-part.on { color: var(--ink); font-weight: 700; }
+.helpnav .helpnav-art { padding-left: 34px; font-size: 13px; }
+.helpnav .helpnav-art[aria-current="page"] { background: var(--brand-soft); color: var(--brand); font-weight: 600; }
+.helpbody h1 { margin: 4px 0 6px; font-size: 32px; font-weight: 750; letter-spacing: -0.02em; line-height: 1.2; }
+.helpcrumb { margin: 0; font-size: 13px; color: var(--ink-muted); }
+.helpcrumb a { color: var(--brand); text-decoration: none; }
+.helpmeta { margin: 0 0 14px; font-size: 13px; color: var(--ink-muted); }
+.helplead { font-size: 16px; line-height: 1.55; margin: 0 0 16px; }
+.helpshow { gap: 8px; margin-bottom: 8px; }
+.helpbody h2 { font-size: 17px; margin: 22px 0 10px; }
+.helpsteps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 10px; }
+.helpsteps li { counter-increment: step; position: relative; padding: 12px 14px 12px 50px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-200); font-size: 15px; line-height: 1.55; }
+.helpsteps li::before { content: counter(step); position: absolute; left: 14px; top: 12px; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: var(--on-brand); font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.helptip { display: flex; gap: 10px; margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; background: var(--accent-soft); color: var(--ink); }
+.helptip .lipicon { color: var(--warning); flex: 0 0 auto; margin-top: 2px; }
+.helporg { display: flex; gap: 10px; margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; background: var(--surface-inset); color: var(--ink); }
+.helpfeedback { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); }
+.helpfeedback h2 { margin: 0; font-size: 15px; }
+.helpfeedback form { display: inline-flex; gap: 6px; }
+.helpask { margin-left: auto; }
+.helpside { position: sticky; top: 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.helpside h2 { margin: 10px 0 2px; font-size: 12.5px; text-transform: none; color: var(--ink-muted); }
+.helpside a { color: var(--brand); text-decoration: none; }
+@media (max-width: 1100px) { .helpart { grid-template-columns: minmax(0, 1fr); } .helpnav, .helpside { position: static; } .helpnav .helpnav-art { padding-left: 10px; } .helpfoot { grid-template-columns: 1fr; } }
+
+/* Lajna's mark: the tile, the flap turned up, three fading dots. */
+.lajnamark .mt-tile { fill: var(--brand); }
+.lajnamark .mt-flap { fill: none; stroke: var(--accent); stroke-width: 11; stroke-linecap: round; stroke-linejoin: round; }
+.lajnamark .lj-dot { fill: var(--on-brand); }
+.lajnamark .lj-d2 { opacity: 0.66; }
+.lajnamark .lj-d3 { opacity: 0.33; }
+
+/* The button on every page, bottom right; above the bar on a phone. */
+.lajnabtn { position: fixed; right: 18px; bottom: 56px; z-index: 40; display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px 0 12px; border-radius: 999px; background: var(--surface-200); color: var(--ink); border: 1px solid var(--line); box-shadow: var(--shadow-lg, 0 10px 30px -12px rgba(0, 0, 0, 0.35)); font-weight: 700; font-size: 14px; text-decoration: none; }
+.lajnabtn:hover { border-color: var(--brand); }
+.lajna-open .lajnabtn { display: none; }
+/* Screen check 12 Oct 2026: the floating button covered the envelope's More; on a computer Lajna opens from the status bar. */
+@media (min-width: 721px) { .lajnabtn { display: none; } }
+.st-lajna { display: inline-flex; align-items: center; gap: 6px; }
+.st-lajna svg { width: 16px; height: 16px; flex: 0 0 auto; }
+.lajna { position: fixed; right: 18px; bottom: 18px; z-index: 50; width: 420px; max-width: calc(100vw - 24px); height: min(760px, calc(100vh - 36px)); display: flex; flex-direction: column; border-radius: 18px; background: var(--surface-100); border: 1px solid var(--line); box-shadow: var(--shadow-lg, 0 24px 60px -20px rgba(0, 0, 0, 0.45)); overflow: hidden; }
+.lajna[hidden] { display: none; }
+.ljpanelhead { display: flex; align-items: center; gap: 10px; padding: 12px 12px 12px 14px; border-bottom: 1px solid var(--line); background: var(--surface-200); }
+.ljpanelhead div { display: flex; flex-direction: column; }
+.ljpanelhead div span { font-size: 12px; color: var(--ink-muted); }
+.ljlog { flex: 1 1 auto; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.ljhello { margin: 0; padding: 12px 14px; border-radius: 14px; background: var(--brand-soft); color: var(--ink); font-size: 14px; line-height: 1.5; }
+.ljchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.ljchips a { display: inline-flex; align-items: center; min-height: 28px; padding: 3px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-200); color: var(--ink); font-size: 12.5px; text-decoration: none; }
+.ljchips a:hover, .ljchips a.on { border-color: var(--brand); color: var(--brand); }
+.ljform { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); background: var(--surface-200); }
+.ljform .inp { flex: 1 1 auto; height: 40px; }
+.ljfine { margin: 0; padding: 0 14px 10px; font-size: 11.5px; color: var(--ink-muted); background: var(--surface-200); }
+.ljthinking { display: flex; gap: 5px; margin: 0; padding: 6px 2px; }
+.ljthinking i { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-muted); animation: ljdot 1s infinite ease-in-out; }
+.ljthinking i:nth-child(2) { animation-delay: 0.15s; }
+.ljthinking i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes ljdot { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .ljthinking i { animation: none; } }
+.ljanswer { display: flex; flex-direction: column; gap: 8px; }
+.ljq { align-self: flex-end; margin: 0; max-width: 85%; padding: 8px 12px; border-radius: 14px 14px 4px 14px; background: var(--brand); color: var(--on-brand); font-size: 14px; }
+.ljq b { display: none; }
+.ljbody { display: flex; gap: 8px; align-items: flex-start; }
+.ljmark { flex: 0 0 auto; margin-top: 2px; }
+.ljtext { flex: 1 1 auto; min-width: 0; padding: 10px 12px; border-radius: 4px 14px 14px 14px; background: var(--surface-200); border: 1px solid var(--line); font-size: 14px; line-height: 1.5; }
+.ljtext > p:first-child { margin-top: 0; }
+.ljsteps { margin: 6px 0 8px; padding-left: 20px; font-size: 13.5px; }
+.ljconsent { margin: 8px 0 4px; padding: 12px; border-radius: 12px; border: 2px solid var(--accent); background: var(--accent-soft); display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ljconsent > b { flex: 1 0 100%; font-size: 13px; color: var(--warning); }
+.ljconsent dl { flex: 1 0 100%; margin: 0; display: flex; gap: 8px; font-size: 14px; }
+.ljconsent dt { font-weight: 600; }
+.ljconsent dd { margin: 0; }
+.ljconsent s { color: var(--ink-muted); }
+.ljmails { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ljmails a { display: flex; gap: 8px; align-items: flex-start; padding: 7px 8px; border-radius: 10px; color: var(--ink); text-decoration: none; }
+.ljmails a:hover { background: var(--surface-inset); }
+.ljdot { flex: 0 0 auto; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%; background: var(--brand); }
+.ljm-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+.ljm-main b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ljm-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-muted); }
+.ljm-side { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-muted); }
+.ljfollow, .ljactions, .ljcites, .ljother { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; font-size: 13px; }
+.ljfollow a, .ljother a { color: var(--brand); }
+.ljdraft { margin-top: 8px; padding: 12px; border-radius: 12px; border: 2px solid var(--accent); background: var(--surface-100); }
+.ljdraft dl { margin: 0 0 8px; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.ljdraft dl div { display: grid; grid-template-columns: 64px 1fr; gap: 6px; }
+.ljdraft dt { color: var(--ink-muted); }
+.ljdraft dd { margin: 0; word-break: break-word; }
+.ljdraft pre { margin: 0; padding: 10px; border-radius: 10px; background: var(--surface-inset); white-space: pre-wrap; font-family: inherit; font-size: 13.5px; line-height: 1.55; max-height: 260px; overflow: auto; }
+.ljnote { margin: 8px 0 0; font-size: 12px; color: var(--ink-muted); }
+.ljcite { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; background: var(--brand-soft); color: var(--brand); font-size: 12px; font-weight: 600; text-decoration: none; }
+.ljstory .sstimeline { margin: 8px 0; }
+.ljpage { max-width: 760px; margin: 0 auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+.ljhead { display: flex; gap: 14px; align-items: center; }
+.ljhead h1 { margin: 0; font-size: 24px; }
+.ljhead p { margin: 2px 0 0; color: var(--ink-muted); font-size: 14px; }
+.ljpage .ljform { border: 1px solid var(--line); border-radius: 14px; }
+@media (max-width: 720px) {
+  .lajnabtn { bottom: 76px; right: 12px; padding: 0 12px; }
+  .lajnabtn span { display: none; }
+  .lajna { right: 0; bottom: 0; width: 100vw; max-width: none; height: 100dvh; border-radius: 0; }
+}
+@media print { .lajnabtn, .lajna { display: none !important; } }
+
+/* "Show me in Anjal": the page dims; the real control is ringed, with one line beside it. */
+.ringveil { position: fixed; inset: 0; z-index: 70; background: rgba(18, 32, 31, 0.45); }
+.ringed { position: relative; z-index: 71; outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 10px; box-shadow: 0 0 0 9999px transparent; background: var(--surface-200); }
+.ringnote { position: fixed; z-index: 72; max-width: 320px; padding: 10px 14px; border-radius: 12px; background: var(--ink); color: var(--surface-100); font-size: 14px; line-height: 1.45; box-shadow: var(--shadow-lg, 0 10px 30px -12px rgba(0, 0, 0, 0.5)); }
+.wlajna { display: flex; align-items: center; gap: 10px; margin: 0; padding: 0 30px 4px; font-size: 14px; color: var(--ink-muted); }
 /* rc.16 screen check (12 Oct 2026): the Today and Settings search boxes show focus. The other fixes
    sit in their own rules: the list head's spacer (first row), the envelope's scroll bar room and actions,
    the row's flag centred, the Today search box's height. */

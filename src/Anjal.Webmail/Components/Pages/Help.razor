@@ -1,0 +1,209 @@
+@page "/help"
+@page "/help/part/{PartId}"
+@page "/help/{ArticleId}"
+@attribute [Authorize]
+@inject HelpGuide Guide
+@inject MailboxService Mail
+@inject Words Words
+
+<PageTitle>@(article is null ? L["Help"] : article.Title) — Anjal</PageTitle>
+
+@* rc.18, design review section 11 [8a]-[8b] (owner, 11 Oct 2026): the help guide - one task an
+   article, in the words on the screen; "Show me in Anjal" rings the real control; every "No" is
+   counted for the weekly review. Lajna answers from these articles and cites them. *@
+@if (article is HelpArticle a)
+{
+    <div class="helpart">
+        <nav class="helpnav" aria-label="@L["Help sections"]">
+            <a class="helpnav-home" href="/help"><LipiIcon Name="arrow-left" Size="15" />@L["All help"]</a>
+            @foreach (HelpPart p in Guide.Parts)
+            {
+                <a class="helpnav-part @(p.Id == a.Part ? "on" : null)" href="/help/part/@p.Id"><LipiIcon Name="@p.Icon" Size="16" />@L[p.Title]</a>
+                @if (p.Id == a.Part)
+                {
+                    @foreach (HelpArticle x in Guide.Articles.Where(x => x.Part == p.Id))
+                    {
+                        <a class="helpnav-art" href="/help/@x.Id" aria-current="@(x.Id == a.Id ? "page" : null)">@x.Title</a>
+                    }
+                }
+            }
+        </nav>
+        <article class="helpbody" aria-labelledby="h-title">
+            <p class="helpcrumb"><a href="/help">@L["Help"]</a> › <a href="/help/part/@a.Part">@L[Guide.Part(a.Part)?.Title ?? string.Empty]</a></p>
+            <h1 id="h-title">@a.Title</h1>
+            <p class="helpmeta">@L["{n} min read"].Replace("{n}", a.Minutes.ToString(Inv), StringComparison.Ordinal) · @L["Anjal {release}"].Replace("{release}", a.Release, StringComparison.Ordinal) · @L["In English"]</p>
+            <p class="helplead">@a.Summary</p>
+            @if (a.Show is HelpShow show)
+            {
+                <a class="btn btn-p helpshow" href="@ShowLink(show)" title="@L["Go there, and see the control ringed."]"><LipiIcon Name="eye" Size="16" />@L["Show me in Anjal"]</a>
+            }
+            <h2 id="h-steps">@L["Steps"]</h2>
+            <ol class="helpsteps">
+                @foreach (string step in a.Steps)
+                {
+                    <li>@step</li>
+                }
+            </ol>
+            @if (a.Tip is string tip)
+            {
+                <aside class="helptip" id="h-tip"><LipiIcon Name="info" Size="16" /><span><b>@L["Tip"]</b> @tip</span></aside>
+            }
+            @if (a.Org is string org)
+            {
+                <aside class="helporg"><LipiIcon Name="lock" Size="16" /><span><b>@L["Set by your organisation"]</b> @org</span></aside>
+            }
+            <section class="helpfeedback" aria-labelledby="h-help">
+                @if (Thanks is not null)
+                {
+                    <p role="status">@L["Thank you. Every answer is read in the weekly review."]</p>
+                }
+                else
+                {
+                    <h2 id="h-help">@L["Did this help?"]</h2>
+                    <form method="post" action="/help/feedback" class="inline">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="id" value="@a.Id" />
+                        <button type="submit" name="helped" value="1" class="btn btn-s btn-sm" title="@L["Tell us this article helped."]" data-needs-server>@L["Yes"]</button>
+                        <button type="submit" name="helped" value="0" class="btn btn-s btn-sm" title="@L["Tell us this article did not help."]" data-needs-server>@L["No"]</button>
+                    </form>
+                }
+                <a class="linkbtn helpask" title="@L["Ask Lajna a question about this article."]" href="#lajna" data-lajna-ask="@a.Title">@L["Ask Lajna about this"]</a>
+            </section>
+        </article>
+        <aside class="helpside" aria-label="@L["On this page"]">
+            <h2>@L["On this page"]</h2>
+            <a href="#h-steps">@L["Steps"]</a>
+            @if (a.Tip is not null)
+            {
+                <a href="#h-tip">@L["Tip"]</a>
+            }
+            @if (a.Related.Count > 0)
+            {
+                <h2>@L["Related"]</h2>
+                @foreach (HelpArticle r in a.Related.Select(Guide.Get).OfType<HelpArticle>())
+                {
+                    <a href="/help/@r.Id">@r.Title</a>
+                }
+            }
+        </aside>
+    </div>
+}
+else if (ArticleId is not null)
+{
+    <div class="emptystate">
+        <h1>@L["Help"]</h1>
+        <p>@L["That article is not in the guide. Search for what you want to do."]</p>
+        <a class="btn btn-s" href="/help" title="@L["Back to the help guide."]">@L["All help"]</a>
+    </div>
+}
+else
+{
+    <div class="helphome">
+        <header class="helphead">
+            <h1>@L["How can we help?"]</h1>
+            <form method="get" action="/help" class="helpsearch" role="search">
+                <span class="sfield"><LipiIcon Name="search" Size="16" Class="si" /><input class="sbox" type="search" name="q" value="@Q" placeholder="@L["Search the help guide"]" aria-label="@L["Search the help guide"]" /></span>
+                <a class="btn helplajna" title="@L["Ask Lajna, in your own words."]" href="#lajna" data-lajna-ask="">@LajnaMark()@L["Ask Lajna"]</a>
+            </form>
+            <nav class="helpchips" aria-label="@L["Popular"]">
+                @foreach (HelpArticle p in Popular)
+                {
+                    <a href="/help/@p.Id">@p.Title</a>
+                }
+            </nav>
+        </header>
+        @if (!string.IsNullOrWhiteSpace(Q))
+        {
+            <section class="helpresults" aria-labelledby="h-found">
+                <h2 id="h-found">@(found.Count == 0 ? L["Nothing in the guide matches. Ask Lajna, or your administrator."] : L["{n} articles"].Replace("{n}", found.Count.ToString(Inv), StringComparison.Ordinal))</h2>
+                @foreach (HelpArticle f in found)
+                {
+                    <a class="helprow" href="/help/@f.Id"><b>@f.Title</b><span>@f.Summary</span></a>
+                }
+            </section>
+        }
+        @if (part is HelpPart hp)
+        {
+            <section class="helpresults" aria-labelledby="h-part">
+                <p class="helpcrumb"><a href="/help">@L["Help"]</a></p>
+                <h2 id="h-part">@L[hp.Title]</h2>
+                @foreach (HelpArticle f in Guide.Articles.Where(x => x.Part == hp.Id))
+                {
+                    <a class="helprow" href="/help/@f.Id"><b>@f.Title</b><span>@f.Summary</span></a>
+                }
+            </section>
+        }
+        <div class="helpgrid">
+            @foreach (HelpPart p in Guide.Parts)
+            {
+                int n = Guide.Articles.Count(x => x.Part == p.Id);
+                <a class="helpcard" href="/help/part/@p.Id">
+                    <span class="helpicon"><LipiIcon Name="@p.Icon" Size="20" /></span>
+                    <b>@L[p.Title]</b>
+                    <span>@(n == 1 ? L["1 article"] : L["{n} articles"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal))</span>
+                </a>
+            }
+        </div>
+        <div class="helpfoot">
+            <section class="helpnew" aria-labelledby="h-new">
+                <h2 id="h-new">@L["New in this release"]</h2>
+                @foreach (HelpArticle f in Guide.Articles.Where(x => x.Release == Guide.NewestRelease))
+                {
+                    <a class="helprow" href="/help/@f.Id"><b>@f.Title</b><span>@f.Summary</span></a>
+                }
+            </section>
+            <section class="helpstuck" aria-labelledby="h-stuck">
+                <h2 id="h-stuck">@L["Still stuck?"]</h2>
+                <p>@L["Lajna answers questions about Anjal, finds your mail and writes drafts. Your administrator can help with anything else."]</p>
+                @foreach (string admin in admins)
+                {
+                    <p class="helpadmin"><LipiIcon Name="user" Size="15" />@admin</p>
+                }
+            </section>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+    private static readonly string[] PopularIds = { "two-step", "search", "send-later", "today", "app-messages" };
+
+    /// <summary>An article's id.</summary>
+    [Parameter] public string? ArticleId { get; set; }
+
+    /// <summary>A part's id.</summary>
+    [Parameter] public string? PartId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "q")] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "thanks")] private string? Thanks { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private HelpArticle? article;
+    private HelpPart? part;
+    private IReadOnlyList<HelpArticle> found = Array.Empty<HelpArticle>();
+    private IReadOnlyList<string> admins = Array.Empty<string>();
+
+    private IEnumerable<HelpArticle> Popular => PopularIds.Select(Guide.Get).OfType<HelpArticle>();
+
+    // "Show me in Anjal": the page, with the control to ring and its line after a #.
+    private static string ShowLink(HelpShow s) => s.Path + "#ring=" + Uri.EscapeDataString(s.At) + "|" + Uri.EscapeDataString(s.Line);
+
+    private static MarkupString LajnaMark() => new(LajnaMarkSvg.Small);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is not null)
+        {
+            System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+            L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+            if (WebmailAuthService.PersonIdOf(user) is Guid me && ArticleId is null)
+            {
+                admins = await Mail.AdministratorNamesAsync(me);
+            }
+        }
+        article = Guide.Get(ArticleId);
+        part = Guide.Part(PartId);
+        found = string.IsNullOrWhiteSpace(Q) ? Array.Empty<HelpArticle>() : Guide.Search(Q, 10).Select(x => x.Article).ToList();
+    }
+}

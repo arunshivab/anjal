@@ -1,0 +1,156 @@
+@using Anjal.Webmail.Services
+@inject HelpGuide Guide
+
+@* rc.18, design review section 11 [8c]-[8g]: one answer from Lajna. The panel's script takes this
+   section from /lajna/answer and adds it to the conversation; without the script, /lajna shows it
+   as a page. Every link that asks again also works as an ordinary link. *@
+<section class="ljanswer lj-@A.Kind" data-lajna-answer aria-live="polite">
+    <p class="ljq"><b>@L["You"]</b> @A.Question</p>
+    <div class="ljbody">
+        <span class="ljmark" aria-hidden="true">@((MarkupString)LajnaMarkSvg.Small)</span>
+        <div class="ljtext">
+            <p>@A.Text</p>
+
+            @if (A.Kind == "help" && A.Cites.Count > 0)
+            {
+                HelpArticle top = A.Cites[0];
+                <ol class="ljsteps">
+                    @foreach (string step in top.Steps.Take(4))
+                    {
+                        <li>@step</li>
+                    }
+                </ol>
+                @if (top.Show is HelpShow show)
+                {
+                    <a class="btn btn-s btn-sm" title="@L["Go there, and see the control ringed."]" href="@(show.Path + "#ring=" + Uri.EscapeDataString(show.At) + "|" + Uri.EscapeDataString(show.Line))"><LipiIcon Name="eye" Size="15" />@L["Show me"]</a>
+                }
+            }
+
+            @if (A.Consent is LajnaConsent c)
+            {
+                <div class="ljconsent">
+                    <b>@L["Lajna will change this, if you agree"]</b>
+                    <dl><dt>@c.What</dt><dd><s>@c.From</s> → <b>@c.To</b></dd></dl>
+                    <form method="post" action="@c.Action" class="inline">
+                        <AntiforgeryToken />
+                        @foreach (KeyValuePair<string, string> f in c.Fields)
+                        {
+                            <input type="hidden" name="@f.Key" value="@f.Value" />
+                        }
+                        <button type="submit" class="btn btn-p btn-sm" title="@L["Make this change now."]" data-needs-server>@L["Yes"]</button>
+                    </form>
+                    <a class="btn btn-q btn-sm" href="@c.Change" title="@L["Open the setting and choose yourself."]">@L["Change it"]</a>
+                </div>
+            }
+
+            @if (A.Kind == "mails")
+            {
+                <ul class="ljmails">
+                    @foreach (LajnaMail m in A.Mails)
+                    {
+                        <li>
+                            <a href="/message/@m.Id">
+                                @if (m.Unread) { <i class="ljdot" title="@L["Unread"]"></i> }
+                                <span class="ljm-main"><b>@(m.Subject.Length > 0 ? m.Subject : L["(no subject)"])</b><span>@m.Preview</span></span>
+                                <span class="ljm-side"><time>@Clock.List(m.At, DateTimeOffset.UtcNow)</time>@if (m.Files) { <LipiIcon Name="attachment" Size="13" /> }</span>
+                            </a>
+                        </li>
+                    }
+                </ul>
+                @if (A.MailsFrom is string from)
+                {
+                    <p class="ljfollow">
+                        <a href="/search?q=&scope=all&sender=@Uri.EscapeDataString(from)">@L["Open as a search"]</a>
+                        <a href="@Ask("Get me the last 5 mails with attachments from " + from, null)" data-lajna-q="@("Get me the last 5 mails with attachments from " + from)">@L["Only with attachments"]</a>
+                    </p>
+                }
+            }
+
+            @if (A.Draft is LajnaDraft d)
+            {
+                <div class="ljdraft">
+                    <dl>
+                        <div><dt>@L["To"]</dt><dd>@d.ToName &lt;@d.To&gt;</dd></div>
+                        <div><dt>@L["Subject"]</dt><dd>@d.Subject</dd></div>
+                    </dl>
+                    <pre>@d.Body</pre>
+                    <p class="ljchips">
+                        @foreach ((string style, string word) in Styles)
+                        {
+                            <a class="@(d.Style == style ? "on" : null)" href="@Ask(A.Question, style)" data-lajna-q="@A.Question" data-lajna-style="@style">@L[word]</a>
+                        }
+                    </p>
+                    <p class="ljactions">
+                        <a class="btn btn-p btn-sm" href="@d.ComposeLink" title="@L["Open this draft in Compose to change and send it."]"><LipiIcon Name="edit" Size="15" />@L["Open in Compose"]</a>
+                        <a class="btn btn-q btn-sm" title="@L["Write the draft again in the usual style."]" href="@Ask(A.Question, "normal")" data-lajna-q="@A.Question" data-lajna-style="normal">@L["Rewrite"]</a>
+                    </p>
+                    <p class="ljnote">@L["Lajna never sends. You send it from Compose."]</p>
+                </div>
+            }
+
+            @if (A.Story is LajnaStory s)
+            {
+                <div class="ljstory">
+                    <p><span class="sspill ss-@(s.Status == "Inside" ? "delivered" : s.Status.ToLowerInvariant())">@L[s.Status == "Inside" ? "Delivered" : s.Status]</span> <b>@(s.Subject.Length > 0 ? s.Subject : L["(no subject)"])</b></p>
+                    <p class="hint">@L["to {address}, sent {time}"].Replace("{address}", s.To, StringComparison.Ordinal).Replace("{time}", Clock.Full(s.At), StringComparison.Ordinal)</p>
+                    @if (s.Attempts.Count > 0)
+                    {
+                        <ol class="sstimeline">
+                            @{ int n = 0; }
+                            @foreach (SendingAttempt t in s.Attempts)
+                            {
+                                n++;
+                                <li class="tl-@t.Outcome"><b>@L["Try {n}"].Replace("{n}", n.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</b><time>@Clock.Full(t.At)</time><span>@t.Host</span>@if (t.Reply.Length > 0) { <code>@t.Reply</code> }</li>
+                            }
+                        </ol>
+                    }
+                    @if (s.Next is DateTimeOffset next)
+                    {
+                        <p>@L["Next try {time}; Anjal gives up {giveup}."].Replace("{time}", Clock.Full(next), StringComparison.Ordinal).Replace("{giveup}", Clock.Full(s.GiveUp), StringComparison.Ordinal)</p>
+                        <a class="btn btn-s btn-sm" title="@L["See where this mail is now."]" href="@(s.App is null ? "/outbox" : "/org/apps?tab=messages&status=Delayed")">@(s.App is null ? L["Open the Outbox"] : L["Show me the message"])</a>
+                    }
+                </div>
+            }
+
+            @if (A.Other is (string otherAddress, string otherName))
+            {
+                <p class="ljother">@L["Or did you mean {name}?"].Replace("{name}", otherName, StringComparison.Ordinal) <a href="@Ask(A.Question.Replace(Who(A), otherAddress, StringComparison.OrdinalIgnoreCase), null)" data-lajna-q="@A.Question.Replace(Who(A), otherAddress, StringComparison.OrdinalIgnoreCase)">@L["Ask about {name}"].Replace("{name}", otherName, StringComparison.Ordinal)</a></p>
+            }
+
+            @if (A.Cites.Count > 0)
+            {
+                <p class="ljcites">
+                    @foreach (HelpArticle cite in A.Cites)
+                    {
+                        <a class="ljcite" href="/help/@cite.Id"><LipiIcon Name="file" Size="13" />@cite.Title</a>
+                    }
+                </p>
+            }
+        </div>
+    </div>
+</section>
+
+@code {
+    private static readonly (string Style, string Word)[] Styles = { ("formal", "More formal"), ("short", "Shorter"), ("ta", "In தமிழ்") };
+
+    /// <summary>The answer.</summary>
+    [Parameter] public LajnaAnswer A { get; set; } = new();
+
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The person's clock.</summary>
+    [Parameter] public ZonedClock Clock { get; set; } = ZonedClock.Default;
+
+    /// <summary>The page the question came from.</summary>
+    [Parameter] public string Page { get; set; } = "/";
+
+    private string Ask(string q, string? style) => "/lajna?q=" + Uri.EscapeDataString(q) + "&page=" + Uri.EscapeDataString(Page) + (style is null ? string.Empty : "&style=" + style);
+
+    // The words of the question that named the person, to swap for the other one.
+    private static string Who(LajnaAnswer a)
+    {
+        System.Text.RegularExpressions.Match m = System.Text.RegularExpressions.Regex.Match(a.Question, @"\b(?:from|to)\s+(?<who>[^?]+?)(?:\s+(?:asking|about|for|regarding|requesting|saying)\b|\s*\??$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return m.Success ? m.Groups["who"].Value : a.Question;
+    }
+}
