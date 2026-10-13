@@ -3046,7 +3046,9 @@ textarea.inp, textarea.railinp, .settings3 textarea { font-size: 13.5px; border-
    middle one may take two. */
 .orgtable.rules td:last-child, .orgtable.rules th:last-child { white-space: nowrap; width: 1%; }
 /* A rule's name of a word or two ("Leaked-password check") is never broken over two lines. */
-.orgtable.rules tbody th { min-width: 14em; }
+/* CI, 13 Oct 2026: at 1536 the sign-in rules table was 3px wider than its card on the CI browser
+   (14em left about 20px to spare here). 12em still keeps each rule's name on few lines. */
+.orgtable.rules tbody th { min-width: 12em; }
 
 /* Page steps in the people list sit in its footer. */
 .orgfoot .pager { padding: 0; }
