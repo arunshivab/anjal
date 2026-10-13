@@ -43,7 +43,10 @@ else
                     </div>
                     <div class="rail-composewrap">
                         <a class="rail-compose" href="/compose" title="@L["Compose"]"><LipiIcon Name="edit" Size="18" /><span class="rl">@L["Compose"]</span></a>
-                        @* rc.15 (item 62, owner 7 Oct): the Compose button's arrow - start from a template, or in the small window. *@
+                        @* rc.15 (item 62, owner 7 Oct): the Compose button's arrow - start from a template, or in the small window.
+                           rc.15.1 (DEF-095): not while a sign-in step is pending; nothing is written until it is done. *@
+                        @if (signInDemand is null)
+                        {
                         <details class="pmenu composemore">
                             <summary class="composearrow" title="@L["More ways to write"]" aria-label="@L["More ways to write"]"><LipiIcon Name="chevron-down" Size="12" /></summary>
                             <div class="pmenu-body">
@@ -60,6 +63,7 @@ else
                                 </form>
                             </div>
                         </details>
+                        }
                     </div>
                     @if (folders is not null)
                     {
@@ -203,7 +207,9 @@ else
                     <button type="submit" class="linkbtn">@L["Back to my mailbox"]</button>
                 </form>
             }
-            @if (person is not null && !person.WelcomeDone && !OnTwoStepSetup)
+            @* rc.15.1 (DEF-095): never while a sign-in step is pending (a longer password, or
+               two-step the organisation requires) - the person does that first, then is welcomed. *@
+            @if (person is not null && !person.WelcomeDone && !OnTwoStepSetup && signInDemand is null)
             {
                 <div class="welcome" role="dialog" aria-modal="true" aria-labelledby="welcometitle">
                     <div class="wcard">
@@ -365,6 +371,7 @@ else
     private bool RailAuto => !(person?.RailChosen ?? false);
 
     private MailboxRow? person;
+    private string? signInDemand;
 
     // DES-11 D5: the offline pages the worker draws speak the person's language too.
     private string OfflineWords => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>(StringComparer.Ordinal)
@@ -551,6 +558,7 @@ else
             sharedBoxes = await Mail.SharedForPersonAsync(me);
             isAdmin = await Mail.IsOrgAdminAsync(me);
             lastSignIn = (await Mail.GetSecurityAsync(me)).PreviousSignIn;
+            signInDemand = await Mail.SignInDemandCachedAsync(me);
             isOperator = Operators.Is(person?.Address);
             offlineMail = (await Mail.OfflineMailAsync(me, shared)).On;
             if (WebmailAuthService.ActingOf(state.User) is Guid open && sharedBoxes.FirstOrDefault(b => b.Box.Id == open) is { Box: not null } found)

@@ -57,6 +57,33 @@ public sealed class Rc7SettingsApiTests : System.IDisposable
     }
 
     [Fact]
+    public async Task EveryChangeThroughTheApi_IsInTheAuditTrail_WithWhoAskedFromWhere()
+    {
+        // rc.15.1 (found on the server, 11 Oct 2026): the entry was written after the reply had
+        // been sent, when the closed connection no longer knew its address - a
+        // NullReferenceException, caught and logged, so no admin-API change reached the trail.
+        // The caller closes its connection once answered, as curl and the seed script do.
+        using var request = new HttpRequestMessage(HttpMethod.Put, "api/settings/webmail/ANJAL_OPERATORS") { Content = JsonContent.Create(new SettingRequest { Value = "arun@anjal.co.in" }) };
+        request.Headers.ConnectionClose = true;
+        HttpResponseMessage put = await this.client.SendAsync(request);
+        Assert.Equal(HttpStatusCode.OK, put.StatusCode);
+        IReadOnlyList<AuditEvent> trail = System.Array.Empty<AuditEvent>();
+        for (int i = 0; i < 50 && trail.Count == 0; i++)
+        {
+            trail = await this.store.ListAuditAsync(10);
+            if (trail.Count == 0)
+            {
+                await Task.Delay(20);
+            }
+        }
+        AuditEvent entry = Assert.Single(trail);
+        Assert.Equal("api", entry.Actor);
+        Assert.Equal("PUT /api/settings/webmail/ANJAL_OPERATORS", entry.Action);
+        Assert.Equal("status 200", entry.Detail);
+        Assert.Equal("127.0.0.1", entry.RemoteAddress);
+    }
+
+    [Fact]
     public async Task Secrets_AndUnknownScopes_AreRefused()
     {
         Assert.Equal(HttpStatusCode.BadRequest, (await this.client.PutAsJsonAsync("api/settings/server/ANJAL_KEK", new SettingRequest { Value = "x" })).StatusCode);

@@ -2214,6 +2214,8 @@
     "Not mostly your name or address": "Not mostly your name or address",
     "The password must not be mostly your name or your address.": "The password must not be mostly your name or your address.",
     "That password is too easy to guess. Choose something that is not mostly a common word or this product's name.": "That password is too easy to guess. Choose something that is not mostly a common word or this product's name.",
-    "Wrong passwords": "Wrong passwords"
+    "Wrong passwords": "Wrong passwords",
+    "Not downloaded yet; checked online meanwhile": "Not downloaded yet; checked online meanwhile",
+    "At least {n} characters for you, as your organisation asks. Any characters; a phrase of ordinary words works well.": "At least {n} characters for you, as your organisation asks. Any characters; a phrase of ordinary words works well."
   }
 }

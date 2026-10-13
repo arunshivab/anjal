@@ -10,6 +10,16 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.15.1** (12 October 2026) - hotfix (DEF-095): a person who had not yet seen
+the welcome screen and whose password was shorter than the new rule was sent to Security, where the
+welcome screen covered the page and neither of its buttons worked. The welcome now waits until a
+pending sign-in step (a longer password, or two-step the organisation requires) is done, and every
+form on the page such a step leads to works (a system-wide test posts each one). Also: every
+change made through the admin API reaches the audit trail again, even when the caller closes its
+connection at once (DEF-096); the first leaked-password download on a new server no longer sends
+an operator alert while passwords are checked online meanwhile (DEF-097); and the Security page
+names the organisation's password length when it is longer than Anjal's own (DEF-098). No schema change.
+
 **v1.0.0-rc.15** (11 October 2026) - the webmail release: rc.11 to rc.15 built
 and evaluated as one (ANJAL-SPEC-11, SPEC-11B v1.1, DES-11, decisions D-111 to
 D-148 in ANJAL-PRJ-03c). The "every script" look in 21 colours with light and

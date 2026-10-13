@@ -45,7 +45,10 @@ def git(*args, stdin=None):
 
 
 def tracked_files():
-    return [f for f in git("ls-files", "-z").decode("utf-8").split("\0") if f]
+    # New files not yet added are checked too (12 Oct 2026: a new test file with LF endings
+    # passed this check and failed "dotnet format", because only files in git were read).
+    listed = git("ls-files", "-z", "--cached", "--others", "--exclude-standard").decode("utf-8").split("\0")
+    return sorted({f for f in listed if f})
 
 
 def rules_for(files):

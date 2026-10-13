@@ -12,6 +12,7 @@ public sealed class RequestContext
 {
     private readonly HttpListenerContext context;
     private readonly int maxBodyBytes;
+    private readonly string remoteAddress;
     private bool bodyRead;
     private string bodyCache = string.Empty;
 
@@ -25,6 +26,10 @@ public sealed class RequestContext
         System.ArgumentNullException.ThrowIfNull(context);
         this.context = context;
         this.maxBodyBytes = maxBodyBytes;
+        // rc.15.1: read now, while the connection is open. The audit entry is written after the
+        // reply has been sent, and on Linux the closed connection no longer knows its address
+        // (a NullReferenceException that left every admin-API change out of the audit trail).
+        this.remoteAddress = context.Request.RemoteEndPoint?.Address.ToString() ?? string.Empty;
     }
 
     /// <summary>HTTP method (GET, POST, etc.) in uppercase.</summary>
@@ -37,7 +42,7 @@ public sealed class RequestContext
     public int ResponseStatus => this.context.Response.StatusCode;
 
     /// <summary>The client address, or empty when unknown.</summary>
-    public string RemoteAddress => this.context.Request.RemoteEndPoint?.Address.ToString() ?? string.Empty;
+    public string RemoteAddress => this.remoteAddress;
 
     /// <summary>The Authorization header value, or empty if not set.</summary>
     public string AuthorizationHeader => this.context.Request.Headers["Authorization"] ?? string.Empty;

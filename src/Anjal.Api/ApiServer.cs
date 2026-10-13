@@ -407,7 +407,7 @@ public sealed class ApiServer : System.IDisposable
 #pragma warning disable CA1031 // Auditing must never turn a completed change into an error.
         catch (System.Exception ex)
         {
-            this.log?.Invoke($"  audit write failed: {ex.GetType().Name}: {ex.Message}");
+            this.log?.Invoke($"  audit write failed: {ex}");
         }
 #pragma warning restore CA1031
     }
