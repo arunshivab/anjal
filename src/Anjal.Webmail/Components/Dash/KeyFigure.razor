@@ -1,0 +1,31 @@
+@* rc.16 (design review 7, [4a]): one of the six key numbers - its name, the number, a 14-day
+   trend line and one line under it; the whole card opens what it counts. *@
+<a class="keyfig" href="@Href">
+    <span class="kf-title">@Title</span>
+    <b class="kf-value">@Value</b>
+    <Spark Values="Trend" Tone="@Tone" W="170" H="28" />
+    <span class="kf-note @(NoteTone is null ? null : "kf-" + NoteTone)">@Note</span>
+</a>
+
+@code {
+    /// <summary>What it counts.</summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>The number, written.</summary>
+    [Parameter] public string Value { get; set; } = string.Empty;
+
+    /// <summary>The last 14 days, oldest first.</summary>
+    [Parameter] public IReadOnlyList<long> Trend { get; set; } = Array.Empty<long>();
+
+    /// <summary>The trend line's colour class.</summary>
+    [Parameter] public string Tone { get; set; } = "sp-brand";
+
+    /// <summary>The line under the number.</summary>
+    [Parameter] public string Note { get; set; } = string.Empty;
+
+    /// <summary>"warn", "seal" or null: the note's colour.</summary>
+    [Parameter] public string? NoteTone { get; set; }
+
+    /// <summary>What the card opens.</summary>
+    [Parameter] public string Href { get; set; } = "#";
+}

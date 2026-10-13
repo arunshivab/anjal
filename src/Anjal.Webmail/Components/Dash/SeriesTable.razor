@@ -1,0 +1,72 @@
+@* rc.16 (design review 7): a chart's steps as a plain table - every number opens its mail. *@
+@{ var inv = System.Globalization.CultureInfo.InvariantCulture; }
+<table class="dtable" data-sortable>
+    <thead>
+        <tr>
+            <th scope="col">@L["When"]</th>
+            <th scope="col" class="num">@L[Only == "received" ? "Unread" : "Received"]</th>
+            @if (Only is null)
+            {
+                <th scope="col" class="num">@L["Sent"]</th>
+                <th scope="col" class="num">@L["Junk"]</th>
+                @if (Compare)
+                {
+                    <th scope="col" class="num">@L["Received, period before"]</th>
+                }
+            }
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (SeriesPoint p in Points)
+        {
+            string? href = Link?.Invoke(p);
+            <tr>
+                <th scope="row">@p.Label</th>
+                <td class="num">@Cell(p.Received, href)</td>
+                @if (Only is null)
+                {
+                    <td class="num">@Cell(p.Sent, href)</td>
+                    <td class="num">@Cell(p.Junk, href)</td>
+                    @if (Compare)
+                    {
+                        <td class="num">@p.Previous.ToString("N0", inv)</td>
+                    }
+                }
+            </tr>
+        }
+    </tbody>
+</table>
+<p class="dc-foot"><a class="linkbtn" href="#" data-csv>@L["Download as CSV"]</a></p>
+
+@code {
+    /// <summary>The steps.</summary>
+    [Parameter] public IReadOnlyList<SeriesPoint> Points { get; set; } = Array.Empty<SeriesPoint>();
+
+    /// <summary>Show the period before.</summary>
+    [Parameter] public bool Compare { get; set; }
+
+    /// <summary>"received" for a single column (the unread backlog); null for all.</summary>
+    [Parameter] public string? Only { get; set; }
+
+    /// <summary>Where a step's numbers lead.</summary>
+    [Parameter] public Func<SeriesPoint, string?>? Link { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private static RenderFragment Cell(long n, string? href) => builder =>
+    {
+        string text = n.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+        if (href is not null && n > 0)
+        {
+            builder.OpenElement(0, "a");
+            builder.AddAttribute(1, "href", href);
+            builder.AddContent(2, text);
+            builder.CloseElement();
+        }
+        else
+        {
+            builder.AddContent(3, text);
+        }
+    };
+}

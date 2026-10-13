@@ -1088,8 +1088,8 @@ internal static class AuthEndpoints
             Console.Error.WriteLine($"[sign-in] network not noted: {ex.GetType().Name}");
         }
 #pragma warning restore CA1031
-        // rc.15 (owner, 7 Oct): everyone lands on their dashboard after signing in.
-        return "/dashboard";
+        // rc.16 (design review 8): everyone lands on Today - or the Inbox, if they chose it.
+        return await http.RequestServices.GetRequiredService<MailboxService>().LandingAsync(mailboxId, ct).ConfigureAwait(false);
     }
 
     // DES-11 S3 (owner, 10 Oct 2026, "A"): five wrong second-step codes lock the second step for

@@ -334,6 +334,17 @@ public interface IMailboxStore
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<MailboxActivity> GetActivityAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, string timeZone, System.Threading.CancellationToken ct = default);
 
+    /// <summary>
+    /// rc.16: the facts of a mailbox's messages over a period, newest first and without their
+    /// bodies, for the figures the dashboard and Today work out (design review 7 and 8).
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="periodStart">Start, inclusive.</param>
+    /// <param name="periodEnd">End, exclusive.</param>
+    /// <param name="limit">At most this many, newest first.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<MessageFact>> ListMessageFactsAsync(System.Guid mailboxId, System.DateTimeOffset periodStart, System.DateTimeOffset periodEnd, int limit, System.Threading.CancellationToken ct = default);
+
     // -------- Sender rules --------
 
     /// <summary>

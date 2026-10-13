@@ -135,7 +135,7 @@ public sealed class WebmailHardeningTests : IAsyncLifetime, System.IDisposable
     public async System.Threading.Tasks.Task ASuccessfulSignIn_UpgradesAnOldHash_AndIsAudited()
     {
         Assert.True(Pbkdf2Hasher.NeedsRehash(this.mailbox.PasswordPbkdf2));
-        Assert.Equal("/dashboard", (await this.SignInAsync("correct horse battery")).Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today", (await this.SignInAsync("correct horse battery")).Headers.Location!.ToString());
         string upgraded = (await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.PasswordPbkdf2;
         Assert.False(Pbkdf2Hasher.NeedsRehash(upgraded));
         Assert.True(Pbkdf2Hasher.Verify("correct horse battery", upgraded));

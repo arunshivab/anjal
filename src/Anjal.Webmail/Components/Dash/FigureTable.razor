@@ -1,0 +1,42 @@
+@* rc.16 (design review 7): a card's figures as a plain table - sortable headings, a CSV
+   download, every number a link. *@
+@{ var inv = System.Globalization.CultureInfo.InvariantCulture; }
+<table class="dtable" data-sortable>
+    <thead><tr><th scope="col">@Heading</th><th scope="col" class="num">@(Show is null ? L["Messages"] : L["Size"])</th>@if (Total > 0) { <th scope="col" class="num">@L["Share"]</th> }</tr></thead>
+    <tbody>
+        @foreach (NamedFigure item in Items)
+        {
+            string name = Folder ? L.Folder(item.Name) : item.Name == MailboxService.Uncategorised ? L[MailboxService.Uncategorised] : item.Name;
+            string value = Show is null ? item.Count.ToString("N0", inv) : Show(item.Count);
+            <tr>
+                <th scope="row">@name</th>
+                <td class="num">@if (item.Link is not null) { <a href="@item.Link">@value</a> } else { @value }</td>
+                @if (Total > 0)
+                {
+                    <td class="num">@Math.Round(100.0 * item.Count / Total).ToString(inv)%</td>
+                }
+            </tr>
+        }
+    </tbody>
+</table>
+<p class="dc-foot"><a class="linkbtn" href="#" data-csv>@L["Download as CSV"]</a></p>
+
+@code {
+    /// <summary>The figures.</summary>
+    [Parameter] public IReadOnlyList<NamedFigure> Items { get; set; } = Array.Empty<NamedFigure>();
+
+    /// <summary>The first column's heading.</summary>
+    [Parameter] public string Heading { get; set; } = string.Empty;
+
+    /// <summary>Names are folders.</summary>
+    [Parameter] public bool Folder { get; set; }
+
+    /// <summary>The whole, for a share column; 0 for none.</summary>
+    [Parameter] public long Total { get; set; }
+
+    /// <summary>How a value is written (sizes); null for a count.</summary>
+    [Parameter] public Func<long, string>? Show { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+}

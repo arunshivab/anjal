@@ -1,13 +1,14 @@
 // Owner, 10 Oct 2026 ("Send and Send later are of different sizes ... there needs to be standard
 // button and text box sizes ... those together need to be the same"): three heights in the whole
-// app - regular 36px for buttons, text boxes and choice boxes; small 28px for actions inside a row,
-// a toolbar or a strip of choices; large 48px only on the sign-in pages and for the boxes a code
-// is typed into - and controls side by side on one row are one height. A strip of choices counts
+// app - regular 36px for buttons, text boxes and choice boxes; small 32px for actions inside a row,
+// a toolbar or a strip of choices; large 44px only on the sign-in pages, Compose's Send row and for
+// the boxes a code is typed into - and controls side by side on one row are one height (design
+// review, 11 Oct 2026, D-149: small 28 -> 32, large 48 -> 44). A strip of choices counts
 // as one control (its box). The phone keeps its own touch sizes, so it is not measured here.
 'use strict';
 const L = require('../lib.js');
 
-const SIZES = [28, 36, 48];
+const SIZES = [32, 36, 44];
 
 function measure() {
   const sel = 'button, a.btn, .btn, input[type=submit], input[type=button], input[type=text], input[type=email], input[type=password], input[type=search], input[type=number], input[type=date], input[type=time], input[type=url], input[type=tel], input:not([type]), select, summary.btn, .eb, .rowact, .iconbtn, .pbtn, .seg';
@@ -45,7 +46,7 @@ function measure() {
 
 module.exports = {
   name: 'sizes',
-  title: 'Three heights in the whole app (36, 28, 48), and one height on a row',
+  title: 'Three heights in the whole app (36, 32, 44), and one height on a row',
   async run(screens) {
     const found = new Map();
     let controls = 0;

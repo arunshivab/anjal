@@ -1,0 +1,38 @@
+@* rc.16 (design review 7, Storage): space by folder as one bar against the mailbox's limit,
+   replacing the ring and the separate "Space by folder" card. Each part opens its folder. *@
+@{
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+    long whole = Math.Max(1, Quota > 0 ? Math.Max(Quota, Parts.Sum(p => p.Count)) : Parts.Sum(p => p.Count));
+}
+<div class="stack" role="img" aria-label="@Label">
+    @for (int i = 0; i < Parts.Count; i++)
+    {
+        NamedFigure p = Parts[i];
+        double w = 100.0 * p.Count / whole;
+        @if (w >= 0.3)
+        {
+            <a class="stack-part st-@(i % 6)" href="@p.Link" style="width:@w.ToString("0.###", inv)%" title="@p.Name · @Show(p.Count)"></a>
+        }
+    }
+</div>
+<ul class="stack-legend">
+    @for (int i = 0; i < Parts.Count; i++)
+    {
+        NamedFigure p = Parts[i];
+        <li><i class="st-@(i % 6)"></i><a href="@p.Link">@p.Name</a><b>@Show(p.Count)</b></li>
+    }
+</ul>
+
+@code {
+    /// <summary>The parts, largest first.</summary>
+    [Parameter] public IReadOnlyList<NamedFigure> Parts { get; set; } = Array.Empty<NamedFigure>();
+
+    /// <summary>The limit the bar is drawn against (0 for none).</summary>
+    [Parameter] public long Quota { get; set; }
+
+    /// <summary>How a value is written.</summary>
+    [Parameter] public Func<long, string> Show { get; set; } = n => n.ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>What the bar says to a screen reader.</summary>
+    [Parameter] public string Label { get; set; } = string.Empty;
+}

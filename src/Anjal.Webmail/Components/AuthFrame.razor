@@ -3,45 +3,42 @@
 @inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 
 @* rc.13: the frame every sign-in board shares (AuthSignIn, AuthReset, AuthInvite,
-   AuthTwoStep, AuthSignedOut): Anjal and the languages on the left; on the right
-   the organisation's logo and name, then the page. *@
+   AuthTwoStep, AuthSignedOut). rc.16, design review 1d (owner, 11 Oct 2026): the brand panel
+   is Anjal's teal and carries the promise and the scripts; the languages move to a menu at the
+   top right of the form side, listing only the languages that are switched on; an organisation
+   with no logo shows its initials, so the Anjal mark is never shown twice. *@
 <div class="authpage">
     <section class="authbrand">
         <span class="mark-tile authmark" aria-hidden="true">
-            <svg viewBox="0 0 148 148" width="108" height="108"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg>
+            <svg viewBox="0 0 148 148" width="72" height="72"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg>
             @* DES-11 D6 (item 39): the letter of the language shown, as on every other screen. *@
             <span class="mt-letter" lang="@L.Language">@Words.MarkLetter(L.Language)</span>
         </span>
-        <p class="authname">Anjal</p>
-        <p class="authline">@L["Mail for every organisation, in every script its people read."]</p>
-        <div class="authlangs">
-            <span class="authlabel">@L["Language"]</span>
-            <div class="authchips" role="group" aria-label="@L["Language"]">
-                @foreach (string lc in MailboxPreferences.Languages)
-                {
-                    bool on = Words.IsEnabled(lc);
-                    @if (on)
-                    {
-                        <a class="authchip @(lc == L.Language ? "on" : "")" lang="@lc" href="/auth/language?l=@lc&back=@Uri.EscapeDataString(Here)" aria-current="@(lc == L.Language ? "true" : null)">@Words.NativeName(lc)</a>
-                    }
-                    else
-                    {
-                        <span class="authchip soon" lang="@lc" title="@L["Coming soon"]">@Words.NativeName(lc)</span>
-                    }
-                }
-            </div>
+        <div class="authpromise">
+            <p class="authhead">@L["Mail for every organisation, in every script its people read."]</p>
+            <p class="authscript"><span lang="@(L.Language == "en" ? "ta" : L.Language)">@Words.ProductName(L.Language)</span> · @L["mail, in your script"]</p>
         </div>
+        <p class="authlock"><LipiIcon Name="lock" Size="16" /><span>@L["Encrypted both ways. Every original kept as proof."]</span></p>
     </section>
     <section class="authform">
+        <details class="authlangmenu pmenu">
+            <summary class="authlangbtn" aria-label="@L["Language"]" title="@L["Language"]"><LipiIcon Name="tag" Size="16" /><span>@Words.NativeName(L.Language)</span><LipiIcon Name="chevron-down" Size="16" /></summary>
+            <div class="pmenu-body authlanglist" role="menu">
+                @foreach (string lc in MailboxPreferences.Languages.Where(Words.IsEnabled))
+                {
+                    <a class="pmi @(lc == L.Language ? "on" : "")" role="menuitem" lang="@lc" href="/auth/language?l=@lc&back=@Uri.EscapeDataString(Here)" aria-current="@(lc == L.Language ? "true" : null)">@Words.NativeName(lc)</a>
+                }
+            </div>
+        </details>
         <div class="authcard">
             <div class="authorg">
                 @if (Org is not null && Org.Logo.Length > 0)
                 {
                     <img class="authlogo-img" src="@Org.Logo" alt="" width="44" height="44" />
                 }
-                else
+                else if (Org is not null)
                 {
-                    <span class="authlogo" aria-hidden="true"><svg viewBox="0 0 148 148" width="44" height="44"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg></span>
+                    <span class="authinitials" aria-hidden="true">@Initials(Org.Name)</span>
                 }
                 <span><b>@(Org is null ? L["Mail"] : Org.Title.Length > 0 ? Org.Title : L["{organisation} mail"].Replace("{organisation}", Org.Name, StringComparison.Ordinal))</b><span class="hostline">@HostName</span></span>
             </div>
@@ -64,4 +61,20 @@
     private string HostName => Http.HttpContext?.Request.Host.Host ?? string.Empty;
 
     private string Here => (Http.HttpContext?.Request.Path.Value ?? "/sign-in") + (Http.HttpContext?.Request.QueryString.Value ?? string.Empty);
+
+    /// <summary>An organisation's initials: the first letters of its first two words ("Sri Ganesh Hospital" gives SG).</summary>
+    /// <param name="name">The organisation's name.</param>
+    /// <returns>One or two letters.</returns>
+    public static string Initials(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        string[] words = name.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        System.Text.StringBuilder sb = new();
+        foreach (string w in words.Take(2))
+        {
+            System.Globalization.StringInfo si = new(w);
+            sb.Append(si.LengthInTextElements > 0 ? si.SubstringByTextElements(0, 1) : string.Empty);
+        }
+        return sb.Length > 0 ? sb.ToString().ToUpperInvariant() : "?";
+    }
 }

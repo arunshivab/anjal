@@ -1,37 +1,58 @@
 @page "/dashboard"
+@page "/dashboard/{Tab}"
 @attribute [Authorize]
 @inject MailboxService Mail
 @inject Words Words
 @inject SessionRegistry Sessions
 
-<PageTitle>@L["Dashboard"] — Anjal</PageTitle>
+<PageTitle>@L[TabTitle] — Anjal</PageTitle>
 
-@* rc.15: the person's dashboard as the approved board draws it (Dashboard,
-   PhoneDashboard; items 56, 58, 63): it opens on Today; each graph has its
-   own period; Reset returns all of them to Today; every count opens what
-   it counts. Only this mailbox - or a shared one the person holds a right
-   on - is shown. On a phone: Unread, Needs attention, Activity and the
-   table, nothing else. *@
-@if (!loaded)
+@* rc.16, design review section 7 (owner, 11 Oct 2026): the dashboard extended into six pages as
+   tabs after Today - Overview, Mail flow, People, Replies, Safety, Storage. The v0.15 rules stay:
+   no gauges, no second axis, every number one click from a plain table, days with no mail drawn
+   as zero, every count opens what it counts. Differences from the period before are counts
+   ("+98 vs previous"), never percentages, and can be switched off. One period for the page; a
+   card that keeps its own says so under its heading. Only this mailbox - or a shared one the
+   person holds a right on - is shown. *@
+@if (!loaded || d is null)
 {
     <div class="dash"><p class="dnote">@L["Loading your figures…"]</p></div>
 }
 else
 {
-<div class="dash">
+<div class="dash dash2 @(Tables ? "alltables" : null)" data-dash="@TabKey">
     <header class="dhead">
         <div>
             <h1>@L["Your dashboard"]</h1>
-            <p class="dsub">@box!.Address. @clock.Full(now)</p>
+            <p class="dsub">@box!.Address · @clock.Full(now)</p>
         </div>
         <div class="dheadbtns">
             @if (isAdmin)
             {
                 <nav class="seg dtoggle" aria-label="@L["Whose figures"]"><a href="/dashboard" aria-current="page">@L["Yours"]</a><a href="/dashboard/org">@orgName</a></nav>
             }
+            <nav class="seg dperiod" aria-label="@L["Period"]">
+                @foreach ((string key, string label) in MailboxService.DashPagePeriods)
+                {
+                    <a href="@Link(p: key)" aria-current="@(period.Key == key ? "page" : null)">@L[label]</a>
+                }
+                <details class="pmenu dcustom">
+                    <summary aria-current="@(period.Key.StartsWith("from:", StringComparison.Ordinal) ? "page" : null)">@L["Custom…"]</summary>
+                    <form method="get" action="@Here" class="pmenu-body dcustomform">
+                        @if (BoxText is not null)
+                        {
+                            <input type="hidden" name="box" value="@BoxText" />
+                        }
+                        <label>@L["From"] <input type="date" class="inp" name="from" value="@CustomFrom" max="@Today" /></label>
+                        <label>@L["To"] <input type="date" class="inp" name="to" value="@CustomTo" max="@Today" /></label>
+                        <button type="submit" class="btn btn-p btn-sm">@L["Show"]</button>
+                    </form>
+                </details>
+            </nav>
+            <a class="dcompare @(Compare ? "on" : null)" href="@Link(cmp: Compare ? "0" : "1")" role="switch" aria-checked="@(Compare ? "true" : "false")" title="@L["Show differences from the period before"]"><span class="dsw" aria-hidden="true"><i></i></span>@L["Compare with previous"]</a>
             @if (boxes.Count > 1)
             {
-                <form method="get" action="/dashboard" class="dboxpick">
+                <form method="get" action="@Here" class="dboxpick">
                     <select name="box" class="setsel" aria-label="@L["Mailbox"]" data-autosubmit>
                         @foreach (MailboxRow b in boxes)
                         {
@@ -41,161 +62,354 @@ else
                     <noscript><button type="submit" class="btn btn-s btn-sm">@L["Show"]</button></noscript>
                 </form>
             }
-            <a class="btn btn-s" href="@ResetLink">@L["Reset all to Today"]</a>
         </div>
     </header>
+    <DashTabs Current="@TabKey" Query="@SharedQuery" Waiting="@((int)d.Waiting.Now)" L="L" />
+    <p class="dtoolbar">
+        <span class="dperiodline">@PeriodLine</span>
+        <a class="linkbtn" href="@Link(tables: Tables ? "0" : "1")">@L[Tables ? "Show the charts" : "Show all as tables"]</a>
+        <a class="linkbtn" href="@ResetLink">@L["Reset all to Today"]</a>
+    </p>
 
-    <div class="dgrid">
-        <section class="dcard dunread">
-            @* rc.15 (owner, 7 Oct): a message opens itself; only the heading goes to the Inbox. *@
-            <h2><a href="/folder/INBOX" class="dh-link">@L["Unread"] @unreadCount.ToString("N0", Inv)<LipiIcon Name="chevron-right" Size="16" /></a></h2>
-            @if (unread.Count == 0)
-            {
-                <p class="dnote dclear"><LipiIcon Name="check" Size="16" />@L["Nothing unread in your Inbox."]</p>
-            }
-            else
-            {
-                <ul class="ulist">
-                    @foreach (MessageRow m in unread)
+    <div class="dgrid dgrid2">
+    @switch (TabKey)
+    {
+        case "flow":
+            <DashCard Id="d-flow" Title="@L["Received, sent and Junk"]" Sub="@PeriodLine" Class="span3" Tables="Tables" L="L">
+                <Chart><LineChart Points="d.Series" Bars="BarsChart" Compare="Compare" Link="StepLink" L="L" /></Chart>
+                <Table><SeriesTable Points="d.Series" Compare="Compare" Link="StepLink" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-inout" Title="@L["Inside and outside"]" Sub="@L["Received, by where the sender is"]" Tables="Tables" L="L">
+                <Chart>
+                    <div class="split2"><i class="sp-in" style="width:@Pct(d.InsideOutside.Inside, d.InsideOutside.Inside + d.InsideOutside.Outside)%"></i><i class="sp-out"></i></div>
+                    <ul class="keyrows">
+                        <li><i class="lg-in"></i>@L["Inside {organisation}"].Replace("{organisation}", orgName, StringComparison.Ordinal)<b>@N(d.InsideOutside.Inside)</b></li>
+                        <li><i class="lg-out"></i>@L["Outside"]<b>@N(d.InsideOutside.Outside)</b></li>
+                    </ul>
+                </Chart>
+                <Table>
+                    <table class="dtable"><thead><tr><th scope="col">@L["From"]</th><th scope="col" class="num">@L["Messages"]</th><th scope="col" class="num">@L["Share"]</th></tr></thead>
+                        <tbody>
+                            <tr><th scope="row">@L["Inside {organisation}"].Replace("{organisation}", orgName, StringComparison.Ordinal)</th><td class="num">@N(d.InsideOutside.Inside)</td><td class="num">@Pct(d.InsideOutside.Inside, d.InsideOutside.Inside + d.InsideOutside.Outside)%</td></tr>
+                            <tr><th scope="row">@L["Outside"]</th><td class="num">@N(d.InsideOutside.Outside)</td><td class="num">@Pct(d.InsideOutside.Outside, d.InsideOutside.Inside + d.InsideOutside.Outside)%</td></tr>
+                        </tbody></table>
+                </Table>
+            </DashCard>
+            <DashCard Id="d-folder" Title="@L["By folder"]" Sub="@L["Received, with each folder's share"]" Tables="Tables" L="L">
+                <Chart><FigureBars Items="d.ByFolder" Total="FolderTotal" Folder="true" L="L" /></Chart>
+                <Table><FigureTable Items="d.ByFolder" Folder="true" Heading="@L["Folder"]" Total="FolderTotal" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-category" Title="@L["By category"]" Sub="@L["Received · trend over the period"]" Tables="Tables" L="L">
+                <Chart><FigureBars Items="d.ByCategory" Trends="true" L="L" /></Chart>
+                <Table><FigureTable Items="d.ByCategory" Heading="@L["Category"]" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-kinds" Title="@L["Attachments by type"]" Sub="@(L["From the newest {n} messages with attachments"].Replace("{n}", d.AttachmentSample.ToString(Inv), StringComparison.Ordinal))" Tables="Tables" L="L">
+                <Chart><FigureBars Items="d.AttachmentKinds" Kinds="true" L="L" Empty="@L["No attachments in this period."]" /></Chart>
+                <Table><FigureTable Items="d.AttachmentKinds" Heading="@L["Type"]" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-lists" Title="@L["Mailing lists and newsletters"]" Sub="@(L["{n} messages from lists and notifications"].Replace("{n}", N(d.ListMessages), StringComparison.Ordinal))" Tables="Tables" L="L">
+                <Chart><FigureBars Items="d.Lists" L="L" Empty="@L["No mailing lists in this period."]" /></Chart>
+                <Table><FigureTable Items="d.Lists" Heading="@L["List or sender"]" L="L" /></Table>
+            </DashCard>
+            break;
+
+        case "people":
+            <DashCard Id="d-who" Title="@L["Who you write with most"]" Sub="@(PeriodLine + " · " + L["received and sent"])" Class="span2" Tables="Tables" L="L">
+                <Chart>
+                    <div class="lc-legend"><span><i class="lg-r"></i>@L["From them"]</span><span><i class="lg-s"></i>@L["From you"]</span></div>
+                    @if (d.People.Count == 0)
                     {
-                        <li>
-                            <a href="/folder/INBOX?open=@m.Id">
-                                <span class="u-av" aria-hidden="true">@Initials(Sender(m))</span><span class="u-main"><span class="u-top"><b>@Sender(m)</b><span class="u-time">@clock.List(m.ReceivedAt, now)</span>@if (!SpamCheck.WasChecked(m, FolderRow.Inbox)) {<span class="score s-none" title="@L["Not checked: your own mail or mail from this server"]">&ndash;</span>} else if (m.SpamScore > 0) {<span class="score @(m.SpamScore >= threshold ? "s-hi" : "s-mid")" title="@L["Checked on arrival: spam score {n}"].Replace("{n}", m.SpamScore.ToString(Inv), StringComparison.Ordinal)">@m.SpamScore</span>} else {<span class="score s-zero" title="@L["Checked on arrival: nothing suspicious"]">0</span>}</span>
-                                <span class="u-subj">@Subject(m)</span></span>
-                            </a>
-                        </li>
-                    }
-                </ul>
-            }
-        </section>
-        <section class="dcard">
-            <h2>@L["Needs attention"]</h2>
-            <DashLines Lines="attention" L="L" Empty="@L["Nothing needs you: no drafts left, nothing waiting in the Outbox, and every message you sent has had its reply."]" />
-        </section>
-        <section class="dcard nophone">
-            <h2>@L["Your safety"]</h2>
-            <DashLines Lines="safety" L="L" Empty="" />
-        </section>
-        @* On a phone the activity comes before the table (board PhoneDashboard). *@
-        <section class="dcard span2 dsplitcard" id="d-activity">
-            <div class="dpart-table">
-                <h2>@L["Received, sent and Junk"]</h2>
-                <CountsTable Rows="table" L="L" Link="CountLink" Note="@(L["Today and Yesterday are calendar days in {zone}; the others end now. Each number opens those messages."].Replace("{zone}", clock.ZoneName(now), StringComparison.Ordinal))" />
-            </div>
-            <div class="dsplit"></div>
-            <div class="dpart-act">
-                <div class="dcardhead">
-                    <h3>@L[ActivityTitle]</h3>
-                    <PeriodChips Current="@activityPeriod.Key" Href="@(k => Link("a", k) + "#d-activity")" For="@L["Activity"]" L="L" />
-                </div>
-                <TimeChart Bars="bars" L="L" Link="BarLink" />
-            </div>
-        </section>
-        <section class="dcard nophone dhealth">
-            <h2>@L["Mailbox health"]</h2>
-            @* rc.15: how full the mailbox is, as a ring. *@
-            <div class="dring @(MailboxService.Fullness(box) >= 90 ? "bad" : MailboxService.Fullness(box) >= 80 ? "warn" : null)" style="--p:@MailboxService.Fullness(box).ToString(Inv)" role="img" aria-label="@L["{p}% used"].Replace("{p}", MailboxService.Fullness(box).ToString(Inv), StringComparison.Ordinal)">
-                <div class="dring-text"><b>@MailboxService.Fullness(box).ToString(Inv)%</b><span>@L["used"]</span></div>
-            </div>
-            @* rc.15 (item 56): the size opens the biggest messages first. *@
-            <p class="dbig dcenter"><a href="@BiggestFirst" class="dh-link" title="@L["Open the biggest messages first"]"><b>@Layout.MainLayout.Size(box.UsedBytes)</b> @(box.QuotaBytes > 0 ? L["of {quota}"].Replace("{quota}", Layout.MainLayout.Size(box.QuotaBytes), StringComparison.Ordinal) : string.Empty)</a></p>
-            <DashLines Lines="health" L="L" Empty="" />
-        </section>
-        <section class="dcard nophone" id="d-folder">
-            <div class="dcardhead col">
-                <h2>@L["By folder"]</h2>
-                <PeriodChips Current="@folderPeriod.Key" Href="@(k => Link("f", k) + "#d-folder")" For="@L["By folder"]" Class="small" L="L" />
-            </div>
-            <BarList Items="byFolder" Tone="h-brand" Empty="@L["Nothing received in this period."]" />
-        </section>
-        <section class="dcard nophone" id="d-category">
-            <div class="dcardhead col">
-                <h2>@L["By category"]</h2>
-                <PeriodChips Current="@categoryPeriod.Key" Href="@(k => Link("c", k) + "#d-category")" For="@L["By category"]" Class="small" L="L" />
-            </div>
-            <BarList Items="byCategory" Tone="h-brand" Empty="@L["Nothing received in this period."]" />
-        </section>
-        <section class="dcard nophone" id="d-who">
-            <div class="dcardhead col">
-                <h2>@L["Who wrote to you most"]</h2>
-                <PeriodChips Current="@whoPeriod.Key" Href="@(k => Link("w", k) + "#d-who")" For="@L["Who wrote to you most"]" Class="small" L="L" />
-            </div>
-            <BarList Items="bySender" Tone="h-accent" Empty="@L["Nothing received in this period."]" />
-        </section>
-        <section class="dcard span2 nophone" id="d-scores">
-            <div class="dcardhead">
-                <h2>@L["Messages by spam score"]</h2>
-                <PeriodChips Current="@scorePeriod.Key" Href="@(k => Link("s", k) + "#d-scores")" For="@L["Messages by spam score"]" L="L" />
-            </div>
-            <ScoreChart Scores="scores.Scores" Threshold="threshold" Checked="scores.Checked" Link="ScoreLink" L="L"
-                        Note="@(L["{n} checked {period}; {j} at or over your organisation's Junk line. Click a bar to list its messages."].Replace("{n}", scores.Checked.ToString("N0", Inv), StringComparison.Ordinal).Replace("{period}", L[scorePeriod.Label].ToLowerInvariant(), StringComparison.Ordinal).Replace("{j}", scores.Scores.Skip(threshold).Sum().ToString("N0", Inv), StringComparison.Ordinal))" />
-        </section>
-        <section class="dcard nophone" id="d-space">
-            <h2>@L["Space by folder"]</h2>
-            @* rc.15 (item 58): what each folder takes, in MB; each opens its folder. *@
-            <BarList Items="space" Tone="h-brand" Show="Mb" Empty="@L["Your mailbox is empty."]" />
-        </section>
-        @if (box.Id == personId)
-        {
-            <section class="dcard nophone dhabits" id="d-habits">
-                <div class="dcardhead">
-                    <h2>@L["Your habits"]</h2>
-                    <form method="post" action="/settings/habits">
-                        <AntiforgeryToken />
-                        <input type="hidden" name="back" value="/dashboard#d-habits" />
-                        <input type="hidden" name="on" value="@(habitsOn ? "0" : "1")" />
-                        <button type="submit" class="btn btn-s btn-sm" title="@L[habitsOn ? "Stop working out your habits" : "Show how quickly you reply and your busiest hours"]">@L[habitsOn ? "Turn off" : "Turn on"]</button>
-                    </form>
-                </div>
-                @if (!habitsOn)
-                {
-                    <p class="dnote">@L["Off. Nothing is worked out about how you use your mail."]</p>
-                }
-                else if (habits is not null)
-                {
-                    @if (habits.MedianReply is TimeSpan reply)
-                    {
-                        <p class="bigline"><b>@SpanText(reply)</b> @L["is how long you usually take to reply"]</p>
-                        <p class="dnote">@(habits.Replies == 1 ? L["From 1 reply in the last 30 days."] : L["From {n} replies in the last 30 days."].Replace("{n}", habits.Replies.ToString(Inv), StringComparison.Ordinal))</p>
+                        <p class="dnote">@L["Nothing received or sent in this period."]</p>
                     }
                     else
                     {
-                        <p class="dnote">@L["No replies in the last 30 days to work out how quickly you reply."]</p>
+                        long peak = Math.Max(1, d.People.Max(p => p.FromThem + p.FromYou));
+                        <ul class="twobars">
+                            @foreach (PersonTraffic p in d.People)
+                            {
+                                <li>
+                                    <span class="u-av" aria-hidden="true">@Initials(p.Name)</span>
+                                    <a class="tb-name" href="/search?scope=all&sender=@Uri.EscapeDataString(p.Address)" title="@p.Address">@p.Name</a>
+                                    <span class="tb-track"><i class="tb-them" style="width:@Share(p.FromThem, peak)%"></i><i class="tb-you" style="width:@Share(p.FromYou, peak)%"></i></span>
+                                    <b class="tb-n">@N(p.FromThem + p.FromYou)</b>
+                                </li>
+                            }
+                        </ul>
                     }
-                    <div class="hourbars" role="img" aria-label="@L["Messages by hour of the day, last 30 days"]">
-                        @for (int h = 0; h < 24; h++)
-                        {
-                            <i class="@(habits.Busiest.Contains(h) ? "busy" : null)" style="height:@HourHeight(h)%" title="@HourLabel(h): @habits.ByHour[h].ToString("N0", Inv)"></i>
-                        }
-                    </div>
-                    <div class="hourticks" aria-hidden="true"><span>@HourLabel(0)</span><span>@HourLabel(6)</span><span>@HourLabel(12)</span><span>@HourLabel(18)</span><span>@HourLabel(23)</span></div>
-                    @if (habits.Busiest.Count > 0)
+                </Chart>
+                <Table>
+                    <table class="dtable" data-sortable>
+                        <thead><tr><th scope="col">@L["Person"]</th><th scope="col" class="num">@L["From them"]</th><th scope="col" class="num">@L["From you"]</th><th scope="col" class="num">@L["You replied"]</th><th scope="col" class="num">@L["Usual reply"]</th></tr></thead>
+                        <tbody>
+                            @foreach (PersonTraffic p in d.People)
+                            {
+                                <tr>
+                                    <th scope="row" title="@p.Address">@p.Name</th>
+                                    <td class="num"><a href="/search?scope=all&sender=@Uri.EscapeDataString(p.Address)">@N(p.FromThem)</a></td>
+                                    <td class="num"><a href="/search?scope=Sent&q=@Uri.EscapeDataString(p.Address)">@N(p.FromYou)</a></td>
+                                    <td class="num @(p.RepliedPercent < 50 ? "dt-warn" : null)">@(p.RepliedPercent is int r ? r.ToString(Inv) + "%" : "–")</td>
+                                    <td class="num">@(p.UsualReply is TimeSpan u ? SpanText(u) : "–")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </Table>
+            </DashCard>
+            <DashCard Id="d-new" Title="@L["New senders"]" Sub="@L["First mail from them in a year came in this period"]" Tables="Tables" L="L">
+                <Chart><FigureBars Items="d.NewSenders" L="L" Empty="@L["No new senders in this period."]" /></Chart>
+                <Table><FigureTable Items="d.NewSenders" Heading="@L["Sender"]" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-domain" Title="@L["By organisation"]" Sub="@L["Received, by the sender's domain"]" Tables="Tables" L="L">
+                <Chart><FigureBars Items="d.ByDomain" L="L" Empty="@L["Nothing received in this period."]" /></Chart>
+                <Table><FigureTable Items="d.ByDomain" Heading="@L["Domain"]" L="L" /></Table>
+            </DashCard>
+            break;
+
+        case "replies":
+            <DashCard Id="d-reply" Title="@L["How quickly you reply"]" Sub="@PeriodLine" Tables="Tables" L="L">
+                <Actions>
+                    <form method="post" action="/settings/habits">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="back" value="/dashboard/replies#d-reply" />
+                        <input type="hidden" name="on" value="@(habitsOn ? "0" : "1")" />
+                        <button type="submit" class="btn btn-s btn-sm" title="@L[habitsOn ? "Stop working out your habits" : "Show how quickly you reply and your busiest hours"]">@L[habitsOn ? "Turn off" : "Turn on"]</button>
+                    </form>
+                </Actions>
+                <Chart>
+                    @if (!habitsOn)
                     {
-                        <p class="dnote">@L["Busiest hours: {hours}."].Replace("{hours}", string.Join(", ", habits.Busiest.Select(HourLabel)), StringComparison.Ordinal) @L["Seen only by you."]</p>
+                        <p class="dnote">@L["Off. Nothing is worked out about how you use your mail."]</p>
                     }
-                }
-            </section>
-        }
+                    else if (d.UsualReply.Now is TimeSpan usual)
+                    {
+                        <p class="dbignum">@SpanText(usual)</p>
+                        <p class="dnote">@L["is how long you usually take to reply"]@if (Compare && d.UsualReply.Before is TimeSpan before) { <text> · @Faster(usual, before)</text> }</p>
+                        <div class="bands" role="img" aria-label="@L["Replies by how long they took"]">
+                            @for (int b = 0; b < 4; b++)
+                            {
+                                long n = d.ReplyBands[b];
+                                @if (n > 0)
+                                {
+                                    <i class="band-@b" style="flex-grow:@n.ToString(Inv)" title="@L[BandNames[b]]: @N(n)">@Pct(n, d.ReplyBands.Sum())%</i>
+                                }
+                            }
+                        </div>
+                        <ul class="keyrows">
+                            @for (int b = 0; b < 4; b++)
+                            {
+                                <li><i class="band-@b"></i>@L[BandNames[b]]<b>@N(d.ReplyBands[b])</b></li>
+                            }
+                        </ul>
+                        <p class="dnote">@InsideOutsideReply · @L["Seen only by you."]</p>
+                    }
+                    else
+                    {
+                        <p class="dnote">@L["No replies in this period to work out how quickly you reply."]</p>
+                    }
+                </Chart>
+                <Table>
+                    <table class="dtable"><thead><tr><th scope="col">@L["Reply time"]</th><th scope="col" class="num">@L["Replies"]</th></tr></thead>
+                        <tbody>
+                            @for (int b = 0; b < 4; b++)
+                            {
+                                <tr><th scope="row">@L[BandNames[b]]</th><td class="num">@(habitsOn ? N(d.ReplyBands[b]) : "–")</td></tr>
+                            }
+                        </tbody></table>
+                </Table>
+            </DashCard>
+            @if (habitsOn && habits is not null)
+            {
+                @* rc.15 (item 58), kept: the person's own busiest hours, seen only by them. *@
+                <DashCard Id="d-habits" Title="@L["Your busiest hours"]" Sub="@L["Mail you received and sent, by hour, last 30 days"]" L="L">
+                    <Body>
+                        <div class="hourbars" role="img" aria-label="@L["Messages by hour of the day, last 30 days"]">
+                            @for (int h = 0; h < 24; h++)
+                            {
+                                <i class="@(habits.Busiest.Contains(h) ? "busy" : null)" style="height:@HourHeight(h)%" title="@HourLabel(h): @habits.ByHour[h].ToString("N0", Inv)"></i>
+                            }
+                        </div>
+                        <div class="hourticks" aria-hidden="true"><span>@HourLabel(0)</span><span>@HourLabel(6)</span><span>@HourLabel(12)</span><span>@HourLabel(18)</span><span>@HourLabel(23)</span></div>
+                        @if (habits.Busiest.Count > 0)
+                        {
+                            <p class="dnote">@L["Busiest hours: {hours}."].Replace("{hours}", string.Join(", ", habits.Busiest.Select(HourLabel)), StringComparison.Ordinal) @L["Seen only by you."]</p>
+                        }
+                    </Body>
+                </DashCard>
+            }
+            <DashCard Id="d-waiting" Title="@L["Waiting for a reply"]" Sub="@L["You wrote to a person three days ago or more and nothing came back"]" L="L">
+                <Body>
+                    @if (waiting.Count == 0)
+                    {
+                        <p class="dnote dclear"><LipiIcon Name="check" Size="16" />@L["Every message you sent has had its reply."]</p>
+                    }
+                    else
+                    {
+                        <ul class="ulist">
+                            @foreach (MessageRow m in waiting.Take(8))
+                            {
+                                <li><a href="/message/@m.Id"><span class="u-av" aria-hidden="true">@Initials(Recipient(m))</span><span class="u-main"><span class="u-top"><b>@Recipient(m)</b><span class="u-time">@clock.List(m.ReceivedAt, now)</span></span><span class="u-subj">@Subject(m)</span></span></a></li>
+                            }
+                        </ul>
+                        <p class="dnote"><a href="/no-reply">@L["Open all {n}"].Replace("{n}", N(waiting.Count), StringComparison.Ordinal)</a></p>
+                    }
+                </Body>
+            </DashCard>
+            <DashCard Id="d-unanswered" Title="@L["Not answered after 2 days"]" Sub="@L["Mail to you, not answered"]" L="L">
+                <Body>
+                    @if (d.NotAnswered.Count == 0)
+                    {
+                        <p class="dnote dclear"><LipiIcon Name="check" Size="16" />@L["Nothing addressed to you is waiting for your answer."]</p>
+                    }
+                    else
+                    {
+                        <ul class="ulist">
+                            @foreach (MessageFact f in d.NotAnswered.Take(8))
+                            {
+                                <li><a href="/message/@f.Id"><span class="u-av" aria-hidden="true">@Initials(FactSender(f))</span><span class="u-main"><span class="u-top"><b>@FactSender(f)</b><span class="u-time">@clock.List(f.ReceivedAt, now)</span></span><span class="u-subj">@Plain(f.Subject)</span></span></a></li>
+                            }
+                        </ul>
+                    }
+                </Body>
+            </DashCard>
+            <DashCard Id="d-backlog" Title="@L["Unread backlog"]" Sub="@L["Unread mail still in the Inbox, by when it arrived"]" Class="span2" Tables="Tables" L="L">
+                <Chart><BacklogBars Points="d.UnreadBacklog" L="L" /></Chart>
+                <Table><SeriesTable Points="d.UnreadBacklog" Only="received" Link="StepLink" L="L" /></Table>
+            </DashCard>
+            break;
 
+        case "safety":
+            <DashCard Id="d-safety" Title="@L["Junk caught and rescued"]" Sub="@L["Today, and the last 30 days"]" L="L">
+                <Body><DashLines Lines="safety" L="L" Empty="" /></Body>
+            </DashCard>
+            <DashCard Id="d-scores" Title="@L["Messages by spam score"]" Sub="@PeriodLine" Class="span2" Tables="Tables" L="L">
+                <Chart>
+                    <ScoreChart Scores="scores.Scores" Threshold="threshold" Checked="scores.Checked" Link="ScoreLink" L="L"
+                                Note="@(L["{n} checked {period}; {j} at or over your organisation's Junk line. Click a bar to list its messages."].Replace("{n}", scores.Checked.ToString("N0", Inv), StringComparison.Ordinal).Replace("{period}", PeriodLine.ToLowerInvariant(), StringComparison.Ordinal).Replace("{j}", scores.Scores.Skip(threshold).Sum().ToString("N0", Inv), StringComparison.Ordinal))" />
+                </Chart>
+                <Table>
+                    <table class="dtable"><thead><tr><th scope="col">@L["Score"]</th><th scope="col" class="num">@L["Messages"]</th></tr></thead>
+                        <tbody>
+                            @for (int s = 0; s < scores.Scores.Length; s++)
+                            {
+                                int score = s;
+                                <tr><th scope="row">@(score == scores.Scores.Length - 1 ? score.ToString(Inv) + "+" : score.ToString(Inv))</th><td class="num">@if (scores.Scores[score] > 0) { <a href="@ScoreLink(score)">@N(scores.Scores[score])</a> } else { <text>0</text> }</td></tr>
+                            }
+                        </tbody></table>
+                </Table>
+            </DashCard>
+            <DashCard Id="d-trust" Title="@L["Senders and encryption"]" Sub="@PeriodLine" Tables="Tables" L="L">
+                <Chart>
+                    <ul class="keyrows big">
+                        <li>@L["Checked and clean"]<b>@Pct(d.Verified.Verified, d.Verified.Checked)%</b><small>@(L["{n} of {m} checked"].Replace("{n}", N(d.Verified.Verified), StringComparison.Ordinal).Replace("{m}", N(d.Verified.Checked), StringComparison.Ordinal))</small></li>
+                        <li>@L["Arrived encrypted"]<b>@Pct(d.Encrypted.Encrypted, d.Encrypted.Known)%</b><small>@(L["{n} of {m} from outside"].Replace("{n}", N(d.Encrypted.Encrypted), StringComparison.Ordinal).Replace("{m}", N(d.Encrypted.Known), StringComparison.Ordinal))</small></li>
+                    </ul>
+                    <h3 class="dc-h3">@L["Arrived unencrypted"]</h3>
+                    <FigureBars Items="d.UnencryptedSenders" Tone="h-warn" L="L" Empty="@L["Everything from outside arrived encrypted."]" />
+                </Chart>
+                <Table><FigureTable Items="d.UnencryptedSenders" Heading="@L["Arrived unencrypted"]" L="L" /></Table>
+            </DashCard>
+            break;
 
+        case "storage":
+            <DashCard Id="d-space" Title="@L["Space"]" Sub="@SpaceLine" Class="span2" Tables="Tables" L="L">
+                <Chart>
+                    <StackBar Parts="SpaceParts" Quota="d.Storage.Quota" Show="Mb" Label="@SpaceLine" />
+                    @if (d.FullInMonths is int months)
+                    {
+                        <p class="dinfo"><LipiIcon Name="info" Size="16" />@L["At this rate it is full in about {n} months."].Replace("{n}", months.ToString(Inv), StringComparison.Ordinal)</p>
+                    }
+                </Chart>
+                <Table><FigureTable Items="SpaceParts" Heading="@L["Folder"]" Show="Mb" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-waste" Title="@L["Waiting to be emptied"]" Sub="@L["Trash and Junk empty themselves after their time"]" L="L">
+                <Body>
+                    <ul class="keyrows big">
+                        @foreach (NamedFigure f in d.Space.Where(s => s.Name is "Trash" or "Junk"))
+                        {
+                            <li><a href="@f.Link">@L.Folder(f.Name)</a><b>@Mb(f.Count)</b></li>
+                        }
+                    </ul>
+                </Body>
+            </DashCard>
+            <DashCard Id="d-growth" Title="@L["Growth over 12 months"]" Sub="@L["Space used at the end of each month"]" Class="span2" Tables="Tables" L="L">
+                <Chart><FigureColumns Items="d.Growth" Show="Mb" /></Chart>
+                <Table><FigureTable Items="d.Growth" Heading="@L["Month"]" Show="Mb" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-biggest" Title="@L["Biggest messages"]" Sub="@L["Largest first"]" L="L">
+                <Body>
+                    <ul class="ulist">
+                        @foreach (MessageFact f in d.Biggest)
+                        {
+                            <li><a href="/message/@f.Id"><span class="u-main"><span class="u-top"><b>@Plain(f.Subject)</b><span class="u-time">@Mb(f.SizeBytes)</span></span><span class="u-subj">@FactSender(f) · @L.Folder(f.Folder)</span></span></a></li>
+                        }
+                    </ul>
+                    <p class="dnote"><a href="@BiggestFirst">@L["Open the biggest messages first"]</a></p>
+                </Body>
+            </DashCard>
+            <DashCard Id="d-bigsenders" Title="@L["Biggest senders"]" Sub="@L["Whose mail takes most space"]" Tables="Tables" L="L">
+                <Chart><FigureBars Items="d.BiggestSenders" Show="Mb" L="L" Empty="@L["Your mailbox is empty."]" /></Chart>
+                <Table><FigureTable Items="d.BiggestSenders" Heading="@L["Sender"]" Show="Mb" L="L" /></Table>
+            </DashCard>
+            break;
 
-
-
-
+        default:
+            <div class="keyfigs span3">
+                <KeyFigure Title="@L["Received"]" Value="@N(d.Received.Now)" Trend="@d.Trends["received"]" Tone="sp-brand" Note="@Diff(d.Received)" Href="@CountLink("received")" />
+                <KeyFigure Title="@L["Sent"]" Value="@N(d.Sent.Now)" Trend="@d.Trends["sent"]" Tone="sp-accent" Note="@Diff(d.Sent)" Href="@CountLink("sent")" />
+                <KeyFigure Title="@L["Unread in Inbox"]" Value="@N(d.Unread.Now)" Trend="@d.Trends["unread"]" Tone="sp-ink" Note="@(d.Unread.OlderThanAWeek > 0 ? L["{n} older than a week"].Replace("{n}", N(d.Unread.OlderThanAWeek), StringComparison.Ordinal) : L["None older than a week"])" NoteTone="@(d.Unread.OlderThanAWeek > 0 ? "warn" : null)" Href="/folder/INBOX?show=unread" />
+                <KeyFigure Title="@L["Usual reply time"]" Value="@(habitsOn && d.UsualReply.Now is TimeSpan u1 ? SpanText(u1) : "–")" Trend="@d.Trends["reply"]" Tone="sp-seal" Note="@(habitsOn && Compare && d.UsualReply.Now is TimeSpan u2 && d.UsualReply.Before is TimeSpan b2 ? Faster(u2, b2) : string.Empty)" NoteTone="seal" Href="/dashboard/replies" />
+                <KeyFigure Title="@L["Waiting for a reply"]" Value="@N(d.Waiting.Now)" Trend="@d.Trends["waiting"]" Tone="sp-warn" Note="@(d.Waiting.Long > 0 ? L["{n} over 6 days"].Replace("{n}", N(d.Waiting.Long), StringComparison.Ordinal) : string.Empty)" NoteTone="warn" Href="/no-reply" />
+                <KeyFigure Title="@L["Junk caught"]" Value="@N(d.Junk.Now)" Trend="@d.Trends["junk"]" Tone="sp-danger" Note="@(rescuedCount > 0 ? L["{n} rescued by you"].Replace("{n}", N(rescuedCount), StringComparison.Ordinal) : Diff(d.Junk))" Href="/folder/Junk" />
+            </div>
+            <DashCard Id="d-activity" Title="@L["Received and sent"]" Sub="@(PeriodLine + (Compare ? " · " + L["Dashed: the period before."] : string.Empty))" Class="span2" Tables="Tables" L="L">
+                <Chart><LineChart Points="d.Series" Bars="BarsChart" Compare="Compare" Link="StepLink" L="L" /></Chart>
+                <Table><SeriesTable Points="d.Series" Compare="Compare" Link="StepLink" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-attention" Title="@L["Needs attention"]" L="L">
+                <Body><DashLines Lines="attention" L="L" Empty="@L["Nothing needs you: no drafts left, nothing waiting in the Outbox, and every message you sent has had its reply."]" /></Body>
+            </DashCard>
+            <DashCard Id="d-heat" Title="@L["When mail arrives"]" Sub="@(L["Received by weekday and hour"] + ", " + PeriodLine.ToLowerInvariant())" Tables="Tables" L="L">
+                <Chart><HeatMap Cells="d.Heat" L="L" /></Chart>
+                <Table><HeatTable Cells="d.Heat" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-category" Title="@L["By category"]" Sub="@L["Received · trend over the period"]" Tables="Tables" L="L">
+                <Chart><FigureBars Items="d.ByCategory" Trends="true" L="L" /></Chart>
+                <Table><FigureTable Items="d.ByCategory" Heading="@L["Category"]" L="L" /></Table>
+            </DashCard>
+            <DashCard Id="d-space" Title="@L["Space"]" Sub="@SpaceLine" Tables="Tables" L="L">
+                <Chart>
+                    <StackBar Parts="SpaceParts" Quota="d.Storage.Quota" Show="Mb" Label="@SpaceLine" />
+                    @if (d.FullInMonths is int months2)
+                    {
+                        <p class="dinfo"><LipiIcon Name="info" Size="16" />@L["At this rate it is full in about {n} months."].Replace("{n}", months2.ToString(Inv), StringComparison.Ordinal)</p>
+                    }
+                </Chart>
+                <Table><FigureTable Items="SpaceParts" Heading="@L["Folder"]" Show="Mb" L="L" /></Table>
+            </DashCard>
+            break;
+    }
     </div>
-    <p class="dnote phoneonly dfoot">@L["The full dashboard is on a larger screen."]</p>
+    <p class="dnote phoneonly dfoot">@L["Swipe for the next card."]</p>
 </div>
 }
 
 @code {
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
 
+    private static readonly string[] BandNames = { "Within an hour", "The same half-day", "The next day", "Later" };
+
+    // rc.15 (item 56): the mailbox's size opens its biggest messages first.
+    private const string BiggestFirst = "/search?scope=all&sort=size";
+
+    /// <summary>The page: flow, people, replies, safety or storage; none for the overview.</summary>
+    [Parameter] public string? Tab { get; set; }
+
     [SupplyParameterFromQuery(Name = "box")] private string? BoxText { get; set; }
-    [SupplyParameterFromQuery(Name = "a")] private string? A { get; set; }
-    [SupplyParameterFromQuery(Name = "s")] private string? S { get; set; }
-    [SupplyParameterFromQuery(Name = "f")] private string? F { get; set; }
-    [SupplyParameterFromQuery(Name = "c")] private string? C { get; set; }
-    [SupplyParameterFromQuery(Name = "w")] private string? W { get; set; }
+    [SupplyParameterFromQuery(Name = "p")] private string? P { get; set; }
+    [SupplyParameterFromQuery(Name = "from")] private string? FromDay { get; set; }
+    [SupplyParameterFromQuery(Name = "to")] private string? ToDay { get; set; }
+    [SupplyParameterFromQuery(Name = "cmp")] private string? Cmp { get; set; }
+    [SupplyParameterFromQuery(Name = "tables")] private string? TablesText { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private Lexicon L = new("en", new Dictionary<string, string>());
@@ -207,37 +421,15 @@ else
     private MailboxRow? box;
     private IReadOnlyList<MailboxRow> boxes = Array.Empty<MailboxRow>();
     private int threshold = TenantRow.DefaultSpamThreshold;
-    private IReadOnlyList<(DashPeriod Period, MailFigures Figures)> table = Array.Empty<(DashPeriod, MailFigures)>();
-    private DashPeriod activityPeriod = null!;
-    private DashPeriod scorePeriod = null!;
-    private DashPeriod folderPeriod = null!;
-    private DashPeriod categoryPeriod = null!;
-    private DashPeriod whoPeriod = null!;
-    private IReadOnlyList<ChartBar> bars = Array.Empty<ChartBar>();
+    private DashPeriod period = null!;
+    private DashPages? d;
     private MailFigures scores = new();
-    private long unreadCount;
-    private IReadOnlyList<MessageRow> unread = Array.Empty<MessageRow>();
     private IReadOnlyList<DashLine> attention = Array.Empty<DashLine>();
-    private IReadOnlyList<(string, long, string?, int)> byFolder = Array.Empty<(string, long, string?, int)>();
-    private IReadOnlyList<(string, long, string?, int)> byCategory = Array.Empty<(string, long, string?, int)>();
-    private IReadOnlyList<(string, long, string?, int)> bySender = Array.Empty<(string, long, string?, int)>();
-    private IReadOnlyList<DashLine> health = Array.Empty<DashLine>();
     private IReadOnlyList<DashLine> safety = Array.Empty<DashLine>();
-    private IReadOnlyList<(string, long, string?, int)> space = Array.Empty<(string, long, string?, int)>();
-    private Guid personId;
-
-    // rc.15 (item 56): the mailbox's size opens its biggest messages first.
-    private const string BiggestFirst = "/search?scope=all&sort=size";
+    private IReadOnlyList<MessageRow> waiting = Array.Empty<MessageRow>();
+    private int rescuedCount;
     private bool habitsOn;
     private MailHabits? habits;
-
-    // rc.15 (item 58): space in MB, as the owner asked; two decimals, as every size (owner, 9 Oct).
-    private static string Mb(long bytes) => Sizes.Megabytes(bytes);
-
-    private string SpanText(TimeSpan t) =>
-        t < TimeSpan.FromHours(1) ? L["{n} min"].Replace("{n}", Math.Max(1, (int)Math.Round(t.TotalMinutes)).ToString(Inv), StringComparison.Ordinal)
-        : t < TimeSpan.FromHours(48) ? L["{n} h"].Replace("{n}", ((int)Math.Round(t.TotalHours)).ToString(Inv), StringComparison.Ordinal)
-        : L["{n} days"].Replace("{n}", ((int)Math.Round(t.TotalDays)).ToString(Inv), StringComparison.Ordinal);
 
     // An hour of the day in the person's clock (24-hour or 12-hour).
     private string HourLabel(int hour) => clock.Time(MailboxService.AtLocal(clock, clock.Local(now).Date.AddHours(hour)));
@@ -249,64 +441,174 @@ else
         return (n == 0 ? 2 : Math.Max(6, n * 100 / max)).ToString(Inv);
     }
 
-    private string ActivityTitle => activityPeriod.Step switch { TimeStep.Hour => "Activity, by hour", TimeStep.Day => "Activity, by day", TimeStep.Week => "Activity, by week", _ => "Activity, by month" };
+    private string TabKey => Tab is "flow" or "people" or "replies" or "safety" or "storage" ? Tab : "overview";
 
-    private string ResetLink => box is not null && boxes.Count > 1 && box.Id != boxes[0].Id ? "/dashboard?box=" + box.Id : "/dashboard";
+    private string TabTitle => TabKey switch
+    {
+        "flow" => "Mail flow",
+        "people" => "People",
+        "replies" => "Replies",
+        "safety" => "Safety",
+        "storage" => "Storage",
+        _ => "Dashboard",
+    };
 
-    // The page's address with one graph's period changed and the others kept.
-    private string Link(string card, string key)
+    private string Here => TabKey == "overview" ? "/dashboard" : "/dashboard/" + TabKey;
+
+    private bool Compare => Cmp != "0";
+
+    private bool Tables => TablesText == "1";
+
+    private bool BarsChart => period.Step == TimeStep.Hour || period.Key == "7d";
+
+    private string Today => clock.Local(now).ToString("yyyy-MM-dd", Inv);
+
+    private string CustomFrom => period.Key.StartsWith("from:", StringComparison.Ordinal) ? period.Key.Split(':')[1] : clock.Local(period.Start).ToString("yyyy-MM-dd", Inv);
+
+    private string CustomTo => period.Key.StartsWith("from:", StringComparison.Ordinal) ? period.Key.Split(':')[3] : Today;
+
+    private string PeriodLine => period.Key.StartsWith("from:", StringComparison.Ordinal)
+        ? L["{from} to {to}"].Replace("{from}", clock.Date(period.Start), StringComparison.Ordinal).Replace("{to}", clock.Date(period.End.AddTicks(-1)), StringComparison.Ordinal)
+        : L[MailboxService.DashPagePeriods.FirstOrDefault(x => x.Key == period.Key).Label ?? "30 days"];
+
+    // What the tabs carry from page to page: the mailbox, the period, the comparison, the tables.
+    private string SharedQuery
+    {
+        get
+        {
+            var q = new List<string>();
+            if (box is not null && boxes.Count > 1 && box.Id != boxes[0].Id)
+            {
+                q.Add("box=" + box.Id);
+            }
+            if (period.Key != "30d")
+            {
+                q.Add(period.Key.StartsWith("from:", StringComparison.Ordinal) ? "from=" + CustomFrom + "&to=" + CustomTo : "p=" + Uri.EscapeDataString(period.Key));
+            }
+            if (!Compare)
+            {
+                q.Add("cmp=0");
+            }
+            if (Tables)
+            {
+                q.Add("tables=1");
+            }
+            return q.Count > 0 ? "?" + string.Join("&", q) : string.Empty;
+        }
+    }
+
+    // This page with one setting changed and the others kept.
+    private string Link(string? p = null, string? cmp = null, string? tables = null)
     {
         var q = new List<string>();
         if (box is not null && boxes.Count > 1 && box.Id != boxes[0].Id)
         {
             q.Add("box=" + box.Id);
         }
-        foreach ((string k, string? v) in new[] { ("a", A), ("s", S), ("f", F), ("c", C), ("w", W) })
+        string key = p ?? period.Key;
+        if (key != "30d")
         {
-            string value = k == card ? key : v ?? "today";
-            if (value != "today")
-            {
-                q.Add(k + "=" + Uri.EscapeDataString(value));
-            }
+            q.Add(key.StartsWith("from:", StringComparison.Ordinal) ? "from=" + CustomFrom + "&to=" + CustomTo : "p=" + Uri.EscapeDataString(key));
         }
-        return "/dashboard" + (q.Count > 0 ? "?" + string.Join("&", q) : string.Empty);
+        if ((cmp ?? (Compare ? "1" : "0")) == "0")
+        {
+            q.Add("cmp=0");
+        }
+        if ((tables ?? (Tables ? "1" : "0")) == "1")
+        {
+            q.Add("tables=1");
+        }
+        return Here + (q.Count > 0 ? "?" + string.Join("&", q) : string.Empty);
     }
+
+    private string ResetLink => Here + (box is not null && boxes.Count > 1 && box.Id != boxes[0].Id ? "?box=" + box.Id + "&p=today" : "?p=today");
+
+    private string N(long n) => n.ToString("N0", Inv);
+
+    private static string Pct(long part, long whole) => whole <= 0 ? "0" : Math.Round(100.0 * part / whole).ToString(Inv);
+
+    private static string Share(long part, long whole) => whole <= 0 ? "0" : (100.0 * part / whole).ToString("0.#", Inv);
+
+    // "+98 vs previous" - counts, not percentages (design review 7); empty when comparison is off.
+    private string Diff((long Now, long Before) v)
+    {
+        if (!Compare)
+        {
+            return string.Empty;
+        }
+        long delta = v.Now - v.Before;
+        return delta == 0 ? L["Same as the period before"] : L["{n} vs previous"].Replace("{n}", (delta > 0 ? "+" : "−") + Math.Abs(delta).ToString("N0", Inv), StringComparison.Ordinal);
+    }
+
+    private string Faster(TimeSpan now, TimeSpan before) =>
+        now < before ? L["{t} quicker"].Replace("{t}", SpanText(before - now), StringComparison.Ordinal)
+        : now > before ? L["{t} slower"].Replace("{t}", SpanText(now - before), StringComparison.Ordinal)
+        : L["Same as the period before"];
+
+    private string InsideOutsideReply =>
+        L["Inside {organisation}: {a}; outside: {b}"].Replace("{organisation}", orgName, StringComparison.Ordinal)
+            .Replace("{a}", d?.ReplyInsideOutside.Inside is TimeSpan a ? SpanText(a) : "–", StringComparison.Ordinal)
+            .Replace("{b}", d?.ReplyInsideOutside.Outside is TimeSpan b ? SpanText(b) : "–", StringComparison.Ordinal);
+
+    private long FolderTotal => d?.ByFolder.Sum(f => f.Count) ?? 0;
+
+    private IReadOnlyList<NamedFigure> SpaceParts => d is null ? Array.Empty<NamedFigure>()
+        : d.Space.Select(s => s with { Name = L.Folder(s.Name) }).ToList();
+
+    private string SpaceLine => d is null ? string.Empty
+        : d.Storage.Quota > 0 ? L["{used} of {quota} · by folder"].Replace("{used}", Mb(d.Storage.Used), StringComparison.Ordinal).Replace("{quota}", Layout.MainLayout.Size(d.Storage.Quota), StringComparison.Ordinal)
+        : L["{used} · by folder"].Replace("{used}", Mb(d.Storage.Used), StringComparison.Ordinal);
+
+    // rc.15 (item 58): space in MB, two decimals, as every size (owner, 9 Oct).
+    private static string Mb(long bytes) => Sizes.Megabytes(bytes);
+
+    private string SpanText(TimeSpan t) =>
+        t < TimeSpan.FromHours(1) ? L["{n} min"].Replace("{n}", Math.Max(1, (int)Math.Round(t.TotalMinutes)).ToString(Inv), StringComparison.Ordinal)
+        : t < TimeSpan.FromHours(48) ? L["{n} h"].Replace("{n}", ((int)Math.Round(t.TotalHours)).ToString(Inv), StringComparison.Ordinal)
+        : L["{n} days"].Replace("{n}", ((int)Math.Round(t.TotalDays)).ToString(Inv), StringComparison.Ordinal);
 
     // A search over the period, in the folder that holds what the count counts.
     private string Range(DashPeriod p) =>
         "&after=" + clock.Local(p.Start).ToString("yyyy-MM-dd", Inv) + "&before=" + clock.Local(p.End.AddTicks(-1)).ToString("yyyy-MM-dd", Inv);
 
-    private string? CountLink(string kind, DashPeriod p) => box is null ? null : kind switch
+    private string CountLink(string kind) => kind switch
     {
-        "sent" => "/search?scope=Sent" + Range(p),
-        "junk" => "/search?scope=Junk" + Range(p),
-        _ => "/search?scope=INBOX" + Range(p),
+        "sent" => "/search?scope=Sent" + Range(period),
+        _ => "/search?scope=INBOX" + Range(period),
     };
 
-    // Item 56: a step of the time chart opens its days' mail (an hour opens its whole day).
-    private string? BarLink(ChartBar b) => box is null ? null
-        : "/search?scope=all&after=" + b.Start.ToString("yyyy-MM-dd", Inv) + "&before=" + b.End.AddTicks(-1).ToString("yyyy-MM-dd", Inv);
+    // Item 56: a step opens its days' mail (an hour opens its whole day).
+    private string? StepLink(SeriesPoint s) =>
+        "/search?scope=all&after=" + clock.Local(s.Start).ToString("yyyy-MM-dd", Inv) + "&before=" + clock.Local(s.End.AddTicks(-1)).ToString("yyyy-MM-dd", Inv);
 
-    private string? ScoreLink(int score) => "/search?scope=all&score=" + score.ToString(Inv) + Range(scorePeriod);
+    private string? ScoreLink(int score) => "/search?scope=all&score=" + score.ToString(Inv) + Range(period);
 
-    // Up to two letters for a sender's round mark: the first of the first two words.
+    // Up to two letters for a person's round mark: the first of the first two words.
     private static string Initials(string name)
     {
         string[] words = name.Split(new[] { ' ', '.', '_', '@' }, StringSplitOptions.RemoveEmptyEntries);
         return words.Length == 0 ? "?" : string.Concat(words.Take(2).Select(w => char.ToUpperInvariant(w[0])));
     }
 
-    private static string Sender(MessageRow m)
+    private static string Recipient(MessageRow m)
     {
-        IReadOnlyList<Anjal.Mime.MailAddress> parsed = Anjal.Mime.AddressParser.Parse(Anjal.Mime.EncodedWordDecoder.Decode(m.FromHeader));
-        return parsed.Count > 0 ? (parsed[0].DisplayName.Length > 0 ? parsed[0].DisplayName : parsed[0].Address) : m.EnvelopeFrom;
+        IReadOnlyList<Anjal.Mime.MailAddress> parsed = Anjal.Mime.AddressParser.Parse(Anjal.Mime.EncodedWordDecoder.Decode(m.ToHeader));
+        return parsed.Count > 0 ? (parsed[0].DisplayName.Length > 0 ? parsed[0].DisplayName : parsed[0].Address) : m.ToHeader;
     }
 
-    private string Subject(MessageRow m)
+    private static string FactSender(MessageFact f)
     {
-        string s = Anjal.Mime.EncodedWordDecoder.Decode(m.Subject).Trim();
+        IReadOnlyList<Anjal.Mime.MailAddress> parsed = Anjal.Mime.AddressParser.Parse(Anjal.Mime.EncodedWordDecoder.Decode(f.FromHeader));
+        return parsed.Count > 0 ? (parsed[0].DisplayName.Length > 0 ? parsed[0].DisplayName : parsed[0].Address) : f.EnvelopeFrom;
+    }
+
+    private string Plain(string subject)
+    {
+        string s = Anjal.Mime.EncodedWordDecoder.Decode(subject).Trim();
         return s.Length > 0 ? s : L["(no subject)"];
     }
+
+    private string Subject(MessageRow m) => Plain(m.Subject);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -332,86 +634,45 @@ else
         orgName = context.Tenant.DisplayName.Length > 0 ? context.Tenant.DisplayName : context.Tenant.Slug;
         threshold = context.Tenant.SpamThreshold > 0 ? context.Tenant.SpamThreshold : TenantRow.DefaultSpamThreshold;
 
-        FigureScope scope = FigureScope.Mailbox(box.Id);
-        table = await Mail.FiguresTableAsync(scope, clock, now);
-        activityPeriod = MailboxService.DashPeriodOf(A, clock, now);
-        scorePeriod = MailboxService.DashPeriodOf(S, clock, now);
-        folderPeriod = MailboxService.DashPeriodOf(F, clock, now);
-        categoryPeriod = MailboxService.DashPeriodOf(C, clock, now);
-        whoPeriod = MailboxService.DashPeriodOf(W, clock, now);
-        MailFigures FiguresOf(DashPeriod p) => table.First(r => r.Period.Key == p.Key).Figures;
-        bars = MailboxService.Bars(FiguresOf(activityPeriod), activityPeriod, clock);
-        scores = FiguresOf(scorePeriod);
+        string? key = FromDay is not null && ToDay is not null ? "from:" + FromDay + ":to:" + ToDay : P;
+        period = MailboxService.DashPagePeriodOf(key, clock, now);
+        d = await Mail.DashPagesAsync(box.Id, period, clock, now);
+        habitsOn = box.Id == person && (await Mail.GetMailSettingsAsync(person)).Habits;
+        waiting = await Mail.NoReplyMessagesAsync(box.Id, now);
+        rescuedCount = (await Mail.RescuedSinceAsync(box.Id, period.Start)).Count;
 
-        (unreadCount, unread) = await Mail.UnreadAsync(box.Id, 5);
-        attention = await Mail.PersonAttentionAsync(box.Id, clock, now);
-
-        MailboxActivity folders = await Mail.ActivityInAsync(box.Id, folderPeriod, clock);
-        byFolder = folders.ByFolder.Take(6).Select(n => (L.Folder(n.Name), n.Count, (string?)("/folder/" + Uri.EscapeDataString(n.Name)), 0)).ToList();
-        MailboxActivity cats = categoryPeriod.Key == folderPeriod.Key ? folders : await Mail.ActivityInAsync(box.Id, categoryPeriod, clock);
-        // rc.15 (item 56): each category's bar opens its messages in that period.
-        Dictionary<string, Guid> categoryIds = (await Mail.ListCategoriesAsync(box.Id))
-            .GroupBy(c => c.Row.Name, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.First().Row.Id, StringComparer.Ordinal);
-        byCategory = cats.ByCategory.Take(6).Select(n => (n.Name == "Uncategorised" ? L["Uncategorised"] : n.Name, n.Count,
-            (string?)(n.Name == "Uncategorised" ? "/search?scope=all&cat=none" + Range(categoryPeriod)
-                : categoryIds.TryGetValue(n.Name, out Guid cid) ? "/search?scope=all&cat=" + cid + Range(categoryPeriod) : null), n.Slot)).ToList();
-        MailboxActivity who = whoPeriod.Key == folderPeriod.Key ? folders : whoPeriod.Key == categoryPeriod.Key ? cats : await Mail.ActivityInAsync(box.Id, whoPeriod, clock);
-        // Counted by address; shown by the name the person saved for it, when there is one (board Dashboard).
-        Dictionary<string, string> named = (await Mail.ListContactsAsync(box.Id))
-            .Where(c => c.Address.Length > 0)
-            .GroupBy(c => c.Address, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First().DisplayName, StringComparer.OrdinalIgnoreCase);
-        bySender = who.TopSenders.Take(5).Select(n => (named.TryGetValue(n.Name, out string? shown) ? shown : n.Name, n.Count, (string?)("/search?scope=all&sender=" + Uri.EscapeDataString(n.Name)), 0)).ToList();
-
-        // Mailbox health: the largest folder, attachments, Junk emptied.
-        IReadOnlyList<FolderView> allFolders = await Mail.ListFoldersAsync(box.Id);
-        var healthLines = new List<DashLine>();
-        if (allFolders.Where(f => f.Name != "Trash").OrderByDescending(f => f.Count).FirstOrDefault() is FolderView largest && largest.Count > 0)
+        if (TabKey == "replies" && habitsOn)
         {
-            healthLines.Add(new DashLine("folder", "{folder} holds the most mail: {n} messages", string.Empty, "/folder/" + Uri.EscapeDataString(largest.Name), string.Empty, new Dictionary<string, string>(StringComparer.Ordinal) { ["folder"] = L.Folder(largest.Name), ["n"] = largest.Count.ToString("N0", Inv) }));
+            habits = await Mail.HabitsAsync(box.Id, clock, now);
         }
-        MailboxActivity year = await Mail.ActivityInAsync(box.Id, MailboxService.DashPeriodOf("12m", clock, now), clock);
-        long withAttachments = year.ReceivedWithAttachments + year.SentWithAttachments;
-        if (withAttachments > 0)
+        if (TabKey == "overview")
         {
-            healthLines.Add(new DashLine("attachment", "{n} messages with attachments in the last 12 months", "Attachments take most of a mailbox's space", "/search?scope=all&attach=1", string.Empty, DashLine.N(withAttachments)));
+            attention = await Mail.PersonAttentionAsync(box.Id, clock, now);
         }
-        long trash = allFolders.FirstOrDefault(f => f.Name == "Trash")?.Count ?? 0;
-        if (trash > 0)
+        if (TabKey == "safety")
         {
-            healthLines.Add(new DashLine("trash", "{n} messages in Trash, emptied after their time", string.Empty, "/folder/Trash", string.Empty, DashLine.N(trash)));
-        }
-        health = healthLines;
-
-        // Your safety: devices, refused sign-ins today, dangerous mail caught today.
-        var safe = new List<DashLine>();
-        if (box.Id == person)
-        {
-            IReadOnlyList<SessionRecord> devices = await Sessions.ListAsync(person, SessionRegistry.SessionOf(user));
-            safe.Add(new DashLine("mobile-app", devices.Count == 1 ? "1 device signed in" : "{n} devices signed in",
-                devices.Count(d => d.Shared) > 0 ? "{shared} on a shared computer" : string.Empty, "/settings/security", string.Empty,
-                new Dictionary<string, string>(StringComparer.Ordinal) { ["n"] = devices.Count.ToString(Inv), ["shared"] = devices.Count(d => d.Shared).ToString(Inv) }));
-            int failed = await Mail.FailedSignInsAsync(new[] { box.Address, box.LocalPart }, MailboxService.DashPeriodOf("today", clock, now).Start);
-            safe.Add(new DashLine("security", failed == 0 ? "No refused sign-ins today" : failed == 1 ? "1 refused sign-in today" : "{n} refused sign-ins today",
-                failed > 0 ? "If it was not you, change your password" : string.Empty, "/settings/security", failed > 0 ? "warn" : string.Empty, DashLine.N(failed)));
-        }
-        // rc.15 (item 58): mail the person rescued from Junk with "Not spam".
-        IReadOnlyList<RescuedMessage> rescued = await Mail.RescuedSinceAsync(box.Id, now.AddDays(-30));
-        safe.Add(new DashLine("email", rescued.Count == 0 ? "Nothing rescued from Junk in the last 30 days" : rescued.Count == 1 ? "1 message rescued from Junk in the last 30 days" : "{n} messages rescued from Junk in the last 30 days",
-            rescued.Count > 0 ? "Marked Not spam by you; their senders now reach your Inbox" : string.Empty, rescued.Count > 0 ? "/search?scope=all&rescued=30" : string.Empty, string.Empty, DashLine.N(rescued.Count)));
-        MailFigures today = table[0].Figures;
-        long dangerous = today.Scores.Skip(8).Sum();
-        safe.Add(new DashLine("circle-x", dangerous == 0 ? "No dangerous mail caught today" : dangerous == 1 ? "1 dangerous message caught today" : "{n} dangerous messages caught today",
-            dangerous > 0 ? "Score 8 or more, filed in Junk" : string.Empty, dangerous > 0 ? "/folder/Junk" : string.Empty, dangerous > 0 ? "bad" : string.Empty, DashLine.N(dangerous)));
-        safety = safe;
-
-        space = (await Mail.FolderSpaceAsync(box.Id)).Take(8).Select(f => (L.Folder(f.Folder), f.Bytes, (string?)("/folder/" + Uri.EscapeDataString(f.Folder)), 0)).ToList();
-        personId = person;
-        if (box.Id == person)
-        {
-            habitsOn = (await Mail.GetMailSettingsAsync(person)).Habits;
-            habits = habitsOn ? await Mail.HabitsAsync(person, clock, now) : null;
+            scores = await Mail.FiguresAsync(FigureScope.Mailbox(box.Id), period, clock);
+            // Devices, refused sign-ins today, mail rescued, dangerous mail caught today.
+            var safe = new List<DashLine>();
+            if (box.Id == person)
+            {
+                IReadOnlyList<SessionRecord> devices = await Sessions.ListAsync(person, SessionRegistry.SessionOf(user));
+                safe.Add(new DashLine("mobile-app", devices.Count == 1 ? "1 device signed in" : "{n} devices signed in",
+                    devices.Count(x => x.Shared) > 0 ? "{shared} on a shared computer" : string.Empty, "/settings/security", string.Empty,
+                    new Dictionary<string, string>(StringComparer.Ordinal) { ["n"] = devices.Count.ToString(Inv), ["shared"] = devices.Count(x => x.Shared).ToString(Inv) }));
+                int failed = await Mail.FailedSignInsAsync(new[] { box.Address, box.LocalPart }, MailboxService.DashPeriodOf("today", clock, now).Start);
+                safe.Add(new DashLine("security", failed == 0 ? "No refused sign-ins today" : failed == 1 ? "1 refused sign-in today" : "{n} refused sign-ins today",
+                    failed > 0 ? "If it was not you, change your password" : string.Empty, "/settings/security", failed > 0 ? "warn" : string.Empty, DashLine.N(failed)));
+            }
+            // rc.15 (item 58): mail the person rescued from Junk with "Not spam".
+            IReadOnlyList<RescuedMessage> rescued = await Mail.RescuedSinceAsync(box.Id, now.AddDays(-30));
+            safe.Add(new DashLine("email", rescued.Count == 0 ? "Nothing rescued from Junk in the last 30 days" : rescued.Count == 1 ? "1 message rescued from Junk in the last 30 days" : "{n} messages rescued from Junk in the last 30 days",
+                rescued.Count > 0 ? "Marked Not spam by you; their senders now reach your Inbox" : string.Empty, rescued.Count > 0 ? "/search?scope=all&rescued=30" : string.Empty, string.Empty, DashLine.N(rescued.Count)));
+            MailFigures today = await Mail.FiguresAsync(FigureScope.Mailbox(box.Id), MailboxService.DashPeriodOf("today", clock, now), clock);
+            long dangerous = today.Scores.Skip(8).Sum();
+            safe.Add(new DashLine("circle-x", dangerous == 0 ? "No dangerous mail caught today" : dangerous == 1 ? "1 dangerous message caught today" : "{n} dangerous messages caught today",
+                dangerous > 0 ? "Score 8 or more, filed in Junk" : string.Empty, dangerous > 0 ? "/folder/Junk" : string.Empty, dangerous > 0 ? "bad" : string.Empty, DashLine.N(dangerous)));
+            safety = safe;
         }
         loaded = true;
     }

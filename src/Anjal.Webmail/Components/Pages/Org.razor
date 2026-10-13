@@ -32,8 +32,15 @@ else
 <div class="settings3 orgconsole">
     <nav class="setnav3 setnav-long" aria-label="@L["Organisation console sections"]">
         <div class="setnav-title orgtitle"><span>@OrgName</span><small>@L["Organisation console"]</small></div>
-        @foreach ((string key, string label, string icon) in Sections)
+        @* rc.16, design review [6f]: Set up on top ("3 of 6"), then the sections in groups. *@
+        @{ string lastGroup = string.Empty; }
+        @foreach ((string group, string key, string label, string icon) in Sections)
         {
+            @if (group != lastGroup)
+            {
+                lastGroup = group;
+                <span class="setnav-group">@L[group]</span>
+            }
             <a href="/org/@key" class="setnav-item @(Current == key ? "on" : null)" aria-current="@(Current == key ? "page" : null)">
                 <LipiIcon Name="@icon" Size="20" />
                 <span class="setnav-text"><b>@L[label]</b><span>@NavSub(key)</span></span>
@@ -78,6 +85,41 @@ else
 
     @switch (Current)
     {
+        case "setup":
+            @* [6f] The six steps: done ones ticked with their date, the current one ringed with its button,
+               the ones after it waiting. *@
+            <section class="formcard orgcard setupcard">
+                <h2>@L["Set up {organisation}"].Replace("{organisation}", OrgName, StringComparison.Ordinal)</h2>
+                <p class="hint orglead">@L["{n} of {m} done. Each step takes a few minutes; you can come back to it."].Replace("{n}", setup.Count(x => x.Done).ToString(Inv), StringComparison.Ordinal).Replace("{m}", setup.Count.ToString(Inv), StringComparison.Ordinal)</p>
+                <ol class="setupsteps">
+                    @{ bool currentShown = false; int number = 0; }
+                    @foreach (SetupStep step in setup)
+                    {
+                        number++;
+                        bool isCurrent = !step.Done && !currentShown;
+                        currentShown |= isCurrent;
+                        <li class="@(step.Done ? "done" : isCurrent ? "current" : "later")">
+                            <span class="ss-mark" aria-hidden="true">@if (step.Done) { <LipiIcon Name="check" Size="16" /> } else { @number }</span>
+                            <span class="ss-text">
+                                <b>@L[step.Title]</b>
+                                @if (step.Done)
+                                {
+                                    <span>@(step.DoneAt is DateTimeOffset at ? L["Done {date}"].Replace("{date}", clock.Date(at), StringComparison.Ordinal) : L["Done"])</span>
+                                }
+                            </span>
+                            @if (isCurrent)
+                            {
+                                <a class="btn btn-p btn-sm" href="@step.Href" title="@L[step.Title]">@L[step.Action]</a>
+                            }
+                            else
+                            {
+                                <a class="linkbtn" href="@step.Href" title="@L[step.Title]">@L["Open"]</a>
+                            }
+                        </li>
+                    }
+                </ol>
+            </section>
+            break;
         case "people":
             <section class="formcard orgcard">
                 <header class="orghead">
@@ -947,19 +989,23 @@ else
 
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
 
-    private static readonly (string Key, string Label, string Icon)[] Sections =
+    // rc.16, design review [6f]: Set up first, then grouped - People and access, Mail, Records, Insight, Brand.
+    private static readonly (string Group, string Key, string Label, string Icon)[] Sections =
     {
-        ("people", "People", "users"),
-        ("signin", "Sign-in and sessions", "security"),
-        ("domains", "Domains", "world-route"),
-        ("shared", "Shared mailboxes", "box"),
-        ("retention", "Retention", "clock"),
-        ("sending", "Sending", "referral-out"),
-        ("figures", "Figures per person", "chart-bar"),
-        ("apps", "Applications", "grid-view"),
-        ("log", "Activity log", "log"),
-        ("branding", "Branding", "edit"),
+        (string.Empty, "setup", "Set up", "checklist-onboard"),
+        ("People and access", "people", "People", "users"),
+        ("People and access", "signin", "Sign-in and sessions", "security"),
+        ("People and access", "shared", "Shared mailboxes", "box"),
+        ("Mail", "domains", "Domains", "world-route"),
+        ("Mail", "sending", "Sending", "referral-out"),
+        ("Mail", "apps", "Applications", "grid-view"),
+        ("Records", "retention", "Retention", "clock"),
+        ("Records", "log", "Activity log", "log"),
+        ("Insight", "figures", "Figures per person", "chart-bar"),
+        ("Brand", "branding", "Branding", "edit"),
     };
+
+    private IReadOnlyList<SetupStep> setup = Array.Empty<SetupStep>();
 
     private static readonly (string Key, string Word)[] PeopleFilters = { ("all", "All"), ("active", "Active"), ("invited", "Invited"), ("disabled", "Disabled") };
     private static readonly int[] JunkChoices = { 7, 14, 30, 60, 90 };
@@ -1026,7 +1072,8 @@ else
     private PersonFiguresSetting figures = new();
     private IReadOnlyList<MailTemplate> orgTemplates = Array.Empty<MailTemplate>();
 
-    private string Current => Sections.Any(s => s.Key == Section) ? Section! : "people";
+    // Until every set-up step is done, the console opens on Set up.
+    private string Current => Sections.Any(s => s.Key == Section) ? Section! : setup.Count > 0 && setup.Any(x => !x.Done) ? "setup" : "people";
     private string OrgName => tenant is null ? string.Empty : tenant.DisplayName.Length > 0 ? tenant.DisplayName : tenant.Slug;
     private string Q => (QText ?? string.Empty).Trim();
     private string Filter => PeopleFilters.Any(f => f.Key == FilterText) ? FilterText! : "all";
@@ -1082,6 +1129,7 @@ else
 
     private string NavSub(string key) => key switch
     {
+        "setup" => L["{n} of {m}"].Replace("{n}", setup.Count(x => x.Done).ToString(Inv), StringComparison.Ordinal).Replace("{m}", setup.Count.ToString(Inv), StringComparison.Ordinal),
         "people" => counts.People == 1 ? L["1 person"] : L["{n} people, {i} invited"].Replace("{n}", counts.People.ToString(Inv), StringComparison.Ordinal).Replace("{i}", counts.Invited.ToString(Inv), StringComparison.Ordinal),
         "signin" => L["Passwords, two-step, idle limits"],
         "domains" => counts.Domains == 1 ? L["1 domain"] : L["{n} domains"].Replace("{n}", counts.Domains.ToString(Inv), StringComparison.Ordinal),
@@ -1214,6 +1262,7 @@ else
         people = await Mail.ListPeopleAsync(tenant, Sessions);
         everyone = people.Select(p => p.Mailbox).ToList();
         figures = await Mail.PersonFiguresOfAsync(tenant.Id);
+        setup = await Mail.SetupStepsAsync(tenant, people);
 
         switch (Current)
         {

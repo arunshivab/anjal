@@ -147,21 +147,29 @@ else
                           @L["Your mailbox is full. Delete or archive some mail to send again: a copy of every sent message is kept in Sent. Or ask your administrator for more space, then come back to this draft."]</span>
                 </div>
             }
+            @* rc.16, design review [6a]: the letter holds the subject, a formatting bar and the body -
+               the same rule as reading; the envelope beside it does the addressing. *@
             <input class="csubject" name="subject" type="text" value="@subject" placeholder="@L["Subject"]" aria-label="@L["Subject"]" />
+            <div class="ctools">
+                <FormatBar L="L" />
+                <button type="submit" class="ctempl" formaction="/draft" name="templates" value="1" formnovalidate title="@L["Templates"]"><LipiIcon Name="email-template" Size="16" /><span>@L["Templates"]</span></button>
+            </div>
             @* Plain text box: what is sent when JavaScript is off. With it on,
                the browser script replaces this with the formatting editor and
                keeps both this box and bodyHtml filled in. *@
             <textarea class="canvas cbody" name="body" aria-label="@L["Message"]" data-rte placeholder="@L["Write your message."]">@body</textarea>
             <input type="hidden" name="bodyHtml" value="@bodyHtml" data-rte-html />
-            <div class="ctools">
-                <button type="submit" class="ctempl" formaction="/draft" name="templates" value="1" formnovalidate title="@L["Templates"]"><LipiIcon Name="email-template" Size="16" /><span>@L["Templates"]</span></button>
-                <FormatBar L="L" />
-                @* rc.15 (owner, 7 Oct; item 48): the same message in a small window over the Inbox, and back. *@
-                <button type="submit" class="ctempl cpop" formaction="/draft" name="dock" value="1" formnovalidate title="@L["Write in a small window over the Inbox"]"><LipiIcon Name="collapse" Size="16" /><span>@L["Small window"]</span></button>
+            @* One status at the bottom of the letter, and the Expect a reply switch. *@
+            <div class="cletterfoot">
+                <p class="cstate" data-draft-state>@(SavedFlag is not null ? L["Draft saved"] : L["Drafts are saved when you press Save draft"])</p>
+                <span class="lh-grow"></span>
+                @* rc.15 (item 63): counted on your dashboard if no answer comes within three days. *@
+                <label class="mtoggle cexpect" title="@L["Shown on your dashboard if no answer comes within three days."]"><span>@L["Expect a reply"]</span><input type="checkbox" name="expect" value="1" /><span class="toggle" aria-hidden="true"><i></i></span></label>
             </div>
         </section>
 
         <aside class="cenv" aria-label="@L["Sending"]">
+            <div class="eflap" aria-hidden="true"><svg viewBox="0 0 304 64" preserveAspectRatio="none"><path d="M-4 0 L152 58 L308 0"></path></svg></div>
             <div class="cblock cfrom">
                 <label class="clabel" for="from">@L["From"]</label>
                 <select id="from" class="csel" name="from" aria-label="@L["From"]">
@@ -170,7 +178,7 @@ else
             </div>
 
             <div class="cblock" data-recips>
-                @* rc.15 (owner, 7 Oct; item 16): To, Cc and Bcc always on show, each label beside its box. *@
+                @* rc.15 (owner, 7 Oct; item 16): each label beside its box. *@
                 <label class="clabel" for="to">@L["To"] <span class="rcount" data-rcount></span></label>
                 <div class="rbox" data-rbox>
                     <input class="rinput" id="to" name="to" type="text" value="@to" data-suggest autocomplete="off" autofocus="@(to.Length == 0)"
@@ -180,13 +188,15 @@ else
             </div>
             @* DES-11 F5 (owner, 10 Oct 2026, "b"): with Send one each, Cc and Bcc give way to one summary copy. *@
             <div class="cblock" id="ccrow" data-recips data-merge-off>
-                <label class="clabel" for="cc">@L["Cc"]</label>
+                <span class="clabelrow"><label class="clabel" for="cc">@L["Cc"]</label>
+                    @* 6a: Bcc behind a link; open when the message already has a Bcc. *@
+                    <a class="linkbtn cbcclink" href="#bccrow" title="@L["Add hidden copies. The other people will not see these addresses."]" data-bcc-open hidden="@(bcc.Length > 0)">+ @L["Bcc"]</a></span>
                 <div class="rbox" data-rbox>
                     <input class="rinput" id="cc" name="cc" type="text" value="@cc" data-suggest autocomplete="off" placeholder="@L["Name or address"]" />
                 </div>
                 <div class="rsum" data-rsum hidden></div>
             </div>
-            <div class="cblock" data-recips data-merge-off>
+            <div class="cblock cbccrow @(bcc.Length > 0 ? "open" : null)" id="bccrow" data-recips data-merge-off>
                 <label class="clabel" for="bcc">@L["Bcc"]</label>
                 <div class="rbox" data-rbox>
                     <input class="rinput" id="bcc" name="bcc" type="text" value="@bcc" data-suggest autocomplete="off" placeholder="@L["Name or address"]" />
@@ -204,7 +214,7 @@ else
             </div>
 
             <div class="cblock cattach">
-                <span class="clabel">@L["Attachments"]</span>
+                <span class="clabel">@L["Enclosed"] · <span data-filecount>@carried.Count</span></span>
                 @if (carried.Count > 0 && carrySource is Guid src)
                 {
                     @* Files already on the original (forward) or the draft. Ticked by
@@ -216,14 +226,15 @@ else
                     {
                         <label class="carry">
                             <input type="checkbox" name="carry" value="@a.Index" checked />
-                            <LipiIcon Name="attachment" Size="14" /><span>@a.FileName</span> <span class="catmeta">@MainLayout.Size(a.SizeBytes)</span>
+                            @{ (string tag, string kind) = FileTag.Of(a.FileName, a.ContentType); }
+                            <span class="ftag ftag-@kind" aria-hidden="true">@tag</span><span class="catname">@a.FileName</span> <span class="catmeta">@MainLayout.Size(a.SizeBytes)</span>
                         </label>
                     }
                 }
                 <ul class="cfiles" data-filelist></ul>
                 <label class="cdrop" data-drop>
                     <input class="cfile" id="attachments" name="attachments" type="file" multiple aria-label="@L["Attach files"]" />
-                    <span>@L["Drop files, or"] <u>@L["choose"]</u></span>
+                    <span><LipiIcon Name="attachment" Size="15" />@L["Drop files, or"] <u>@L["choose"]</u></span>
                 </label>
             </div>
 
@@ -263,33 +274,38 @@ else
             }
 
             <span class="cgrow"></span>
-            @* rc.15 (item 63): counted on your dashboard if no answer comes within three days. *@
-            <label class="checkline cexpect" title="@L["Shown on your dashboard if no answer comes within three days."]"><input type="checkbox" name="expect" value="1" /><span>@L["Expect a reply"]</span></label>
+            @* 6a: one Send row - Send (full width), Send later and More (Templates, the small window,
+               Save draft, Save as template, Discard). *@
             <div class="csend">
-                <button type="submit" class="btn btn-p csendbtn" disabled="@full" data-send data-word-send="@L["Send"]" data-word-sendn="@L["Send to {n}"]">@L["Send"]</button>
+                <button type="submit" class="btn btn-p csendbtn" disabled="@full" data-send data-word-send="@L["Send"]" data-word-sendn="@L["Send to {n}"]"><LipiIcon Name="referral-out" Size="16" />@L["Send"]</button>
                 <details class="pmenu clater">
-                    <summary class="btn btn-s"><LipiIcon Name="clock" Size="16" />@L["Send later"]</summary>
+                    <summary class="btn btn-s iconsq" title="@L["Send later"]" aria-label="@L["Send later"]"><LipiIcon Name="clock" Size="17" /></summary>
                     <div class="pmenu-body pmenu-up">
                         <SendLaterChoices L="L" Tomorrow="tomorrow" Monday="monday" Clock="clock" />
                     </div>
                 </details>
-                <details class="pmenu confirm cdiscard">
-                    <summary class="btn btn-s iconsq" title="@L["Discard"]" aria-label="@L["Discard"]"><LipiIcon Name="trash" Size="16" /></summary>
+                <details class="pmenu cmorewrite">
+                    <summary class="btn btn-s iconsq" title="@L["More"]" aria-label="@L["More"]"><LipiIcon Name="more-horizontal" Size="17" /></summary>
                     <div class="pmenu-body pmenu-up">
-                        <p class="pm-note">@L["Discard this message? A saved draft is removed too."]</p>
-                        <button type="submit" class="btn btn-d btn-sm" formaction="/draft/discard" formnovalidate data-discard>@L["Discard"]</button>
+                        <button type="submit" class="pmi" formaction="/draft" name="templates" value="1" formnovalidate><LipiIcon Name="email-template" Size="15" />@L["Templates"]</button>
+                        @* rc.15 (owner, 7 Oct; item 48): the same message in a small window over the Inbox, and back. *@
+                        <button type="submit" class="pmi cpop" formaction="/draft" name="dock" value="1" formnovalidate title="@L["Write in a small window over the Inbox"]"><LipiIcon Name="collapse" Size="15" />@L["Small window"]</button>
+                        <button type="submit" class="pmi" formaction="/draft" formnovalidate><LipiIcon Name="download" Size="15" />@L["Save draft"]</button>
+                        <button type="submit" class="pmi" formaction="/draft" name="savetemplate" value="1" formnovalidate><LipiIcon Name="bookmark" Size="15" />@L["Save as template"]</button>
+                        @if (IsAdmin)
+                        {
+                            <button type="submit" class="pmi" formaction="/draft" name="savetemplate" value="org" formnovalidate title="@L["Everyone in your organisation can use it; only administrators can remove it."]"><LipiIcon Name="users" Size="15" />@L["Save as template for everyone"]</button>
+                        }
+                        <a class="pmi" href="@Back" data-cancel><LipiIcon Name="close" Size="15" />@L["Cancel"]</a>
+                        <details class="confirm cdiscard">
+                            <summary class="pmi danger"><LipiIcon Name="trash" Size="15" />@L["Discard"]</summary>
+                            <span class="inner">
+                                @L["Discard this message? A saved draft is removed too."]
+                                <button type="submit" class="btn btn-d btn-sm" formaction="/draft/discard" formnovalidate data-discard>@L["Discard"]</button>
+                            </span>
+                        </details>
                     </div>
                 </details>
-            </div>
-            <div class="cfoot">
-                <p class="cstate" data-draft-state>@(SavedFlag is not null ? L["Draft saved"] : L["Drafts are saved when you press Save draft"])</p>
-                <button type="submit" class="linkbtn" formaction="/draft" formnovalidate>@L["Save draft"]</button>
-                <button type="submit" class="linkbtn" formaction="/draft" name="savetemplate" value="1" formnovalidate>@L["Save as template"]</button>
-                @if (IsAdmin)
-                {
-                    <button type="submit" class="linkbtn" formaction="/draft" name="savetemplate" value="org" formnovalidate title="@L["Everyone in your organisation can use it; only administrators can remove it."]">@L["Save as template for everyone"]</button>
-                }
-                <a class="linkbtn" href="@Back" data-cancel>@L["Cancel"]</a>
             </div>
             <p class="railnote csign">@L["Anjal signs and sends from {address}."].Replace("{address}", address, StringComparison.Ordinal)</p>
         </aside>

@@ -1,0 +1,102 @@
+@using Anjal.Webmail.Services
+@* rc.16, design review 4.1 (owner, 11 Oct 2026): the list head is one row - the folder, an
+   "N new" pill, then this menu and More. What to show (All, Unread, Read), the layout and the
+   order live here, so they no longer take the list head's room. Each is still its own small
+   form or link, and works without the script. *@
+<details class="pmenu pmenu-right lhfilter">
+    <summary class="iconbtn @(Active ? "on" : null)" title="@L["Show, layout and order"]" aria-label="@L["Show, layout and order"]"><LipiIcon Name="filter" Size="16" /></summary>
+    <div class="pmenu-body">
+        <p class="pm-head">@L["Show"]</p>
+        @foreach ((string key, string word) in Shows)
+        {
+            <a class="pmi" href="@FilterLink(key)" aria-current="@(Show == key ? "page" : null)">
+                @if (Show == key)
+                {
+                    <LipiIcon Name="check" Size="15" />
+                }
+                else
+                {
+                    <span class="pmi-gap" aria-hidden="true"></span>
+                }
+                @L[word]
+            </a>
+        }
+        @if (Layouts)
+        {
+            <p class="pm-head">@L["Layout"]</p>
+            <form method="post" action="/settings/layout" class="inline">
+                <AntiforgeryToken />
+                <input type="hidden" name="back" value="@Back" />
+                @foreach ((string key, string icon, string word) in LayoutChoices)
+                {
+                    <button type="submit" name="layout" value="@key" class="pmi" aria-pressed="@(Layout == key ? "true" : "false")" data-needs-server>
+                        <LipiIcon Name="@icon" Size="15" />@L[word]@if (Layout == key) { <LipiIcon Name="check" Size="15" Class="pmi-end" /> }
+                    </button>
+                }
+            </form>
+        }
+        <p class="pm-head">@L["Sort"]</p>
+        <form method="post" action="/settings/sort" class="inline sortlist">
+            <AntiforgeryToken />
+            <input type="hidden" name="folder" value="@Folder" />
+            <input type="hidden" name="back" value="@SortBack" />
+            @foreach (string choice in MailboxService.SortChoices)
+            {
+                <button type="submit" name="sort" value="@choice" class="pmi" aria-pressed="@(choice == Sort ? "true" : "false")" data-needs-server>
+                    @if (choice == Sort)
+                    {
+                        <LipiIcon Name="check" Size="15" />
+                    }
+                    else
+                    {
+                        <span class="pmi-gap" aria-hidden="true"></span>
+                    }
+                    @L[SortMenu.SortWord(choice, Outgoing)]
+                </button>
+            }
+        </form>
+    </div>
+</details>
+
+@code {
+    private static readonly (string Key, string Word)[] Shows = { ("all", "All"), ("unread", "Unread"), ("read", "Read") };
+
+    private static readonly (string Key, string Icon, string Word)[] LayoutChoices =
+    {
+        ("three", "columns", "Three panes"),
+        ("focus", "expand", "Focus"),
+        ("list", "list-view", "List only"),
+    };
+
+    /// <summary>The words in the person's language.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>all, unread or read.</summary>
+    [Parameter] public string Show { get; set; } = "all";
+
+    /// <summary>The address of the list showing all, unread or read.</summary>
+    [Parameter] public Func<string, string> FilterLink { get; set; } = k => "?show=" + k;
+
+    /// <summary>Offer the layout choices (folders; not search).</summary>
+    [Parameter] public bool Layouts { get; set; } = true;
+
+    /// <summary>The layout now: three, focus or list.</summary>
+    [Parameter] public string Layout { get; set; } = "three";
+
+    /// <summary>Where the layout choice returns.</summary>
+    [Parameter] public string Back { get; set; } = "/folder/INBOX";
+
+    /// <summary>The folder's name, or the search key, for the order.</summary>
+    [Parameter] public string Folder { get; set; } = string.Empty;
+
+    /// <summary>The order now.</summary>
+    [Parameter] public string Sort { get; set; } = MailboxService.NewestFirst;
+
+    /// <summary>True in Sent, Drafts and Scheduled: by name is by recipient.</summary>
+    [Parameter] public bool Outgoing { get; set; }
+
+    /// <summary>Where the order's choice returns: the list's first page.</summary>
+    [Parameter] public string SortBack { get; set; } = "/folder/INBOX";
+
+    private bool Active => Show != "all" || Sort != MailboxService.NewestFirst;
+}

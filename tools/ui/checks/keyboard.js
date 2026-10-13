@@ -15,8 +15,11 @@ function mark() {
     const r = e.getBoundingClientRect(); const cs = getComputedStyle(e);
     if (r.width < 1 || r.height < 1 || cs.visibility === 'hidden') { return false; }
     if (e.closest('[inert], [aria-hidden=true]')) { return false; }
+    // A summary shows while its own section is closed, but not inside another closed one (rc.16:
+    // Discard's confirm sits inside the closed More menu of compose).
     const d = e.closest('details:not([open])');
-    return !d || (e.tagName === 'SUMMARY' && e.parentElement === d);
+    if (d && e.tagName === 'SUMMARY' && e.parentElement === d) { return !(d.parentElement && d.parentElement.closest('details:not([open])')); }
+    return !d;
   };
   let n = 0;
   const list = [];

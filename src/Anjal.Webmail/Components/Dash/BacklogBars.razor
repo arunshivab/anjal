@@ -1,0 +1,22 @@
+@* rc.16 (design review 7, Replies): unread mail still in the Inbox, by when it arrived. *@
+@{ var inv = System.Globalization.CultureInfo.InvariantCulture; long max = Math.Max(1, Points.Count == 0 ? 0 : Points.Max(p => p.Received)); }
+<div class="cols" role="img" aria-label="@L["Unread backlog"]">
+    @foreach (SeriesPoint p in Points)
+    {
+        <span class="col" title="@p.Label · @p.Received.ToString("N0", inv)"><i style="height:@(p.Received == 0 ? "0" : Math.Max(3, p.Received * 100 / max).ToString(inv))%"></i></span>
+    }
+</div>
+<div class="lc-axis" aria-hidden="true">
+    @for (int i = 0; i < Points.Count; i++)
+    {
+        <span>@(i % Math.Max(1, Points.Count / 6) == 0 || i == Points.Count - 1 ? Points[i].Label : string.Empty)</span>
+    }
+</div>
+
+@code {
+    /// <summary>The steps, oldest first; Received holds the unread count.</summary>
+    [Parameter] public IReadOnlyList<SeriesPoint> Points { get; set; } = Array.Empty<SeriesPoint>();
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+}

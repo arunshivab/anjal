@@ -143,13 +143,18 @@ public sealed partial class DashboardsBatchCTests : IAsyncLifetime, IDisposable
         await svc.MarkNotSpamAsync(this.arun.Id, got.Id);
 
         HttpClient c = await this.SignedInAsync("arun");
-        string dash = await c.GetStringAsync(new Uri("dashboard", UriKind.Relative));
+        // rc.16 (design review 7): the dashboard's pages - Junk rescued on Safety, space by folder on
+        // Storage (and the overview), the person's busiest hours on Replies.
+        string dash = await c.GetStringAsync(new Uri("dashboard/safety", UriKind.Relative));
         Assert.Contains("1 message rescued from Junk in the last 30 days", dash, StringComparison.Ordinal);
         Assert.Contains("href=\"/search?scope=all&amp;rescued=30\"", dash, StringComparison.Ordinal);
-        Assert.Contains("Space by folder", dash, StringComparison.Ordinal);
-        Assert.Matches(MbRegex(), dash);
-        Assert.Contains("/search?scope=all&amp;sort=size", dash, StringComparison.Ordinal);
-        Assert.Contains("class=\"hourbars\"", dash, StringComparison.Ordinal);
+        string storage = await c.GetStringAsync(new Uri("dashboard/storage", UriKind.Relative));
+        Assert.Contains("data-card=\"d-space\"", storage, StringComparison.Ordinal);
+        Assert.Contains(">Folder<", storage, StringComparison.Ordinal);
+        Assert.Matches(MbRegex(), storage);
+        Assert.Contains("/search?scope=all&amp;sort=size", storage, StringComparison.Ordinal);
+        string replies = await c.GetStringAsync(new Uri("dashboard/replies", UriKind.Relative));
+        Assert.Contains("class=\"hourbars\"", replies, StringComparison.Ordinal);
 
         string rescued = await c.GetStringAsync(new Uri("search?scope=all&rescued=30", UriKind.Relative));
         Assert.Contains("Report ready", rescued, StringComparison.Ordinal);
@@ -157,11 +162,11 @@ public sealed partial class DashboardsBatchCTests : IAsyncLifetime, IDisposable
         Assert.Contains("biggest first", await c.GetStringAsync(new Uri("search?scope=all&sort=size", UriKind.Relative)), StringComparison.Ordinal);
 
         // Habits are on unless the person turns them off; off, nothing is worked out.
-        using (HttpResponseMessage r = await Post(c, "settings/habits", Token(dash), ("on", "0"), ("back", "/dashboard")))
+        using (HttpResponseMessage r = await Post(c, "settings/habits", Token(replies), ("on", "0"), ("back", "/dashboard/replies")))
         {
             Assert.Equal(HttpStatusCode.Redirect, r.StatusCode);
         }
-        string off = await c.GetStringAsync(new Uri("dashboard", UriKind.Relative));
+        string off = await c.GetStringAsync(new Uri("dashboard/replies", UriKind.Relative));
         Assert.Contains("Off. Nothing is worked out about how you use your mail.", off, StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"hourbars\"", off, StringComparison.Ordinal);
         Assert.False((await svc.GetMailSettingsAsync(this.arun.Id)).Habits);

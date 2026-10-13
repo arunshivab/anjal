@@ -1,0 +1,35 @@
+@* rc.16 (design review 7): a small trend line under a key figure, or beside a category -
+   14 days or the period's steps, oldest first, drawn on its own scale. *@
+<svg class="spark @Tone" viewBox="0 0 @W @H" width="@W" height="@H" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+    @if (Values.Count > 1)
+    {
+        <polyline points="@Points" />
+    }
+</svg>
+
+@code {
+    /// <summary>The values, oldest first.</summary>
+    [Parameter] public IReadOnlyList<long> Values { get; set; } = Array.Empty<long>();
+
+    /// <summary>"sp-brand", "sp-accent", "sp-seal", "sp-warn", "sp-danger" or a category slot ("slot-3"): the line's colour.</summary>
+    [Parameter] public string Tone { get; set; } = "sp-brand";
+
+    /// <summary>Width in pixels.</summary>
+    [Parameter] public int W { get; set; } = 180;
+
+    /// <summary>Height in pixels.</summary>
+    [Parameter] public int H { get; set; } = 26;
+
+    private string Points
+    {
+        get
+        {
+            long max = Math.Max(1, Values.Max());
+            long min = Values.Min();
+            double span = Math.Max(1, max - min);
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            return string.Join(" ", Values.Select((v, i) =>
+                (i * (W - 2.0) / (Values.Count - 1) + 1).ToString("0.#", inv) + "," + (H - 2 - ((v - min) / span * (H - 4))).ToString("0.#", inv)));
+        }
+    }
+}

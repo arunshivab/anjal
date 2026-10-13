@@ -84,8 +84,9 @@ public sealed partial class SortingTests : IAsyncLifetime, IDisposable
 
         // Remembered for the Inbox, not for Archive; newest first forgets it.
         Assert.Equal("Bala", Names(await c.GetStringAsync(new Uri("folder/INBOX", UriKind.Relative)))[0]);
-        Assert.Contains("aria-pressed=\"true\" title=\"Biggest first\"", await c.GetStringAsync(new Uri("folder/INBOX", UriKind.Relative)), StringComparison.Ordinal);
-        Assert.Contains("aria-pressed=\"true\" title=\"Newest first\"", await c.GetStringAsync(new Uri("folder/Archive", UriKind.Relative)), StringComparison.Ordinal);
+        // rc.16, design review 4.1: the order is chosen in the list's filter menu.
+        Assert.Contains("name=\"sort\" value=\"size\" class=\"pmi\" aria-pressed=\"true\"", await c.GetStringAsync(new Uri("folder/INBOX", UriKind.Relative)), StringComparison.Ordinal);
+        Assert.Contains("name=\"sort\" value=\"newest\" class=\"pmi\" aria-pressed=\"true\"", await c.GetStringAsync(new Uri("folder/Archive", UriKind.Relative)), StringComparison.Ordinal);
         Assert.Equal(NewestOrder, Names(await SortAsync(c, "newest")));
     }
 

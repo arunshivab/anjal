@@ -324,7 +324,9 @@ public sealed partial class MailboxService
         ArgumentNullException.ThrowIfNull(clock);
         DateTime unspecified = DateTime.SpecifyKind(local, DateTimeKind.Unspecified);
         TimeSpan offset = clock.Zone.GetUtcOffset(unspecified);
-        return new DateTimeOffset(unspecified, offset);
+        // Screen check, 12 Oct 2026: the instant in UTC. PostgreSQL's timestamptz takes only offset 0, and a
+        // custom dashboard range (/dashboard/safety?from=...&to=...) reached the store with +05:30 and failed.
+        return new DateTimeOffset(unspecified, offset).ToUniversalTime();
     }
 
     private async Task<bool> IsWaitingAsync(Guid mailboxId, Guid heldId, CancellationToken ct)

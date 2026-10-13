@@ -21,10 +21,6 @@
             {
                 <span class="mfolder">@FolderLabel</span>
             }
-            @if (M.HasAttachments)
-            {
-                <span data-attachment role="img" title="@L["Has attachments"]" aria-label="@L["Has attachments"]"><LipiIcon Name="attachment" Size="13" /></span>
-            }
             @if (Conversation > 1)
             {
                 <span class="ccount" title="@L["{n} messages in this conversation"].Replace("{n}", MailboxService.Count(Conversation), StringComparison.Ordinal)">@Conversation</span>
@@ -37,44 +33,32 @@
                 <span class="unenc" data-unencrypted role="img" title="@L["Arrived unencrypted: anyone on the network path could have read it"]" aria-label="@L["Arrived unencrypted"]"><LipiIcon Name="unlock" Size="13" /></span>
             }
             <a class="subj" href="@OpenLink" data-open>@(string.IsNullOrWhiteSpace(M.Subject) ? L["(no subject)"] : M.Subject)</a>
-            @if (Category is not null)
-            {
-                <span class="chip slot-@Category.Row.Slot"><i></i>@Category.Row.Name</span>
-            }
             @if (ShowFlag)
             {
                 <button type="submit" class="fav @(M.Flagged ? "on" : "")"
                         formaction="/message/@M.Id/flag" formnovalidate
                         name="back" value="@BackLink" data-needs-server
                         title="@(M.Flagged ? L["Remove flag"] : L["Flag"])"
-                        aria-label="@(M.Flagged ? L["Remove flag"] : L["Flag"])"><span lang="ta">அ</span></button>
+                        aria-label="@(M.Flagged ? L["Remove flag"] : L["Flag"])"><LipiIcon Name="flag" Size="14" Variant="@(M.Flagged ? LipiconVariant.Fill : LipiconVariant.Regular)" /></button>
             }
-            @* rc.15: the score follows the subject, small; the first line is who, the clip (reviews 1 and 2) and when. *@
-            @* Decision 1B: 0 means checked and clean; a dash means never checked. *@
-            @if (Sends is not null)
+            @* rc.16, design review 4.2 (owner, 11 Oct 2026): a score shows only when it means something,
+               in words - "Spam 2" in amber, "Junk risk 7" in red. A clean or unchecked message shows
+               nothing in the list; the envelope still says whether it was checked. *@
+            @if (Sends is null && SpamCheck.WasChecked(M, FolderName) && M.SpamScore > 0)
             {
-                @* Waiting to be sent: no score to show. *@
-            }
-            else if (!SpamCheck.WasChecked(M, FolderName))
-            {
-                <span class="score s-none" title="@L["Not checked: your own mail or mail from this server"]">&ndash;</span>
-            }
-            else if (M.SpamScore > 0)
-            {
-                <span class="score @(M.SpamScore >= Threshold ? "s-hi" : "s-mid")" title="@L["Checked on arrival: spam score {n}"].Replace("{n}", M.SpamScore.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)">@M.SpamScore</span>
-            }
-            else
-            {
-                <span class="score s-zero" title="@L["Checked on arrival: nothing suspicious"]">0</span>
+                bool high = M.SpamScore >= Threshold;
+                string n = M.SpamScore.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                <span class="score @(high ? "s-hi" : "s-mid")" title="@L["Checked on arrival: spam score {n}"].Replace("{n}", n, StringComparison.Ordinal)">@((high ? L["Junk risk {n}"] : L["Spam {n}"]).Replace("{n}", n, StringComparison.Ordinal))</span>
             }
         </div>
         @if (Sends is not null)
         {
             <div class="mline3 msends"><span class="sendpill"><LipiIcon Name="clock" Size="12" />@Sends</span></div>
         }
-        else if (M.Preview.Length > 0)
+        else if (M.Preview.Length > 0 || M.HasAttachments || Category is not null)
         {
-            <div class="mline3">@System.Text.RegularExpressions.Regex.Replace(M.Preview, @"\s+", " ").Trim()</div>
+            @* 4.4: the quiet third line - the preview, then the clip and the category after it. *@
+            <div class="mline3"><span class="mprev">@System.Text.RegularExpressions.Regex.Replace(M.Preview, @"\s+", " ").Trim()</span>@if (M.HasAttachments) { <span class="mclip" data-attachment role="img" title="@L["Has attachments"]" aria-label="@L["Has attachments"]"><LipiIcon Name="attachment" Size="13" /></span> }@if (Category is not null) { <span class="chip slot-@Category.Row.Slot"><i></i>@Category.Row.Name</span> }</div>
         }
     </div>
     @* rc.12 (D-116): the row's own actions, shown on hover or keyboard focus.

@@ -10,6 +10,19 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.16** (12 October 2026) - the design review (owner, 11 Oct 2026; brief sections 1-5,
+7, 8 and 9). Sign-in on Anjal's teal with the organisation's initials, a language menu and two
+device cards; the envelope as a postal envelope beside the letter, with file-type tags and the
+LiPicons flag; a calmer list (one-row head, a filter menu, scores only when above 0, the clip and
+category on the third line); **Today** as the page after sign-in, with reading in place and a quick
+reply; the dashboard as six pages with a Chart/Table switch on every card; Compose as two sheets;
+Settings reordered with "Find a setting"; the organisation's six-step set-up; search operators as
+removable chips; Contacts with People, Groups and Organisation; helpful empty folders and a
+mailbox-full notice; one bottom bar for what just happened; Anjal's own mails in one HTML layout
+beside their text; a component sheet for operators at /dev/components. Sizes D-149: small controls
+32px, sign-in 44px, select text 14px. Crimson and Olive retuned. The stylesheet was cleaned up with
+no visual change (proved by a computed-style record of 688 screens). No schema change.
+
 **v1.0.0-rc.15.1** (12 October 2026) - hotfix (DEF-095): a person who had not yet seen
 the welcome screen and whose password was shorter than the new rule was sent to Security, where the
 welcome screen covered the page and neither of its buttons worked. The welcome now waits until a

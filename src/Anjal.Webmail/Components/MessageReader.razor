@@ -31,9 +31,13 @@ else
            Outside the letter, so the letter still begins with its subject (item 42). *@
         <div class="phonehead">
             <a class="phoneback" href="/folder/@Uri.EscapeDataString(view.Folder.Name)"><LipiIcon Name="chevron-left" Size="16" />@L.Folder(view.Folder.Name)</a>
+            @* rc.16, design review [6b]: the envelope strip - accent-soft, a small flap, the sender's
+               initials; tapping it opens the full 2c envelope as a sheet. *@
             <a class="phonesummary" href="#envelope">
-                <b>@(string.IsNullOrWhiteSpace(view.From) ? view.Row.EnvelopeFrom : SenderName)</b>
-                <span>@PhoneRecipients @clock.Full(view.Row.ReceivedAt)</span>
+                <svg class="pflap" viewBox="0 0 300 16" preserveAspectRatio="none" aria-hidden="true"><path d="M-4 0 L150 14 L304 0"></path></svg>
+                <span class="pav" aria-hidden="true">@PhoneInitial</span>
+                <span class="pmain"><b>@(string.IsNullOrWhiteSpace(view.From) ? view.Row.EnvelopeFrom : SenderName)</b>
+                <span>@PhoneRecipients · @clock.Full(view.Row.ReceivedAt)</span></span>
                 @if (Stamps.Count > 0)
                 {
                     <span class="pchecks">@(Stamps.Count == 1 ? L["1 check"] : L["{n} checks"].Replace("{n}", Stamps.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</span>
@@ -138,8 +142,26 @@ else
                     </form>
                 </dialog>
             }
+            @* rc.16 (design review 8, [5b]): on Today, a quick reply box where the letter ends - Send,
+               Full reply; Ctrl+Enter sends; then the next unread opens. *@
+            @if (!IsScheduled && QuickReply is not null && SenderAddress.Length > 0 && !IsOwn)
+            {
+                <form method="post" action="/today/reply" class="quickreply" data-quickreply>
+                    <AntiforgeryToken />
+                    <input type="hidden" name="id" value="@Id" />
+                    <input type="hidden" name="next" value="@QuickReply" />
+                    <input type="hidden" name="undo" value="0" data-undo-flag />
+                    <p class="qr-to">@L["Reply to {name}"].Replace("{name}", SenderName, StringComparison.Ordinal) · <span>@L["your signature is added"]</span></p>
+                    <textarea name="body" rows="3" required maxlength="20000" aria-label="@L["Your reply"]" placeholder="@L["Write your reply"]" data-ctrl-enter></textarea>
+                    <div class="qr-acts">
+                        <button type="submit" class="btn btn-p" data-needs-server><LipiIcon Name="referral-out" Size="15" />@L["Send"]</button>
+                        <a class="btn btn-s" href="@ReplyLink("reply")"><LipiIcon Name="expand" Size="15" />@L["Full reply"]</a>
+                        <span class="qr-hint">@L["Ctrl + Enter sends, then the next unread opens"]</span>
+                    </div>
+                </form>
+            }
             @* rc.15 (owner, 7 Oct): answer where reading ends, as well as in the envelope. *@
-            @if (!IsScheduled)
+            @if (!IsScheduled && QuickReply is null)
             {
                 <div class="letterend">
                     <a class="eb eb-p" href="@ReplyLink("reply")"><LipiIcon Name="undo" Size="15" />@L["Reply"]</a>
@@ -222,96 +244,99 @@ else
                 <a class="eback" href="@ReturnHref" data-escback><LipiIcon Name="arrow-left" Size="16" />@L["Back to {folder}"].Replace("{folder}", L.Folder(view.Folder.Name), StringComparison.Ordinal)</a>
             }
             <div class="pshead sheetonly"><b>@L["Envelope"]</b><span class="lh-grow"></span><a class="iconbtn" href="#close" aria-label="@L["Close"]"><LipiIcon Name="close" Size="17" /></a></div>
-            @* Item 20: name and address on one line. *@
-            <section class="ecard efrom">
+            @* rc.16, design review 2c (owner, 11 Oct 2026): the pane is the envelope the letter came
+               in - a flap across the top with the stamps on it, then From, To, Cc and Date as an
+               address block (labels in a column, each name on its own line with its address under
+               it), people outside the organisation marked, and a dashed fold before what is enclosed. *@
+            <div class="eflap" aria-hidden="true"><svg viewBox="0 0 304 64" preserveAspectRatio="none"><path d="M-4 0 L152 58 L308 0"></path></svg></div>
+            @if (Stamps.Count > 0)
+            {
+                <div class="estamps" aria-label="@L["Checks"]" role="group">
+                    @foreach ((string icon, string word, string why) in Stamps)
+                    {
+                        <Stamp Word="@L[word]" Why="@(L[why].Replace("{tls}", view.Row.TransportTls ?? string.Empty, StringComparison.Ordinal))" Lock="@(icon == "lock")" />
+                    }
+                </div>
+            }
+            <section class="eaddress" aria-label="@L["Envelope"]">
                 <span class="elabel">@L["From"]</span>
-                @if (string.IsNullOrWhiteSpace(view.From))
-                {
-                    @* No From header: show who actually sent it, and say so (DEF-022). *@
-                    <span class="ewho"><span class="eaddr">@(string.IsNullOrWhiteSpace(view.Row.EnvelopeFrom) ? L["(unknown)"] : view.Row.EnvelopeFrom)</span></span>
-                    <span class="enote">@L["envelope sender; the message has no From header"]</span>
-                }
-                else
-                {
-                    <span class="ewho"><b>@SenderName</b>@if (SenderAddress.Length > 0 && SenderAddress != SenderName) { <span class="eaddr"> &lt;@SenderAddress&gt;</span> }</span>
-                }
-            </section>
-
-            @* Items 20 and 52: To and Cc always shown; above 5, chips with "+N more". *@
-            <section class="ecard erecip" aria-label="@L["Recipients"]">
+                <div class="ewho">
+                    @if (string.IsNullOrWhiteSpace(view.From))
+                    {
+                        @* No From header: show who actually sent it, and say so (DEF-022). *@
+                        <b>@(string.IsNullOrWhiteSpace(view.Row.EnvelopeFrom) ? L["(unknown)"] : view.Row.EnvelopeFrom)</b>
+                        <span class="enote">@L["envelope sender; the message has no From header"]</span>
+                    }
+                    else
+                    {
+                        <b>@SenderName</b>
+                        @if (SenderAddress.Length > 0 && SenderAddress != SenderName)
+                        {
+                            <span class="eaddr">@SenderAddress</span>
+                        }
+                    }
+                </div>
+                @* Items 20 and 52: To and Cc always shown; above 5, chips with "+N more". *@
                 @if (!recipients.Collapsed)
                 {
                     @foreach (string line in new[] { "To", "Cc" })
                     {
                         @if (recipients.People.Any(r => r.Line == line))
                         {
-                            <div class="eline"><span class="elabel">@L[line]</span>
-                                <span class="epeople">
-                                    @foreach (Recipient r in recipients.People.Where(r => r.Line == line))
-                                    {
-                                        <span class="eperson @(r.Inside ? "" : "outside")">@if (r.IsYou) { <b>@L["You"]</b> } else { <b>@r.Name</b> }@if (r.Name != r.Address || r.IsYou) { <span class="eaddr"> &lt;@r.Address&gt;</span> }</span>
-                                    }
-                                </span>
+                            <span class="elabel">@L[line]</span>
+                            <div class="epeople">
+                                @foreach (Recipient r in recipients.People.Where(r => r.Line == line))
+                                {
+                                    <span class="eperson @(r.Inside ? "" : "outside")" title="@r.Address"><b>@(r.IsYou ? L["You"] : r.Name)</b>@if (!r.Inside) { <i class="eout"> · @L["outside"]</i> }</span>
+                                }
                             </div>
                         }
                     }
                 }
                 else
                 {
-                    <p class="esummary">@L["{n} people: {inside} in the organisation, {outside} outside"].Replace("{n}", recipients.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{inside}", recipients.InsideCount.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{outside}", recipients.OutsideCount.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
-                    <div class="echips">
-                        @foreach (Recipient r in recipients.People.Take(Recipients.ShownInFull))
-                        {
-                            <span class="echip @(r.Inside ? "" : "outside")" title="@r.Address"><i>@L[r.Line]</i>@(r.IsYou ? L["You"] : r.Name)</span>
-                        }
+                    <span class="elabel">@L["To"]</span>
+                    <div class="epeople">
+                        <p class="esummary">@L["{n} people: {inside} in the organisation, {outside} outside"].Replace("{n}", recipients.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{inside}", recipients.InsideCount.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{outside}", recipients.OutsideCount.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+                        <div class="echips">
+                            @foreach (Recipient r in recipients.People.Take(Recipients.ShownInFull))
+                            {
+                                <span class="echip @(r.Inside ? "" : "outside")" title="@r.Address"><i>@L[r.Line]</i>@(r.IsYou ? L["You"] : r.Name)</span>
+                            }
+                        </div>
+                        <details class="eall">
+                            <summary>@L["+{n} more"].Replace("{n}", (recipients.Count - Recipients.ShownInFull).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</summary>
+                            <input type="search" class="efind" placeholder="@L["Find a person"]" aria-label="@L["Find a person"]" data-findperson />
+                            @foreach (IGrouping<string, Recipient> org in recipients.ByOrganisation)
+                            {
+                                <div class="eorg">
+                                    <span class="eorgname">@org.Key</span>
+                                    @foreach (Recipient r in org)
+                                    {
+                                        <span class="eperson @(r.Inside ? "" : "outside")" data-person="@(r.Name.ToLowerInvariant()) @(r.Address.ToLowerInvariant())"><i>@L[r.Line]</i><b>@(r.IsYou ? L["You"] : r.Name)</b><span class="eaddr">@r.Address</span></span>
+                                    }
+                                </div>
+                            }
+                        </details>
                     </div>
-                    <details class="eall">
-                        <summary>@L["+{n} more"].Replace("{n}", (recipients.Count - Recipients.ShownInFull).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</summary>
-                        <input type="search" class="efind" placeholder="@L["Find a person"]" aria-label="@L["Find a person"]" data-findperson />
-                        @foreach (IGrouping<string, Recipient> org in recipients.ByOrganisation)
-                        {
-                            <div class="eorg">
-                                <span class="eorgname">@org.Key</span>
-                                @foreach (Recipient r in org)
-                                {
-                                    <span class="eperson @(r.Inside ? "" : "outside")" data-person="@(r.Name.ToLowerInvariant()) @(r.Address.ToLowerInvariant())"><i>@L[r.Line]</i><b>@(r.IsYou ? L["You"] : r.Name)</b><span class="eaddr"> &lt;@r.Address&gt;</span></span>
-                                }
-                            </div>
-                        }
-                    </details>
+                }
+                @if (IsScheduled)
+                {
+                    <span class="elabel">@L["Sends"]</span>
+                    <div class="ewhen"><b>@(SendsAt is DateTimeOffset s ? clock.Full(s) : view.Row.DateHeader)</b>@if (SendsAt is DateTimeOffset when) { <span class="eaddr">@InWords(when)</span> }</div>
+                }
+                else
+                {
+                    <span class="elabel">@L["Date"]</span>
+                    <div class="ewhen" title="@clock.Full(view.Row.ReceivedAt)">@clock.Full(view.Row.ReceivedAt)</div>
+                }
+                @if (NotVerified)
+                {
+                    @* Item 49: "Not verified" is amber, with no stamp. *@
+                    <span class="elabel">@L["Checks"]</span>
+                    <div><span class="notverified" title="@L["DMARC did not pass: the sender could not be confirmed."]">@L["Not verified"]</span></div>
                 }
             </section>
-
-            @if (IsScheduled)
-            {
-                <section class="ecard etime">
-                    <span class="elabel">@L["Sends"]</span>
-                    <span><b>@(SendsAt is DateTimeOffset s ? clock.Full(s) : view.Row.DateHeader)</b>@if (SendsAt is DateTimeOffset when) { <span class="eaddr"> · @InWords(when)</span> }</span>
-                </section>
-            }
-            else
-            {
-                <section class="ecard etime">
-                    <span class="elabel">@L["Received"]</span><span>@clock.Full(view.Row.ReceivedAt)</span>
-                </section>
-            }
-
-
-            @* The seal of trust: green stamps for what Anjal has proved about this message. *@
-            @if (Stamps.Count > 0 || NotVerified)
-            {
-                <section class="ecard estamps" aria-label="@L["Checks"]">
-                    @foreach ((string icon, string word, string why) in Stamps)
-                    {
-                        <Stamp Word="@L[word]" Why="@(L[why].Replace("{tls}", view.Row.TransportTls ?? string.Empty, StringComparison.Ordinal))" Lock="@(icon == "lock")" />
-                    }
-                    @if (NotVerified)
-                    {
-                        @* Item 49: "Not verified" is amber, with no stamp. *@
-                        <span class="notverified" title="@L["DMARC did not pass: the sender could not be confirmed."]">@L["Not verified"]</span>
-                    }
-                </section>
-            }
 
             @* UX-04: the conversation - replies grouped, across folders. *@
             @if (conversation.Count > 1)
@@ -337,12 +362,14 @@ else
 
             @if (view.Attachments.Count > 0)
             {
-                <section class="ecard">
-                    <h2 class="ehead">@L["Attachments"] · @view.Attachments.Count</h2>
+                @* 2c: "Enclosed · N" after a dashed fold; each file has a tag for its type. *@
+                <section class="eenclosed">
+                    <h2 class="ehead">@L["Enclosed"] · @view.Attachments.Count</h2>
                     @foreach (AttachmentView a in view.Attachments)
                     {
+                        (string tag, string kind) = FileTag.Of(a.FileName, a.ContentType);
                         <div class="attrow">
-                            <LipiIcon Name="attachment" Size="16" />
+                            <span class="ftag ftag-@kind" aria-hidden="true">@tag</span>
                             @if (MailboxService.PreviewType(a) is not null)
                             {
                                 <a class="attname" href="@PreviewLink(a.Index)" title="@L["Show it here"]">
@@ -352,7 +379,7 @@ else
                             }
                             else
                             {
-                                <a class="attname" href="/message/@Id/attachment/@a.Index">
+                                <a class="attname" href="/message/@Id/attachment/@a.Index" title="@a.FileName">
                                     <span class="fn">@a.FileName</span>
                                     <span class="mt">@MainLayout.Size(a.SizeBytes)</span>
                                 </a>
@@ -398,15 +425,16 @@ else
                     <AntiforgeryToken />
                     <input type="hidden" name="back" value="@Back" />
                     @* Item 19: the flag button carries its symbol, as in the list. *@
-                    <button type="submit" class="eb @(view.Row.Flagged ? "on" : "")" data-needs-server data-kb="flag" aria-pressed="@(view.Row.Flagged ? "true" : "false")">
-                        <span class="fav @(view.Row.Flagged ? "on" : "")" aria-hidden="true" lang="ta">அ</span>@(view.Row.Flagged ? L["Remove flag"] : L["Flag"])
+                    @* 2c: the LiPicons flag in accent amber; அ stays the brand mark only. *@
+                    <button type="submit" class="eb eflag @(view.Row.Flagged ? "on" : "")" data-needs-server data-kb="flag" aria-pressed="@(view.Row.Flagged ? "true" : "false")" title="@(view.Row.Flagged ? L["Remove flag"] : L["Flag"])">
+                        <LipiIcon Name="flag" Size="15" Variant="@(view.Row.Flagged ? LipiconVariant.Fill : LipiconVariant.Regular)" /><span>@(view.Row.Flagged ? L["Flagged"] : L["Flag"])</span>
                     </button>
                 </form>
                 <form method="post" action="/message/@Id/read" class="inline">
                     <AntiforgeryToken />
                     <input type="hidden" name="seen" value="0" />
                     <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
-                    <button type="submit" class="eb eicon" data-needs-server title="@L["Mark as unread"]" aria-label="@L["Mark as unread"]"><LipiIcon Name="email" Size="16" /></button>
+                    <button type="submit" class="eb" data-needs-server title="@L["Mark as unread"]"><LipiIcon Name="email" Size="15" /><span>@L["Unread"]</span></button>
                 </form>
                 @if (view.Folder.Name != "Archive" && view.Folder.Name != "Trash" && view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder)
                 {
@@ -415,7 +443,7 @@ else
                         <AntiforgeryToken />
                         <input type="hidden" name="folder" value="Archive" />
                         <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
-                        <button type="submit" class="eb eicon" data-needs-server data-kb="archive" title="@L["Archive"]" aria-label="@L["Archive"]"><LipiIcon Name="archive" Size="16" /></button>
+                        <button type="submit" class="eb" data-needs-server data-kb="archive" title="@L["Archive"]"><LipiIcon Name="archive" Size="15" /><span>@L["Archive"]</span></button>
                     </form>
                 }
                 @if (view.Folder.Name == "Trash")
@@ -433,7 +461,7 @@ else
                         <AntiforgeryToken />
                         <input type="hidden" name="folder" value="Trash" />
                         <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
-                        <button type="submit" class="eb eicon" data-needs-server data-kb="delete" title="@L["Delete"]" aria-label="@L["Delete"]"><LipiIcon Name="trash" Size="16" /></button>
+                        <button type="submit" class="eb eb-danger" data-needs-server data-kb="delete" title="@L["Delete"]"><LipiIcon Name="trash" Size="15" /><span>@L["Delete"]</span></button>
                     </form>
                 }
                 @if (view.Folder.Name == Anjal.Mailbox.MailboxSink.JunkFolder)
@@ -446,9 +474,9 @@ else
                         <button type="submit" class="eb" data-needs-server>@L["Not junk"]</button>
                     </form>
                 }
-                <a class="eb eicon" href="/message/@Id/print" target="_blank" rel="noopener" title="@L["Print"]" aria-label="@L["Print"]"><LipiIcon Name="print" Size="16" /></a>
+                <a class="eb" href="/message/@Id/print" target="_blank" rel="noopener" title="@L["Print"]"><LipiIcon Name="print" Size="15" /><span>@L["Print"]</span></a>
                 <details class="emore">
-                    <summary class="eb eicon" title="@L["More"]" aria-label="@L["More"]"><LipiIcon Name="more-horizontal" Size="16" /></summary>
+                    <summary class="eb" title="@L["More"]"><LipiIcon Name="more-horizontal" Size="15" /><span>@L["More"]</span></summary>
                     <div class="emenu" role="menu">
                         @* rc.15 (owner, 7 Oct: "no mark as unread option"): named here as well as the envelope icon. *@
                         <form method="post" action="/message/@Id/read" class="inline">
@@ -646,6 +674,12 @@ else
     /// <summary>Where flagging or a category change returns to: the message page, or the three-pane folder view (rc.11, item 45).</summary>
     [Parameter] public string? BackLink { get; set; }
 
+    /// <summary>
+    /// rc.16 (Today, [5b]): where a quick reply goes after it is sent - the next unread. When set,
+    /// the letter ends with a quick reply box instead of the Reply, Reply all and Forward row.
+    /// </summary>
+    [Parameter] public string? QuickReply { get; set; }
+
     /// <summary>rc.15: show "Back to the folder" at the top of the envelope (focus, full view).</summary>
     [Parameter] public bool ShowBack { get; set; }
 
@@ -831,6 +865,17 @@ else
     }
     private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
     private IReadOnlySet<string> trusted = new HashSet<string>();
+
+    // [6b]: the first letter of the sender's name for the strip's avatar.
+    private string PhoneInitial
+    {
+        get
+        {
+            string who = string.IsNullOrWhiteSpace(view?.From) ? view?.Row.EnvelopeFrom ?? string.Empty : SenderName;
+            who = who.Trim().TrimStart('"', '\'', '<');
+            return who.Length == 0 ? "?" : System.Globalization.StringInfo.GetNextTextElement(who, 0).ToUpperInvariant();
+        }
+    }
 
     private string SenderName
     {

@@ -258,7 +258,7 @@ public sealed class Des11SecurityTests : IAsyncLifetime, IDisposable
     private async Task<HttpClient> SignedInAsync(string userAgent)
     {
         HttpClient c = this.Client(userAgent);
-        Assert.Equal("/dashboard", (await SignInAsync(c)).Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today", (await SignInAsync(c)).Headers.Location!.ToString());
         return c;
     }
 }

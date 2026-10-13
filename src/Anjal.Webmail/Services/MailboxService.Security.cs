@@ -908,8 +908,18 @@ public sealed partial class MailboxService
         {
             sb.Append(SecurityMailHeader).Append(": 1\r\n");
         }
-        sb.Append("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
-        sb.Append(text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal)).Append("\r\n");
+        // rc.16, design review [6m]: the plain text, always, and the one HTML layout beside it.
+        string org = (await this.GetContextAsync(mailbox.Id, ct).ConfigureAwait(false)) is { } context && context.Tenant.DisplayName.Trim().Length > 0
+            ? context.Tenant.DisplayName.Trim()
+            : mailbox.Domain;
+        string boundary = "anjal-" + Guid.NewGuid().ToString("N");
+        string Crlf(string s) => s.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal);
+        sb.Append("MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"").Append(boundary).Append("\"\r\n\r\n");
+        sb.Append("--").Append(boundary).Append("\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
+        sb.Append(Crlf(text)).Append("\r\n");
+        sb.Append("--").Append(boundary).Append("\r\nContent-Type: text/html; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
+        sb.Append(Crlf(SystemMailLayout.Html(security ? SystemMailLayout.Security : SystemMailLayout.Notice, subject, text, org, mailbox.Domain)));
+        sb.Append("--").Append(boundary).Append("--\r\n");
         byte[] raw = Encoding.UTF8.GetBytes(sb.ToString());
         var sink = new Anjal.Mailbox.MailboxSink(this.store, this.maildir);
         if (await sink.ResolveAsync(to, ct).ConfigureAwait(false) is not null)

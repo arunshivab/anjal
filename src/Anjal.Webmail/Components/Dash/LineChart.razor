@@ -1,0 +1,119 @@
+@* rc.16 (design review 7, [4a] and [4d]): received and sent over the period. Bars for Today and
+   7 days; for 30 days and longer, lines with a light fill - Received in brand teal, Sent in
+   accent, Junk a thin danger line, and the period before as a dashed grey line. Each step opens
+   its mail; hovering names the exact values. Days with no mail are drawn as zero. *@
+@{
+    var inv = System.Globalization.CultureInfo.InvariantCulture;
+}
+<div class="lc-legend">
+    <span><i class="lg-r"></i>@L["Received"] <b>@Sum(p => p.Received)</b></span>
+    <span><i class="lg-s"></i>@L["Sent"] <b>@Sum(p => p.Sent)</b></span>
+    @if (Compare)
+    {
+        <span><i class="lg-p"></i>@L["Received, period before"] <b>@Sum(p => p.Previous)</b></span>
+    }
+    <span><i class="lg-j"></i>@L["Junk"] <b>@Sum(p => p.Junk)</b></span>
+</div>
+<div class="lc" role="img" aria-label="@L["Received {r}, sent {s}"].Replace("{r}", Sum(p => p.Received), StringComparison.Ordinal).Replace("{s}", Sum(p => p.Sent), StringComparison.Ordinal)">
+    <svg viewBox="0 0 @Vw @Vh" preserveAspectRatio="none" class="lc-svg" aria-hidden="true">
+        @for (int g = 0; g <= 2; g++)
+        {
+            double y = Pad + (Vh - 2 * Pad) * g / 2.0;
+            <line class="lc-grid" x1="0" x2="@Vw" y1="@y.ToString("0.#", inv)" y2="@y.ToString("0.#", inv)" />
+        }
+        @if (Bars)
+        {
+            double slot = (double)Vw / Math.Max(1, Points.Count);
+            @for (int i = 0; i < Points.Count; i++)
+            {
+                SeriesPoint p = Points[i];
+                double x = i * slot;
+                double bw = Math.Max(2, slot * 0.34);
+                <rect class="lc-bar-r" x="@((x + slot * 0.14).ToString("0.#", inv))" y="@Y(p.Received).ToString("0.#", inv)" width="@bw.ToString("0.#", inv)" height="@((Vh - Pad - Y(p.Received)).ToString("0.#", inv))" />
+                <rect class="lc-bar-s" x="@((x + slot * 0.14 + bw + 1).ToString("0.#", inv))" y="@Y(p.Sent).ToString("0.#", inv)" width="@bw.ToString("0.#", inv)" height="@((Vh - Pad - Y(p.Sent)).ToString("0.#", inv))" />
+            }
+        }
+        else
+        {
+            <path class="lc-fill-r" d="@Area(p => p.Received)" />
+            <path class="lc-fill-s" d="@Area(p => p.Sent)" />
+            @if (Compare)
+            {
+                <path class="lc-line-p" d="@Line(p => p.Previous)" />
+            }
+            <path class="lc-line-r" d="@Line(p => p.Received)" />
+            <path class="lc-line-s" d="@Line(p => p.Sent)" />
+            <path class="lc-line-j" d="@Line(p => p.Junk)" />
+        }
+    </svg>
+    <div class="lc-steps">
+        @for (int i = 0; i < Points.Count; i++)
+        {
+            SeriesPoint p = Points[i];
+            string tip = p.Label + " · " + L["Received"] + " " + p.Received.ToString("N0", inv) + " · " + L["Sent"] + " " + p.Sent.ToString("N0", inv) + " · " + L["Junk"] + " " + p.Junk.ToString("N0", inv);
+            @if (Link?.Invoke(p) is string href && p.Received + p.Sent + p.Junk > 0)
+            {
+                <a class="lc-step" href="@href" title="@(tip + " · " + L["Opens that day's mail"])"><span class="sr-only">@tip</span></a>
+            }
+            else
+            {
+                <span class="lc-step" title="@tip"></span>
+            }
+        }
+    </div>
+    <span class="lc-max" aria-hidden="true">@Max.ToString("N0", inv)</span>
+</div>
+<div class="lc-axis" aria-hidden="true">
+    @for (int i = 0; i < Points.Count; i++)
+    {
+        <span>@(ShowLabel(i) ? Points[i].Label : string.Empty)</span>
+    }
+</div>
+
+@code {
+    private const int Vw = 600;
+    private const int Vh = 200;
+    private const int Pad = 6;
+
+    /// <summary>The steps.</summary>
+    [Parameter] public IReadOnlyList<SeriesPoint> Points { get; set; } = Array.Empty<SeriesPoint>();
+
+    /// <summary>Bars instead of lines (Today and 7 days).</summary>
+    [Parameter] public bool Bars { get; set; }
+
+    /// <summary>Draw the period before as a dashed line.</summary>
+    [Parameter] public bool Compare { get; set; } = true;
+
+    /// <summary>Where a step opens its mail; null for none.</summary>
+    [Parameter] public Func<SeriesPoint, string?>? Link { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private long Max => Math.Max(1, Points.Count == 0 ? 0 : Points.Max(p => Math.Max(Math.Max(p.Received, p.Sent), Compare ? p.Previous : 0)));
+
+    private double Y(long v) => Pad + (Vh - 2 * Pad) * (1 - (double)v / Max);
+
+    private double X(int i) => Points.Count <= 1 ? Vw / 2.0 : i * (double)Vw / (Points.Count - 1);
+
+    private string Sum(Func<SeriesPoint, long> pick) => Points.Sum(pick).ToString("N0", System.Globalization.CultureInfo.InvariantCulture);
+
+    private string Line(Func<SeriesPoint, long> pick)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return string.Concat(Points.Select((p, i) => (i == 0 ? "M" : " L") + X(i).ToString("0.#", inv) + " " + Y(pick(p)).ToString("0.#", inv)));
+    }
+
+    private string Area(Func<SeriesPoint, long> pick)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        return Points.Count == 0 ? string.Empty
+            : Line(pick) + " L" + X(Points.Count - 1).ToString("0.#", inv) + " " + (Vh - Pad).ToString(inv) + " L0 " + (Vh - Pad).ToString(inv) + " Z";
+    }
+
+    private bool ShowLabel(int i)
+    {
+        int every = Points.Count <= 14 ? 1 : Points.Count <= 31 ? 5 : Math.Max(1, Points.Count / 6);
+        return i % every == 0 || i == Points.Count - 1;
+    }
+}
