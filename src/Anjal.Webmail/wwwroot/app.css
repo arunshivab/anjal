@@ -3134,10 +3134,12 @@ time > .td { font-size: 11px; font-weight: 400; color: var(--ink-subtle); }
 /* The activity log has six columns: it changes to blocks a little sooner. */
 @container (max-width: 760px) {
   .logtable thead { display: none; }
-  .logtable tbody tr { display: grid; grid-template-columns: 4.5em minmax(0, 1fr) auto; grid-template-areas: "time who result" ". action action" ". on from";
+  .logtable tbody tr { display: grid; grid-template-columns: 6.5em minmax(0, 1fr) auto; grid-template-areas: "time who result" ". action action" ". on from";
                        column-gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
   .logtable tbody td { display: block; padding: 0; border: 0; }
-  .logtable tbody td:nth-child(1) { grid-area: time; }
+  /* CI, 14 Oct 2026: an entry from an earlier day reads "Yesterday 23:56" or "8 Oct 23:56", which reached
+     41px into the next column; the day goes above the time and the column is a little wider. */
+  .logtable tbody td:nth-child(1) { grid-area: time; white-space: normal; overflow-wrap: anywhere; }
   .logtable tbody td:nth-child(2) { grid-area: who; }
   .logtable tbody td:nth-child(3) { grid-area: action; color: var(--ink-muted); }
   .logtable tbody td:nth-child(4) { grid-area: on; color: var(--ink-muted); }
