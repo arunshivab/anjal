@@ -568,9 +568,12 @@
     @if (Current == "help")
     {
         <section class="formcard setcard">
-            <h2>@L["Help"]</h2>
-            <p class="hint">@L["Shortcuts, the tour, and where to get help."]</p>
+            <h2>@L["Help and Lajna"]</h2>
+            <p class="hint">@L["The help guide, Lajna, the shortcuts and the tour."]</p>
             <div class="helplinks">
+                @* rc.18, design review section 11: the guide and Lajna. *@
+                <a class="btn btn-p" href="/help" title="@L["Read how to do things in Anjal."]"><LipiIcon Name="file" Size="16" />@L["Open the help guide"]</a>
+                <a class="btn btn-s" title="@L["Ask Lajna, in your own words."]" href="/lajna?page=%2Fsettings%2Fhelp" data-lajna-ask="">@((MarkupString)LajnaMarkSvg.Small)@L["Ask Lajna"]</a>
                 <a class="btn btn-s" href="#shortcuts"><LipiIcon Name="help" Size="16" />@L["Keyboard shortcuts"]</a>
                 <a class="btn btn-s" href="/dashboard/today#tour"><LipiIcon Name="refresh" Size="16" />@L["Take the tour again"]</a>
             </div>
@@ -811,7 +814,7 @@
         ("categories", "Categories", "Shared and your own", "tag"),
         ("appearance", "Appearance", "Theme, density, layout", "contrast"),
         ("language", "Language and time", "Language, time zone, dates", "world-route"),
-        ("help", "Help", "Shortcuts, tour, guide", "help"),
+        ("help", "Help and Lajna", "The guide, Lajna, shortcuts, tour", "help"),
     };
 
     // "Find a setting": words that lead to each section, besides its name and line.
@@ -824,7 +827,7 @@
         ["categories"] = "category label colour",
         ["appearance"] = "theme colour dark light density layout panes",
         ["language"] = "language time zone date clock 24-hour",
-        ["help"] = "shortcuts keyboard tour guide",
+        ["help"] = "shortcuts keyboard tour guide help lajna assistant",
     };
 
     // Addresses from before rc.13 still land in the right place.

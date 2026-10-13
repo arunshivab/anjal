@@ -80,7 +80,7 @@ async function signIn(page) {
   await page.fill('input[name=address]', address);
   await page.fill('input[name=password]', password);
   await Promise.all([page.waitForNavigation(), page.click('button[type=submit]')]);
-  if (page.url().includes('/sign-in')) {
+  if (/^\/sign-in(\/|$)/.test(new URL(page.url()).pathname)) {
     throw new Error('Could not sign in as ' + address + ' at ' + base + ' - check ANJAL_UI_ADDRESS and ANJAL_UI_PASSWORD.');
   }
   if (await page.$('.welcome')) {
@@ -106,7 +106,7 @@ async function visit(w, url, settle) {
     }
     return false;
   }
-  if (w.page.url().includes('/sign-in')) {
+  if (/^\/sign-in(\/|$)/.test(new URL(w.page.url()).pathname)) {
     await signIn(w.page);
     return visit(w, url, settle);
   }

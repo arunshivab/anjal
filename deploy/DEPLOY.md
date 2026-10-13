@@ -1646,6 +1646,11 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.17 to rc.18** (Help and Lajna): the usual steps only (backup first). No schema change, no
+setting to change, and no outside service: the help guide is built into the webmail and Lajna
+reads only the person's own mail and settings on this server. "Did this help?" answers are kept
+as a service record (`help-feedback`).
+
 **rc.16 to rc.17** (Sending systems): the usual steps (backup first), and run `schema.sql`
 once: it adds the index `outbound_messages_sender_time_idx` (the applications' messages by
 sender and time). No setting to change. From now on an application's hard bounce, or its third

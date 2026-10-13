@@ -101,7 +101,8 @@ module.exports = {
           w.page.off('response', onResp);
           w.page.off('pageerror', onErr);
           if (bad.length) { found.push(`${u}: "${info.txt}" (${how}): ${bad.join('; ')}`); }
-          if (at.includes('/sign-in') || at.includes('/signed-out')) {
+          // rc.18: the help article /help/sign-in is not the sign-in page; match the path itself.
+          if (/^\/(sign-in|signed-out)(\/|$)/.test(new URL(at, L.base).pathname)) {
             await w.close();
             w = await L.open(L.SMALL);
           }
