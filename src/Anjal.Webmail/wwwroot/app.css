@@ -3046,9 +3046,7 @@ textarea.inp, textarea.railinp, .settings3 textarea { font-size: 13.5px; border-
    middle one may take two. */
 .orgtable.rules td:last-child, .orgtable.rules th:last-child { white-space: nowrap; width: 1%; }
 /* A rule's name of a word or two ("Leaked-password check") is never broken over two lines. */
-/* CI, 13 Oct 2026: at 1536 the sign-in rules table was 3px wider than its card on the CI browser
-   (14em left about 20px to spare here). 12em still keeps each rule's name on few lines. */
-.orgtable.rules tbody th { min-width: 12em; }
+.orgtable.rules tbody th { min-width: 14em; }
 
 /* Page steps in the people list sit in its footer. */
 .orgfoot .pager { padding: 0; }
@@ -3123,7 +3121,9 @@ time > .td { font-size: 11px; font-weight: 400; color: var(--ink-subtle); }
    The sign-in rules put each rule's name on its own line, with Anjal's limit, the organisation's choice and
    how they compare under it; the activity log shows each entry as a small block - when, who and the result,
    with the action and what it was on under them (the address it came from shows when the entry is chosen). */
-@container (max-width: 640px) {
+/* CI, 13 Oct 2026: at 1536 with the folder names open the four columns were 3px wider than the card
+   on the CI browser (about 20px to spare here), so the rules go to the stacked form a little sooner. */
+@container (max-width: 720px) {
   .orgtable.rules:has(thead th:nth-child(4)) { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; }
   .orgtable.rules:has(thead th:nth-child(4)) :is(thead, tbody, tr) { display: contents; }
   .orgtable.rules:has(thead th:nth-child(4)) thead th:first-child { display: none; }
