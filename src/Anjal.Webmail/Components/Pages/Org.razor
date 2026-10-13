@@ -420,32 +420,8 @@ else
             break;
 
         case "apps":
-            <section class="formcard orgcard">
-                <header class="orghead">
-                    <h2>@L["Applications"]</h2>
-                    <a class="btn btn-p" href="/org/apps?new=1"><LipiIcon Name="plus" Size="16" />@L["Add an application"]</a>
-                </header>
-                <p class="hint orglead">@L["Each application gets its own send-only keys, limited to its own address. Keys can be rotated or revoked one by one."]</p>
-                <table class="orgtable">
-                    <thead><tr><th>@L["Application"]</th><th>@L["Sends as"]</th><th>@L["Receives"]</th><th>@L["Keys"]</th><th>@L["Status"]</th></tr></thead>
-                    <tbody>
-                    @foreach (OrgApp a in apps)
-                    {
-                        <tr class="@(SelText == a.Id ? "on" : null)">
-                            <td><a class="rowlink" href="/org/apps?sel=@Uri.EscapeDataString(a.Id)"><b>@a.Name</b><span>@a.Description</span></a></td>
-                            <td>@a.SendsAs</td>
-                            <td>@(a.Receives.Length > 0 ? a.Receives : "-")</td>
-                            <td><span class="pill pill-mute">@(a.Keys.Count == 1 ? L["1 key"] : L["{n} keys"].Replace("{n}", a.Keys.Count.ToString(Inv), StringComparison.Ordinal))</span></td>
-                            <td>@if (a.Keys.Count == 0) {<span class="pill pill-bad">@L["No key"]</span>} else if (a.Keys.Any(k => k.EndsAt is not null)) {<span class="pill pill-warn">@L["Rotating"]</span>} else {<span class="pill pill-info">@L["Healthy"]</span>}</td>
-                        </tr>
-                    }
-                    </tbody>
-                </table>
-                @if (apps.Count == 0)
-                {
-                    <p class="orgempty">@L["No application yet. Add one for each system that sends mail, such as a hospital information system or a payroll system."]</p>
-                }
-            </section>
+            @* rc.17, design review section 10: Applications became Sending systems. *@
+            <SendingSystems Tenant="tenant" Apps="apps" Clock="clock" L="L" Host="@Host.Name" TabText="@TabText" PeriodText="@PeriodQuery" Status="@StatusText" AppId="@AppIdText" Q="@QText" Msg="@MsgText" Hook="@HookText" />
             break;
 
         case "log":
@@ -915,11 +891,11 @@ else
                             {
                                 <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/key" class="inline"><AntiforgeryToken /><input type="hidden" name="rotate" value="1" /><button type="submit" class="btn btn-s btn-sm" title="@L["A new key now; this one stops working in 14 days."]">@L["Rotate"]</button></form>
                             }
-                            <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/revoke" class="inline"><AntiforgeryToken /><input type="hidden" name="key" value="@k.Id" /><button type="submit" class="btn btn-danger-q btn-sm">@L["Revoke"]</button></form>
+                            <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/revoke" class="inline"><AntiforgeryToken /><input type="hidden" name="key" value="@k.Id" /><button type="submit" class="btn btn-danger-q btn-sm" title="@L["Stop this key now; the application can no longer send with it."]">@L["Revoke"]</button></form>
                         </div>
                     </div>
                 }
-                <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/key"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn"><LipiIcon Name="plus" Size="16" />@L["New key"]</button></form>
+                <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/key"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn" title="@L["Make another key for this application; it is shown once."]"><LipiIcon Name="plus" Size="16" />@L["New key"]</button></form>
                 <p class="asidetext">@L["A new key is shown once, when it is made. Anjal keeps only a fingerprint of it."]</p>
             }
             else
@@ -998,7 +974,7 @@ else
         ("People and access", "shared", "Shared mailboxes", "box"),
         ("Mail", "domains", "Domains", "world-route"),
         ("Mail", "sending", "Sending", "referral-out"),
-        ("Mail", "apps", "Applications", "grid-view"),
+        ("Mail", "apps", "Sending systems", "server-stack"),
         ("Records", "retention", "Retention", "clock"),
         ("Records", "log", "Activity log", "log"),
         ("Insight", "figures", "Figures per person", "chart-bar"),
@@ -1031,6 +1007,13 @@ else
     [SupplyParameterFromQuery(Name = "new")] private string? New { get; set; }
     [SupplyParameterFromQuery(Name = "hold")] private string? Hold { get; set; }
     [SupplyParameterFromQuery(Name = "q")] private string? QText { get; set; }
+    // rc.17, Sending systems: the tab, the period, and the Messages filters.
+    [SupplyParameterFromQuery(Name = "tab")] private string? TabText { get; set; }
+    [SupplyParameterFromQuery(Name = "period")] private string? PeriodQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "status")] private string? StatusText { get; set; }
+    [SupplyParameterFromQuery(Name = "appId")] private string? AppIdText { get; set; }
+    [SupplyParameterFromQuery(Name = "msg")] private string? MsgText { get; set; }
+    [SupplyParameterFromQuery(Name = "hook")] private string? HookText { get; set; }
     [SupplyParameterFromQuery(Name = "f")] private string? FilterText { get; set; }
     [SupplyParameterFromQuery(Name = "p")] private int? PageText { get; set; }
     [SupplyParameterFromQuery(Name = "domain")] private string? DomainText { get; set; }
@@ -1159,6 +1142,12 @@ else
         "unhold" => L["Hold lifted. The retention rules apply to that mailbox again."],
         "proved" => L["Domain proved and added. Publish its records below."],
         "template" => L["Template removed."],
+        "retried" => L["It will be tried again within a minute."],
+        "stopped" => L["Anjal stopped trying; the application is told it failed."],
+        "tested" => L["A test is on its way to you. Its tries show here."],
+        "replayed" => L["The delivery waits to be posted again."],
+        "added" when Current == "apps" => L["Added to Do not send."],
+        "removed" when Current == "apps" => L["Taken off Do not send."],
         _ => L["Saved."],
     };
 

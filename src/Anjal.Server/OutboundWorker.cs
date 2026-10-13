@@ -136,6 +136,29 @@ public sealed class OutboundWorker
 
     private async System.Threading.Tasks.Task ProcessOneAsync(Anjal.Store.OutboundMessage m, System.Threading.CancellationToken ct)
     {
+        // rc.17 (design review [7d]): an application's message to an address on its organisation's
+        // do-not-send list is not sent; it is marked "Suppressed" with the list's reason.
+        if (this.options.DoNotSend is not null)
+        {
+            string? held = null;
+            try
+            {
+                held = await this.options.DoNotSend(m, ct).ConfigureAwait(false);
+            }
+#pragma warning disable CA1031 // A list that cannot be read never stops mail; it is logged.
+            catch (System.Exception ex) when (ex is not System.OperationCanceledException)
+            {
+                this.log?.Invoke($"do-not-send check for {m.Id} failed ({ex.GetType().Name}: {ex.Message}); sending");
+            }
+#pragma warning restore CA1031
+            if (held is not null)
+            {
+                await this.store.MarkOutboundResultAsync(m.Id, Anjal.Store.OutboundStatus.Failed, this.clock(), Anjal.Store.DoNotSend.SuppressedPrefix + held, ct).ConfigureAwait(false);
+                this.log?.Invoke($"suppressed {m.Id} -> {m.EnvelopeTo}: {held}");
+                return;
+            }
+        }
+
         byte[] bytesToSend = m.RawBytes;
 
         // v1.0.0-rc.8: a row is signed once; its evidence copy holds the exact
@@ -396,4 +419,10 @@ public sealed class OutboundWorkerOptions
     /// queue.
     /// </summary>
     public System.Func<Anjal.Store.OutboundMessage, string, bool, System.Threading.CancellationToken, System.Threading.Tasks.Task>? OnFinalFailure { get; init; }
+
+    /// <summary>
+    /// rc.17 (design review [7d]): asked before each message is sent; a reason means the message is
+    /// on the do-not-send list and is marked "Suppressed" instead of sent. Null sends everything.
+    /// </summary>
+    public System.Func<Anjal.Store.OutboundMessage, System.Threading.CancellationToken, System.Threading.Tasks.Task<string?>>? DoNotSend { get; init; }
 }

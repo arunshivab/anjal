@@ -3818,6 +3818,106 @@ a.cfig:hover { border-color: var(--brand); }
 .notebar .lipicon { color: var(--accent); flex: 0 0 auto; }
 .notebar.leaving { opacity: 0; transition: opacity 280ms var(--ease); }
 .undobar ~ .undobar { bottom: 100px; }
+
+/* ===================================================================
+   rc.17 - Sending systems (design review section 10, [7a]-[7e]).
+   =================================================================== */
+.sendsys .sshead { flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.sendsys .sshead .hint { margin: 2px 0 0; }
+.sstabs { display: flex; flex-wrap: wrap; gap: 2px; margin: 4px 0 14px; border-bottom: 1px solid var(--line); }
+.sstabs a { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 12px; color: var(--ink-muted); font-weight: 500; font-size: 14px; text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.sstabs a[aria-current="page"] { color: var(--brand); font-weight: 700; border-bottom-color: var(--brand); }
+.sstabs a:hover { color: var(--ink); }
+.ssbadge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--danger); color: var(--surface-100); font-size: 11px; font-weight: 700; }
+.sskpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.sskpis.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sskpi { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-100); border-top: 3px solid var(--line-strong); }
+.sskpi span { font-size: 12.5px; color: var(--ink-muted); font-weight: 600; }
+.sskpi b { font-size: 24px; font-weight: 750; color: var(--ink); font-variant-numeric: tabular-nums; }
+.sskpi small { font-size: 12px; color: var(--ink-muted); }
+.sskpi.k-ok { border-top-color: var(--success); } .sskpi.k-ok small { color: var(--success); }
+.sskpi.k-warn { border-top-color: var(--accent); } .sskpi.k-warn small { color: var(--warning); }
+.sskpi.k-bad { border-top-color: var(--danger); } .sskpi.k-bad small { color: var(--danger); }
+.sskpi.k-ink { border-top-color: var(--ink); }
+.ssgrid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; margin-bottom: 14px; }
+.ssbars { display: flex; align-items: flex-end; gap: 3px; height: 180px; padding-top: 6px; }
+.ssbar { flex: 1 1 0; display: flex; flex-direction: column-reverse; height: 100%; min-width: 4px; }
+.ssbar i { display: block; width: 100%; }
+.ssbar i:last-child { border-radius: 3px 3px 0 0; }
+.ssbar .b-none { height: 2px; background: var(--line); }
+.b-delivered { background: var(--seal, var(--success)); }
+.b-delayed { background: var(--accent); }
+.b-bounced { background: var(--danger); }
+.b-failed { background: var(--ink); }
+.ssaxis { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-muted); margin-top: 4px; }
+.sslegend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; font-size: 12.5px; color: var(--ink-muted); }
+.sslegend span { display: inline-flex; align-items: center; gap: 6px; background: none; }
+.sslegend span::before { content: ""; width: 10px; height: 10px; border-radius: 3px; }
+.sslegend .b-delivered::before { background: var(--seal, var(--success)); }
+.sslegend .b-delayed::before { background: var(--accent); }
+.sslegend .b-bounced::before { background: var(--danger); }
+.sslegend .b-failed::before { background: var(--ink); }
+.ssattn ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ssattn li { display: grid; grid-template-columns: 32px 1fr auto; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; border: 1px solid var(--line); }
+.ssattn .atticon { width: 32px; height: 32px; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; }
+.ssattn .att-warn .atticon { background: var(--warning-soft); color: var(--warning); }
+.ssattn .att-bad .atticon { background: var(--danger-soft); color: var(--danger); }
+.ssattn .att-ok .atticon { background: var(--success-soft); color: var(--success); }
+.ssattn .atttext { display: flex; flex-direction: column; min-width: 0; font-size: 13px; }
+.ssattn .atttext span { color: var(--ink-muted); font-size: 12.5px; }
+.sspill { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.ss-delivered { background: var(--success-soft); color: var(--success); }
+.ss-delayed { background: var(--warning-soft); color: var(--warning); }
+.ss-bounced { background: var(--danger-soft); color: var(--danger); }
+.ss-failed { background: var(--ink); color: var(--surface-100); }
+.ss-queued { background: var(--surface-inset, var(--surface-300)); color: var(--ink-muted); }
+.ss-suppressed { background: var(--info-soft); color: var(--info); }
+.ssok { color: var(--success); font-weight: 600; }
+.sswarn { color: var(--warning); font-weight: 600; }
+.ssbad { color: var(--danger); font-weight: 600; }
+.sstable td.nowrap, .sstable .nowrap { white-space: nowrap; }
+.sstable .ssto, .sstable .sssubj { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ssfilters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ssfilters .inp { max-width: 300px; }
+/* Screen check 12 Oct: the search box keeps room for its example text; the tables keep inside their card
+   (a narrow screen scrolls the table, never the card). */
+.ssfilters .orgsearch { flex: 1 1 250px; min-width: 250px; }
+.sstable-wrap { overflow-x: auto; }
+.sstable th, .sstable td { padding-left: 6px; padding-right: 6px; }
+.ssmsgs.has-detail { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 14px; align-items: start; }
+/* Screen check 12 Oct: beside the table only where both fit; otherwise the message comes first, the table below. */
+@media (max-width: 1700px) { .ssmsgs.has-detail { grid-template-columns: minmax(0, 1fr); } .ssmsgs.has-detail .ssdetail { order: -1; position: static; } }
+.ssdetail { position: sticky; top: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-100); }
+.ssdetail h3 { margin: 6px 0 2px; font-size: 16px; }
+.ssdstate { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--warning); }
+.sstimeline { list-style: none; margin: 14px 0; padding: 0 0 0 18px; border-left: 2px solid var(--line); display: flex; flex-direction: column; gap: 12px; }
+.sstimeline li { position: relative; display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.sstimeline li::before { content: ""; position: absolute; left: -25px; top: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--line-strong); box-shadow: 0 0 0 3px var(--surface-100); }
+.sstimeline .tl-delivered::before { background: var(--success); }
+.sstimeline .tl-deferred::before { background: var(--accent); }
+.sstimeline .tl-refused::before { background: var(--danger); }
+.sstimeline .tl-next::before { background: var(--surface-100); border: 2px solid var(--accent); width: 8px; height: 8px; }
+.sstimeline time { font-size: 12px; color: var(--ink-muted); }
+.sstimeline span { color: var(--ink-muted); }
+.sstimeline code, .ssreply { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; background: var(--surface-inset, var(--surface-300)); padding: 3px 6px; border-radius: 6px; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+.ssfacts { margin: 0 0 12px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.ssfacts div { display: grid; grid-template-columns: 110px 1fr; gap: 8px; }
+.ssfacts dt { color: var(--ink-muted); }
+.ssfacts dd { margin: 0; word-break: break-all; }
+.ssactions { display: flex; flex-wrap: wrap; gap: 8px; }
+.sssample { margin-top: 16px; }
+.sssample h3 { font-size: 15px; margin: 0 0 4px; }
+.sssample pre { margin: 8px 0 0; padding: 12px 14px; border-radius: 12px; background: var(--ink); color: var(--surface-100); overflow-x: auto; font-size: 12.5px; line-height: 1.55; }
+.ssrowact { display: flex; align-items: center; gap: 10px; justify-content: flex-end; }
+.ssdetailrow td { background: var(--surface-inset, var(--surface-300)); }
+.sshookt { list-style: none; margin: 0; padding: 0; font-size: 12.5px; display: flex; flex-direction: column; gap: 4px; }
+.sshookt time { color: var(--ink-muted); margin-right: 6px; }
+@media (max-width: 1200px) { .ssgrid { grid-template-columns: 1fr; } }
+/* Screen pictures, 12 Oct 2026: with the rail open at 1366 the six figures did not fit their tiles ("100%" spilled);
+   the card, not the window, decides: six in a row from 820px, else three. */
+.sendsys { container-type: inline-size; }
+@container (max-width: 820px) { .sskpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .sskpis, .sskpis.three { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* rc.16 screen check (12 Oct 2026): the Today and Settings search boxes show focus. The other fixes
    sit in their own rules: the list head's spacer (first row), the envelope's scroll bar room and actions,
    the row's flag centred, the Today search box's height. */

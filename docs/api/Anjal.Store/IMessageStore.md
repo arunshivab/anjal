@@ -40,14 +40,18 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 - **ListDkimKeysAsync** *(method)* - List all configured DKIM keys. The field IS populated; callers handling API responses should redact it.
 - **ListGreylistAsync** *(method)* - All remembered greylisting triplets.
 - **ListLocalDomainsAsync** *(method)* - List all local domains.
+- **ListOutboundBySendersAsync** *(method)* - rc.17 (Sending systems, design review [7b]): outbound messages from any of these envelope senders created in a period, newest first. Each row's holds only the first 8 KB of the message (enough for its headers).
 - **ListOutboundForSenderAsync** *(method)* - The Outbox (rc.12, item 9): one sender's outbound rows still waiting or being sent, oldest first.
 - **ListOutboundTlsPoliciesAsync** *(method)* - List all configured TLS policies.
 - **ListRoutingRulesAsync** *(method)* - List all routing rules in insertion order.
 - **ListSettingsAsync** *(method)* - The stored settings of one scope, by key.
 - **ListSmtpUsersAsync** *(method)* - List all configured SMTP users. Hashes ARE populated; callers handling API responses must redact the hash field.
+- **ListWebhookDeliveriesAsync** *(method)* - rc.17 (design review [7d]): the recorded attempts to post these inbound messages to their webhooks, newest first.
+- **ListWebhookJobsAsync** *(method)* - rc.17 (design review [7d]): notifications to addresses at these domains created since a time, newest first.
 - **MarkOutboundResultAsync** *(method)* - Record the result of an outbound send attempt. Updates status, increments the attempt counter, sets next-attempt-at for retries, and writes the last-error text.
 - **OldestPendingOutboundAsync** *(method)* - When the oldest message still waiting in the outbound queue was queued (rc.14); null when none waits.
 - **ReplaceGreylistAsync** *(method)* - Replace the remembered triplets with , in one transaction.
+- **ReplayWebhookJobAsync** *(method)* - rc.17 (design review [7d], Replay): post a notification again - it waits to be sent now, with its tries counted afresh and a new give-up time. Returns false when it is not there or is being sent at this moment.
 - **RetryOutboundNowAsync** *(method)* - Make a waiting outbound row of this sender due now ("Try now").
 - **SaveInboundMessageAsync** *(method)* - Persist an inbound message. Returns the saved message with populated.
 - **SaveWebhookDeliveryAsync** *(method)* - Record a webhook delivery outcome for diagnostics.

@@ -518,6 +518,93 @@ internal static class OrgEndpoints
             return Results.Redirect("/org/branding?saved=1");
         }).RequireAuthorization();
 
+        // ---- rc.17: Sending systems (design review section 10) ----
+        app.MapPost("/org/sending/{action}", async (HttpContext http, string action, [FromForm] string? id, [FromForm] string? back,
+            MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            string to = LocalPath.Safe(back);
+            to = to.StartsWith("/org/apps", StringComparison.Ordinal) ? to : "/org/apps?tab=messages";
+            string Back(string saved) => to + (to.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "saved=" + saved;
+            switch (action)
+            {
+                case "retry" or "stop" when Guid.TryParse(id, out Guid mid):
+                    bool done = await svc.SendingRetryOrStopAsync(a.Tenant, mid, action == "stop", ct).ConfigureAwait(false);
+                    if (!done)
+                    {
+                        return Results.Redirect(to + (to.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, "That message is no longer waiting to be sent.")));
+                    }
+                    await audit.RecordAsync(a.Me.Address, action == "stop" ? "org.sending.stopped" : "org.sending.retried", mid.ToString(), Client(http)).ConfigureAwait(false);
+                    return Results.Redirect(Back(action == "stop" ? "stopped" : "retried"));
+                case "test":
+                    Guid? queued = await svc.SendingTestAsync(a.Tenant, id ?? string.Empty, a.Me.Address, ct).ConfigureAwait(false);
+                    if (queued is null)
+                    {
+                        return Results.NotFound();
+                    }
+                    await audit.RecordAsync(a.Me.Address, "org.sending.tested", id ?? string.Empty, Client(http)).ConfigureAwait(false);
+                    return Results.Redirect("/org/apps?tab=messages&msg=" + queued.Value + "&saved=tested");
+                case "replay" when Guid.TryParse(id, out Guid hid):
+                    if (!await svc.ReplayWebhookAsync(a.Tenant, hid, ct).ConfigureAwait(false))
+                    {
+                        return Results.Redirect("/org/apps?tab=webhooks&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, "That delivery cannot be replayed now; it may be being sent.")));
+                    }
+                    await audit.RecordAsync(a.Me.Address, "org.webhook.replayed", hid.ToString(), Client(http)).ConfigureAwait(false);
+                    return Results.Redirect("/org/apps?tab=webhooks&saved=replayed");
+                default:
+                    return Results.NotFound();
+            }
+        }).RequireAuthorization();
+
+        app.MapPost("/org/donotsend", async (HttpContext http, [FromForm] string? address, [FromForm] string? reason, [FromForm] string? remove,
+            MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            bool off = remove == "1";
+            string? error = await svc.SetDoNotSendAsync(a.Tenant, address ?? string.Empty, reason ?? string.Empty, a.Me.Address, off, ct).ConfigureAwait(false);
+            if (error is not null)
+            {
+                return Results.Redirect("/org/apps?tab=donotsend&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
+            }
+            await audit.RecordAsync(a.Me.Address, off ? "org.donotsend.removed" : "org.donotsend.added", (address ?? string.Empty).Trim().ToLowerInvariant(), Client(http)).ConfigureAwait(false);
+            return Results.Redirect("/org/apps?tab=donotsend&saved=" + (off ? "removed" : "added"));
+        }).RequireAuthorization();
+
+        app.MapGet("/org/sending/{id:guid}.eml", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a || await svc.SendingOriginalAsync(a.Tenant, id, ct).ConfigureAwait(false) is not byte[] raw)
+            {
+                return Results.NotFound();
+            }
+            return Results.File(raw, "message/rfc822", id.ToString("N")[..12] + ".eml");
+        }).RequireAuthorization();
+
+        app.MapGet("/org/sending/messages.csv", async (HttpContext http, string? p, string? status, string? appId, string? q, MailboxService svc, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            (DateTimeOffset start, _) = MailboxService.SendingPeriodOf(p, now);
+            IEnumerable<SendingRow> rows = MailboxService.FilterSending(await svc.SendingRowsAsync(a.Tenant, start, now, ct).ConfigureAwait(false), status, appId, q);
+            var sb = new StringBuilder("time,status,to,subject,application,tries,last reply\r\n");
+            foreach (SendingRow r in rows)
+            {
+                sb.Append(string.Join(",", new[]
+                {
+                    r.At.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss'Z'", CultureInfo.InvariantCulture), r.Status, r.To, r.Subject, r.App, r.Tries.ToString(CultureInfo.InvariantCulture), r.LastError,
+                }.Select(MailboxService.CsvCell))).Append("\r\n");
+            }
+            return Results.File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv; charset=utf-8", "anjal-sending-systems.csv");
+        }).RequireAuthorization();
+
         app.MapPost("/org/templates/delete", async (HttpContext http, [FromForm] string? key, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
         {
             if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
@@ -645,6 +732,12 @@ internal static class OrgLog
         ["org.app.key"] = "Made a key",
         ["org.app.rotated"] = "Rotated a key",
         ["org.app.revoked"] = "Revoked a key",
+        ["org.sending.retried"] = "Tried an application's message again",
+        ["org.sending.stopped"] = "Stopped trying an application's message",
+        ["org.sending.tested"] = "Sent a test from an application",
+        ["org.webhook.replayed"] = "Replayed a webhook delivery",
+        ["org.donotsend.added"] = "Added an address to Do not send",
+        ["org.donotsend.removed"] = "Took an address off Do not send",
         ["org.branding"] = "Changed branding",
         ["org.template.added"] = "Added a template",
         ["org.template.removed"] = "Removed a template",

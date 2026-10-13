@@ -555,6 +555,9 @@ CREATE TABLE IF NOT EXISTS mailbox_documents (
 );
 CREATE INDEX IF NOT EXISTS outbound_messages_sender_idx ON outbound_messages (lower(envelope_from)) WHERE status IN (0, 1);
 
+-- rc.17 (Sending systems): an organisation's applications' messages by sender and time, every status.
+CREATE INDEX IF NOT EXISTS outbound_messages_sender_time_idx ON outbound_messages (lower(envelope_from), created_at DESC);
+
 -- v1.0.0-rc.13: an organisation's own documents - its sign-in look, policies
 -- and defaults - each kind kept as one JSON document per organisation.
 CREATE TABLE IF NOT EXISTS tenant_documents (

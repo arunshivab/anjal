@@ -35,10 +35,12 @@ Only ever against a throwaway copy: `reach` presses every button.
 On Linux (as GitHub does), with PostgreSQL running and a Release build:
 
 ```
-PGPASSWORD=<postgres password> bash tools/ui/setup.sh    # new database anjal_ui, sample mail, webmail on 5080
 cd tools/ui
 npm install
 npx playwright install chromium
+cd ../..
+PGPASSWORD=<postgres password> bash tools/ui/setup.sh    # new database anjal_ui, sample mail, two applications, webmail on 5080
+cd tools/ui
 node check.js                       # every check; exit code 1 when anything is found
 node check.js --only names,tips     # some checks
 node check.js --skip reach          # all but pressing every button
