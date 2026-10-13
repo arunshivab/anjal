@@ -20,7 +20,7 @@
     <div class="lh-row">
         <h1>@FolderLabel</h1>
         @* Design review 4.1: "Inbox  3 new"; the full count stays for screen readers and the script. *@
-        <span class="cnt sr-only" data-count data-total="@total">@CountText</span>
+        <span class="cnt sr-only" data-count data-total="@total" data-word="@L["{n} messages"]">@CountText</span>
         @if (unread > 0)
         {
             <span class="lhnew" data-newpill title="@CountText">@L["{n} new"].Replace("{n}", unread.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span>

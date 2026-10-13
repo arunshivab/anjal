@@ -581,9 +581,15 @@
         var dot = document.createElement("i");
         host.appendChild(dot);
         // rc.11: the server gives the words in the person's language; English otherwise.
-        host.appendChild(document.createTextNode(online
-          ? (host.getAttribute("data-online") || "Connected")
-          : (host.getAttribute("data-offline") || "Offline")));
+        // DEF-106 (rc.19): the words sit in a slot as wide as the wider of the two, so going
+        // offline and back never moves "Updated" beside it.
+        var on = host.getAttribute("data-online") || "Connected", off = host.getAttribute("data-offline") || "Offline";
+        var slot = document.createElement("span");
+        slot.className = "slot";
+        slot.setAttribute("data-slot-a", on);
+        slot.setAttribute("data-slot-b", off);
+        slot.textContent = online ? on : off;
+        host.appendChild(slot);
         host.setAttribute("title", online
           ? W("Anjal is reachable.")
           : W("Anjal is not reachable from this browser. Anything you send will fail until it returns."));
@@ -1391,7 +1397,7 @@
             : [row.getAttribute("data-message")];
           dragging = ids;
           e.dataTransfer.effectAllowed = "move";
-          e.dataTransfer.setData("text/plain", ids.length + " message" + (ids.length === 1 ? "" : "s"));
+          e.dataTransfer.setData("text/plain", W("{n} messages").replace("{n}", String(ids.length)));
           document.documentElement.classList.add("dragging-mail");
         });
         row.addEventListener("dragend", function () {
@@ -1557,7 +1563,8 @@
           var count = $("[data-count]");
           if (count) {
             var total = count.getAttribute("data-total") || "0";
-            count.textContent = total + (total === "1" ? " message" : " messages");
+            // DEF-106 survey: the count in the person's language, as the server wrote it (was English).
+            count.textContent = (count.getAttribute("data-word") || "{n} messages").replace("{n}", total);
           }
           // rc.16: the head's "N new" pill goes with the last unread.
           $$("[data-newpill]").forEach(function (p) { p.hidden = true; });

@@ -17,7 +17,7 @@ const fs = require('fs');
 const path = require('path');
 const L = require('./lib.js');
 
-const ORDER = ['noscroll', 'names', 'tips', 'menus', 'close', 'align', 'shrink', 'clip', 'same', 'steady', 'lineup', 'sizes', 'scrollbars', 'flap', 'swap', 'keyboard', 'reach'];
+const ORDER = ['noscroll', 'names', 'tips', 'menus', 'close', 'align', 'shrink', 'clip', 'same', 'steady', 'live', 'lineup', 'sizes', 'scrollbars', 'flap', 'swap', 'keyboard', 'reach'];
 
 function arg(name) {
   const i = process.argv.indexOf('--' + name);

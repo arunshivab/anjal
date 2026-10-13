@@ -14,7 +14,11 @@ function frame() {
     if (p) { out['rail ' + k] = p; }
   });
   document.querySelectorAll('.statusbar > *').forEach((e, i) => { const p = pos(e); if (p) { out['status bar ' + (e.className || i)] = p; } });
-  return out;
+  // DEF-106: with each status bar item, what it said and how wide it was, so a report names the
+  // text that changed width rather than only the items it pushed.
+  const said = {};
+  document.querySelectorAll('.statusbar > *').forEach((e) => { const q = e.getBoundingClientRect(); if (q.width) { said[e.className || 'item'] = '"' + e.textContent.trim().replace(/\s+/g, ' ').slice(0, 40) + '" ' + q.width.toFixed(1) + 'px'; } });
+  return { out, said };
 }
 
 async function setFold(w, folded) {
@@ -38,15 +42,17 @@ module.exports = {
           const state = folded ? 'folded' : 'with names';
           for (const url of screens) {
             if (!(await L.visit(w, url, 250))) { continue; }
-            const f = await w.page.evaluate(frame);
+            const { out: f, said } = await w.page.evaluate(frame);
             for (const [k, p] of Object.entries(f)) {
               checked++;
               // Folded and open, each rail icon keeps the same place; the status bar too.
-              if (ref[k] === undefined) { ref[k] = { p, url, state }; continue; }
+              if (ref[k] === undefined) { ref[k] = { p, url, state, said }; continue; }
               const [ax, ay] = ref[k].p.split(',').map(Number); const [bx, by] = p.split(',').map(Number);
               if (Math.abs(ax - bx) > 1 || Math.abs(ay - by) > 1) {
-                found.push(`${size.join('x')} ${state} ${url}: ${k} at ${p}, but at ${ref[k].p} on ${ref[k].url} (${ref[k].state})`);
-                ref[k] = { p, url, state };
+                const was = ref[k].said || {};
+                const changed = Object.keys(said).filter((c) => was[c] !== undefined && was[c] !== said[c]).map((c) => `${c} ${was[c]} -> ${said[c]}`);
+                found.push(`${size.join('x')} ${state} ${url}: ${k} at ${p}, but at ${ref[k].p} on ${ref[k].url} (${ref[k].state})` + (k.startsWith('status bar') && changed.length ? `; status bar text that changed: ${changed.join('; ')}` : ''));
+                ref[k] = { p, url, state, said };
               }
             }
           }

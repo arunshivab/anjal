@@ -31,7 +31,7 @@ jobs:
           - group: buttons
             checks: "tips,close,keyboard,swap,flap,reach"
           - group: layout
-            checks: "shrink,clip,steady,lineup"
+            checks: "shrink,clip,steady,live,lineup"
           - group: look
             checks: "align,same,sizes,scrollbars"
     services:
