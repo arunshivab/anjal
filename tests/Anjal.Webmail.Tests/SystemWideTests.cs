@@ -9,7 +9,7 @@ namespace Anjal.Webmail.Tests;
 /// </summary>
 public partial class SystemWideTests
 {
-    private static readonly string[] ScreenChecks = { "noscroll", "names", "tips", "menus", "close", "align", "shrink", "clip", "same", "steady", "lineup", "sizes", "scrollbars", "flap", "swap", "keyboard", "reach" };
+    private static readonly string[] ScreenChecks = { "noscroll", "names", "tips", "menus", "close", "align", "shrink", "clip", "same", "steady", "live", "lineup", "sizes", "scrollbars", "flap", "swap", "keyboard", "reach" };
 
     private static readonly HashSet<string> OptionalHooks = new(StringComparer.Ordinal) { "masonry", "bg-name" };
 

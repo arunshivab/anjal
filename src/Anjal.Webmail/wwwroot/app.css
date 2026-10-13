@@ -739,7 +739,7 @@ a.st-last:hover { color: var(--ink); }
            font-weight: 700; color: var(--brand); cursor: pointer; }
 
 /* The selection bar: only what applies is enabled (item 13). */
-.selbar { position: sticky; top: 0; z-index: 2; align-items: center; flex-wrap: wrap; }
+.selbar { position: sticky; top: 0; z-index: 2; align-items: stretch; flex-wrap: wrap; }
 .selbar .lbl { font-size: 13px; color: var(--ink-muted); }
 .selbar .lbl.armed { color: var(--ink); font-weight: 700; }
 .selbar button:disabled { opacity: 0.45; cursor: default; }
@@ -4073,3 +4073,10 @@ a.cfig:hover { border-color: var(--brand); }
 /* The reply's small window lies over the envelope; while it is open the envelope behind it does not
    scroll, so no scroll bar is left under the window (screen check, 12 Oct 2026). */
 .readcol:has(> .cdock) aside.envelope { overflow-y: hidden; }
+
+/* DEF-106 (rc.19; owner 13 Oct 2026): a text that changes on an open screen keeps one width, the
+   wider of what it can say, so nothing beside it moves. The two longest wordings ride along as
+   hidden, zero-height lines; the box is as wide as the widest of the three. */
+.slot { display: inline-flex; flex-direction: column; }
+.slot::before { content: attr(data-slot-a); height: 0; overflow: hidden; visibility: hidden; white-space: nowrap; }
+.slot::after { content: attr(data-slot-b); height: 0; overflow: hidden; visibility: hidden; white-space: nowrap; }

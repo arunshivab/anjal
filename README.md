@@ -10,6 +10,14 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.19** (13 October 2026) - Steady text (DEF-106). Text that changes on an open screen
+no longer moves what is beside it: the connection light keeps one width (the wider of "Connected"
+and "Offline"), and the selection bar is left-aligned with Clear at its right, so "3 selected"
+growing no longer shifts the tick box. A new screen check, **live**, sets every live text to its
+shortest and longest wording and fails if a neighbour moves; the **steady** check now names the
+status bar text that changed width. The list's message count and the drag label are written in
+the person's language. No schema change.
+
 **v1.0.0-rc.18** (12 October 2026) - Help and Lajna (design review section 11, [8a]-[8g]).
 A **help guide** at `/help`: 11 parts and 54 short articles, searchable, each with its steps and a
 **Show me in Anjal** link that opens the page with the control ringed; "Did this help?" is
