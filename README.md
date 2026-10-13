@@ -10,6 +10,18 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.17** (12 October 2026) - Sending systems (design review section 10, [7a]-[7e]).
+Organisation > Applications became **Sending systems**: an overview of what the organisation's
+applications sent in the last hour, day, week or month (accepted, delivered with the usual time,
+delayed, bounced, failed) with a chart and what needs attention; **Messages**, searchable, each
+with every attempt - the receiving server, the TLS used and its exact reply - and Try now, Stop
+trying and the original as .eml; **Applications** with their figures, Send a test and an SMTP
+sample; **Webhooks** with each delivery's answer and Replay; a **Do not send** list (hard bounces
+and third give-ups are added by the server; the API answers `suppressed`; people's own mail is
+never held); **Domains and DNS**. The Anjal console gains **Transactional**: the queue now, what
+applications sent today, how much went on the first try, and the receiving servers that slow us
+down. No SMS. schema.sql adds one index.
+
 **v1.0.0-rc.16** (12 October 2026) - the design review (owner, 11 Oct 2026; brief sections 1-5,
 7, 8 and 9). Sign-in on Anjal's teal with the organisation's initials, a language menu and two
 device cards; the envelope as a postal envelope beside the letter, with file-type tags and the
@@ -956,6 +968,11 @@ the configured token is empty (test-only mode).
 
     POST   /api/outbound                      { envelopeFrom, envelopeTo, subject?, bodyText?, rawBytesBase64?, giveUpHours? }
     GET    /api/outbound/{id}
+
+From rc.17, a message from one of an organisation's applications (Organisation > Sending systems)
+to an address on that organisation's do-not-send list is not queued: the answer is
+`409 {"error":"suppressed", ...}` with the reason (the address bounced hard, was given up on three
+times, or an administrator added it). The queue holds back such messages sent by SMTP the same way.
 
 ### Inbound
 

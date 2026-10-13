@@ -78,6 +78,41 @@ public interface IMessageStore
     /// <summary>Count queued notifications by state, for metrics.</summary>
     System.Threading.Tasks.Task<long> CountWebhookJobsAsync(WebhookJobStatus status, System.Threading.CancellationToken ct = default);
 
+    /// <summary>
+    /// rc.17 (Sending systems, design review [7b]): outbound messages from any of these envelope
+    /// senders created in a period, newest first. Each row's <see cref="OutboundMessage.RawBytes"/>
+    /// holds only the first 8 KB of the message (enough for its headers).
+    /// </summary>
+    /// <param name="senders">The envelope senders (compared without case).</param>
+    /// <param name="start">From (inclusive).</param>
+    /// <param name="until">Until (exclusive).</param>
+    /// <param name="limit">At most this many.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<OutboundMessage>> ListOutboundBySendersAsync(System.Collections.Generic.IReadOnlyCollection<string> senders, System.DateTimeOffset start, System.DateTimeOffset until, int limit, System.Threading.CancellationToken ct = default);
+
+    /// <summary>rc.17 (design review [7d]): notifications to addresses at these domains created since a time, newest first.</summary>
+    /// <param name="domains">The recipients' domains (compared without case).</param>
+    /// <param name="since">Created at or after.</param>
+    /// <param name="limit">At most this many.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<WebhookJob>> ListWebhookJobsAsync(System.Collections.Generic.IReadOnlyCollection<string> domains, System.DateTimeOffset since, int limit, System.Threading.CancellationToken ct = default);
+
+    /// <summary>rc.17 (design review [7d]): the recorded attempts to post these inbound messages to their webhooks, newest first.</summary>
+    /// <param name="inboundMessageIds">The inbound messages.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<WebhookDelivery>> ListWebhookDeliveriesAsync(System.Collections.Generic.IReadOnlyCollection<System.Guid> inboundMessageIds, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
+    /// rc.17 (design review [7d], Replay): post a notification again - it waits to be sent now, with
+    /// its tries counted afresh and a new give-up time. Returns false when it is not there or is being
+    /// sent at this moment.
+    /// </summary>
+    /// <param name="id">The notification.</param>
+    /// <param name="now">Now.</param>
+    /// <param name="giveUpAt">The new give-up time.</param>
+    /// <param name="ct">Cancellation.</param>
+    System.Threading.Tasks.Task<bool> ReplayWebhookJobAsync(System.Guid id, System.DateTimeOffset now, System.DateTimeOffset giveUpAt, System.Threading.CancellationToken ct = default);
+
     // -------- Outbound queue --------
 
     /// <summary>

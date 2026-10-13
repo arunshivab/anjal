@@ -99,4 +99,6 @@ env "${COMMON[@]}" ANJAL_WEBMAIL_PORT="$WEB_PORT" ANJAL_WEBMAIL_KEYS_DIR="$WORK/
   setsid dotnet "$ROOT/src/Anjal.Webmail/bin/$CONFIG/net10.0/Anjal.Webmail.dll" > "$WORK/webmail.log" 2>&1 < /dev/null &
 echo $! > "$WORK/webmail.pid"
 wait_for "http://127.0.0.1:$WEB_PORT/sign-in" "The webmail" "$WORK/webmail.log"
+# 5. Two applications with a test message each, so Sending systems is checked with data (rc.17).
+(cd "$ROOT/tools/ui" && ANJAL_UI_BASE="http://127.0.0.1:$WEB_PORT" ANJAL_UI_ADDRESS="$ADDRESS" ANJAL_UI_PASSWORD="$PASSWORD" node seed-apps.js)
 echo "ready: http://127.0.0.1:$WEB_PORT  ($ADDRESS)"

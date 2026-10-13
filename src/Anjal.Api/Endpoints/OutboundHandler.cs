@@ -58,6 +58,15 @@ public sealed class OutboundHandler
             return;
         }
 
+        // rc.17 (design review [7d]): an application does not send again to an address on its
+        // organisation's do-not-send list; it is told "suppressed", with the reason.
+        if (this.store is IMailboxStore lists
+            && await DoNotSend.CheckAsync(lists, req.EnvelopeFrom, req.EnvelopeTo).ConfigureAwait(false) is string held)
+        {
+            await ctx.WriteErrorAsync(409, "suppressed", $"{req.EnvelopeTo} is on the do-not-send list: {held}.").ConfigureAwait(false);
+            return;
+        }
+
         byte[] rawBytes;
         if (!string.IsNullOrEmpty(req.RawBytesBase64))
         {

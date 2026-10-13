@@ -93,6 +93,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **ListMessagesByIdsAsync** *(method)* - _(no description)_
 - **ListMessagesBySeenAsync** *(method)* - _(no description)_
 - **ListMessagesSortedAsync** *(method)* - _(no description)_
+- **ListOutboundBySendersAsync** *(method)* - _(no description)_
 - **ListOutboundForSenderAsync** *(method)* - _(no description)_
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
@@ -102,6 +103,8 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **ListTenantDomainsAsync** *(method)* - _(no description)_
 - **ListTenantsAsync** *(method)* - _(no description)_
 - **ListTrustedSendersAsync** *(method)* - _(no description)_
+- **ListWebhookDeliveriesAsync** *(method)* - _(no description)_
+- **ListWebhookJobsAsync** *(method)* - _(no description)_
 - **MarkEvidencePurgedAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
@@ -109,6 +112,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
+- **ReplayWebhookJobAsync** *(method)* - _(no description)_
 - **RetryOutboundNowAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveMessageAsync** *(method)* - _(no description)_

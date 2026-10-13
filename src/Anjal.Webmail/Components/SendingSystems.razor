@@ -1,0 +1,572 @@
+@using Anjal.Store
+@using Anjal.Webmail.Services
+@inject MailboxService Mail
+
+@* rc.17, design review section 10 [7a]-[7d] (owner, 11 Oct 2026): Sending systems - what the
+   organisation's applications sent, whether it arrived and why not, every attempt with the
+   receiving server's own reply, their webhooks, and the do-not-send list. Read from the queue, the
+   evidence store and the webhook queue; the keys stay in the panel beside it. *@
+<section class="formcard orgcard sendsys">
+    <header class="orghead sshead">
+        <div>
+            <h2>@L["Sending systems"]</h2>
+            <p class="hint">@L["Mail sent by your applications through the API or SMTP · {period}"].Replace("{period}", L[PeriodLabel].ToLowerInvariant(), StringComparison.Ordinal)</p>
+        </div>
+        <span class="lh-grow"></span>
+        <nav class="seg" aria-label="@L["Period"]">
+            @foreach ((string key, string label) in MailboxService.SendingPeriods)
+            {
+                <a href="@Link(tab: Tab, p: key)" aria-current="@(PeriodKey == key ? "page" : null)">@L[label]</a>
+            }
+        </nav>
+        <a class="btn btn-p" href="/org/apps?new=1"><LipiIcon Name="plus" Size="16" />@L["Add an application"]</a>
+    </header>
+    <nav class="sstabs" aria-label="@L["Sending systems"]">
+        @foreach ((string key, string icon, string label) in Tabs)
+        {
+            <a href="@Link(tab: key)" aria-current="@(Tab == key ? "page" : null)"><LipiIcon Name="@icon" Size="16" /><span>@L[label]</span>@if (key == "webhooks" && hookFailed > 0) { <b class="ssbadge">@hookFailed</b> }</a>
+        }
+    </nav>
+
+    @switch (Tab)
+    {
+        case "messages":
+            <form method="get" action="/org/apps" class="ssfilters" role="search">
+                <input type="hidden" name="tab" value="messages" />
+                <input type="hidden" name="period" value="@PeriodKey" />
+                <span class="orgsearch"><LipiIcon Name="search" Size="16" /><input type="search" name="q" value="@Q" placeholder="@L["Address, subject or message id"]" aria-label="@L["Address, subject or message id"]" /></span>
+                <select class="setsel" name="status" aria-label="@L["Status"]" data-autosubmit>
+                    <option value="all">@L["All statuses"]</option>
+                    @foreach (string s in Statuses)
+                    {
+                        <option value="@s" selected="@(Status == s)">@L[s]</option>
+                    }
+                </select>
+                <select class="setsel" name="appId" aria-label="@L["Application"]" data-autosubmit>
+                    <option value="all">@L["All applications"]</option>
+                    @foreach (OrgApp a in Apps)
+                    {
+                        <option value="@a.Id" selected="@(AppId == a.Id)">@a.Name</option>
+                    }
+                </select>
+                <button type="submit" class="btn btn-s btn-sm" title="@L["Show the messages that match."]">@L["Find"]</button>
+                <span class="lh-grow"></span>
+                <a class="btn btn-q btn-sm" href="@CsvLink" title="@L["Save these messages as a CSV file."]" download><LipiIcon Name="download" Size="15" />@L["CSV"]</a>
+            </form>
+            <div class="ssmsgs @(detail is null ? null : "has-detail")">
+                <div class="sstable-wrap">
+                    @if (shown.Count == 0)
+                    {
+                        <p class="orgempty">@L["No message from your applications matches, in this period."]</p>
+                    }
+                    else
+                    {
+                        <table class="orgtable sstable">
+                            <thead><tr><th scope="col">@L["Status"]</th><th scope="col">@L["Time"]</th><th scope="col">@L["To"]</th><th scope="col">@L["Subject"]</th><th scope="col">@L["Application"]</th><th scope="col" class="num">@L["Tries"]</th></tr></thead>
+                            <tbody>
+                                @foreach (SendingRow r in shown.Take(200))
+                                {
+                                    <tr class="@(detail?.Row.Id == r.Id ? "on" : null)">
+                                        <td><span class="sspill ss-@r.Status.ToLowerInvariant()">@L[r.Status]</span></td>
+                                        <td class="nowrap"><a class="rowlink" href="@Link(tab: "messages", msg: r.Id.ToString())">@clock.List(r.At, Now)</a></td>
+                                        <td class="ssto">@r.To</td>
+                                        <td class="sssubj">@(r.Subject.Length > 0 ? r.Subject : L["(no subject)"])</td>
+                                        <td>@r.App</td>
+                                        <td class="num">@r.Tries</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                        @if (shown.Count > 200)
+                        {
+                            <p class="hint">@L["The newest 200 of {n}; narrow the search, or take them all as CSV."].Replace("{n}", shown.Count.ToString("N0", Inv), StringComparison.Ordinal)</p>
+                        }
+                    }
+                </div>
+                @if (detail is SendingDetail d)
+                {
+                    <aside class="ssdetail" aria-label="@L["The message"]">
+                        <p class="ssdstate"><span class="sspill ss-@d.Row.Status.ToLowerInvariant()">@L[d.Row.Status]</span>@if (d.Row.Next is DateTimeOffset nx) { <span>@L["trying again {time}"].Replace("{time}", clock.Time(nx), StringComparison.Ordinal)</span> }</p>
+                        <h3>@(d.Row.Subject.Length > 0 ? d.Row.Subject : L["(no subject)"])</h3>
+                        <p class="hint">@L["to {address} · {app}"].Replace("{address}", d.Row.To, StringComparison.Ordinal).Replace("{app}", d.Row.App, StringComparison.Ordinal)</p>
+                        <ol class="sstimeline">
+                            <li class="tl-accepted"><b>@L["Accepted from {app}"].Replace("{app}", d.Row.App, StringComparison.Ordinal)</b><time>@clock.Full(d.Row.At)</time><span>@(d.Sha256 is null ? L["No original kept yet"] : L["Original kept"])</span></li>
+                            @{ int n = 0; }
+                            @foreach (SendingAttempt t in d.Attempts)
+                            {
+                                n++;
+                                <li class="tl-@t.Outcome">
+                                    <b>@L["Try {n}: {outcome}"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal).Replace("{outcome}", L[OutcomeWord(t.Outcome)], StringComparison.Ordinal)</b>
+                                    <time>@clock.Full(t.At)</time>
+                                    <span>@(t.Host.Length > 0 ? t.Host : "–")@(t.Tls is string tls ? " · " + tls : string.Empty)</span>
+                                    @if (t.Reply.Length > 0)
+                                    {
+                                        <code>@t.Reply</code>
+                                    }
+                                </li>
+                            }
+                            @if (d.Row.Next is DateTimeOffset next)
+                            {
+                                <li class="tl-next"><b>@L["Next try"]</b><time>@clock.Full(next)</time><span>@L["Gives up {time}, and tells the application."].Replace("{time}", clock.Full(d.Row.GiveUp), StringComparison.Ordinal)</span></li>
+                            }
+                            else if (d.Row.Status is "Bounced" or "Failed" or "Suppressed" && d.Row.LastError.Length > 0)
+                            {
+                                <li class="tl-refused"><b>@L[d.Row.Status]</b><code>@d.Row.LastError</code></li>
+                            }
+                        </ol>
+                        <dl class="ssfacts">
+                            <div><dt>@L["Message id"]</dt><dd><code>@(d.MessageId.Length > 0 ? d.MessageId : "–")</code></dd></div>
+                            <div><dt>@L["Original kept"]</dt><dd>@(d.Sha256 is string sha ? "SHA-256 " + sha[..Math.Min(12, sha.Length)] + "…" : "–")</dd></div>
+                            <div><dt>@L["Gives up"]</dt><dd>@clock.Full(d.Row.GiveUp)</dd></div>
+                        </dl>
+                        <div class="ssactions">
+                            @if (d.Row.Status is "Delayed" or "Queued")
+                            {
+                                <form method="post" action="/org/sending/retry" class="inline">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value="@d.Row.Id" />
+                                    <input type="hidden" name="back" value="@Link(tab: "messages", msg: d.Row.Id.ToString())" />
+                                    <button type="submit" class="btn btn-s btn-sm" data-needs-server><LipiIcon Name="refresh" Size="15" />@L["Try now"]</button>
+                                </form>
+                                <form method="post" action="/org/sending/stop" class="inline">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value="@d.Row.Id" />
+                                    <input type="hidden" name="back" value="@Link(tab: "messages", msg: d.Row.Id.ToString())" />
+                                    <button type="submit" class="btn btn-q btn-sm btn-danger" title="@L["Stop delivering it. It is marked as failed."]" data-needs-server>@L["Stop trying"]</button>
+                                </form>
+                            }
+                            <a class="btn btn-q btn-sm" href="/org/sending/@(d.Row.Id).eml" title="@L["Save this mail's original as a file."]" download><LipiIcon Name="download" Size="15" />@EmlWord</a>
+                        </div>
+                    </aside>
+                }
+            </div>
+            break;
+
+        case "applications":
+            <div class="sstable-wrap">
+            <table class="orgtable sstable">
+                <thead><tr><th scope="col">@L["Application"]</th><th scope="col" class="num">@L["Accepted"]</th><th scope="col" class="num">@L["Delivered"]</th><th scope="col" class="num">@L["Bounced"]</th><th scope="col" class="num">@L["Failed"]</th><th scope="col" class="num">@L["Usual time"]</th><th scope="col">@L["Status"]</th><th scope="col"><span class="sr-only">@L["Send a test"]</span></th></tr></thead>
+                <tbody>
+                    @foreach (SendingAppFigures f in view?.Apps ?? Array.Empty<SendingAppFigures>())
+                    {
+                        <tr>
+                            <td><a class="rowlink" href="/org/apps?sel=@Uri.EscapeDataString(f.App.Id)&tab=applications"><b>@f.App.Name</b><span>@f.App.SendsAs</span>@if (f.App.Description.Length > 0) { <span>@f.App.Description</span> }</a></td>
+                            <td class="num">@f.Accepted.ToString("N0", Inv)</td>
+                            <td class="num">@Percent(f.Delivered, f.Accepted)</td>
+                            <td class="num @(f.Bounced > 0 ? "ssbad" : null)">@f.Bounced.ToString("N0", Inv)</td>
+                            <td class="num">@f.Failed.ToString("N0", Inv)</td>
+                            <td class="num">@Took(f.Usual)</td>
+                            <td><span class="@(f.Health == "Healthy" ? "ssok" : "sswarn")">@L[f.Health]</span></td>
+                            <td>
+                                <form method="post" action="/org/sending/test" class="inline">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="id" value="@f.App.Id" />
+                                    <button type="submit" class="btn btn-s btn-sm" data-needs-server title="@L["Sends a short message from {address} to you"].Replace("{address}", f.App.SendsAs, StringComparison.Ordinal)">@L["Send a test"]</button>
+                                </form>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            </div>
+            @if (Apps.Count == 0)
+            {
+                <p class="orgempty">@L["No application yet. Add one for each system that sends mail, such as a hospital information system or a payroll system."]</p>
+            }
+            else
+            {
+                OrgApp sample = Apps[0];
+                <section class="sssample" aria-label="@L["Send through SMTP"]">
+                    <h3>@L["Send through SMTP"]</h3>
+                    <p class="hint">@L["An application signs in on port 587 with its key's user name and the key; it may send only as its own address."]</p>
+                    <pre><code>@SmtpSample(sample)</code></pre>
+                </section>
+            }
+            break;
+
+        case "webhooks":
+            <p class="hint orglead">@L["Mail to an application's +tag addresses is posted to its webhook, signed, and tried again for 24 hours. A delivery that failed can be replayed once the webhook is back."]</p>
+            @if (hooks.Count == 0)
+            {
+                <p class="orgempty">@L["No webhook deliveries in this period."]</p>
+            }
+            else
+            {
+                <div class="sstable-wrap">
+                <table class="orgtable sstable">
+                    <thead><tr><th scope="col">@L["Time"]</th><th scope="col">@L["Answer"]</th><th scope="col">@L["To"]</th><th scope="col">@L["Status"]</th><th scope="col" class="num">@L["Tries"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
+                    <tbody>
+                        @foreach (WebhookView h in hooks)
+                        {
+                            <tr class="@(Hook == h.Job.Id.ToString() ? "on" : null)">
+                                <td class="nowrap">@clock.List(h.Job.CreatedAt, Now)</td>
+                                <td><span class="@CodeTone(h.Code)">@(h.Code?.ToString(Inv) ?? "–")</span></td>
+                                <td>@h.Job.Recipient@(h.Job.Tag.Length > 0 ? " · " + h.Job.Tag : string.Empty)</td>
+                                <td><span class="sspill ss-@HookStatus(h.Job.Status).ToLowerInvariant()">@L[HookStatus(h.Job.Status)]</span></td>
+                                <td class="num">@h.Job.Attempts</td>
+                                <td class="ssrowact">
+                                    <a class="linkbtn" href="@Link(tab: "webhooks", hook: h.Job.Id.ToString())" title="@L["See this webhook's deliveries."]">@L["View"]</a>
+                                    @if (h.Job.Status == WebhookJobStatus.Failed)
+                                    {
+                                        <form method="post" action="/org/sending/replay" class="inline">
+                                            <AntiforgeryToken />
+                                            <input type="hidden" name="id" value="@h.Job.Id" />
+                                            <button type="submit" class="btn btn-s btn-sm" title="@L["Send this webhook again."]" data-needs-server>@L["Replay"]</button>
+                                        </form>
+                                    }
+                                </td>
+                            </tr>
+                            @if (Hook == h.Job.Id.ToString())
+                            {
+                                <tr class="ssdetailrow"><td colspan="6">
+                                    <p class="hint">@(h.Url.Length > 0 ? h.Url : string.Empty) @(h.Job.LastError.Length > 0 ? " · " + h.Job.LastError : string.Empty)</p>
+                                    <ul class="sshookt">
+                                        @foreach (WebhookDelivery t in h.Deliveries)
+                                        {
+                                            <li><time>@clock.Full(t.AttemptedAt)</time> <b>@(t.StatusCode == 0 ? "–" : t.StatusCode.ToString(Inv))</b> @t.ErrorMessage</li>
+                                        }
+                                    </ul>
+                                </td></tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+                </div>
+            }
+            break;
+
+        case "donotsend":
+            <p class="hint orglead">@L["Addresses that bounced hard, were given up on three times, or that you added. Your applications' mail to them is not sent: the API answers with suppressed, and mail sent by SMTP is marked Suppressed. People's own mail is not held."]</p>
+            <form method="post" action="/org/donotsend" class="ssfilters">
+                <AntiforgeryToken />
+                <input class="inp" type="email" name="address" required maxlength="254" placeholder="name@@example.in" aria-label="@L["Address"]" />
+                <input class="inp" name="reason" maxlength="100" placeholder="@L["Why (optional)"]" aria-label="@L["Why (optional)"]" />
+                <button type="submit" class="btn btn-p btn-sm" data-needs-server><LipiIcon Name="plus" Size="15" />@L["Add"]</button>
+            </form>
+            @if (list.Count == 0)
+            {
+                <p class="orgempty">@L["No address is on the list."]</p>
+            }
+            else
+            {
+                <div class="sstable-wrap">
+                <table class="orgtable sstable">
+                    <thead><tr><th scope="col">@L["Address"]</th><th scope="col">@L["Why"]</th><th scope="col">@L["Added"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
+                    <tbody>
+                        @foreach (DoNotSendEntry e in list)
+                        {
+                            <tr>
+                                <td>@e.Address</td>
+                                <td>@L[e.Reason]</td>
+                                <td class="nowrap">@clock.List(e.Added, Now) · @(e.By == DoNotSend.ByAnjal ? L["by Anjal"] : e.By)</td>
+                                <td>
+                                    <form method="post" action="/org/donotsend" class="inline">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="address" value="@e.Address" />
+                                        <input type="hidden" name="remove" value="1" />
+                                        <button type="submit" class="linkbtn" data-needs-server>@L["Remove"]</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+            }
+            break;
+
+        case "dns":
+            <p class="hint orglead">@L["The records receiving servers check before they trust your applications' mail. Anjal checks them every day."]</p>
+            @if (dns is null || dns.Domains.Count == 0)
+            {
+                <p class="orgempty">@L["Not checked yet. Open Domains and check the records."]</p>
+            }
+            else
+            {
+                <div class="sstable-wrap">
+                <table class="orgtable sstable">
+                    <thead><tr><th scope="col">@L["Domain"]</th>@foreach (string k in DnsKinds) { <th scope="col">@k</th> }</tr></thead>
+                    <tbody>
+                        @foreach (KeyValuePair<string, Dictionary<string, string>> dom in dns.Domains.OrderBy(x => x.Key, StringComparer.Ordinal))
+                        {
+                            <tr>
+                                <td><b>@dom.Key</b></td>
+                                @foreach (string k in DnsKinds)
+                                {
+                                    string found = dom.Value.TryGetValue(k, out string? v) ? v : "unchecked";
+                                    <td><span class="@(found is "missing" or "different" ? "ssbad" : found == "unchecked" ? null : "ssok")">@L[DnsWord(found)]</span></td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+                <p class="hint">@L["Checked {date}."].Replace("{date}", clock.Full(dns.At), StringComparison.Ordinal) <a href="/org/domains">@L["Domains"]</a></p>
+            }
+            break;
+
+        default:
+            @if (view is SendingOverview o)
+            {
+                <div class="sskpis">
+                    <div class="sskpi"><span>@L["Accepted"]</span><b>@o.Rows.Count.ToString("N0", Inv)</b><small>@(o.Apps.Count == 1 ? L["from 1 application"] : L["from {n} applications"].Replace("{n}", o.Apps.Count.ToString(Inv), StringComparison.Ordinal))</small></div>
+                    <div class="sskpi k-ok"><span>@L["Delivered"]</span><b>@o.Count("Delivered").ToString("N0", Inv)</b><small>@Percent(o.Count("Delivered"), o.Rows.Count) · @L["usual {time}"].Replace("{time}", Took(o.Usual), StringComparison.Ordinal)</small></div>
+                    <div class="sskpi k-warn"><span>@L["Delayed"]</span><b>@((o.Count("Delayed") + o.Count("Queued")).ToString("N0", Inv))</b><small>@L["still trying"]</small></div>
+                    <div class="sskpi k-bad"><span>@L["Bounced"]</span><b>@o.Count("Bounced").ToString("N0", Inv)</b><small>@L["{n} added to Do not send"].Replace("{n}", o.ListAdded.ToString(Inv), StringComparison.Ordinal)</small></div>
+                    <div class="sskpi k-ink"><span>@L["Failed"]</span><b>@((o.Count("Failed") + o.Count("Suppressed")).ToString("N0", Inv))</b><small>@L["gave up, stopped or suppressed"]</small></div>
+                    <div class="sskpi k-ok"><span>@L["Sent encrypted"]</span><b>100%</b><small>@L["never sent in plain text"]</small></div>
+                </div>
+                <div class="ssgrid">
+                    <DashCard Id="ss-steps" Title="@L["What happened to each message"]" Sub="@L["Delivered, delayed (still trying), bounced, failed"]" Class="span2" L="L">
+                        <Chart>
+                            <div class="ssbars" role="img" aria-label="@L["What happened to each message"]">
+                                @foreach (SendingStep s in o.Steps)
+                                {
+                                    int total = s.Delivered + s.Delayed + s.Bounced + s.Failed;
+                                    <span class="ssbar" title="@StepLabel(s.Start): @L["Delivered"] @s.Delivered, @L["Delayed"] @s.Delayed, @L["Bounced"] @s.Bounced, @L["Failed"] @s.Failed">
+                                        <i class="b-failed" style="height:@Height(s.Failed)%"></i><i class="b-bounced" style="height:@Height(s.Bounced)%"></i><i class="b-delayed" style="height:@Height(s.Delayed)%"></i><i class="b-delivered" style="height:@Height(s.Delivered)%"></i>
+                                        @if (total == 0) { <i class="b-none"></i> }
+                                    </span>
+                                }
+                            </div>
+                            <div class="ssaxis" aria-hidden="true"><span>@StepLabel(o.Start)</span><span>@L["now"]</span></div>
+                            <div class="sslegend" aria-hidden="true"><span class="b-delivered">@L["Delivered"]</span><span class="b-delayed">@L["Delayed"]</span><span class="b-bounced">@L["Bounced"]</span><span class="b-failed">@L["Failed (gave up)"]</span></div>
+                        </Chart>
+                        <Table>
+                            <table class="dtable">
+                                <thead><tr><th scope="col">@L["From"]</th><th scope="col" class="num">@L["Delivered"]</th><th scope="col" class="num">@L["Delayed"]</th><th scope="col" class="num">@L["Bounced"]</th><th scope="col" class="num">@L["Failed"]</th></tr></thead>
+                                <tbody>
+                                    @foreach (SendingStep s in o.Steps)
+                                    {
+                                        <tr><th scope="row">@StepLabel(s.Start)</th><td class="num">@s.Delivered</td><td class="num">@s.Delayed</td><td class="num">@s.Bounced</td><td class="num">@s.Failed</td></tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </Table>
+                    </DashCard>
+                    <section class="dcard ssattn" aria-labelledby="ss-attn">
+                        <h3 id="ss-attn" class="dc-title">@L["Needs attention"]</h3>
+                        @if (o.Attention.Count == 0)
+                        {
+                            <p class="hint">@L["Nothing needs you."]</p>
+                        }
+                        <ul>
+                            @foreach (SendingAttention a in o.Attention)
+                            {
+                                <li class="att-@a.Tone">
+                                    <span class="atticon"><LipiIcon Name="@a.Icon" Size="16" /></span>
+                                    <span class="atttext"><b>@Fill(a.Title, a.Values)</b><span>@Fill(a.Text, a.Values)</span></span>
+                                    <a class="btn btn-s btn-sm" href="@a.Href" title="@Fill(a.Title, a.Values)">@L[a.Action]</a>
+                                </li>
+                            }
+                        </ul>
+                    </section>
+                </div>
+                <div class="sstable-wrap">
+                <table class="orgtable sstable">
+                    <thead><tr><th scope="col">@L["Application"]</th><th scope="col" class="num">@L["Accepted"]</th><th scope="col" class="num">@L["Delivered"]</th><th scope="col" class="num">@L["Bounced"]</th><th scope="col" class="num">@L["Failed"]</th><th scope="col" class="num">@L["Usual time"]</th><th scope="col">@L["Status"]</th></tr></thead>
+                    <tbody>
+                        @foreach (SendingAppFigures f in o.Apps)
+                        {
+                            <tr>
+                                <td><a class="rowlink" href="@Link(tab: "messages", appId: f.App.Id)"><b>@f.App.Name</b><span>@f.App.SendsAs</span></a></td>
+                                <td class="num">@f.Accepted.ToString("N0", Inv)</td>
+                                <td class="num">@Percent(f.Delivered, f.Accepted)</td>
+                                <td class="num @(f.Bounced > 0 ? "ssbad" : null)">@f.Bounced.ToString("N0", Inv)</td>
+                                <td class="num">@f.Failed.ToString("N0", Inv)</td>
+                                <td class="num">@Took(f.Usual)</td>
+                                <td><span class="@(f.Health == "Healthy" ? "ssok" : "sswarn")">@L[f.Health]</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+                @if (Apps.Count == 0)
+                {
+                    <p class="orgempty">@L["No application yet. Add one for each system that sends mail, such as a hospital information system or a payroll system."]</p>
+                }
+            }
+            break;
+    }
+</section>
+
+@code {
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+    private static readonly (string Key, string Icon, string Label)[] Tabs =
+    {
+        ("overview", "chart-bar", "Overview"), ("messages", "log", "Messages"), ("applications", "api", "Applications"),
+        ("webhooks", "webhook", "Webhooks"), ("donotsend", "minus-circle", "Do not send"), ("dns", "world-route", "Domains and DNS"),
+    };
+    private static readonly string[] Statuses = { "Delivered", "Delayed", "Queued", "Bounced", "Failed", "Suppressed" };
+    private static readonly string[] DnsKinds = { "MX", "SPF", "DKIM", "DMARC", "MTA-STS" };
+
+    /// <summary>The organisation.</summary>
+    [Parameter] public TenantRow Tenant { get; set; } = new();
+
+    /// <summary>Its applications.</summary>
+    [Parameter] public IReadOnlyList<OrgApp> Apps { get; set; } = Array.Empty<OrgApp>();
+
+    /// <summary>The viewer's clock.</summary>
+    [Parameter] public ZonedClock Clock { get; set; } = ZonedClock.Default;
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The web address people reach Anjal at (for the SMTP sample).</summary>
+    [Parameter] public string Host { get; set; } = "mail.example.in";
+
+    /// <summary>The tab: overview, messages, applications, webhooks, donotsend or dns.</summary>
+    [Parameter] public string? TabText { get; set; }
+
+    /// <summary>The period: 1h, 24h, 7d or 30d.</summary>
+    [Parameter] public string? PeriodText { get; set; }
+
+    /// <summary>Messages: a status.</summary>
+    [Parameter] public string? Status { get; set; }
+
+    /// <summary>Messages: an application's id.</summary>
+    [Parameter] public string? AppId { get; set; }
+
+    /// <summary>Messages: words to find.</summary>
+    [Parameter] public string? Q { get; set; }
+
+    /// <summary>Messages: the message open beside the list.</summary>
+    [Parameter] public string? Msg { get; set; }
+
+    /// <summary>Webhooks: the delivery open.</summary>
+    [Parameter] public string? Hook { get; set; }
+
+    private ZonedClock clock => Clock;
+    private DateTimeOffset Now = DateTimeOffset.UtcNow;
+    private SendingOverview? view;
+    private List<SendingRow> shown = new();
+    private SendingDetail? detail;
+    private IReadOnlyList<WebhookView> hooks = Array.Empty<WebhookView>();
+    private int hookFailed;
+    private IReadOnlyList<DoNotSendEntry> list = Array.Empty<DoNotSendEntry>();
+    private DnsCheckRecord? dns;
+
+    private string Tab => TabText is "messages" or "applications" or "webhooks" or "donotsend" or "dns" ? TabText : "overview";
+    private string PeriodKey => MailboxService.SendingPeriodOf(PeriodText, Now).Key;
+    private string PeriodLabel => MailboxService.SendingPeriods.First(p => p.Key == PeriodKey).Label;
+
+    private string CsvLink => "/org/sending/messages.csv?p=" + PeriodKey + "&status=" + Uri.EscapeDataString(Status ?? "all") + "&appId=" + Uri.EscapeDataString(AppId ?? "all") + "&q=" + Uri.EscapeDataString(Q ?? string.Empty);
+
+    private string Link(string? tab = null, string? p = null, string? msg = null, string? appId = null, string? hook = null)
+    {
+        var q = new List<string> { "tab=" + (tab ?? Tab) };
+        string period = p ?? PeriodKey;
+        if (period != "24h")
+        {
+            q.Add("period=" + period);
+        }
+        if ((tab ?? Tab) == "messages")
+        {
+            if (!string.IsNullOrEmpty(Status) && Status != "all")
+            {
+                q.Add("status=" + Uri.EscapeDataString(Status));
+            }
+            string? app = appId ?? AppId;
+            if (!string.IsNullOrEmpty(app) && app != "all")
+            {
+                q.Add("appId=" + Uri.EscapeDataString(app));
+            }
+            if (!string.IsNullOrEmpty(Q))
+            {
+                q.Add("q=" + Uri.EscapeDataString(Q));
+            }
+            if (msg is not null)
+            {
+                q.Add("msg=" + msg);
+            }
+        }
+        if (hook is not null)
+        {
+            q.Add("hook=" + hook);
+        }
+        return "/org/apps?" + string.Join("&", q);
+    }
+
+    private string Fill(string words, IReadOnlyDictionary<string, string> values)
+    {
+        string text = L[words];
+        foreach (KeyValuePair<string, string> v in values)
+        {
+            string value = v.Key == "date" && DateTimeOffset.TryParse(v.Value, Inv, System.Globalization.DateTimeStyles.None, out DateTimeOffset at) ? clock.Full(at) : v.Value;
+            text = text.Replace("{" + v.Key + "}", value, StringComparison.Ordinal);
+        }
+        return text;
+    }
+
+    private int Height(int count)
+    {
+        int max = Math.Max(1, view?.Steps.Max(s => s.Delivered + s.Delayed + s.Bounced + s.Failed) ?? 1);
+        return count == 0 ? 0 : Math.Max(2, count * 100 / max);
+    }
+
+    private string StepLabel(DateTimeOffset at) => PeriodKey is "1h" or "24h" ? clock.Time(at) : clock.Date(at);
+
+    // Rounded one way, as every percentage people read (Sizes.Percent).
+    private static string Percent(long part, long whole) => whole == 0 ? "–" : Sizes.Percent(part, whole).ToString(Inv) + "%";
+
+    private string Took(TimeSpan? t) => t is not TimeSpan v ? "–"
+        : v.TotalSeconds < 90 ? L["{n} s"].Replace("{n}", Math.Max(1, (int)Math.Round(v.TotalSeconds)).ToString(Inv), StringComparison.Ordinal)
+        : v.TotalMinutes < 90 ? L["{n} min"].Replace("{n}", ((int)Math.Round(v.TotalMinutes)).ToString(Inv), StringComparison.Ordinal)
+        : L["{n} h"].Replace("{n}", ((int)Math.Round(v.TotalHours)).ToString(Inv), StringComparison.Ordinal);
+
+    // The SMTP sample: curl, as the application would send, with its own address and user name.
+    private string SmtpSample(OrgApp app) =>
+        "curl --url smtp://" + Host + ":587 --ssl-reqd \\\n"
+        + "  --user \"" + (app.Keys.FirstOrDefault()?.Username ?? "app-…") + ":$KEY\" \\\n"
+        + "  --mail-from " + app.SendsAs + " --mail-rcpt someone@example.in \\\n"
+        + "  --upload-file message.eml";
+
+    private const string EmlWord = ".eml";
+
+    private static string? CodeTone(int? code) => code is null ? null : code is >= 200 and < 300 ? "ssok" : "ssbad";
+
+    private static string OutcomeWord(string outcome) => outcome switch { "delivered" => "delivered", "refused" => "refused", _ => "deferred" };
+
+    private static string HookStatus(WebhookJobStatus s) => s switch
+    {
+        WebhookJobStatus.Delivered => "Delivered",
+        WebhookJobStatus.Failed => "Failed",
+        WebhookJobStatus.Sending => "Queued",
+        _ => "Delayed",
+    };
+
+    private static string DnsWord(string found) => found switch
+    {
+        "missing" => "Missing",
+        "different" => "Differs",
+        "unchecked" => "–",
+        _ => "Correct",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Now = DateTimeOffset.UtcNow;
+        (DateTimeOffset start, _) = MailboxService.SendingPeriodOf(PeriodText, Now);
+        hooks = await Mail.WebhooksAsync(Tenant, start);
+        hookFailed = hooks.Count(h => h.Job.Status == WebhookJobStatus.Failed);
+        switch (Tab)
+        {
+            case "messages":
+                shown = MailboxService.FilterSending(await Mail.SendingRowsAsync(Tenant, start, Now), Status, AppId, Q).ToList();
+                detail = Guid.TryParse(Msg, out Guid id) ? await Mail.SendingDetailAsync(Tenant, id) : null;
+                break;
+            case "applications":
+            case "overview":
+                view = await Mail.SendingOverviewAsync(Tenant, PeriodText, Now);
+                break;
+            case "donotsend":
+                list = await Mail.DoNotSendListAsync(Tenant);
+                break;
+            case "dns":
+                dns = await Mail.DnsCheckOfAsync(Tenant.Id);
+                break;
+            default:
+                break;
+        }
+    }
+}

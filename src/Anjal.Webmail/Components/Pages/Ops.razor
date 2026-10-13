@@ -26,7 +26,7 @@ else if (me is null)
 }
 else
 {
-<div class="settings3 orgconsole @(Current == "overview" ? "noaside" : null)">
+<div class="settings3 orgconsole @(Current is "overview" or "transactional" ? "noaside" : null)">
     <nav class="setnav3" aria-label="@L["Anjal console sections"]">
         <div class="setnav-title orgtitle"><span>@L["Anjal console"]</span><small>@L["For operators of this Anjal service"]</small></div>
         @foreach ((string key, string label, string icon) in Sections)
@@ -205,6 +205,38 @@ else
             </section>
             break;
 
+        case "transactional" when trans is TransactionalView tv:
+            @* rc.17, design review [7e]: what every organisation's applications send, for the operators. *@
+            <section class="formcard orgcard">
+                <header class="orghead">
+                    <h2>@L["Transactional"]</h2>
+                    <span class="hint">@L["Mail sent by applications, every organisation, since the start of today"]</span>
+                </header>
+                <div class="sskpis three">
+                    <div class="sskpi @(tv.Oldest is TimeSpan old1 && old1 > TimeSpan.FromHours(6) ? "k-bad" : "k-ok")"><span>@L["Queue right now"]</span><b>@tv.Waiting.ToString("N0", Inv)</b><small>@(tv.Oldest is TimeSpan old ? L["oldest {time}"].Replace("{time}", OldestWords(old), StringComparison.Ordinal) : L["empty"])</small></div>
+                    <div class="sskpi"><span>@L["Sent by applications today"]</span><b>@tv.Accepted.ToString("N0", Inv)</b><small>@(tv.Organisations == 1 ? L["from 1 organisation"] : L["from {n} organisations"].Replace("{n}", tv.Organisations.ToString(Inv), StringComparison.Ordinal))</small></div>
+                    <div class="sskpi @FirstTryTone(tv)"><span>@L["Delivered on the first try"]</span><b>@(tv.Delivered == 0 ? "–" : Sizes.Percent(tv.FirstTry, tv.Delivered).ToString(Inv) + "%")</b><small>@L["{n} delivered today"].Replace("{n}", tv.Delivered.ToString("N0", Inv), StringComparison.Ordinal)</small></div>
+                </div>
+                <h3 class="charthead">@L["Receiving servers that slow us down"]</h3>
+                @if (tv.Slow.Count == 0)
+                {
+                    <p class="hint">@L["None today: every receiving server took its mail."]</p>
+                }
+                else
+                {
+                    <table class="orgtable sstable">
+                        <thead><tr><th scope="col">@L["Domain"]</th><th scope="col" class="num">@L["Still trying"]</th><th scope="col" class="num">@L["Failed"]</th><th scope="col">@L["Their last reply"]</th></tr></thead>
+                        <tbody>
+                            @foreach (SlowReceiver sr in tv.Slow)
+                            {
+                                <tr><td><b>@sr.Domain</b></td><td class="num">@sr.Waiting.ToString("N0", Inv)</td><td class="num">@sr.Failed.ToString("N0", Inv)</td><td><code class="ssreply">@(sr.Reply.Length > 0 ? sr.Reply : "–")</code></td></tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </section>
+            break;
+
         case "health":
             <section class="formcard orgcard">
                 <header class="orghead">
@@ -233,7 +265,7 @@ else
     }
     </div>
 
-    @if (Current != "overview")
+    @if (Current is not ("overview" or "transactional"))
     {
     <aside class="setaside" aria-label="@L["About this section"]">
     @switch (Current)
@@ -392,6 +424,7 @@ else
         ("orgs", "Organisations", "department-master"),
         ("limits", "Platform limits", "security"),
         ("health", "Service health", "server-stack"),
+        ("transactional", "Transactional", "referral-out"),
     };
 
     private static readonly (string Key, string Word)[] OrgFilters = { ("all", "All"), ("active", "Active"), ("setting-up", "Setting up"), ("suspended", "Suspended") };
@@ -452,6 +485,7 @@ else
         "orgs" => orgs.Count == 1 ? L["1 organisation"] : L["{n} organisations"].Replace("{n}", orgs.Count.ToString(Inv), StringComparison.Ordinal),
         "limits" => L["The outer limits for everyone"],
         "health" => L[healthWord],
+        "transactional" => L["What applications send"],
         _ => string.Empty,
     };
 
@@ -692,6 +726,13 @@ else
     }
 
     private bool ready;
+    private TransactionalView? trans;
+
+    private static string FirstTryTone(TransactionalView tv) => tv.Delivered > 0 && Sizes.Percent(tv.FirstTry, tv.Delivered) < 90 ? "k-warn" : "k-ok";
+
+    private string OldestWords(TimeSpan t) => t.TotalMinutes < 1 ? L["under a minute"]
+        : t.TotalHours < 2 ? L["{n} min"].Replace("{n}", ((int)t.TotalMinutes).ToString(Inv), StringComparison.Ordinal)
+        : L["{n} h"].Replace("{n}", ((int)t.TotalHours).ToString(Inv), StringComparison.Ordinal);
 
     protected override async Task OnParametersSetAsync()
     {
@@ -725,6 +766,11 @@ else
         if (Current == "overview")
         {
             await this.LoadOverviewAsync();
+        }
+        if (Current == "transactional")
+        {
+            DateTimeOffset nowT = DateTimeOffset.UtcNow;
+            trans = await Mail.TransactionalAsync(MailboxService.AtLocal(clock, clock.Local(nowT).Date), nowT);
         }
         if (Current == "health")
         {

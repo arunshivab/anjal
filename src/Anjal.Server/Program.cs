@@ -392,11 +392,24 @@ public static class Program
                 {
                     // A message that fails for good gets a bounce notice in
                     // the sender's own INBOX; nothing is sent outbound.
+                    DoNotSend = store is Anjal.Store.IMailboxStore checkStore
+                        ? (message, token) => Anjal.Store.DoNotSend.CheckAsync(checkStore, message.EnvelopeFrom, message.EnvelopeTo, token)
+                        : null,
                     OnFinalFailure = async (message, reason, permanent, token) =>
                     {
                         if (message.EnvelopeFrom.Length == 0)
                         {
                             return; // never bounce a bounce
+                        }
+                        // rc.17 (design review [7d]): an application's hard bounce, or its third give-up
+                        // to one address, puts the address on the organisation's do-not-send list.
+                        if (store is Anjal.Store.IMailboxStore listStore)
+                        {
+                            string? added = await Anjal.Store.DoNotSend.NoteFailureAsync(listStore, message.EnvelopeFrom, message.EnvelopeTo, reason, permanent, System.DateTimeOffset.UtcNow, token).ConfigureAwait(false);
+                            if (added is not null)
+                            {
+                                Log($"do-not-send: {message.EnvelopeTo} added for {message.EnvelopeFrom} ({added})");
+                            }
                         }
                         byte[] notice = BounceNotice.Build(hostname, message, reason, permanent, System.DateTimeOffset.UtcNow);
                         await mailboxSink.DeliverAsync(new Anjal.Smtp.DeliveryContext

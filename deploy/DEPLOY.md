@@ -1646,6 +1646,12 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.16 to rc.17** (Sending systems): the usual steps (backup first), and run `schema.sql`
+once: it adds the index `outbound_messages_sender_time_idx` (the applications' messages by
+sender and time). No setting to change. From now on an application's hard bounce, or its third
+give-up to one address, puts the address on that organisation's do-not-send list (Organisation >
+Sending systems > Do not send); people's own mail is not affected.
+
 **rc.15.1 to rc.16** (the design review): the usual steps only (backup first). No schema change,
 no setting to change. People now land on **Today** after signing in; anyone who prefers the Inbox
 chooses it in Settings > Mail > "Open Anjal on". The component sheet at `/dev/components` opens
