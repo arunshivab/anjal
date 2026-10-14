@@ -56,7 +56,10 @@ public sealed partial class MailboxService
         {
             return Array.Empty<(string, string)>();
         }
-        if (w.Contains('@', StringComparison.Ordinal))
+        // rc.20 (owner, 14 Oct 2026: "arunshiva@redifmail's last 5 mails"): a whole address is taken as
+        // it is; part of one (no dot after the @) is matched against the person's contacts and senders.
+        int at = w.IndexOf('@', StringComparison.Ordinal);
+        if (at > 0 && w.IndexOf('.', at) > at + 1)
         {
             return new[] { (w, w) };
         }

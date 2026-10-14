@@ -155,11 +155,12 @@
    "id": "theme",
    "part": "start",
    "title": "Change the colours and density",
-   "summary": "Pick light or dark, a colour, and how much fits on the screen.",
+   "summary": "Pick light or dark, a colour, how much fits on the screen, and how big everything is.",
    "steps": [
     "Open Settings, then Appearance.",
     "Under Light or dark choose Light, Dark or Follow the device.",
     "Pick a colour, then choose Comfortable or Compact density and your layout (three panes, Focus or List only).",
+    "Under Size on screen choose Normal, 90% or 80% to make everything smaller. If Windows shows everything at 125%, 80% shows Anjal at its usual size.",
     "Changes apply at once. Only you see them."
    ],
    "tip": null,
@@ -171,7 +172,7 @@
    "related": [
     "language"
    ],
-   "keywords": "dark mode light mode colour color theme density compact layout",
+   "keywords": "dark mode light mode colour color theme density compact layout size zoom smaller bigger font text too big",
    "release": "rc.15",
    "org": null
   },

@@ -12,7 +12,7 @@ public sealed partial class PostgresMessageStore
     private const string TenantColumns = "id, slug, display_name, enabled, spam_threshold, created_at, unencrypted_folder, evidence_retention_days, postmaster_mailbox";
     private const string SenderRuleColumns = "id, tenant_id, pattern, action, created_at";
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
-    private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme, time_zone, language, density, layout, rail_folded, date_format, week_start, page_size, new_mail_sound, welcome_done, rail_chosen";
+    private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme, time_zone, language, density, layout, rail_folded, date_format, week_start, page_size, new_mail_sound, welcome_done, rail_chosen, zoom";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
     private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id, left(body_text, 160)";
 
@@ -759,6 +759,7 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         NewMailSound = r.GetBoolean(20),
         WelcomeDone = r.GetBoolean(21),
         RailChosen = r.GetBoolean(22),
+        Zoom = r.GetInt32(23),
     };
 
     /// <inheritdoc/>
@@ -770,7 +771,7 @@ RETURNING " + MailboxSenderRuleColumns + ";";
 UPDATE mailboxes
    SET time_zone = @time_zone, language = @language, density = @density, layout = @layout,
        rail_folded = @rail_folded, rail_chosen = @rail_chosen, date_format = @date_format, week_start = @week_start,
-       page_size = @page_size, new_mail_sound = @new_mail_sound, welcome_done = @welcome_done, updated_at = now()
+       page_size = @page_size, new_mail_sound = @new_mail_sound, welcome_done = @welcome_done, zoom = @zoom, updated_at = now()
  WHERE id = @id;";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -786,6 +787,7 @@ UPDATE mailboxes
         cmd.Parameters.AddWithValue("page_size", p.PageSize);
         cmd.Parameters.AddWithValue("new_mail_sound", p.NewMailSound);
         cmd.Parameters.AddWithValue("welcome_done", p.WelcomeDone);
+        cmd.Parameters.AddWithValue("zoom", p.Zoom);
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
     }
 

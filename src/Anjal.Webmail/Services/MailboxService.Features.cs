@@ -1133,6 +1133,17 @@ public sealed partial class MailboxService
             },
             ct);
 
+    /// <summary>Save the size on screen (rc.20): 100, 90 or 80 percent; anything else keeps 100.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="zoom">The size in percent.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The size saved, or null when the mailbox is gone.</returns>
+    public async Task<int?> SetZoomAsync(Guid mailboxId, int zoom, CancellationToken ct = default)
+    {
+        int saved = MailboxPreferences.Zooms.Contains(zoom) ? zoom : MailboxPreferences.DefaultZoom;
+        return await this.ChangePreferencesAsync(mailboxId, p => p.Zoom = saved, ct).ConfigureAwait(false) ? saved : null;
+    }
+
     /// <summary>Record that the welcome screen has been answered, so it is never shown again (rc.11, D-105).</summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="ct">Cancellation.</param>

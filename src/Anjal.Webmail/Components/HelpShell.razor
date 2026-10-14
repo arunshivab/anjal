@@ -1,0 +1,66 @@
+@using Anjal.Webmail.Services
+@inject HelpGuide Guide
+
+@* rc.20 (owner, 14 Oct 2026: "the screens are not consistent... some are full, some are in panes";
+   "small [search] at top of every page"; "lajna and help - same"): every help page and Lajna's own
+   page share one frame - the parts of the guide on the left, a small search with Ask Lajna at the
+   top, the page in the middle, and a side column on the right. *@
+<div class="helpshell">
+    <nav class="helpnav" aria-label="@L["Help sections"]">
+        <a class="helpnav-home" href="/help" aria-current="@(Home ? "page" : null)"><LipiIcon Name="home" Size="16" />@L["All help"]</a>
+        <a class="helpnav-part helpnav-lajna @(Lajna ? "on" : null)" href="/lajna?page=@Uri.EscapeDataString(Back)" aria-current="@(Lajna ? "page" : null)"><span class="hn-mark" aria-hidden="true">@((MarkupString)LajnaMarkSvg.Small)</span>@L["Ask Lajna"]</a>
+        @foreach (HelpPart p in Guide.Parts)
+        {
+            <a class="helpnav-part @(p.Id == PartId ? "on" : null)" href="/help/part/@p.Id" aria-current="@(p.Id == PartId && ArticleId is null ? "page" : null)"><LipiIcon Name="@p.Icon" Size="16" />@L[p.Title]</a>
+            @if (p.Id == PartId)
+            {
+                @foreach (HelpArticle x in Guide.Articles.Where(x => x.Part == p.Id))
+                {
+                    <a class="helpnav-art" href="/help/@x.Id" aria-current="@(x.Id == ArticleId ? "page" : null)">@x.Title</a>
+                }
+            }
+        }
+    </nav>
+    <div class="helpmain">
+        <form method="get" action="/help" class="helpbar" role="search">
+            <span class="sfield"><LipiIcon Name="search" Size="16" Class="si" /><input class="sbox" type="search" name="q" value="@Q" placeholder="@L["Search the help guide"]" aria-label="@L["Search the help guide"]" /></span>
+            @if (!Lajna)
+            {
+                <a class="btn helplajna" title="@L["Ask Lajna, in your own words."]" href="/lajna?page=@Uri.EscapeDataString(Back)" data-lajna-ask="">@((MarkupString)LajnaMarkSvg.Small)@L["Ask Lajna"]</a>
+            }
+        </form>
+        @ChildContent
+    </div>
+    <aside class="helpside" aria-label="@L["On this page"]">
+        @Side
+    </aside>
+</div>
+
+@code {
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The part shown or the article's part; its articles are listed under it.</summary>
+    [Parameter] public string? PartId { get; set; }
+
+    /// <summary>The article shown, marked in the list.</summary>
+    [Parameter] public string? ArticleId { get; set; }
+
+    /// <summary>True on the guide's first page.</summary>
+    [Parameter] public bool Home { get; set; }
+
+    /// <summary>True on Lajna's page.</summary>
+    [Parameter] public bool Lajna { get; set; }
+
+    /// <summary>What was searched, kept in the box.</summary>
+    [Parameter] public string? Q { get; set; }
+
+    /// <summary>The page Lajna goes back to.</summary>
+    [Parameter] public string Back { get; set; } = "/help";
+
+    /// <summary>The page itself.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>The right-hand column.</summary>
+    [Parameter] public RenderFragment? Side { get; set; }
+}

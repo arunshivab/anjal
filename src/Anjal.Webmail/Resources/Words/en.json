@@ -2682,6 +2682,21 @@
     "Send this webhook again.": "Send this webhook again.",
     "Stop this key now; the application can no longer send with it.": "Stop this key now; the application can no longer send with it.",
     "Make another key for this application; it is shown once.": "Make another key for this application; it is shown once.",
-    "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.": "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft."
+    "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.": "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.",
+    "(add the address in Compose)": "(add the address in Compose)",
+    "Answer how to do something in Anjal, from this guide.": "Answer how to do something in Anjal, from this guide.",
+    "Back to the page you were on.": "Back to the page you were on.",
+    "Change a setting, only after you say Yes.": "Change a setting, only after you say Yes.",
+    "Find your mail, such as the last 5 mails from Priya.": "Find your mail, such as the last 5 mails from Priya.",
+    "Go back to the page you were on, with Lajna beside it.": "Go back to the page you were on, with Lajna beside it.",
+    "Makes everything on screen smaller, as the browser's zoom does, on every computer you use. If Windows shows everything at 125%, 80% shows Anjal at its usual size.": "Makes everything on screen smaller, as the browser's zoom does, on every computer you use. If Windows shows everything at 125%, 80% shows Anjal at its usual size.",
+    "Open as a panel": "Open as a panel",
+    "Private": "Private",
+    "Say what happened to a message you sent.": "Say what happened to a message you sent.",
+    "Size on screen": "Size on screen",
+    "What Lajna can do": "What Lajna can do",
+    "Write a draft for you to send, such as a leave letter to your manager.": "Write a draft for you to send, such as a leave letter to your manager.",
+    "{n}%": "{n}%",
+    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself."
   }
 }

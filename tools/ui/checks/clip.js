@@ -19,9 +19,14 @@ function check() {
     for (const o of s.options) { const w = textW(o.text, cs); if (w > room + 1 && (!worst || w > worst[1])) { worst = [o.text, w]; } }
     if (worst && (!sel || worst[0] !== sel.text)) { out.push(['choice box: an option would be cut when chosen', name(s), `"${worst[0]}" needs ${Math.round(worst[1])}px, has ${Math.round(room)}px`]); }
   }
-  for (const e of document.querySelectorAll('button, summary, a.btn, a.pbtn, a.eb, a.linkbtn, a.pill, a.chip, a.tchip, .seg a, label.segopt, a.rail-item, a.pmi, button.pmi, a.eback, .lh-pills a')) {
+  for (const e of document.querySelectorAll('button, summary, a.btn, a.pbtn, a.eb, a.linkbtn, a.pill, a.chip, a.tchip, .seg a, label.segopt, a.rail-item, a.pmi, button.pmi, a.eback, .lh-pills a, a.authbtn')) {
     if (!vis(e)) { continue; }
     const r = e.getBoundingClientRect(); const rng = document.createRange(); let worst = 0; let what = '';
+    // rc.20 (owner, 14 Oct 2026, "Sign in again" with its words on the button's edges): a button with
+    // a fill or a border keeps its words at least 4px in from each side.
+    const ecs = getComputedStyle(e);
+    const filled = (ecs.backgroundColor && !/rgba\(.*,\s*0\)$|transparent/.test(ecs.backgroundColor)) || parseFloat(ecs.borderLeftWidth) > 0;
+    let tight = Infinity; let tightWhat = '';
     const walker = document.createTreeWalker(e, NodeFilter.SHOW_TEXT); let n;
     while ((n = walker.nextNode())) {
       if (!n.textContent.trim()) { continue; }
@@ -34,9 +39,15 @@ function check() {
         if (q.width < 1) { continue; }
         const over = Math.max(q.right - r.right, r.left - q.left, q.bottom - r.bottom, r.top - q.top);
         if (over > worst) { worst = over; what = n.textContent.trim().slice(0, 40); }
+        // Words only (not a badge's count or a single symbol), and only those the button itself
+        // frames: text inside a part with its own fill (a count pill) is that part's business.
+        let framer = pe; while (framer !== e && /rgba\(.*,\s*0\)$|transparent/.test(getComputedStyle(framer).backgroundColor)) { framer = framer.parentElement; }
+        const gap = Math.min(q.left - r.left, r.right - q.right) / (document.documentElement.currentCSSZoom || 1);
+        if (framer === e && n.textContent.trim().length > 2 && gap < tight) { tight = gap; tightWhat = n.textContent.trim().slice(0, 40); }
       }
     }
     if (worst > 1.5) { out.push([getComputedStyle(e).overflow !== 'visible' ? 'button: words cut' : 'button: words spill past its edge', name(e), `"${what}" goes ${Math.round(worst)}px past the edge`]); }
+    else if (filled && tight < 4) { out.push(['button: words touch its edge', name(e), `"${tightWhat}" is ${Math.max(0, Math.round(tight))}px from the edge`]); }
     for (const c of [e, ...e.querySelectorAll('*')]) {
       const cs = getComputedStyle(c);
       if (cs.textOverflow === 'ellipsis' && c.scrollWidth > c.clientWidth + 1 && vis(c)) { out.push(['button: words end in …', name(e), `"${c.textContent.trim().slice(0, 50)}"`]); }

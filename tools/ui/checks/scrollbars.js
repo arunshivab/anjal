@@ -21,14 +21,16 @@ function measure() {
   for (const s of scrollers) {
     const q = s.getBoundingClientRect();
     const cs = getComputedStyle(s);
+    // rc.20: the box's own sizes are in page pixels; on screen they are times the person's zoom.
+    const k = s.currentCSSZoom || 1;
     const strips = [];
     if (/auto|scroll/.test(cs.overflowY) && s.offsetWidth - s.clientWidth - s.clientLeft * 2 > 2) {
-      const left = q.left + s.clientLeft + s.clientWidth;
-      strips.push({ kind: 'scroll bar', l: left, r: left + (s.offsetWidth - s.clientWidth - s.clientLeft * 2), t: q.top + s.clientTop, b: q.top + s.clientTop + s.clientHeight });
+      const left = q.left + (s.clientLeft + s.clientWidth) * k;
+      strips.push({ kind: 'scroll bar', l: left, r: left + (s.offsetWidth - s.clientWidth - s.clientLeft * 2) * k, t: q.top + s.clientTop * k, b: q.top + (s.clientTop + s.clientHeight) * k });
     }
     if (/auto|scroll/.test(cs.overflowX) && s.offsetHeight - s.clientHeight - s.clientTop * 2 > 2) {
-      const top = q.top + s.clientTop + s.clientHeight;
-      strips.push({ kind: 'bottom scroll bar', l: q.left + s.clientLeft, r: q.left + s.clientLeft + s.clientWidth, t: top, b: top + (s.offsetHeight - s.clientHeight - s.clientTop * 2) });
+      const top = q.top + (s.clientTop + s.clientHeight) * k;
+      strips.push({ kind: 'bottom scroll bar', l: q.left + s.clientLeft * k, r: q.left + (s.clientLeft + s.clientWidth) * k, t: top, b: top + (s.offsetHeight - s.clientHeight - s.clientTop * 2) * k });
     }
     for (const st of strips) {
       // Only the part of the scroll bar on screen.

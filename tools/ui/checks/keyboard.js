@@ -51,7 +51,8 @@ function look() {
     id: e.dataset.kb === undefined ? name : e.dataset.kb,
     name,
     iframe: e.tagName === 'IFRAME',
-    seen: r.width >= 1 && r.height >= 1 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth,
+    // rc.20: sizes in page pixels, so a person's smaller size on screen (zoom) is not taken for hidden.
+    seen: r.width / (e.currentCSSZoom || 1) >= 0.99 && r.height / (e.currentCSSZoom || 1) >= 0.99 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth,
     shows: ring || focused !== plain || e.tagName === 'IFRAME',
   };
 }

@@ -13,6 +13,7 @@ A person's own settings for how the webmail looks and tells time (rc.11): time z
 - **DefaultPageSize** *(field)* - Messages per page for a new mailbox: 50, as before rc.11.
 - **DefaultTimeZone** *(field)* - The time zone a new mailbox starts with.
 - **DefaultWeekStart** *(field)* - The first day of the week a new mailbox starts with.
+- **DefaultZoom** *(field)* - Size on screen for a new mailbox: 100%. rc.20 (owner, 14 Oct 2026: "the screen fonts are still bigger"): on a computer that Windows enlarges to 125%, 80% shows Anjal at its designed size. Only smaller sizes are offered; the browser's own zoom makes things larger.
 - **IsKnownTimeZone** *(method)* - True when names a time zone this server knows.
 - **Normalized** *(method)* - A copy in which every value is one that exists: known values kept (lower-cased, trimmed), anything else replaced by its default.
 - **Of** *(method)* - The preferences stored on a mailbox.
@@ -33,3 +34,5 @@ A person's own settings for how the webmail looks and tells time (rc.11): time z
 - **WeekStart** *(property)* - One of .
 - **WeekStarts** *(property)* - Monday or Sunday.
 - **WelcomeDone** *(property)* - True once the welcome screen has been answered (D-105): it is never shown again.
+- **Zoom** *(property)* - One of : everything on screen at this size.
+- **Zooms** *(property)* - The sizes on screen a person may choose, in percent.

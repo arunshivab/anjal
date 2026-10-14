@@ -70,7 +70,7 @@
             {
                 <div class="ljdraft">
                     <dl>
-                        <div><dt>@L["To"]</dt><dd>@d.ToName &lt;@d.To&gt;</dd></div>
+                        <div><dt>@L["To"]</dt><dd>@if (d.To.Length > 0) {<text>@d.ToName &lt;@d.To&gt;</text>} else {<text>@d.ToName <i>@L["(add the address in Compose)"]</i></text>}</dd></div>
                         <div><dt>@L["Subject"]</dt><dd>@d.Subject</dd></div>
                     </dl>
                     <pre>@d.Body</pre>
