@@ -169,7 +169,7 @@ public sealed partial class Rc20Tests : IAsyncLifetime, IDisposable
         Assert.Contains("I would like to request leave on Friday.", friday.Body, StringComparison.Ordinal);
         Assert.Equal("Leave request: tomorrow", LajnaLetters.Write("hr@anjal.co.in", "HR", "for leave tomorrow", true, null, "Arun", string.Empty, "normal").Subject);
         Assert.Contains("leave on 14 Oct", LajnaLetters.Write("hr@anjal.co.in", "HR", "for leave on 14 Oct", true, null, "Arun", string.Empty, "short").Body, StringComparison.Ordinal);
-        Assert.Contains("leave 6–10 Nov", LajnaLetters.Write("hr@anjal.co.in", "HR", "for leave 6-10 Nov", true, null, "Arun", string.Empty, "normal").Body, StringComparison.Ordinal);
+        Assert.Contains("leave from 6 to 10 Nov", LajnaLetters.Write("hr@anjal.co.in", "HR", "for leave 6-10 Nov", true, null, "Arun", string.Empty, "normal").Body, StringComparison.Ordinal);
     }
 
     [Fact]

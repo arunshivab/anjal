@@ -10,6 +10,15 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.21** (15 October 2026) - Lajna writes drafts from the way people ask. A request is read
+with "I want to", "can you", "please" and typing slips ("sent"), the letter named first ("a leave
+letter to hr"), "inform / ask / remind / thank / let … know", the days in the usual forms ("from
+17th october to 19th october", "17/10 to 19/10", "oct 28 to nov 2", "23rd and 24th October", "for 3
+days from next Monday"), the reason, the kind of leave (sick, casual), and a parent's school leave
+letter ("my child Nafees's principal" gives "my son Nafees will be absent from school from 17 to 19
+October"). Greetings fit the person ("Dear Dr Rao", "Dear Principal", "Dear HR team"). Still no
+language model: everything stays on the server.
+
 **v1.0.0-rc.20** (14 October 2026) - Size on screen, one frame for help and Lajna. Settings >
 Appearance gains **Size on screen** (Normal, 90%, 80%), kept with the person: on a computer Windows
 shows at 125%, 80% shows Anjal at its designed size. Every help page and Lajna's page share one

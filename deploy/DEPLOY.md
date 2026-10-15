@@ -1646,6 +1646,9 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.20 to rc.21** (Lajna drafting): the usual steps only (backup first). No schema change, no
+setting to change.
+
 **rc.19 to rc.20** (size on screen; help and Lajna in one frame): the usual steps (backup first), and
 run `schema.sql` once: it adds the column `mailboxes.zoom` (100, 90 or 80; everyone starts at 100).
 No setting to change. Anyone who finds Anjal too large - typically a laptop Windows shows at 125% -
