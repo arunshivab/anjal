@@ -223,7 +223,7 @@ public sealed class Rc18HelpAndLajnaTests : IAsyncLifetime, IDisposable
         LajnaDraft normal = LajnaLetters.Write("hr@anjal.co.in", "hr@anjal.co.in", "for leave for my sister's wedding, 6-10 Nov", true, rao, "Arun Shiva", "Imagiqa", "normal");
         Assert.Equal("Leave request: 6–10 Nov", normal.Subject);
         Assert.StartsWith("Dear HR team,", normal.Body, StringComparison.Ordinal);
-        Assert.Contains("leave 6–10 Nov for my sister's wedding.", normal.Body, StringComparison.Ordinal);
+        Assert.Contains("leave from 6 to 10 Nov for my sister's wedding.", normal.Body, StringComparison.Ordinal);
         Assert.EndsWith("Arun Shiva\nImagiqa", normal.Body, StringComparison.Ordinal);
         Assert.Contains("Yours sincerely", LajnaLetters.Write("hr@anjal.co.in", "HR", "for leave, 6-10 Nov", true, null, "Arun", string.Empty, "formal").Body, StringComparison.Ordinal);
         Assert.StartsWith("Hi ", LajnaLetters.Write("meera@anjal.co.in", "Meera Iyer", "for leave on 14 Oct", true, null, "Arun", string.Empty, "short").Body, StringComparison.Ordinal);

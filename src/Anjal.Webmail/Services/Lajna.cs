@@ -120,9 +120,11 @@ public sealed partial class Lajna
         {
             return await this.FindAsync(person, q, owned, L, ct).ConfigureAwait(false);
         }
-        if (DraftRegex().Match(q) is { Success: true } draft)
+        // rc.21 (owner, 15 Oct 2026: drafting "is not working properly"): the request is read the way
+        // people type it - see LajnaRequest.
+        if (LajnaRequest.Parse(q) is LajnaAsk ask)
         {
-            return await this.DraftAsync(user, person, q, draft.Groups["who"].Value, draft.Groups["what"].Value, style, L, ct).ConfigureAwait(false);
+            return await this.DraftAsync(user, person, q, ask, style, L, ct).ConfigureAwait(false);
         }
         if (StoryRegex().Match(q) is { Success: true } story)
         {
@@ -163,9 +165,11 @@ public sealed partial class Lajna
 
     // ---- drafts [8f] ----
 
-    private async Task<LajnaAnswer> DraftAsync(ClaimsPrincipal user, Guid person, string q, string whoText, string what, string? style, Lexicon L, CancellationToken ct)
+    private async Task<LajnaAnswer> DraftAsync(ClaimsPrincipal user, Guid person, string q, LajnaAsk ask, string? style, Lexicon L, CancellationToken ct)
     {
-        IReadOnlyList<(string Address, string Name)> who = await this.mail.WhoIsAsync(person, whoText, ct).ConfigureAwait(false);
+        string whoText = ask.Who;
+        // A school role such as "Principal" is not looked up in the person's contacts.
+        IReadOnlyList<(string Address, string Name)> who = ask.School ? Array.Empty<(string, string)>() : await this.mail.WhoIsAsync(person, whoText, ct).ConfigureAwait(false);
         // rc.20 (owner, 14 Oct 2026: "write a mail to HR asking for leave on Friday"): someone Lajna
         // cannot find still gets the draft, with the To line left for the person to fill in.
         bool unknown = who.Count == 0;
@@ -176,10 +180,9 @@ public sealed partial class Lajna
         MailboxRow? me = (await this.mail.GetContextAsync(person, ct).ConfigureAwait(false))?.Mailbox;
         string myName = me is null || me.DisplayName.Length == 0 ? user.Identity?.Name ?? string.Empty : me.DisplayName;
         (_, string signature) = await this.mail.GetSignatureAsync(person, ct).ConfigureAwait(false);
-        bool leave = LeaveRegex().IsMatch(what);
-        LajnaCover? cover = leave ? await this.mail.WhoCoveredAsync(person, ct).ConfigureAwait(false) : null;
-        string s = style is "formal" or "short" or "ta" ? style : (Regex.IsMatch(q, @"\p{IsTamil}") ? "ta" : "normal");
-        LajnaDraft draft = LajnaLetters.Write(who[0].Address, who[0].Name, what, leave, cover, myName, signature, s);
+        LajnaCover? cover = ask.Leave && ask.Child is null ? await this.mail.WhoCoveredAsync(person, ct).ConfigureAwait(false) : null;
+        string s = style is "formal" or "short" or "ta" ? style : Regex.IsMatch(q, @"\p{IsTamil}") ? "ta" : ask.Tone.Length > 0 ? ask.Tone : "normal";
+        LajnaDraft draft = LajnaLetters.Write(who[0].Address, who[0].Name, ask, cover, myName, signature, s);
         string text = unknown
             ? L["I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself."].Replace("{name}", whoText.Trim(), StringComparison.Ordinal)
             : cover is null
@@ -322,13 +325,6 @@ public sealed partial class Lajna
     [GeneratedRegex(@"^(?:please\s+)?(?:(?:get|show|find|open|list|give)\s+)?(?:me\s+)?(?<who>[^?]+?)['’]s?\s+(?:last|latest|recent|newest)?\s*(?<n>\d{1,2})?\s*(?:mails?|messages?|e-?mails?|letters?)(?<files>\s+with\s+(?:attachments?|files?))?\s*\??$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FindOwnerRegex();
 
-    [GeneratedRegex(@"^(?:please\s+)?(?:write|draft|compose)\s+(?:a\s+|an\s+)?(?:(?:short|formal|quick)\s+)?(?:mail|e-?mail|message|letter|note)?\s*to\s+(?<who>.+?)\s+(?<what>(?:asking|about|for|regarding|requesting|saying|to ask|to say|to tell|telling|to request|to inform)\b.+)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex DraftRegex();
-
     [GeneratedRegex(@"(?:why|where|what happened|did|has|was|is)\b.*\b(?:mail|message|e-?mail|letter)\b.*?\bto\s+(?<who>[\p{L}\p{N}.@+_-]+(?:\s+\p{Lu}[\p{L}.-]+)?)\b.*?(?:arrive|deliver|reach|bounce|go|got|get|sent|fail|receive)|(?:why|where|what happened)\b.*\bto\s+(?<who>[\w.+-]+@[\w.-]+)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex StoryRegex();
-
-    [GeneratedRegex(@"\b(leave|vacation|holiday|time off|day off|days off)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
-    private static partial Regex LeaveRegex();
-
 }
