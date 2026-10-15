@@ -1359,7 +1359,7 @@ public static class Program
         }).RequireAuthorization();
 
         // rc.11 (item 40 and 45): Appearance - colour, light or dark, density, layout - applied at once.
-        app.MapPost("/settings/appearance", async (HttpContext http, [FromForm] string? colour, [FromForm] string? mode, [FromForm] string? density, [FromForm] string? layout, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/settings/appearance", async (HttpContext http, [FromForm] string? colour, [FromForm] string? mode, [FromForm] string? density, [FromForm] string? layout, [FromForm] int? zoom, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
@@ -1369,7 +1369,13 @@ public static class Program
             string theme = MailboxRow.NormalizeTheme((colour ?? "anjal") + "-" + (mode ?? "light"));
             await svc.SetThemeAsync(mailboxId.Value, theme, ct).ConfigureAwait(false);
             await svc.SetLayoutAsync(mailboxId.Value, layout, density, ct).ConfigureAwait(false);
-            await AuthEndpoints.ResignAsync(http, WebmailAuthService.WithTheme(http.User, theme)).ConfigureAwait(false);
+            System.Security.Claims.ClaimsPrincipal next = WebmailAuthService.WithTheme(http.User, theme);
+            // rc.20 (owner, 14 Oct 2026): size on screen, shown on the next page.
+            if (zoom is int z && await svc.SetZoomAsync(mailboxId.Value, z, ct).ConfigureAwait(false) is int savedZoom)
+            {
+                next = WebmailAuthService.WithZoom(next, savedZoom);
+            }
+            await AuthEndpoints.ResignAsync(http, next).ConfigureAwait(false);
             return Results.Redirect("/settings/appearance?saved=appearance");
         }).RequireAuthorization();
 
@@ -1478,6 +1484,21 @@ public static class Program
                 return Results.Redirect("/sign-in");
             }
             await svc.SetNewMailSoundAsync(mailboxId.Value, string.Equals(on, "1", StringComparison.Ordinal), ct).ConfigureAwait(false);
+            return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // rc.20: the size on screen alone (Lajna's proposal, after the person's Yes); back where they were.
+        app.MapPost("/settings/zoom", async (HttpContext http, [FromForm] int? zoom, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            if (await svc.SetZoomAsync(mailboxId.Value, zoom ?? MailboxPreferences.DefaultZoom, ct).ConfigureAwait(false) is int saved)
+            {
+                await AuthEndpoints.ResignAsync(http, WebmailAuthService.WithZoom(http.User, saved)).ConfigureAwait(false);
+            }
             return Results.Redirect(LocalPath.Safe(back));
         }).RequireAuthorization();
 

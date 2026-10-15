@@ -789,6 +789,7 @@ public sealed partial class InMemoryMessageStore
         PageSize = m.PageSize,
         NewMailSound = m.NewMailSound,
         WelcomeDone = m.WelcomeDone,
+        Zoom = m.Zoom,
         Enabled = m.Enabled,
         QuotaBytes = m.QuotaBytes,
         UsedBytes = m.UsedBytes,
@@ -818,6 +819,7 @@ public sealed partial class InMemoryMessageStore
             m.WeekStart = p.WeekStart;
             m.PageSize = p.PageSize;
             m.NewMailSound = p.NewMailSound;
+            m.Zoom = p.Zoom;
             m.WelcomeDone = p.WelcomeDone;
             m.UpdatedAt = System.DateTimeOffset.UtcNow;
             return Task.FromResult(true);

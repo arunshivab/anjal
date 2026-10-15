@@ -2683,6 +2683,21 @@
     "Send this webhook again.": "ഈ വെബ്‌ഹുക്ക് വീണ്ടും അയയ്ക്കുക.",
     "Stop this key now; the application can no longer send with it.": "ഈ കീ ഇപ്പോൾ നിർത്തുക; ആപ്ലിക്കേഷന് ഇനി ഇതുപയോഗിച്ച് അയയ്ക്കാനാകില്ല.",
     "Make another key for this application; it is shown once.": "ഈ ആപ്ലിക്കേഷനായി മറ്റൊരു കീ ഉണ്ടാക്കുക; അത് ഒരിക്കൽ മാത്രം കാണിക്കും.",
-    "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.": "അഞ്ചലിന്റെ സഹായിയായ ലജ്ന, സ്ക്രീനിന്റെ താഴെയുള്ള «ലജ്നയോട് ചോദിക്കുക» എന്നതിൽ നിന്ന് തുറക്കും: എന്തെങ്കിലും ചെയ്യുന്നത് എങ്ങനെ, നിങ്ങളുടെ മെയിൽ കണ്ടെത്താൻ, അല്ലെങ്കിൽ ഡ്രാഫ്റ്റ് എഴുതാൻ അതിനോട് ചോദിക്കുക."
+    "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.": "അഞ്ചലിന്റെ സഹായിയായ ലജ്ന, സ്ക്രീനിന്റെ താഴെയുള്ള «ലജ്നയോട് ചോദിക്കുക» എന്നതിൽ നിന്ന് തുറക്കും: എന്തെങ്കിലും ചെയ്യുന്നത് എങ്ങനെ, നിങ്ങളുടെ മെയിൽ കണ്ടെത്താൻ, അല്ലെങ്കിൽ ഡ്രാഫ്റ്റ് എഴുതാൻ അതിനോട് ചോദിക്കുക.",
+    "(add the address in Compose)": "(വിലാസം Compose-ൽ ചേർക്കുക)",
+    "Answer how to do something in Anjal, from this guide.": "ഈ ഗൈഡിൽ നിന്ന്, Anjal-ൽ ഒരു കാര്യം എങ്ങനെ ചെയ്യാമെന്ന് മറുപടി നൽകും.",
+    "Back to the page you were on.": "നിങ്ങൾ ഉണ്ടായിരുന്ന പേജിലേക്ക് മടങ്ങുക.",
+    "Change a setting, only after you say Yes.": "നിങ്ങൾ അതെ എന്ന് പറഞ്ഞതിനു ശേഷം മാത്രം ഒരു ക്രമീകരണം മാറ്റും.",
+    "Find your mail, such as the last 5 mails from Priya.": "നിങ്ങളുടെ മെയിൽ കണ്ടെത്തും, ഉദാഹരണത്തിന് പ്രിയയുടെ അവസാനത്തെ 5 മെയിലുകൾ.",
+    "Go back to the page you were on, with Lajna beside it.": "നിങ്ങൾ ഉണ്ടായിരുന്ന പേജിലേക്ക് മടങ്ങുക, അരികിൽ ലജ്നയോടൊപ്പം.",
+    "Makes everything on screen smaller, as the browser's zoom does, on every computer you use. If Windows shows everything at 125%, 80% shows Anjal at its usual size.": "നിങ്ങൾ ഉപയോഗിക്കുന്ന ഓരോ കമ്പ്യൂട്ടറിലും, ബ്രൗസറിന്റെ സൂം പോലെ, സ്ക്രീനിലെ എല്ലാം ചെറുതാക്കുന്നു. Windows എല്ലാം 125% ൽ കാണിക്കുന്നുവെങ്കിൽ, 80% Anjal-നെ അതിന്റെ സാധാരണ വലുപ്പത്തിൽ കാണിക്കും.",
+    "Open as a panel": "പാനലായി തുറക്കുക",
+    "Private": "സ്വകാര്യം",
+    "Say what happened to a message you sent.": "നിങ്ങൾ അയച്ച സന്ദേശത്തിന് എന്ത് സംഭവിച്ചുവെന്ന് പറയും.",
+    "Size on screen": "സ്ക്രീനിലെ വലുപ്പം",
+    "What Lajna can do": "ലജ്ന എന്തു ചെയ്യും",
+    "Write a draft for you to send, such as a leave letter to your manager.": "നിങ്ങൾക്ക് അയയ്ക്കാൻ ഒരു ഡ്രാഫ്റ്റ് എഴുതും, ഉദാഹരണത്തിന് മാനേജർക്ക് ഒരു അവധി അപേക്ഷ.",
+    "{n}%": "{n}%",
+    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "{name}-ന്റെ വിലാസം എനിക്കറിയില്ല, അതിനാൽ സ്വീകർത്താവ് വരി ശൂന്യമാണ്. ഇതാ ഒരു ഡ്രാഫ്റ്റ്: Compose-ൽ തുറന്ന്, വിലാസം ചേർത്ത്, നിങ്ങൾ തന്നെ അയയ്ക്കുക."
   }
 }

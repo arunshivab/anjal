@@ -221,6 +221,9 @@ public sealed class MailboxRow
     /// <summary>True once the person has folded or opened the rail themselves (rc.15); until then it folds by itself on laptop screens.</summary>
     public bool RailChosen { get; set; }
 
+    /// <summary>Size on screen in percent (rc.20, owner 14 Oct 2026): 100, 90 or 80.</summary>
+    public int Zoom { get; set; } = MailboxPreferences.DefaultZoom;
+
     /// <summary>Date format (rc.11): one of <see cref="MailboxPreferences.DateFormats"/>.</summary>
     public string DateFormat { get; set; } = MailboxPreferences.DefaultDateFormat;
 

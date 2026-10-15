@@ -2683,6 +2683,21 @@
     "Send this webhook again.": "இந்த வெப்ஹூக்கை மீண்டும் அனுப்பவும்.",
     "Stop this key now; the application can no longer send with it.": "இந்த விசையை இப்போதே நிறுத்தவும்; பயன்பாடு இனி இதைக் கொண்டு அனுப்ப முடியாது.",
     "Make another key for this application; it is shown once.": "இந்தப் பயன்பாட்டுக்கு இன்னொரு விசையை உருவாக்கவும்; அது ஒருமுறை மட்டுமே காட்டப்படும்.",
-    "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.": "அஞ்சலின் உதவியாளரான லஜ்னா, திரையின் கீழே உள்ள «லஜ்னாவிடம் கேள்» என்பதிலிருந்து திறக்கும்: ஏதாவது செய்வது எப்படி, உங்கள் அஞ்சலைக் கண்டுபிடிக்க, அல்லது வரைவு எழுத அதனிடம் கேளுங்கள்."
+    "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.": "அஞ்சலின் உதவியாளரான லஜ்னா, திரையின் கீழே உள்ள «லஜ்னாவிடம் கேள்» என்பதிலிருந்து திறக்கும்: ஏதாவது செய்வது எப்படி, உங்கள் அஞ்சலைக் கண்டுபிடிக்க, அல்லது வரைவு எழுத அதனிடம் கேளுங்கள்.",
+    "(add the address in Compose)": "(முகவரியை Compose-இல் சேர்க்கவும்)",
+    "Answer how to do something in Anjal, from this guide.": "இந்த வழிகாட்டியிலிருந்து, Anjal-இல் ஒன்றை எப்படிச் செய்வது என்று பதில் சொல்லும்.",
+    "Back to the page you were on.": "நீங்கள் இருந்த பக்கத்திற்குத் திரும்ப.",
+    "Change a setting, only after you say Yes.": "நீங்கள் ஆம் என்று சொன்ன பிறகே ஒரு அமைப்பை மாற்றும்.",
+    "Find your mail, such as the last 5 mails from Priya.": "உங்கள் அஞ்சலைக் கண்டுபிடிக்கும், உதாரணமாக பிரியாவின் கடைசி 5 அஞ்சல்கள்.",
+    "Go back to the page you were on, with Lajna beside it.": "நீங்கள் இருந்த பக்கத்திற்குத் திரும்ப, அருகில் லஜ்னாவுடன்.",
+    "Makes everything on screen smaller, as the browser's zoom does, on every computer you use. If Windows shows everything at 125%, 80% shows Anjal at its usual size.": "நீங்கள் பயன்படுத்தும் ஒவ்வொரு கணினியிலும், உலாவியின் பெரிதாக்கல் போல, திரையில் உள்ள அனைத்தையும் சிறியதாக்கும். Windows அனைத்தையும் 125% இல் காட்டினால், 80% Anjal-ஐ அதன் வழக்கமான அளவில் காட்டும்.",
+    "Open as a panel": "பலகமாகத் திற",
+    "Private": "தனிப்பட்டது",
+    "Say what happened to a message you sent.": "நீங்கள் அனுப்பிய செய்திக்கு என்ன நடந்தது என்று சொல்லும்.",
+    "Size on screen": "திரையில் அளவு",
+    "What Lajna can do": "லஜ்னா என்ன செய்யும்",
+    "Write a draft for you to send, such as a leave letter to your manager.": "நீங்கள் அனுப்புவதற்கு ஒரு வரைவை எழுதும், உதாரணமாக உங்கள் மேலாளருக்கு ஒரு விடுப்புக் கடிதம்.",
+    "{n}%": "{n}%",
+    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "{name}-இன் முகவரி எனக்குத் தெரியாது, எனவே பெறுநர் வரி காலியாக உள்ளது. இதோ ஒரு வரைவு: Compose-இல் திறந்து, முகவரியைச் சேர்த்து, நீங்களே அனுப்புங்கள்."
   }
 }

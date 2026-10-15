@@ -31,7 +31,7 @@ function measure() {
     markLeft: m ? m.left : null,
     markRight: m ? m.right : null,
     letterLeft: card.getBoundingClientRect().left,
-    listInner: l.left + list.clientLeft + list.clientWidth,
+    listInner: l.left + (list.clientLeft + list.clientWidth) * (list.currentCSSZoom || 1),
     inkLeft: ink ? ink.left - 1.75 : null,
     inkRight: ink ? ink.right + 1.75 : null,
   };

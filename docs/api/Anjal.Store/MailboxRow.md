@@ -35,3 +35,4 @@ A mailbox: a receiving identity local_part@domain belonging to a tenant. The mai
 - **UsedBytes** *(property)* - Bytes currently stored in this mailbox, maintained by the store on each delivery.
 - **WeekStart** *(property)* - First day of the week (rc.11): monday or sunday.
 - **WelcomeDone** *(property)* - The welcome screen has been answered (rc.11, D-105).
+- **Zoom** *(property)* - Size on screen in percent (rc.20, owner 14 Oct 2026): 100, 90 or 80.

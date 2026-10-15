@@ -115,6 +115,11 @@ public sealed partial class Lajna
         {
             return await this.FindAsync(person, q, find, L, ct).ConfigureAwait(false);
         }
+        // rc.20 (owner, 14 Oct 2026): "Priya's last 5 mails", "find arunshiva@redifmail's mails".
+        if (FindOwnerRegex().Match(q) is { Success: true } owned)
+        {
+            return await this.FindAsync(person, q, owned, L, ct).ConfigureAwait(false);
+        }
         if (DraftRegex().Match(q) is { Success: true } draft)
         {
             return await this.DraftAsync(user, person, q, draft.Groups["who"].Value, draft.Groups["what"].Value, style, L, ct).ConfigureAwait(false);
@@ -161,9 +166,12 @@ public sealed partial class Lajna
     private async Task<LajnaAnswer> DraftAsync(ClaimsPrincipal user, Guid person, string q, string whoText, string what, string? style, Lexicon L, CancellationToken ct)
     {
         IReadOnlyList<(string Address, string Name)> who = await this.mail.WhoIsAsync(person, whoText, ct).ConfigureAwait(false);
-        if (who.Count == 0)
+        // rc.20 (owner, 14 Oct 2026: "write a mail to HR asking for leave on Friday"): someone Lajna
+        // cannot find still gets the draft, with the To line left for the person to fill in.
+        bool unknown = who.Count == 0;
+        if (unknown)
         {
-            return new LajnaAnswer { Kind = "unsure", Text = L["I could not find anyone called {name} in your contacts or your organisation. Try their address."].Replace("{name}", whoText.Trim(), StringComparison.Ordinal), Question = q };
+            who = new[] { (string.Empty, whoText.Trim()) };
         }
         MailboxRow? me = (await this.mail.GetContextAsync(person, ct).ConfigureAwait(false))?.Mailbox;
         string myName = me is null || me.DisplayName.Length == 0 ? user.Identity?.Name ?? string.Empty : me.DisplayName;
@@ -172,7 +180,9 @@ public sealed partial class Lajna
         LajnaCover? cover = leave ? await this.mail.WhoCoveredAsync(person, ct).ConfigureAwait(false) : null;
         string s = style is "formal" or "short" or "ta" ? style : (Regex.IsMatch(q, @"\p{IsTamil}") ? "ta" : "normal");
         LajnaDraft draft = LajnaLetters.Write(who[0].Address, who[0].Name, what, leave, cover, myName, signature, s);
-        string text = cover is null
+        string text = unknown
+            ? L["I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself."].Replace("{name}", whoText.Trim(), StringComparison.Ordinal)
+            : cover is null
             ? L["Here is a draft. Read it, then open it in Compose to send it yourself."]
             : (cover.Copied ? L["Here is a draft. Your mail of {date} copied {name}; check that they will cover again."] : L["Here is a draft. Your mail of {date} says {name} covered last time."])
                 .Replace("{date}", WebmailAuthService.ClockOf(user).Date(cover.At), StringComparison.Ordinal)
@@ -230,6 +240,16 @@ public sealed partial class Lajna
         {
             return mode == "light" ? null : new LajnaConsent(L["Light or dark"], L["Dark"], L["Light"], "/settings/theme", Fields(("theme", colour + "-light")), "/settings/appearance");
         }
+        // rc.20: size on screen - one step smaller or larger than now, 100, 90 or 80 percent.
+        if (Regex.IsMatch(t, @"\b(smaller|bigger|larger|zoom|text size|font size|size on screen|too big|too large|too small)\b"))
+        {
+            int now = WebmailAuthService.ZoomOf(user);
+            bool down = Regex.IsMatch(t, @"\b(smaller|too big|too large|zoom out|reduce|less)\b");
+            int[] steps = MailboxPreferences.Zooms.OrderByDescending(z => z).ToArray();
+            int i = Array.IndexOf(steps, now);
+            int next = down ? steps[Math.Min(steps.Length - 1, i + 1)] : steps[Math.Max(0, i - 1)];
+            return next == now ? null : new LajnaConsent(L["Size on screen"], Percent(now, L), Percent(next, L), "/settings/zoom", Fields(("zoom", next.ToString(CultureInfo.InvariantCulture)), ("back", back)), "/settings/appearance");
+        }
         if (Regex.IsMatch(t, @"\b(sound|chime)\b"))
         {
             bool off = Regex.IsMatch(t, @"\b(off|stop|mute|silence|no|disable|quiet)\b");
@@ -264,6 +284,8 @@ public sealed partial class Lajna
         }
         return null;
 
+        static string Percent(int z, Lexicon L) => z == MailboxPreferences.DefaultZoom ? L["Normal"] : L["{n}%"].Replace("{n}", z.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+
         static IReadOnlyList<KeyValuePair<string, string>> Fields(params (string Name, string Value)[] f) => f.Select(x => new KeyValuePair<string, string>(x.Name, x.Value)).ToList();
     }
 
@@ -294,8 +316,11 @@ public sealed partial class Lajna
         return new LajnaAnswer { Kind = "unsure", Text = text, Cites = found.Select(f => f.Article).ToList(), Question = q };
     }
 
-    [GeneratedRegex(@"^(?:please\s+)?(?:get|show|find|open|list|give)?\s*(?:me\s+)?(?:the\s+|my\s+)?(?:last|latest|recent|newest)?\s*(?<n>\d{1,2})?\s*(?:mails?|messages?|e-?mails?|letters?)\s+(?<files>with\s+(?:attachments?|files?)\s+)?(?:from|by|sent by)\s+(?<who>[^?]+?)\s*\??$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^(?:please\s+)?(?:get|show|find|open|list|give)?\s*(?:me\s+)?(?:the\s+|my\s+)?(?:last|latest|recent|newest)?\s*(?<n>\d{1,2})?\s*(?:mails?|messages?|e-?mails?|letters?)\s+(?<files>with\s+(?:attachments?|files?)\s+)?(?:from|by|sent by|of)\s+(?<who>[^?]+?)\s*\??$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex FindRegex();
+
+    [GeneratedRegex(@"^(?:please\s+)?(?:(?:get|show|find|open|list|give)\s+)?(?:me\s+)?(?<who>[^?]+?)['’]s?\s+(?:last|latest|recent|newest)?\s*(?<n>\d{1,2})?\s*(?:mails?|messages?|e-?mails?|letters?)(?<files>\s+with\s+(?:attachments?|files?))?\s*\??$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex FindOwnerRegex();
 
     [GeneratedRegex(@"^(?:please\s+)?(?:write|draft|compose)\s+(?:a\s+|an\s+)?(?:(?:short|formal|quick)\s+)?(?:mail|e-?mail|message|letter|note)?\s*to\s+(?<who>.+?)\s+(?<what>(?:asking|about|for|regarding|requesting|saying|to ask|to say|to tell|telling|to request|to inform)\b.+)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex DraftRegex();

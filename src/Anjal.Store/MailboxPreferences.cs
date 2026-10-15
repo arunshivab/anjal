@@ -33,6 +33,17 @@ public sealed class MailboxPreferences
     private static readonly string[] WeekStartList = { "monday", "sunday" };
 
     private static readonly int[] PageSizeList = { 10, 20, 30, 50, 100 };
+    private static readonly int[] ZoomList = { 100, 90, 80 };
+
+    /// <summary>
+    /// Size on screen for a new mailbox: 100%. rc.20 (owner, 14 Oct 2026: "the screen fonts are
+    /// still bigger"): on a computer that Windows enlarges to 125%, 80% shows Anjal at its designed
+    /// size. Only smaller sizes are offered; the browser's own zoom makes things larger.
+    /// </summary>
+    public const int DefaultZoom = 100;
+
+    /// <summary>The sizes on screen a person may choose, in percent.</summary>
+    public static IReadOnlyList<int> Zooms => ZoomList;
 
     /// <summary>Messages per page for a new mailbox: 50, as before rc.11.</summary>
     public const int DefaultPageSize = 50;
@@ -91,6 +102,9 @@ public sealed class MailboxPreferences
     /// <summary>True once the welcome screen has been answered (D-105): it is never shown again.</summary>
     public bool WelcomeDone { get; set; }
 
+    /// <summary>One of <see cref="Zooms"/>: everything on screen at this size.</summary>
+    public int Zoom { get; set; } = DefaultZoom;
+
     /// <summary>The preferences stored on a mailbox.</summary>
     /// <param name="mailbox">The mailbox.</param>
     /// <returns>A copy the caller may change.</returns>
@@ -110,6 +124,7 @@ public sealed class MailboxPreferences
             PageSize = mailbox.PageSize,
             NewMailSound = mailbox.NewMailSound,
             WelcomeDone = mailbox.WelcomeDone,
+            Zoom = mailbox.Zoom,
         };
     }
 
@@ -137,6 +152,7 @@ public sealed class MailboxPreferences
         PageSize = System.Array.IndexOf(PageSizeList, this.PageSize) >= 0 ? this.PageSize : DefaultPageSize,
         NewMailSound = this.NewMailSound,
         WelcomeDone = this.WelcomeDone,
+        Zoom = System.Array.IndexOf(ZoomList, this.Zoom) >= 0 ? this.Zoom : DefaultZoom,
     };
 
     private static string Pick(string? value, string[] allowed, string fallback)

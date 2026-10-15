@@ -264,6 +264,8 @@ ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS new_mail_sound BOOLEAN NOT NULL D
 ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS welcome_done   BOOLEAN NOT NULL DEFAULT false;
 -- rc.15: until a person folds or opens the rail themselves, it shows icons only up to laptop width.
 ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS rail_chosen    BOOLEAN NOT NULL DEFAULT false;
+-- rc.20 (owner, 14 Oct 2026): size on screen, 100, 90 or 80 percent.
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS zoom           INTEGER NOT NULL DEFAULT 100;
 
 CREATE INDEX IF NOT EXISTS messages_unread_idx
     ON messages (mailbox_id, folder_id)

@@ -16,6 +16,13 @@
     try { var b = document.getElementById("anjal-words"); return b ? JSON.parse(b.textContent || "{}") : {}; } catch (e) { return {}; }
   }());
   var W = function (english) { return WORDS[english] || english; };
+  // rc.20 (owner, 14 Oct 2026): the person's size on screen zooms the whole page. Positions read from
+  // the window (getBoundingClientRect, innerWidth) are in screen pixels; a style is in page pixels,
+  // so anything placed by measurement is divided by the zoom, and page sizes multiplied by it.
+  var zoomOf = function () {
+    var z = document.documentElement.currentCSSZoom || parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+    return z > 0 ? z : 1;
+  };
   // rc.16 (2c): the words and kind of a file's type tag - the same rules as FileTag.Of on the server.
   var fileTag = function (name, type) {
     var ext = (/\.([^.]+)$/.exec(name || "") || ["", ""])[1].toLowerCase();
@@ -409,15 +416,16 @@
       tip.textContent = el.getAttribute("data-tip") || "";
       tip.classList.toggle("long", tip.textContent.length > 28);
       tip.hidden = false;
+      var z = zoomOf();
       var r = el.getBoundingClientRect(), t = tip.getBoundingClientRect();
-      var vw = document.documentElement.clientWidth, vh = window.innerHeight;
+      var vw = document.documentElement.clientWidth * z, vh = window.innerHeight;
       var up = !!el.closest(above);
       var top = up ? r.top - t.height - 6 : r.bottom + 6;
       if (!up && top + t.height > vh - 4) { top = r.top - t.height - 6; }
       if (up && top < 4) { top = r.bottom + 6; }
       var left = Math.max(8, Math.min(r.left + (r.width / 2) - (t.width / 2), vw - t.width - 8));
-      tip.style.left = left + "px";
-      tip.style.top = top + "px";
+      tip.style.left = (left / z) + "px";
+      tip.style.top = (top / z) + "px";
       tip.classList.add("on");
     }
     function hide() {
@@ -454,7 +462,7 @@
   page(function railHandle() {
     var rail = $("nav.rail");
     if (!rail) { return; }
-    function place() { rail.style.setProperty("--railw", rail.getBoundingClientRect().width + "px"); }
+    function place() { rail.style.setProperty("--railw", (rail.getBoundingClientRect().width / zoomOf()) + "px"); }
     place();
     scope.on(window, "resize", place);
     scope.on(window, "load", place);
@@ -1791,12 +1799,13 @@
       back.hidden = i === 0;
       nextButton.textContent = i < live.length - 1 ? nextButton.getAttribute("data-word-next") : nextButton.getAttribute("data-word-done");
       bubble.hidden = false;
+      var z = zoomOf();
       var r = el.getBoundingClientRect();
-      var h = bubble.offsetHeight || 150;
+      var h = (bubble.offsetHeight || 150) * z;
       var top = r.bottom + 10;
       if (top + h > window.innerHeight - 8) { top = Math.max(8, r.top - h - 10); }
-      bubble.style.top = top + "px";
-      bubble.style.left = Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - 330)) + "px";
+      bubble.style.top = (top / z) + "px";
+      bubble.style.left = (Math.min(Math.max(8, r.left), Math.max(8, window.innerWidth - 330 * z)) / z) + "px";
       nextButton.focus();
     }
 
@@ -1985,10 +1994,11 @@
       // Owner, 10 Oct 2026: the flap sits beside the open card, before the list's scroll bar (Windows
       // shows one), never on it: its stroke is centred between the card's edge and the inside edge
       // of the list's scroll area.
-      var inner = l.left + list.clientLeft + list.clientWidth;
-      var ink = 11.5;
-      mark.style.top = Math.round(middle - v.top - 12) + "px";
-      mark.style.left = Math.round(r.right - v.left + Math.max(0, (inner - r.right - ink) / 2) - 2.25) + "px";
+      var z = zoomOf();
+      var inner = l.left + (list.clientLeft + list.clientWidth) * z;
+      var ink = 11.5 * z;
+      mark.style.top = Math.round((middle - v.top) / z - 12) + "px";
+      mark.style.left = Math.round((r.right - v.left + Math.max(0, (inner - r.right - ink) / 2)) / z - 2.25) + "px";
     }
     list.addEventListener("scroll", place, { passive: true });
     scope.on(window, "resize", place);
@@ -2240,31 +2250,42 @@
   function place(d) {
     var body = d._float, s = d.querySelector(":scope > summary");
     if (!body || !s) { return; }
+    var z = zoomOf();
     var sr = s.getBoundingClientRect(), gap = 6, edge = 8;
-    var vw = window.innerWidth, vh = window.innerHeight;
-    body.style.maxHeight = (vh - 2 * edge) + "px";
-    var w = body.offsetWidth, h = body.offsetHeight;
-    var left = d._alignRight ? sr.right - w : sr.left;
-    left = Math.max(edge, Math.min(left, vw - w - edge));
-    var top = sr.bottom + gap;
-    if (top + h > vh - edge) {
-      top = sr.top - gap - h >= edge ? sr.top - gap - h : Math.max(edge, vh - edge - h);
+    // rc.20 (screen check at 80%): a layer that answers container queries (Settings' middle box) holds
+    // even a fixed menu inside it and cuts it at its edges, so the menu is kept within that layer.
+    var box = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+    for (var up = body.parentElement; up && up !== document.documentElement; up = up.parentElement) {
+      var ucs = getComputedStyle(up);
+      if (ucs.containerType && ucs.containerType !== "normal") {
+        var ub = up.getBoundingClientRect();
+        box = { left: Math.max(0, ub.left), top: Math.max(0, ub.top), right: Math.min(window.innerWidth, ub.right), bottom: Math.min(window.innerHeight, ub.bottom) };
+        break;
+      }
     }
-    body.style.left = left + "px";
-    body.style.top = top + "px";
+    body.style.maxHeight = ((box.bottom - box.top - 2 * edge) / z) + "px";
+    var w = body.offsetWidth * z, h = body.offsetHeight * z;
+    var left = d._alignRight ? sr.right - w : sr.left;
+    left = Math.max(box.left + edge, Math.min(left, box.right - w - edge));
+    var top = sr.bottom + gap;
+    if (top + h > box.bottom - edge) {
+      top = sr.top - gap - h >= box.top + edge ? sr.top - gap - h : Math.max(box.top + edge, box.bottom - edge - h);
+    }
+    body.style.left = (left / z) + "px";
+    body.style.top = (top / z) + "px";
     // A layer around the menu may still hold its fixed position (one that
     // really is turned or moved, and so is left as it is): correct by the
     // difference between where the menu landed and where it should be.
     var got = body.getBoundingClientRect();
-    if (Math.abs(got.left - left) > 0.5) { body.style.left = (2 * left - got.left) + "px"; }
-    if (Math.abs(got.top - top) > 0.5) { body.style.top = (2 * top - got.top) + "px"; }
+    if (Math.abs(got.left - left) > 0.5) { body.style.left = ((2 * left - got.left) / z) + "px"; }
+    if (Math.abs(got.top - top) > 0.5) { body.style.top = ((2 * top - got.top) / z) + "px"; }
   }
   function float(d, body) {
     var r = body.getBoundingClientRect(), sr = d.querySelector(":scope > summary").getBoundingClientRect();
     d._alignRight = Math.abs(r.right - sr.right) < Math.abs(r.left - sr.left);
     d._floatStyle = body.getAttribute("style");
     d._float = body;
-    body.style.width = r.width + "px";
+    body.style.width = (r.width / zoomOf()) + "px";
     body.style.position = "fixed";
     body.style.right = "auto";
     body.style.bottom = "auto";
@@ -3489,7 +3510,20 @@
     });
     document.addEventListener("keydown", function (e) {
       var p = panel();
-      if (e.key === "Escape" && p && !p.hidden && p.contains(document.activeElement)) { close(); }
+      if (e.key === "Escape" && p && !p.hidden && p.contains(document.activeElement)) { close(); return; }
+      // rc.20 (owner, 14 Oct 2026: "no way to minimize her"): on Lajna's own page Escape goes back
+      // to where the person was, unless a menu or the panel is open.
+      var back = $("[data-lajna-back]");
+      if (e.key === "Escape" && back && (!p || p.hidden) && !document.querySelector("details[open]")) {
+        e.preventDefault();
+        window.location.href = back.getAttribute("href");
+      }
+    });
+    // rc.20: "Open as a panel" on Lajna's page goes back with #lajna-open; the panel opens there.
+    page(function lajnaFromPage() {
+      if (window.location.hash !== "#lajna-open") { return; }
+      if (window.history && window.history.replaceState) { window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search); }
+      open(null);
     });
   }());
 
@@ -3514,10 +3548,12 @@
     document.body.appendChild(veil);
     document.body.appendChild(note);
     el.classList.add("ringed");
+    var z = zoomOf();
     var r = el.getBoundingClientRect();
-    var top = r.bottom + 10 + note.offsetHeight > window.innerHeight ? r.top - note.offsetHeight - 10 : r.bottom + 10;
-    note.style.top = Math.max(8, top) + "px";
-    note.style.left = Math.max(8, Math.min(r.left, document.documentElement.clientWidth - note.offsetWidth - 8)) + "px";
+    var nh = note.offsetHeight * z, nw = note.offsetWidth * z;
+    var top = r.bottom + 10 + nh > window.innerHeight ? r.top - nh - 10 : r.bottom + 10;
+    note.style.top = (Math.max(8, top) / z) + "px";
+    note.style.left = (Math.max(8, Math.min(r.left, document.documentElement.clientWidth * z - nw - 8)) / z) + "px";
     function done() {
       el.classList.remove("ringed");
       veil.remove();

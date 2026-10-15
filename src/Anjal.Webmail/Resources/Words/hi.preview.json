@@ -2683,6 +2683,21 @@
     "Send this webhook again.": "यह वेबहुक फिर से भेजें।",
     "Stop this key now; the application can no longer send with it.": "यह कुंजी अभी रोकें; एप्लिकेशन अब इससे नहीं भेज सकेगा।",
     "Make another key for this application; it is shown once.": "इस एप्लिकेशन के लिए एक और कुंजी बनाएँ; यह केवल एक बार दिखाई जाएगी।",
-    "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.": "अंजल की सहायक लज्ना स्क्रीन के नीचे «लज्ना से पूछें» से खुलती है: उससे पूछें कि कुछ कैसे करें, अपना मेल खोजें, या ड्राफ़्ट लिखें।"
+    "Lajna, Anjal's helper, opens from Ask Lajna at the foot of the screen: ask it how to do something, to find your mail, or to write a draft.": "अंजल की सहायक लज्ना स्क्रीन के नीचे «लज्ना से पूछें» से खुलती है: उससे पूछें कि कुछ कैसे करें, अपना मेल खोजें, या ड्राफ़्ट लिखें।",
+    "(add the address in Compose)": "(पता Compose में जोड़ें)",
+    "Answer how to do something in Anjal, from this guide.": "इस गाइड से बताती है कि Anjal में कोई काम कैसे करें।",
+    "Back to the page you were on.": "जिस पेज पर आप थे वहाँ वापस जाएँ।",
+    "Change a setting, only after you say Yes.": "आपके हाँ कहने के बाद ही कोई सेटिंग बदलती है।",
+    "Find your mail, such as the last 5 mails from Priya.": "आपकी मेल ढूँढती है, जैसे प्रिया की आखिरी 5 मेल।",
+    "Go back to the page you were on, with Lajna beside it.": "जिस पेज पर आप थे वहाँ वापस जाएँ, साथ में लज्ना के साथ।",
+    "Makes everything on screen smaller, as the browser's zoom does, on every computer you use. If Windows shows everything at 125%, 80% shows Anjal at its usual size.": "आपके हर कंप्यूटर पर, ब्राउज़र के ज़ूम की तरह, स्क्रीन पर सब कुछ छोटा करता है। अगर Windows सब कुछ 125% पर दिखाता है, तो 80% पर Anjal अपने सामान्य आकार में दिखता है।",
+    "Open as a panel": "पैनल के रूप में खोलें",
+    "Private": "निजी",
+    "Say what happened to a message you sent.": "बताती है कि आपके भेजे संदेश का क्या हुआ।",
+    "Size on screen": "स्क्रीन पर आकार",
+    "What Lajna can do": "लज्ना क्या कर सकती है",
+    "Write a draft for you to send, such as a leave letter to your manager.": "आपके भेजने के लिए ड्राफ़्ट लिखती है, जैसे आपके मैनेजर को छुट्टी का पत्र।",
+    "{n}%": "{n}%",
+    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "मुझे {name} का पता नहीं पता, इसलिए 'प्रति' पंक्ति खाली है। यह रहा ड्राफ़्ट: इसे Compose में खोलें, पता जोड़ें और खुद भेजें।"
   }
 }

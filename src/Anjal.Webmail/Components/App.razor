@@ -1,7 +1,7 @@
 @inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 @inject Anjal.Webmail.Services.Words Words
 <!DOCTYPE html>
-<html lang="@Shown" data-theme="@Anjal.Webmail.Services.WebmailAuthService.ThemeOf(Http.HttpContext?.User)">
+<html lang="@Shown" data-theme="@Anjal.Webmail.Services.WebmailAuthService.ThemeOf(Http.HttpContext?.User)" data-zoom="@Anjal.Webmail.Services.WebmailAuthService.ZoomOf(Http.HttpContext?.User).ToString(System.Globalization.CultureInfo.InvariantCulture)">
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

@@ -880,7 +880,8 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         Assert.Contains("font-size:14px", html, StringComparison.Ordinal);
 
         string css = await this.client.GetStringAsync("app.css");
-        Assert.Contains(".reading { height: calc(100vh - 61px);", css, StringComparison.Ordinal);
+        // rc.20: the window's height is divided by the person's size on screen.
+        Assert.Contains(".reading { height: calc(calc(100vh / var(--z, 1)) - 61px);", css, StringComparison.Ordinal);
     }
 }
 

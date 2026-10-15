@@ -80,6 +80,18 @@
                 </div>
             </fieldset>
 
+            @* rc.20 (owner, 14 Oct 2026): everything smaller, for a computer that Windows enlarges to 125%. *@
+            <fieldset class="setgroup">
+                <legend>@L["Size on screen"]</legend>
+                <div class="seg">
+                    @foreach (int z in MailboxPreferences.Zooms)
+                    {
+                        <label class="segopt"><input type="radio" name="zoom" value="@z" checked="@(zoom == z)" data-autosubmit /><span>@(z == MailboxPreferences.DefaultZoom ? L["Normal"] : L["{n}%"].Replace("{n}", z.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</span></label>
+                    }
+                </div>
+                <p class="hint">@L["Makes everything on screen smaller, as the browser's zoom does, on every computer you use. If Windows shows everything at 125%, 80% shows Anjal at its usual size."]</p>
+            </fieldset>
+
             <fieldset class="setgroup">
                 <legend>@L["Layout"]</legend>
                 <div class="seg">
@@ -708,6 +720,7 @@
                     <input type="hidden" name="mode" value="light" />
                     <input type="hidden" name="density" value="@MailboxPreferences.DefaultDensity" />
                     <input type="hidden" name="layout" value="@MailboxPreferences.DefaultLayout" />
+                    <input type="hidden" name="zoom" value="@MailboxPreferences.DefaultZoom" />
                     <button type="submit" class="btn btn-s asidebtn">@L["Reset to organisation default"]</button>
                 </form>
             }
@@ -869,6 +882,7 @@
     private string colour = "anjal";
     private string mode = "light";
     private string density = MailboxPreferences.DefaultDensity;
+    private int zoom = MailboxPreferences.DefaultZoom;
     private string layout = MailboxPreferences.DefaultLayout;
     private string language = MailboxPreferences.DefaultLanguage;
     private string timeZone = MailboxPreferences.DefaultTimeZone;
@@ -1039,6 +1053,7 @@
             mode = theme[(theme.LastIndexOf('-') + 1)..];
             MailboxPreferences prefs = MailboxPreferences.Of(context.Value.Mailbox).Normalized();
             density = prefs.Density;
+            zoom = prefs.Zoom;
             layout = prefs.Layout;
             language = prefs.Language;
             timeZone = prefs.TimeZone;

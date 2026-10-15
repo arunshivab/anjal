@@ -10,6 +10,16 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.20** (14 October 2026) - Size on screen, one frame for help and Lajna. Settings >
+Appearance gains **Size on screen** (Normal, 90%, 80%), kept with the person: on a computer Windows
+shows at 125%, 80% shows Anjal at its designed size. Every help page and Lajna's page share one
+frame - the parts on the left, a small search with Ask Lajna on top, a side column - with no release
+label under titles; Lajna's page has Back and Open as a panel (Escape goes back). Lajna understands
+"Priya's last 5 mails", "last 5 mails of Priya" and part of an address, writes a draft even to
+someone it cannot find (the To line left for the person), and keeps the day in a leave letter ("on
+Friday"). "Sign in again" is as wide as "Sign in"; the clip check now fails a filled button whose
+words touch its edge. `schema.sql` adds one column (`mailboxes.zoom`).
+
 **v1.0.0-rc.19** (13 October 2026) - Steady text (DEF-106). Text that changes on an open screen
 no longer moves what is beside it: the connection light keeps one width (the wider of "Connected"
 and "Offline"), and the selection bar is left-aligned with Clear at its right, so "3 selected"

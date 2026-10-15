@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using Anjal.Store;
 
@@ -37,6 +38,12 @@ public sealed class WebmailAuthService
 
     /// <summary>Claim type for the person's language (rc.11).</summary>
     public const string LanguageClaim = "anjal:lang";
+
+    /// <summary>
+    /// Claim type for the person's size on screen in percent (rc.20). Like the theme it is written on
+    /// the root element before any page component runs, so it rides in the cookie.
+    /// </summary>
+    public const string ZoomClaim = "anjal:zoom";
 
     /// <summary>
     /// Claim type for the shared mailbox the person has opened (rc.14). While
@@ -195,6 +202,7 @@ public sealed class WebmailAuthService
         identity.AddClaim(new Claim(TimeZoneClaim, preferences.TimeZone));
         identity.AddClaim(new Claim(DateFormatClaim, preferences.DateFormat));
         identity.AddClaim(new Claim(LanguageClaim, preferences.Language));
+        identity.AddClaim(new Claim(ZoomClaim, preferences.Zoom.ToString(CultureInfo.InvariantCulture)));
         return new ClaimsPrincipal(identity);
     }
 
@@ -338,6 +346,33 @@ public sealed class WebmailAuthService
             }
         }
         identity.AddClaim(new Claim(LanguageClaim, language));
+        return new ClaimsPrincipal(identity);
+    }
+
+    /// <summary>The signed-in person's size on screen in percent: 100 for anyone else or an older cookie (rc.20).</summary>
+    /// <param name="user">The current principal, or null.</param>
+    /// <returns>100, 90 or 80.</returns>
+    public static int ZoomOf(ClaimsPrincipal? user) =>
+        int.TryParse(user?.FindFirst(ZoomClaim)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int z) && MailboxPreferences.Zooms.Contains(z)
+            ? z
+            : MailboxPreferences.DefaultZoom;
+
+    /// <summary>Rebuild a principal with a different size on screen (rc.20), shown on the very next page.</summary>
+    /// <param name="user">The current principal.</param>
+    /// <param name="zoom">100, 90 or 80.</param>
+    /// <returns>The principal.</returns>
+    public static ClaimsPrincipal WithZoom(ClaimsPrincipal user, int zoom)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        var identity = new ClaimsIdentity("AnjalWebmail");
+        foreach (Claim c in user.Claims)
+        {
+            if (!string.Equals(c.Type, ZoomClaim, StringComparison.Ordinal))
+            {
+                identity.AddClaim(new Claim(c.Type, c.Value));
+            }
+        }
+        identity.AddClaim(new Claim(ZoomClaim, zoom.ToString(CultureInfo.InvariantCulture)));
         return new ClaimsPrincipal(identity);
     }
 

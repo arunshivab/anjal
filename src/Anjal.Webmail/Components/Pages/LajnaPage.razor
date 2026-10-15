@@ -6,28 +6,49 @@
 <PageTitle>@L["Lajna"] — Anjal</PageTitle>
 
 @* rc.18, design review section 11: Lajna as a page - the same answers the floating panel shows,
-   for a browser without the script (and the panel's source: /lajna/answer is the answer alone). *@
-    <div class="ljpage">
-        <header class="ljhead">
-            <span aria-hidden="true">@((MarkupString)LajnaMarkSvg.Large)</span>
-            <div><h1>@L["Lajna"]</h1><p>@L["Anjal's helper. It reads only your own mail and settings, here in Anjal, and never sends or changes anything without your Yes."]</p></div>
-        </header>
-        @if (answer is not null)
-        {
-            <LajnaReply A="answer" L="L" Clock="clock" Page="@PageFrom" />
-        }
-        <form method="get" action="/lajna" class="ljform" role="search">
-            <input type="hidden" name="page" value="@PageFrom" />
-            <input class="inp" name="q" value="@Q" maxlength="300" placeholder="@L["Ask Lajna"]" aria-label="@L["Ask Lajna"]" autofocus />
-            <button type="submit" class="btn btn-p" title="@L["Send your question to Lajna."]">@L["Ask"]</button>
-        </form>
-        <p class="ljchips">
-            @foreach (string s in Suggestions)
+   for a browser without the script (and the panel's source: /lajna/answer is the answer alone).
+   rc.20 (owner, 14 Oct 2026: "no way to minimize her... go back"; "lajna and help - same"): the page
+   sits in the help guide's frame, with Back to where the person was and Open as a panel; Escape goes
+   back too. *@
+<HelpShell L="L" Lajna="true" Back="@PageFrom">
+    <ChildContent>
+        <div class="ljpage">
+            <p class="ljtop">
+                <a class="ljback" href="@PageFrom" data-lajna-back title="@L["Back to the page you were on."]"><LipiIcon Name="arrow-left" Size="15" />@L["Back"]</a>
+                <a class="btn btn-s btn-sm ljpanel" href="@(PageFrom + "#lajna-open")" title="@L["Go back to the page you were on, with Lajna beside it."]"><LipiIcon Name="collapse" Size="15" />@L["Open as a panel"]</a>
+            </p>
+            <header class="ljhead">
+                <span aria-hidden="true">@((MarkupString)LajnaMarkSvg.Large)</span>
+                <div><h1>@L["Lajna"]</h1><p>@L["Anjal's helper. It reads only your own mail and settings, here in Anjal, and never sends or changes anything without your Yes."]</p></div>
+            </header>
+            @if (answer is not null)
             {
-                <a href="/lajna?q=@Uri.EscapeDataString(L[s])&page=@Uri.EscapeDataString(PageFrom)">@L[s]</a>
+                <LajnaReply A="answer" L="L" Clock="clock" Page="@PageFrom" />
             }
-        </p>
-    </div>
+            <form method="get" action="/lajna" class="ljform" role="search">
+                <input type="hidden" name="page" value="@PageFrom" />
+                <input class="inp" name="q" value="@Q" maxlength="300" placeholder="@L["Ask Lajna"]" aria-label="@L["Ask Lajna"]" autofocus="@(answer is null)" />
+                <button type="submit" class="btn btn-p" title="@L["Send your question to Lajna."]">@L["Ask"]</button>
+            </form>
+            <p class="ljchips">
+                @foreach (string s in Suggestions)
+                {
+                    <a href="/lajna?q=@Uri.EscapeDataString(L[s])&page=@Uri.EscapeDataString(PageFrom)">@L[s]</a>
+                }
+            </p>
+        </div>
+    </ChildContent>
+    <Side>
+        <h2>@L["What Lajna can do"]</h2>
+        <p class="helpsidetext">@L["Answer how to do something in Anjal, from this guide."]</p>
+        <p class="helpsidetext">@L["Find your mail, such as the last 5 mails from Priya."]</p>
+        <p class="helpsidetext">@L["Write a draft for you to send, such as a leave letter to your manager."]</p>
+        <p class="helpsidetext">@L["Say what happened to a message you sent."]</p>
+        <p class="helpsidetext">@L["Change a setting, only after you say Yes."]</p>
+        <h2>@L["Private"]</h2>
+        <p class="helpsidetext">@L["Lajna works inside Anjal: nothing you ask leaves this server, and nothing is kept."]</p>
+    </Side>
+</HelpShell>
 
 @code {
     /// <summary>The questions offered to start with.</summary>
