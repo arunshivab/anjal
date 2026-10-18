@@ -79,7 +79,7 @@ LIMIT 500;";
     {
         System.ArgumentNullException.ThrowIfNull(envelopeFrom);
         const string sql = @"
-UPDATE outbound_messages SET status = 3, last_error = @why
+UPDATE outbound_messages SET status = 3, last_error = @why, finished_at = now()
 WHERE id = @id AND status = 0 AND lower(envelope_from) = lower(@from);";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);

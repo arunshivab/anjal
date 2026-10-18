@@ -1646,6 +1646,12 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.21 to rc.21.1** (DEF-117, Outbox content): the usual steps (backup first), and run `schema.sql`
+once: it adds `outbound_messages.finished_at` and `body_removed_at` and fills `finished_at` for mail
+already delivered. Within an hour of the restart, the content of mail delivered more than the
+organisation's keep-days ago (default 7) is removed from the queue; its record and the evidence copy
+stay. The webmail log says `[outbox] N delivered message(s) cleared`.
+
 **rc.20 to rc.21** (Lajna drafting): the usual steps only (backup first). No schema change, no
 setting to change.
 

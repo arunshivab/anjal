@@ -531,7 +531,8 @@ SET status          = @status,
     attempts        = attempts + 1,
     next_attempt_at = @next_attempt_at,
     last_error      = @last_error,
-    lease_expires_at = NULL
+    lease_expires_at = NULL,
+    finished_at     = CASE WHEN @status IN (2, 3) THEN now() ELSE NULL END
 WHERE id = @id
 RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error;";
 
@@ -565,7 +566,8 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
     public async Task<OutboundMessage?> GetOutboundByIdAsync(System.Guid id, CancellationToken ct = default)
     {
         const string sql = @"
-SELECT id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error
+SELECT id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error,
+       lease_expires_at, finished_at, body_removed_at
 FROM outbound_messages
 WHERE id = @id
 LIMIT 1;";
@@ -851,7 +853,48 @@ LIMIT 1;";
         GiveUpAt = r.GetFieldValue<System.DateTimeOffset>(8),
         LastError = r.GetString(9),
         LeaseExpiresAt = r.FieldCount > 10 && !r.IsDBNull(10) ? r.GetFieldValue<System.DateTimeOffset>(10) : null,
+        FinishedAt = r.FieldCount > 11 && !r.IsDBNull(11) ? r.GetFieldValue<System.DateTimeOffset>(11) : null,
+        BodyRemovedAt = r.FieldCount > 12 && !r.IsDBNull(12) ? r.GetFieldValue<System.DateTimeOffset>(12) : null,
     };
+
+    /// <inheritdoc/>
+    public async Task<int> RemoveOutboundContentAsync(IReadOnlyCollection<string> senderDomains, IReadOnlyCollection<string> keepSenders, System.DateTimeOffset finishedBefore, int limit, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(senderDomains);
+        System.ArgumentNullException.ThrowIfNull(keepSenders);
+        if (limit <= 0)
+        {
+            return 0;
+        }
+        // The header block ends at the first empty line (CRLF CRLF, or LF LF in a message that was
+        // stored with bare line ends); everything after it is the content that goes.
+        const string sql = @"
+UPDATE outbound_messages o
+SET raw_bytes = CASE
+        WHEN position('\x0d0a0d0a'::bytea in o.raw_bytes) > 0
+            THEN substring(o.raw_bytes from 1 for position('\x0d0a0d0a'::bytea in o.raw_bytes) + 3)
+        WHEN position('\x0a0a'::bytea in o.raw_bytes) > 0
+            THEN substring(o.raw_bytes from 1 for position('\x0a0a'::bytea in o.raw_bytes) + 1)
+        ELSE ''::bytea
+    END,
+    body_removed_at = now()
+WHERE o.id IN (
+    SELECT id FROM outbound_messages
+    WHERE status IN (2, 3)
+      AND body_removed_at IS NULL
+      AND coalesce(finished_at, next_attempt_at, created_at) < @before
+      AND (cardinality(@domains) = 0 OR lower(split_part(envelope_from, '@', 2)) = ANY(@domains))
+      AND NOT (lower(envelope_from) = ANY(@keep))
+    ORDER BY created_at
+    LIMIT @limit);";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("before", finishedBefore);
+        cmd.Parameters.AddWithValue("domains", senderDomains.Select(d => d.Trim().ToLowerInvariant()).Where(d => d.Length > 0).Distinct().ToArray());
+        cmd.Parameters.AddWithValue("keep", keepSenders.Select(k => k.Trim().ToLowerInvariant()).Where(k => k.Length > 0).Distinct().ToArray());
+        cmd.Parameters.AddWithValue("limit", limit);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
 
     /// <inheritdoc/>
     public async Task<SmtpUserRow> UpsertSmtpUserAsync(SmtpUserRow user, CancellationToken ct = default)

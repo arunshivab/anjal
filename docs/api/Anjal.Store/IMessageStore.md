@@ -50,6 +50,7 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 - **ListWebhookJobsAsync** *(method)* - rc.17 (design review [7d]): notifications to addresses at these domains created since a time, newest first.
 - **MarkOutboundResultAsync** *(method)* - Record the result of an outbound send attempt. Updates status, increments the attempt counter, sets next-attempt-at for retries, and writes the last-error text.
 - **OldestPendingOutboundAsync** *(method)* - When the oldest message still waiting in the outbound queue was queued (rc.14); null when none waits.
+- **RemoveOutboundContentAsync** *(method)* - v1.0.0-rc.21.1 (DEF-117, owner 16 Oct 2026, option (a)): remove the content of delivered or given-up messages that ended before a time, keeping only their header block, so the queue stops holding every message for ever while the record of who, when and what happened stays. Messages still being tried are never touched; the evidence store is not touched.
 - **ReplaceGreylistAsync** *(method)* - Replace the remembered triplets with , in one transaction.
 - **ReplayWebhookJobAsync** *(method)* - rc.17 (design review [7d], Replay): post a notification again - it waits to be sent now, with its tries counted afresh and a new give-up time. Returns false when it is not there or is being sent at this moment.
 - **RetryOutboundNowAsync** *(method)* - Make a waiting outbound row of this sender due now ("Try now").

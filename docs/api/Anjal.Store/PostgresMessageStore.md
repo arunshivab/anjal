@@ -110,6 +110,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **MoveMessageAsync** *(method)* - _(no description)_
 - **OldestPendingOutboundAsync** *(method)* - _(no description)_
 - **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
+- **RemoveOutboundContentAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
 - **ReplayWebhookJobAsync** *(method)* - _(no description)_

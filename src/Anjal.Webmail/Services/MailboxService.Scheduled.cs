@@ -383,6 +383,12 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
                     {
                         Console.WriteLine($"[emptying] {emptied} message(s) deleted from Trash and Junk after their time.");
                     }
+                    // rc.21.1 (DEF-117): delivered mail's content leaves the queue after the organisation's keep-days.
+                    int cleared = await this.mail.ClearOldOutboxAsync(now, stoppingToken).ConfigureAwait(false);
+                    if (cleared > 0)
+                    {
+                        Console.WriteLine($"[outbox] {cleared} delivered message(s) cleared of their content after the organisation's keep-days; their records stay.");
+                    }
                     // rc.14: an application's old key stops when its rotation overlap ends.
                     int retired = await this.mail.RetireEndedKeysAsync(now, stoppingToken).ConfigureAwait(false);
                     if (retired > 0)

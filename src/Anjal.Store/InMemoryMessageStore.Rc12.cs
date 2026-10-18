@@ -72,6 +72,7 @@ public sealed partial class InMemoryMessageStore
             }
             found.Status = OutboundStatus.Failed;
             found.LastError = OutboundMessage.CancelledBySender;
+            found.FinishedAt = System.DateTimeOffset.UtcNow;
             return Task.FromResult(true);
         }
     }

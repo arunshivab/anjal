@@ -164,6 +164,20 @@ public interface IMessageStore
     System.Threading.Tasks.Task<OutboundMessage?> GetOutboundByIdAsync(System.Guid id, System.Threading.CancellationToken ct = default);
 
     /// <summary>
+    /// v1.0.0-rc.21.1 (DEF-117, owner 16 Oct 2026, option (a)): remove the content of delivered or
+    /// given-up messages that ended before a time, keeping only their header block, so the queue
+    /// stops holding every message for ever while the record of who, when and what happened
+    /// stays. Messages still being tried are never touched; the evidence store is not touched.
+    /// </summary>
+    /// <param name="senderDomains">Only messages from these envelope sender domains (compared without case); empty for every domain.</param>
+    /// <param name="keepSenders">Envelope senders whose messages are kept whole (a legal hold), compared without case.</param>
+    /// <param name="finishedBefore">Only messages whose delivery ended before this time.</param>
+    /// <param name="limit">At most this many in one call.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>How many messages had their content removed.</returns>
+    System.Threading.Tasks.Task<int> RemoveOutboundContentAsync(System.Collections.Generic.IReadOnlyCollection<string> senderDomains, System.Collections.Generic.IReadOnlyCollection<string> keepSenders, System.DateTimeOffset finishedBefore, int limit, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
     /// Count outbound messages by status. Used by <c>/metrics</c> for queue
     /// depth; a cheap indexed count.
     /// </summary>

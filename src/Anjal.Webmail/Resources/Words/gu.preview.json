@@ -2698,6 +2698,9 @@
     "What Lajna can do": "લજ્ના શું કરી શકે",
     "Write a draft for you to send, such as a leave letter to your manager.": "તમારે મોકલવા માટે ડ્રાફ્ટ લખે છે, જેમ કે તમારા મેનેજરને રજાનો પત્ર.",
     "{n}%": "{n}%",
-    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "મને {name} નું સરનામું ખબર નથી, તેથી 'પ્રતિ' લાઇન ખાલી છે. આ રહ્યો ડ્રાફ્ટ: તેને Compose માં ખોલો, સરનામું ઉમેરો અને જાતે મોકલો."
+    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "મને {name} નું સરનામું ખબર નથી, તેથી 'પ્રતિ' લાઇન ખાલી છે. આ રહ્યો ડ્રાફ્ટ: તેને Compose માં ખોલો, સરનામું ઉમેરો અને જાતે મોકલો.",
+    "Content": "સામગ્રી",
+    "Removed {date}, after the days set under Retention. This record stays; the untouched original is kept as legal evidence.": "{date} એ, Retention માં નક્કી કરેલા દિવસો પછી દૂર કર્યું. આ નોંધ રહે છે; બદલાયા વગરની મૂળ નકલ કાનૂની પુરાવા તરીકે રાખવામાં આવે છે.",
+    "Applications' mail too. Your Sent folder is not affected.": "એપ્લિકેશનોના મેઇલ પર પણ. તમારું મોકલેલા ફોલ્ડર પ્રભાવિત થતું નથી."
   }
 }
