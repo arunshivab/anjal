@@ -595,3 +595,16 @@ CREATE TABLE IF NOT EXISTS service_records (
 -- organisation's storage plan says otherwise. Mailboxes made before keep their size
 -- until the operator sets the organisation's plan in the Anjal console.
 ALTER TABLE mailboxes ALTER COLUMN quota_bytes SET DEFAULT 1073741824;
+
+-- v1.0.0-rc.21.1 (DEF-117, owner 16 Oct 2026): a queued message's content is removed once
+-- its delivery has ended and the organisation's Outbox keep-days (Organisation > Retention,
+-- at most 30) have passed. Only the header block stays, so Sending systems keeps the record of
+-- who, when and what happened; the untouched original stays in the evidence store.
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ;
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS body_removed_at TIMESTAMPTZ;
+-- Messages that ended before this release: their last attempt time is when delivery ended.
+UPDATE outbound_messages SET finished_at = greatest(next_attempt_at, created_at)
+WHERE status IN (2, 3) AND finished_at IS NULL;
+CREATE INDEX IF NOT EXISTS outbound_messages_content_kept_idx
+    ON outbound_messages (finished_at)
+    WHERE status IN (2, 3) AND body_removed_at IS NULL;

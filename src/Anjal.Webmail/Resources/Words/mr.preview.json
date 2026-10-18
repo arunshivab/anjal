@@ -2698,6 +2698,9 @@
     "What Lajna can do": "लज्ना काय करू शकते",
     "Write a draft for you to send, such as a leave letter to your manager.": "तुम्हाला पाठवण्यासाठी मसुदा लिहिते, जसे तुमच्या व्यवस्थापकाला रजेचे पत्र.",
     "{n}%": "{n}%",
-    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "मला {name} चा पत्ता माहीत नाही, म्हणून 'प्रति' ओळ रिकामी आहे. हा मसुदा: Compose मध्ये उघडा, पत्ता जोडा आणि स्वतः पाठवा."
+    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "मला {name} चा पत्ता माहीत नाही, म्हणून 'प्रति' ओळ रिकामी आहे. हा मसुदा: Compose मध्ये उघडा, पत्ता जोडा आणि स्वतः पाठवा.",
+    "Content": "मजकूर",
+    "Removed {date}, after the days set under Retention. This record stays; the untouched original is kept as legal evidence.": "{date} रोजी, Retention मध्ये ठरवलेल्या दिवसांनंतर काढले. ही नोंद राहते; न बदललेली मूळ प्रत कायदेशीर पुरावा म्हणून ठेवली जाते.",
+    "Applications' mail too. Your Sent folder is not affected.": "ॲप्लिकेशन्सच्या मेलवरही. तुमचे पाठवलेले फोल्डर प्रभावित होत नाही."
   }
 }

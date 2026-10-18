@@ -4,6 +4,57 @@ namespace Anjal.Store;
 public sealed partial class InMemoryMessageStore
 {
     /// <inheritdoc/>
+    public Task<int> RemoveOutboundContentAsync(IReadOnlyCollection<string> senderDomains, IReadOnlyCollection<string> keepSenders, System.DateTimeOffset finishedBefore, int limit, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(senderDomains);
+        System.ArgumentNullException.ThrowIfNull(keepSenders);
+        var domains = new HashSet<string>(senderDomains.Select(d => d.Trim()).Where(d => d.Length > 0), System.StringComparer.OrdinalIgnoreCase);
+        var keep = new HashSet<string>(keepSenders.Select(k => k.Trim()), System.StringComparer.OrdinalIgnoreCase);
+        lock (this.gate)
+        {
+            int removed = 0;
+            foreach (OutboundMessage m in this.outbound.OrderBy(o => o.CreatedAt))
+            {
+                if (removed >= limit)
+                {
+                    break;
+                }
+                string domain = m.EnvelopeFrom.Contains('@', System.StringComparison.Ordinal) ? m.EnvelopeFrom[(m.EnvelopeFrom.LastIndexOf('@') + 1)..] : string.Empty;
+                System.DateTimeOffset ended = m.FinishedAt ?? (m.NextAttemptAt == default ? m.CreatedAt : m.NextAttemptAt);
+                if (m.Status is not (OutboundStatus.Sent or OutboundStatus.Failed) || m.BodyRemovedAt is not null || ended >= finishedBefore
+                    || (domains.Count > 0 && !domains.Contains(domain)) || keep.Contains(m.EnvelopeFrom.Trim()))
+                {
+                    continue;
+                }
+                m.RawBytes = HeaderBlock(m.RawBytes);
+                m.BodyRemovedAt = System.DateTimeOffset.UtcNow;
+                removed++;
+            }
+            return Task.FromResult(removed);
+        }
+    }
+
+    // The header block: everything up to and including the first empty line.
+    private static byte[] HeaderBlock(byte[] raw)
+    {
+        for (int i = 0; i + 3 < raw.Length; i++)
+        {
+            if (raw[i] == 13 && raw[i + 1] == 10 && raw[i + 2] == 13 && raw[i + 3] == 10)
+            {
+                return raw[..(i + 4)];
+            }
+        }
+        for (int i = 0; i + 1 < raw.Length; i++)
+        {
+            if (raw[i] == 10 && raw[i + 1] == 10)
+            {
+                return raw[..(i + 2)];
+            }
+        }
+        return System.Array.Empty<byte>();
+    }
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<OutboundMessage>> ListOutboundBySendersAsync(IReadOnlyCollection<string> senders, System.DateTimeOffset start, System.DateTimeOffset until, int limit, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(senders);

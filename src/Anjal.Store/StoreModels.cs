@@ -187,6 +187,19 @@ public sealed class OutboundMessage
     public System.DateTimeOffset? LeaseExpiresAt { get; set; }
 
     /// <summary>
+    /// When delivery ended - sent, or given up (v1.0.0-rc.21.1, DEF-117). Null while it is still
+    /// being tried. The organisation's keep-days for the Outbox copy count from here.
+    /// </summary>
+    public System.DateTimeOffset? FinishedAt { get; set; }
+
+    /// <summary>
+    /// When the message's content was removed from the queue after its keep-days (rc.21.1,
+    /// DEF-117, owner 16 Oct 2026): only the header block is kept, so the record of who, when and
+    /// what happened stays; the untouched original stays in the evidence store. Null until then.
+    /// </summary>
+    public System.DateTimeOffset? BodyRemovedAt { get; set; }
+
+    /// <summary>
     /// How long a lease lasts. Longer than any single delivery attempt can
     /// take with its timeouts, so a slow but live send is never taken over.
     /// </summary>

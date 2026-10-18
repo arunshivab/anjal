@@ -82,7 +82,8 @@ public sealed record SendingAttempt(DateTimeOffset At, string Host, string? Tls,
 /// <param name="MessageId">Its Message-ID.</param>
 /// <param name="Sha256">The fingerprint of the original kept, or null when none is kept.</param>
 /// <param name="Attempts">Each attempt, oldest first.</param>
-public sealed record SendingDetail(SendingRow Row, string MessageId, string? Sha256, IReadOnlyList<SendingAttempt> Attempts);
+/// <param name="ContentRemoved">When the message's content was removed after the organisation's keep-days (rc.21.1, DEF-117), or null while it is kept.</param>
+public sealed record SendingDetail(SendingRow Row, string MessageId, string? Sha256, IReadOnlyList<SendingAttempt> Attempts, DateTimeOffset? ContentRemoved = null);
 
 /// <summary>One notification to an application's webhook (design review [7d]).</summary>
 /// <param name="Job">The notification.</param>
@@ -293,7 +294,7 @@ public sealed partial class MailboxService
                     .Select(a => new SendingAttempt(a.AttemptedAt, a.RemoteHost, a.TransportTls, a.ReplyCode, a.ReplyText, a.Outcome)));
             }
         }
-        return new SendingDetail(ToSendingRow(m, app), HeaderOf(m.RawBytes, "Message-ID").Trim('<', '>', ' '), sha, attempts);
+        return new SendingDetail(ToSendingRow(m, app), HeaderOf(m.RawBytes, "Message-ID").Trim('<', '>', ' '), sha, attempts, m.BodyRemovedAt);
     }
 
     /// <summary>The original of one of the organisation's messages, as an .eml file; null when it is not theirs.</summary>
@@ -304,7 +305,66 @@ public sealed partial class MailboxService
     public async Task<byte[]?> SendingOriginalAsync(TenantRow tenant, Guid id, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tenant);
-        return await this.OwnOutboundAsync(tenant, id, ct).ConfigureAwait(false) is (OutboundMessage m, _) ? m.RawBytes : null;
+        // rc.21.1 (DEF-117): once the content is removed there is no original here to give; the
+        // untouched original is in the evidence store, for legal use only.
+        return await this.OwnOutboundAsync(tenant, id, ct).ConfigureAwait(false) is (OutboundMessage m, _) && m.BodyRemovedAt is null ? m.RawBytes : null;
+    }
+
+    /// <summary>Anjal's outer limit for keeping a delivered message's content in the queue (policy CMP-02).</summary>
+    public const int MaxOutboxDays = 30;
+
+    /// <summary>
+    /// v1.0.0-rc.21.1 (DEF-117, owner 16 Oct 2026, option (a)): remove the content of messages
+    /// whose delivery ended longer ago than their organisation keeps Outbox copies (Organisation
+    /// &gt; Retention, 1 to 30 days, default 7), keeping the header block so the record of who,
+    /// when and what happened stays. Mail from a mailbox under a legal hold is kept whole. Mail
+    /// from addresses no organisation owns (Anjal's own system mail) is cleared after Anjal's 30
+    /// days. The evidence store is not touched.
+    /// </summary>
+    /// <param name="now">Now.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>How many messages had their content removed.</returns>
+    public async Task<int> ClearOldOutboxAsync(DateTimeOffset now, CancellationToken ct = default)
+    {
+        const int batch = 500;
+        int removed = 0;
+        var held = new List<string>();
+        var plans = new List<(IReadOnlyList<string> Domains, int Days)>();
+        foreach (TenantRow t in await this.store.ListTenantsAsync(ct).ConfigureAwait(false))
+        {
+            RetentionPolicy p = await this.RetentionOfAsync(t, ct).ConfigureAwait(false);
+            IReadOnlyList<string> domains = (await this.store.ListTenantDomainsAsync(t.Id, ct).ConfigureAwait(false)).Select(d => d.Domain).ToList();
+            plans.Add((domains, Math.Clamp(p.OutboxDays, 1, MaxOutboxDays)));
+            foreach (LegalHold h in await this.ReadTenantDocumentAsync<List<LegalHold>>(t.Id, HoldsKind, ct).ConfigureAwait(false) ?? new List<LegalHold>())
+            {
+                if (await this.store.GetMailboxByIdAsync(h.MailboxId, ct).ConfigureAwait(false) is MailboxRow m)
+                {
+                    held.Add(m.Address);
+                }
+            }
+        }
+        foreach ((IReadOnlyList<string> domains, int days) in plans.Where(p => p.Domains.Count > 0))
+        {
+            removed += await RemoveAllAsync(domains, days).ConfigureAwait(false);
+        }
+        // Whatever is left - addresses no organisation owns - after Anjal's outer limit.
+        removed += await RemoveAllAsync(Array.Empty<string>(), MaxOutboxDays).ConfigureAwait(false);
+        return removed;
+
+        async Task<int> RemoveAllAsync(IReadOnlyList<string> domains, int days)
+        {
+            int total = 0;
+            for (int i = 0; i < 200; i++)
+            {
+                int n = await this.messageStore.RemoveOutboundContentAsync(domains, held, now - TimeSpan.FromDays(days), batch, ct).ConfigureAwait(false);
+                total += n;
+                if (n < batch)
+                {
+                    break;
+                }
+            }
+            return total;
+        }
     }
 
     /// <summary>Try one of the organisation's waiting messages now, or stop trying it.</summary>

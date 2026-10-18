@@ -10,6 +10,13 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.21.1** (18 October 2026) - DEF-117: the content of sent mail no longer stays in the
+queue for ever. Once delivery has ended and the organisation's Outbox keep-days (Organisation >
+Retention, 1 to 30 days, default 7) have passed, only the header block is kept: Sending systems
+still shows who, when, the subject and every attempt, and the untouched original stays in the
+evidence store. Mail from a mailbox under a legal hold is kept whole; mail from addresses no
+organisation owns is cleared after Anjal's 30 days. Run `schema.sql` once.
+
 **v1.0.0-rc.21** (15 October 2026) - Lajna writes drafts from the way people ask. A request is read
 with "I want to", "can you", "please" and typing slips ("sent"), the letter named first ("a leave
 letter to hr"), "inform / ask / remind / thank / let … know", the days in the usual forms ("from

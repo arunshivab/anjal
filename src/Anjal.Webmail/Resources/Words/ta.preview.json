@@ -2698,6 +2698,9 @@
     "What Lajna can do": "லஜ்னா என்ன செய்யும்",
     "Write a draft for you to send, such as a leave letter to your manager.": "நீங்கள் அனுப்புவதற்கு ஒரு வரைவை எழுதும், உதாரணமாக உங்கள் மேலாளருக்கு ஒரு விடுப்புக் கடிதம்.",
     "{n}%": "{n}%",
-    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "{name}-இன் முகவரி எனக்குத் தெரியாது, எனவே பெறுநர் வரி காலியாக உள்ளது. இதோ ஒரு வரைவு: Compose-இல் திறந்து, முகவரியைச் சேர்த்து, நீங்களே அனுப்புங்கள்."
+    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "{name}-இன் முகவரி எனக்குத் தெரியாது, எனவே பெறுநர் வரி காலியாக உள்ளது. இதோ ஒரு வரைவு: Compose-இல் திறந்து, முகவரியைச் சேர்த்து, நீங்களே அனுப்புங்கள்.",
+    "Content": "உள்ளடக்கம்",
+    "Removed {date}, after the days set under Retention. This record stays; the untouched original is kept as legal evidence.": "{date} அன்று, Retention-இல் அமைத்த நாட்களுக்குப் பிறகு நீக்கப்பட்டது. இந்தப் பதிவு இருக்கும்; மாற்றப்படாத அசல் சட்டச் சான்றாக வைக்கப்படுகிறது.",
+    "Applications' mail too. Your Sent folder is not affected.": "செயலிகளின் அஞ்சலுக்கும். உங்கள் அனுப்பியவை கோப்புறை பாதிக்கப்படாது."
   }
 }

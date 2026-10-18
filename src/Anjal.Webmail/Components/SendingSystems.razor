@@ -118,6 +118,11 @@
                             <div><dt>@L["Message id"]</dt><dd><code>@(d.MessageId.Length > 0 ? d.MessageId : "–")</code></dd></div>
                             <div><dt>@L["Original kept"]</dt><dd>@(d.Sha256 is string sha ? "SHA-256 " + sha[..Math.Min(12, sha.Length)] + "…" : "–")</dd></div>
                             <div><dt>@L["Gives up"]</dt><dd>@clock.Full(d.Row.GiveUp)</dd></div>
+                            @if (d.ContentRemoved is DateTimeOffset gone)
+                            {
+                                @* rc.21.1 (DEF-117): the content leaves the queue after the organisation's keep-days. *@
+                                <div><dt>@L["Content"]</dt><dd>@L["Removed {date}, after the days set under Retention. This record stays; the untouched original is kept as legal evidence."].Replace("{date}", clock.Full(gone), StringComparison.Ordinal)</dd></div>
+                            }
                         </dl>
                         <div class="ssactions">
                             @if (d.Row.Status is "Delayed" or "Queued")
@@ -135,7 +140,10 @@
                                     <button type="submit" class="btn btn-q btn-sm btn-danger" title="@L["Stop delivering it. It is marked as failed."]" data-needs-server>@L["Stop trying"]</button>
                                 </form>
                             }
-                            <a class="btn btn-q btn-sm" href="/org/sending/@(d.Row.Id).eml" title="@L["Save this mail's original as a file."]" download><LipiIcon Name="download" Size="15" />@EmlWord</a>
+                            @if (d.ContentRemoved is null)
+                            {
+                                <a class="btn btn-q btn-sm" href="/org/sending/@(d.Row.Id).eml" title="@L["Save this mail's original as a file."]" download><LipiIcon Name="download" Size="15" />@EmlWord</a>
+                            }
                         </div>
                     </aside>
                 }

@@ -2697,6 +2697,9 @@
     "What Lajna can do": "What Lajna can do",
     "Write a draft for you to send, such as a leave letter to your manager.": "Write a draft for you to send, such as a leave letter to your manager.",
     "{n}%": "{n}%",
-    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself."
+    "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.": "I do not know {name}'s address, so the To line is empty. Here is a draft: open it in Compose, add the address, and send it yourself.",
+    "Content": "Content",
+    "Removed {date}, after the days set under Retention. This record stays; the untouched original is kept as legal evidence.": "Removed {date}, after the days set under Retention. This record stays; the untouched original is kept as legal evidence.",
+    "Applications' mail too. Your Sent folder is not affected.": "Applications' mail too. Your Sent folder is not affected."
   }
 }

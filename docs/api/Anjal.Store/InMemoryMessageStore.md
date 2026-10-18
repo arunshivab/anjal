@@ -110,6 +110,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **NoteRecoveredFromJunk** *(method)* - Record that a message was moved out of Junk by the reader.
 - **OldestPendingOutboundAsync** *(method)* - _(no description)_
 - **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
+- **RemoveOutboundContentAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
 - **ReplayWebhookJobAsync** *(method)* - _(no description)_

@@ -394,6 +394,7 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore,
             found.LastError = lastError;
             found.Attempts++;
             found.LeaseExpiresAt = null;
+            found.FinishedAt = newStatus is OutboundStatus.Sent or OutboundStatus.Failed ? System.DateTimeOffset.UtcNow : null;
             if (newStatus == OutboundStatus.Pending)
             {
                 found.NextAttemptAt = nextAttemptAt;
