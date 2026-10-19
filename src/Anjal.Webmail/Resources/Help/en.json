@@ -1514,22 +1514,22 @@
   {
    "id": "patient-warning",
    "part": "patient",
-   "title": "The patient-information warning",
-   "summary": "When a message to someone outside your organisation looks like it carries patient information, Anjal asks you to check before it goes. A warning, never a block: you decide.",
+   "title": "The patient and personal-information warning",
+   "summary": "When a message to someone outside your organisation looks like it carries patient information (a record number, a diagnosis, a report) or personal information (an Aadhaar or PAN number, a phone number, bank details, pay, a password), Anjal asks you to check before it goes. A warning, never a block: you decide.",
    "steps": [
     "Write the message as usual and press Send.",
-    "If the subject, text or a file name looks like a record number, a diagnosis or a report, a yellow notice names what was found and the outside address.",
+    "If the subject, text or a file name looks like a record number, a diagnosis, a report, an Aadhaar or PAN number, a phone number, bank details or pay, a yellow notice names what was found and the outside address.",
     "Press Send anyway, or change the message. The Referral template under Hospital and clinic is written for sending a referral safely."
    ],
-   "tip": null,
+   "tip": "Anjal matches patterns, not meaning: it cannot tell what a sentence is about. Mail inside your organisation is never checked.",
    "show": null,
    "related": [
     "templates",
     "outside"
    ],
-   "keywords": "patient confidential hipaa dpdp record number mrn uhid referral warning outside",
+   "keywords": "patient confidential hipaa dpdp record number mrn uhid referral warning outside personal aadhaar pan phone bank salary files",
    "release": "rc.22",
-   "org": null
+   "org": "Your organisation can also ask everyone to check before any mail with files goes outside (Organisation > Mail rules > Files going outside)."
   },
   {
    "id": "aliases",

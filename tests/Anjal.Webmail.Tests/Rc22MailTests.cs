@@ -18,6 +18,7 @@ public sealed class Rc22MailTests : IDisposable
     private static readonly string[] HelpOnly = { "help@sgh.in" };
     private static readonly string[] NoFiles = Array.Empty<string>();
     private static readonly string[] ReportFile = { "discharge-summary.pdf" };
+    private static readonly string[] Payroll = { "payroll-oct.xlsx" };
     private static readonly string[] Doctors = { "doctors@sgh.in" };
     private static readonly string[] UnreadFlagged = { "Unread", "Flagged" };
     private static readonly string[] HelpAlias = { "help@sgh.in" };
@@ -195,11 +196,46 @@ public sealed class Rc22MailTests : IDisposable
     {
         Assert.Empty(await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "meera@sgh.in", Subject = "Discharge summary MRN 2026-10443", Body = "Diagnosis attached." }));
         IReadOnlyList<string> reasons = await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "dr.rao@gmail.test", Subject = "Discharge summary MRN 2026-10443", Body = "Diagnosis attached." });
-        Assert.Equal("dr.rao@gmail.test", reasons[0]);
         Assert.Contains(reasons, r => r.Contains("record number", StringComparison.Ordinal));
         Assert.Empty(await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "dr.rao@gmail.test", Subject = "Lunch", Body = "Friday?" }));
         Assert.Empty(PatientInformation.Signs("Lunch", "Friday?", NoFiles));
         Assert.Contains(PatientInformation.Signs("Hi", "see file", ReportFile), r => r.Contains("discharge-summary.pdf", StringComparison.Ordinal));
+        // The kind comes first, then the outside address.
+        Assert.Equal("patient", reasons[0]);
+        Assert.Equal("dr.rao@gmail.test", reasons[1]);
+        // Whole words only: "forward" is not "ward", "showcase" is not "case".
+        Assert.Empty(PatientInformation.Signs("Please forward the showcase deck", "toward Friday", NoFiles));
+    }
+
+    [Fact]
+    public async Task PersonalInformation_IsNamed_AndTheOrganisationCanAskAboutEveryFileGoingOutside()
+    {
+        // Owner, 19 Oct 2026: Aadhaar, PAN, phone, bank account, pay and passwords are personal information.
+        IReadOnlyList<string> aadhaar = PatientInformation.PersonalSigns("Details", "Aadhaar 2345 6789 0123, PAN ABCDE1234F, call 98400 12345", NoFiles);
+        Assert.Contains("an Aadhaar number", aadhaar);
+        Assert.Contains("a PAN", aadhaar);
+        Assert.Contains("a phone number", aadhaar);
+        Assert.Contains(PatientInformation.PersonalSigns("Salary revision", "Your payslip is attached.", NoFiles), r => r.Contains("\"salary\"", StringComparison.Ordinal));
+        Assert.Contains(PatientInformation.PersonalSigns("Hi", "see file", Payroll), r => r.Contains("payroll-oct.xlsx", StringComparison.Ordinal));
+        Assert.Empty(PatientInformation.PersonalSigns("Lunch on Friday?", "Order no 2026-10-19 placed at 12:30, bill 1,250.", NoFiles));
+
+        IReadOnlyList<string> personal = await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "hr.vendor@gmail.test", Subject = "Bank details", Body = "A/c no 123456789012, IFSC HDFC0001234" });
+        Assert.Equal("personal", personal[0]);
+        IReadOnlyList<string> both = await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "hr.vendor@gmail.test", Subject = "Patient's Aadhaar", Body = "2345 6789 0123" });
+        Assert.Equal("both", both[0]);
+
+        // Files outside: nothing until the organisation switches it on, then every file is asked about.
+        var withFile = new ComposeRequest { To = "vendor@gmail.test", Subject = "Quotation", Body = "Attached." };
+        withFile.Attachments.Add(("quote.pdf", "application/pdf", new byte[] { 1 }));
+        Assert.Empty(await this.svc.PatientWarningAsync(this.arun.Id, withFile));
+        await this.svc.SaveMailPolicyAsync(this.sgh.Id, new OrgMailPolicy { AskBeforeFilesOutside = true });
+        IReadOnlyList<string> files = await this.svc.PatientWarningAsync(this.arun.Id, withFile);
+        Assert.Equal("files", files[0]);
+        Assert.Equal("vendor@gmail.test", files[1]);
+        Assert.Equal("quote.pdf", files[2]);
+        // Inside the organisation, and mail without files, stay unasked.
+        Assert.Empty(await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "meera@sgh.in", Subject = "Quotation", Body = "Attached." }));
+        Assert.Empty(await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "vendor@gmail.test", Subject = "Quotation", Body = "No file." }));
     }
 
     [Fact]

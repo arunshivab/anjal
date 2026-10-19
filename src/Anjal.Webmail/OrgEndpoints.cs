@@ -121,15 +121,15 @@ internal static class OrgEndpoints
         }).RequireAuthorization();
 
         // rc.22 (mockup 13): the organisation's mail rules.
-        app.MapPost("/org/rules", async (HttpContext http, [FromForm] string? forward, [FromForm] string? nicknames, [FromForm] string? away, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
+        app.MapPost("/org/rules", async (HttpContext http, [FromForm] string? forward, [FromForm] string? nicknames, [FromForm] string? away, [FromForm] string? askFiles, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
         {
             if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
             {
                 return Results.NotFound();
             }
-            var policy = new Anjal.Mailbox.OrgMailPolicy { ForwardingOutside = forward == "1", Nicknames = nicknames == "1", AwayOutside = away == "1" };
+            var policy = new Anjal.Mailbox.OrgMailPolicy { ForwardingOutside = forward == "1", Nicknames = nicknames == "1", AwayOutside = away == "1", AskBeforeFilesOutside = askFiles == "1" };
             await svc.SaveMailPolicyAsync(a.Tenant.Id, policy, ct).ConfigureAwait(false);
-            await audit.RecordAsync(a.Me.Address, "org.rules", a.Tenant.Slug, Client(http), $"forwarding outside {(policy.ForwardingOutside ? "allowed" : "not allowed")}, nicknames {(policy.Nicknames ? "allowed" : "off")}, away replies {(policy.AwayOutside ? "inside and outside" : "inside only")}").ConfigureAwait(false);
+            await audit.RecordAsync(a.Me.Address, "org.rules", a.Tenant.Slug, Client(http), $"forwarding outside {(policy.ForwardingOutside ? "allowed" : "not allowed")}, nicknames {(policy.Nicknames ? "allowed" : "off")}, away replies {(policy.AwayOutside ? "inside and outside" : "inside only")}, files outside {(policy.AskBeforeFilesOutside ? "asked first" : "as usual")}").ConfigureAwait(false);
             return Results.Redirect("/org/rules?saved=1");
         }).RequireAuthorization();
 
