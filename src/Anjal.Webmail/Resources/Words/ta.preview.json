@@ -3098,6 +3098,14 @@
     "My organisation": "என் நிறுவனம்",
     "My contacts": "என் தொடர்புகள்",
     "First + last name": "முதல் + கடைசிப் பெயர்",
-    "Individuals: people with their own address on the shared domain; the administrator is User management.": "தனிநபர்கள்: பகிர்ந்த டொமைனில் தங்கள் சொந்த முகவரியுடன் உள்ளவர்கள்; நிர்வாகி User management."
+    "Individuals: people with their own address on the shared domain; the administrator is User management.": "தனிநபர்கள்: பகிர்ந்த டொமைனில் தங்கள் சொந்த முகவரியுடன் உள்ளவர்கள்; நிர்வாகி User management.",
+    "({files}, to {who}). Your organisation asks everyone to check before files leave it: that this is allowed, and that the address is right. Press Send again to send it anyway; untick a file below to leave it out.": "({files}, {who}-க்கு). கோப்புகள் நிறுவனத்தை விட்டு வெளியேறும் முன் சரிபார்க்க உங்கள் நிறுவனம் அனைவரையும் கேட்கிறது: இது அனுமதிக்கப்பட்டதா, முகவரி சரியானதா என. எப்படியும் அனுப்ப Send-ஐ மீண்டும் அழுத்தவும்; ஒரு கோப்பை விட்டுவிட கீழே அதன் டிக்கை நீக்கவும்.",
+    "Ask first": "முதலில் கேள்",
+    "Ask first: before any mail with files goes to an address outside your domains, the person is asked to check it, whatever the files are. Patient and personal information are checked either way.": "முதலில் கேள்: கோப்புகளுடன் எந்த அஞ்சலும் உங்கள் டொமைன்களுக்கு வெளியே உள்ள முகவரிக்குச் செல்லும் முன், கோப்புகள் எதுவாயினும், சரிபார்க்க அந்த நபரிடம் கேட்கப்படும். நோயாளி மற்றும் தனிப்பட்ட தகவல் எப்படியும் சரிபார்க்கப்படும்.",
+    "Files are going outside {org}": "கோப்புகள் {org}-க்கு வெளியே செல்கின்றன",
+    "Files going outside": "வெளியே செல்லும் கோப்புகள்",
+    "Send as usual": "வழக்கம் போல் அனுப்பு",
+    "This looks like patient and personal information": "இது நோயாளி மற்றும் தனிப்பட்ட தகவல் போலத் தெரிகிறது",
+    "This looks like personal information": "இது தனிப்பட்ட தகவல் போலத் தெரிகிறது"
   }
 }

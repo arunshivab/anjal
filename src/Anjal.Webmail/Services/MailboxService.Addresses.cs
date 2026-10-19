@@ -177,14 +177,15 @@ public sealed partial class MailboxService
     }
 
     /// <summary>
-    /// rc.22 (item 50): what in a message looks like patient information going outside the
-    /// organisation, in words; empty when nothing does, when every recipient is inside, or for an
-    /// individual (no organisation to go outside of).
+    /// rc.22 (item 50; owner 19 Oct 2026): what in a message looks like patient or personal
+    /// information going outside the organisation, in words - or, when the organisation asks about
+    /// every file, that files are going outside; empty when nothing does, when every recipient is
+    /// inside, or for an individual (no organisation to go outside of).
     /// </summary>
     /// <param name="mailboxId">The writer.</param>
     /// <param name="request">The message.</param>
     /// <param name="ct">Cancellation.</param>
-    /// <returns>The reasons: the outside address first, then what was found.</returns>
+    /// <returns>The kind (patient, personal, both, or files when the organisation asks about every file), the outside address, then what was found.</returns>
     public async Task<IReadOnlyList<string>> PatientWarningAsync(Guid mailboxId, ComposeRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -206,13 +207,30 @@ public sealed partial class MailboxService
         {
             return Array.Empty<string>();
         }
-        IReadOnlyList<string> signs = PatientInformation.Signs(request.Subject, request.Body, request.Attachments.Select(x => x.FileName));
-        if (signs.Count == 0)
+        List<string> fileNames = request.Attachments.Select(x => x.FileName).ToList();
+        IReadOnlyList<string> patient = PatientInformation.Signs(request.Subject, request.Body, fileNames);
+        IReadOnlyList<string> personal = PatientInformation.PersonalSigns(request.Subject, request.Body, fileNames);
+        string kind = patient.Count > 0 && personal.Count > 0 ? "both" : patient.Count > 0 ? "patient" : personal.Count > 0 ? "personal" : string.Empty;
+        if (kind.Length == 0 && fileNames.Count > 0)
+        {
+            // Owner, 19 Oct 2026: the organisation's switch - any files going outside are asked about.
+            Guid? tenant = await this.TenantOfAsync(mailboxId, ct).ConfigureAwait(false);
+            if (tenant is Guid t && (await this.MailPolicyOfAsync(t, ct).ConfigureAwait(false)).AskBeforeFilesOutside)
+            {
+                kind = "files";
+            }
+        }
+        if (kind.Length == 0)
         {
             return Array.Empty<string>();
         }
-        var all = new List<string> { string.Join(", ", outside.Take(3)) };
-        all.AddRange(signs);
+        var all = new List<string> { kind, string.Join(", ", outside.Take(3)) };
+        all.AddRange(patient);
+        all.AddRange(personal);
+        if (kind == "files")
+        {
+            all.Add(fileNames.Count == 1 ? fileNames[0] : fileNames.Count + " files");
+        }
         return all;
     }
 }

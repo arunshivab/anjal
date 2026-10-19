@@ -304,6 +304,15 @@ else
                         </div>
                         <p class="hint">@L["Whether automatic replies go to senders outside the organisation."]</p>
                     </div>
+                    @* Owner, 19 Oct 2026: a plain switch beside the pattern checks - any file leaving the organisation is asked about. *@
+                    <div class="setfield">
+                        <span class="setlbl">@L["Files going outside"]</span>
+                        <div class="seg" role="radiogroup">
+                            <label class="segopt"><input type="radio" name="askFiles" value="0" checked="@(!mailPolicy.AskBeforeFilesOutside)" /><span>@L["Send as usual"]</span></label>
+                            <label class="segopt"><input type="radio" name="askFiles" value="1" checked="@mailPolicy.AskBeforeFilesOutside" /><span>@L["Ask first"]</span></label>
+                        </div>
+                        <p class="hint">@L["Ask first: before any mail with files goes to an address outside your domains, the person is asked to check it, whatever the files are. Patient and personal information are checked either way."]</p>
+                    </div>
                 </div>
                 <div class="setactions"><button type="submit" class="btn btn-p">@L["Save"]</button></div>
                 @if (forwards.Count > 0)

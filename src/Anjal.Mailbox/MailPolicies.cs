@@ -24,6 +24,13 @@ public sealed class OrgMailPolicy
     /// <summary>Whether out-of-office replies go to senders outside the organisation (item 30).</summary>
     public bool AwayOutside { get; set; } = true;
 
+    /// <summary>
+    /// Owner, 19 Oct 2026: ask once before any mail that carries files goes to an address outside the
+    /// organisation, whatever the files are. Off by default; the patient and personal-information
+    /// checks run either way.
+    /// </summary>
+    public bool AskBeforeFilesOutside { get; set; }
+
     /// <summary>Read an organisation's policy; Anjal's defaults when it has set none.</summary>
     /// <param name="store">The store.</param>
     /// <param name="tenantId">The organisation.</param>

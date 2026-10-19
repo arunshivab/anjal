@@ -3098,6 +3098,14 @@
     "My organisation": "મારી સંસ્થા",
     "My contacts": "મારા સંપર્કો",
     "First + last name": "પહેલું + છેલ્લું નામ",
-    "Individuals: people with their own address on the shared domain; the administrator is User management.": "વ્યક્તિઓ: વહેંચાયેલા ડોમેન પર પોતાનું સરનામું ધરાવતા લોકો; વ્યવસ્થાપક User management છે."
+    "Individuals: people with their own address on the shared domain; the administrator is User management.": "વ્યક્તિઓ: વહેંચાયેલા ડોમેન પર પોતાનું સરનામું ધરાવતા લોકો; વ્યવસ્થાપક User management છે.",
+    "({files}, to {who}). Your organisation asks everyone to check before files leave it: that this is allowed, and that the address is right. Press Send again to send it anyway; untick a file below to leave it out.": "({files}, {who} ને). ફાઇલો સંસ્થાની બહાર જાય તે પહેલાં તપાસવા તમારી સંસ્થા બધાને કહે છે: આ માન્ય છે કે નહીં, અને સરનામું સાચું છે કે નહીં. તોપણ મોકલવા Send ફરી દબાવો; કોઈ ફાઇલ છોડી દેવા નીચે તેનો ટિક દૂર કરો.",
+    "Ask first": "પહેલાં પૂછો",
+    "Ask first: before any mail with files goes to an address outside your domains, the person is asked to check it, whatever the files are. Patient and personal information are checked either way.": "પહેલાં પૂછો: ફાઇલો સાથેનો કોઈપણ મેઇલ તમારા ડોમેન બહારના સરનામે જાય તે પહેલાં, ફાઇલો ગમે તે હોય, વ્યક્તિને તપાસવા કહેવાય છે. દર્દી અને વ્યક્તિગત માહિતી કોઈપણ રીતે તપાસાય છે.",
+    "Files are going outside {org}": "ફાઇલો {org} ની બહાર જઈ રહી છે",
+    "Files going outside": "બહાર જતી ફાઇલો",
+    "Send as usual": "હંમેશની જેમ મોકલો",
+    "This looks like patient and personal information": "આ દર્દી અને વ્યક્તિગત માહિતી લાગે છે",
+    "This looks like personal information": "આ વ્યક્તિગત માહિતી લાગે છે"
   }
 }

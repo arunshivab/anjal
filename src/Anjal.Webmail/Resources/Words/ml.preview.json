@@ -3098,6 +3098,14 @@
     "My organisation": "എന്റെ സ്ഥാപനം",
     "My contacts": "എന്റെ കോൺടാക്റ്റുകൾ",
     "First + last name": "ആദ്യ + അവസാന പേര്",
-    "Individuals: people with their own address on the shared domain; the administrator is User management.": "വ്യക്തികൾ: പങ്കിട്ട ഡൊമെയ്‌നിൽ സ്വന്തം വിലാസമുള്ളവർ; അഡ്മിനിസ്ട്രേറ്റർ User management."
+    "Individuals: people with their own address on the shared domain; the administrator is User management.": "വ്യക്തികൾ: പങ്കിട്ട ഡൊമെയ്‌നിൽ സ്വന്തം വിലാസമുള്ളവർ; അഡ്മിനിസ്ട്രേറ്റർ User management.",
+    "({files}, to {who}). Your organisation asks everyone to check before files leave it: that this is allowed, and that the address is right. Press Send again to send it anyway; untick a file below to leave it out.": "({files}, {who}-ലേക്ക്). ഫയലുകൾ സ്ഥാപനം വിട്ടുപോകുംമുമ്പ് പരിശോധിക്കാൻ നിങ്ങളുടെ സ്ഥാപനം എല്ലാവരോടും ആവശ്യപ്പെടുന്നു: ഇത് അനുവദനീയമാണോ, വിലാസം ശരിയാണോ എന്ന്. എന്നാലും അയയ്ക്കാൻ Send വീണ്ടും അമർത്തുക; ഒരു ഫയൽ ഒഴിവാക്കാൻ താഴെ അതിന്റെ ടിക്ക് മാറ്റുക.",
+    "Ask first": "ആദ്യം ചോദിക്കുക",
+    "Ask first: before any mail with files goes to an address outside your domains, the person is asked to check it, whatever the files are. Patient and personal information are checked either way.": "ആദ്യം ചോദിക്കുക: ഫയലുകളുള്ള ഏതു മെയിലും നിങ്ങളുടെ ഡൊമെയ്‌നുകൾക്കു പുറത്തുള്ള വിലാസത്തിലേക്കു പോകുംമുമ്പ്, ഫയലുകൾ എന്തായാലും, പരിശോധിക്കാൻ ആ വ്യക്തിയോട് ആവശ്യപ്പെടും. രോഗി, വ്യക്തിഗത വിവരങ്ങൾ എന്തായാലും പരിശോധിക്കപ്പെടും.",
+    "Files are going outside {org}": "ഫയലുകൾ {org}-ന് പുറത്തേക്ക് പോകുന്നു",
+    "Files going outside": "പുറത്തേക്കു പോകുന്ന ഫയലുകൾ",
+    "Send as usual": "പതിവുപോലെ അയയ്ക്കുക",
+    "This looks like patient and personal information": "ഇത് രോഗിയുടെയും വ്യക്തിഗതവുമായ വിവരങ്ങളായി തോന്നുന്നു",
+    "This looks like personal information": "ഇത് വ്യക്തിഗത വിവരമായി തോന്നുന്നു"
   }
 }

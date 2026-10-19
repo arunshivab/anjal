@@ -10,6 +10,13 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.22.1** (19 October 2026) - The Compose warning for mail going outside the organisation
+now also names personal information (an Aadhaar or PAN number, a phone number, bank details, pay,
+a password), and an organisation can ask everyone to check before any mail with files goes
+outside (Organisation > Mail rules > Files going outside). Owner, 19 Oct 2026: "personal
+patterns + broad switch". Still a warning, never a block; mail inside the organisation is never
+checked.
+
 **v1.0.0-rc.22** (19 October 2026) - Accounts, and the mail that goes with them. Individuals get an
 account on **anjalmail.com** through the usermanagement console (invited, or filled in by hand);
 organisations add people through their administrator (invited with the username chosen by the
