@@ -102,6 +102,28 @@
 {
     <div class="notice-wrap"><div class="notice n-err"><LipiIcon Name="warning" Size="16" /><span>@notice</span></div></div>
 }
+@if (awayOn is not null && Name == FolderRow.Inbox)
+{
+    @* rc.22 (item 30): the yellow line while the away reply is on. *@
+    <div class="notice-wrap"><div class="notice n-warn">
+        <LipiIcon Name="clock" Size="16" />
+        <span>@(awayOn.Until is DateTimeOffset until ? L["Your away reply is on until {date}."].Replace("{date}", clock.Full(until), StringComparison.Ordinal) : L["Your away reply is on."])</span>
+        <form method="post" action="/settings/away" class="inline act">
+            <AntiforgeryToken />
+            <input type="hidden" name="back" value="/folder/INBOX" />
+            <button type="submit" class="btn btn-s btn-sm" data-needs-server>@L["Turn it off"]</button>
+        </form>
+        <a class="btn btn-q btn-sm" href="/settings/away">@L["Change"]</a>
+    </div></div>
+}
+@if (heldCount > 0 && Name == FolderRow.Inbox)
+{
+    @* rc.22 (item 39, mockup 22): mail held because the virus scanner is down. *@
+    <div class="notice-wrap"><div class="notice n-warn">
+        <LipiIcon Name="security" Size="16" />
+        <span><b>@(heldCount == 1 ? L["One message is held."] : L["{n} messages are held."].Replace("{n}", heldCount.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</b> @L["A file in it could not be checked for viruses because the scanner is being repaired. It is held safely and checked again every few minutes; it arrives once the scanner answers. Your administrator has been told."]</span>
+    </div></div>
+}
 @if (OfferDmarcRule)
 {
     @* Item 31: the first DMARC report brings the ready-made rule. *@
@@ -244,6 +266,20 @@ else
                                 <button class="btn btn-s btn-sm" name="action" value="move" type="submit" data-bulkaction data-needs-server>@L["Move to"]</button>
                             </div>
                         }
+                        @if (Name is not ("Drafts" or "Sent" or "Trash") && Name != Anjal.Mailbox.MailboxSink.JunkFolder && Name != MailboxService.ScheduledFolder)
+                        {
+                            @* rc.22 (item 31): snooze the selected mail until a preset. *@
+                            <div class="pmi-row">
+                                <LipiIcon Name="clock" Size="15" />
+                                <select name="until" class="scope" aria-label="@L["Snooze until"]" data-bulkaction>
+                                    <option value="today">@L["Later today"]</option>
+                                    <option value="tomorrow" selected>@L["Tomorrow"]</option>
+                                    <option value="weekend">@L["This weekend"]</option>
+                                    <option value="week">@L["Next week"]</option>
+                                </select>
+                                <button class="btn btn-s btn-sm" name="action" value="snooze" type="submit" data-bulkaction data-needs-server>@L["Snooze"]</button>
+                            </div>
+                        }
                         @* Categories are for mail you keep: not offered in Drafts, Junk or Trash. *@
                         @if (categories.Count > 0 && Name != "Drafts" && Name != Anjal.Mailbox.MailboxSink.JunkFolder && Name != "Trash")
                         {
@@ -291,6 +327,26 @@ else
         else
         {
             <div class="mlist @(ShowFlag ? "" : "noflag")" data-list data-newest="@Newest" data-folder="@Name" data-page="@pageIndex">
+                @foreach (SectionView sv in sectionViews)
+                {
+                    @* rc.22 (item 55, mockup 21): the sections, each a saved search, above everything else. *@
+                    <section class="mgroup msection" aria-label="@sv.Section.Name">
+                        <h2 class="mgroup-day msection-head"><span>@sv.Section.Name</span><a class="msection-all" href="@sv.SearchLink">@(sv.Total == 1 ? L["all 1"] : L["all {n}"].Replace("{n}", sv.Total.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</a></h2>
+                        @if (sv.Rows.Count == 0)
+                        {
+                            <p class="msection-empty">@L["Nothing here right now."]</p>
+                        }
+                        @foreach (MessageRow m in sv.Rows)
+                        {
+                            <MessageListRow M="m" L="L" Clock="clock" FolderName="@Name" Threshold="threshold" Trusted="trusted" Mark="@MarkOf(m)" Category="@(m.CategoryId is Guid cid ? Lookup(cid) : null)" Who="@Sender(m)"
+                                            Selectable="true" ShowFlag="ShowFlag" OpenLink="@OpenLink(m)" BackLink="@BackLink" IsOpen="@(m.Id == OpenId)" QuickUrl="@($"/folder/{Uri.EscapeDataString(Name)}/bulk")" />
+                        }
+                    </section>
+                }
+                @if (sectionViews.Count > 0)
+                {
+                    <h2 class="mgroup-day msection-head"><span>@L["Everything else"]</span></h2>
+                }
                 @foreach (IGrouping<string, MessageRow> group in Groups)
                 {
                     <section class="mgroup" aria-label="@(Dated ? L.Heading(group.Key) : null)">
@@ -301,7 +357,7 @@ else
                         @foreach (MessageRow m in group)
                         {
                             <MessageListRow M="m" L="L" Clock="clock" FolderName="@Name" Threshold="threshold" Trusted="trusted" Sends="@SendsLabel(m)" Conversation="@conversationOf(m)"
-                                            Category="@(m.CategoryId is Guid cid ? Lookup(cid) : null)" Who="@(IsOutgoing ? Recipient(m) : Sender(m))"
+                                            Mark="@MarkOf(m)" Category="@(m.CategoryId is Guid cid ? Lookup(cid) : null)" Who="@(IsOutgoing ? Recipient(m) : Sender(m))"
                                             Outgoing="IsOutgoing" Selectable="true" ShowFlag="ShowFlag" OpenLink="@OpenLink(m)" BackLink="@BackLink" IsOpen="@(m.Id == OpenId)"
                                             QuickUrl="@($"/folder/{Uri.EscapeDataString(Name)}/bulk")" />
                         }
@@ -413,6 +469,8 @@ else
         : null;
 
     private IReadOnlyList<string> notices = Array.Empty<string>();
+    private Anjal.Mailbox.AwayReply? awayOn;
+    private int heldCount;
     private bool OfferDmarcRule;
     private Func<MessageRow, int> conversationOf = _ => 1;
 
@@ -420,7 +478,19 @@ else
     private string? SendsLabel(MessageRow m) =>
         Name == MailboxService.ScheduledFolder && MailboxService.SendTimeOf(m) is DateTimeOffset at
             ? L["Sends {time}"].Replace("{time}", clock.Full(at), StringComparison.Ordinal)
+            : Name == MailboxService.SnoozedFolder && snoozed.Sleeping.TryGetValue(m.Id, out SnoozeEntry? entry)
+            ? L["Back {time}"].Replace("{time}", clock.Full(entry.Until), StringComparison.Ordinal)
             : null;
+
+    // rc.22: "Snoozed" for a day after it came back; "Virus removed" when a file was taken out on arrival (item 39).
+    private string? MarkOf(MessageRow m) =>
+        woken.Contains(m.Id) ? "Snoozed"
+        : m.Subject.Contains("(attachment removed:", StringComparison.Ordinal) ? "Virus removed"
+        : null;
+
+    private SnoozeDocument snoozed = new();
+    private IReadOnlyList<SectionView> sectionViews = Array.Empty<SectionView>();
+    private IReadOnlySet<Guid> woken = new HashSet<Guid>();
 
     /// <summary>The message open beside the list (three panes) or alone (focus); item 45.</summary>
     private Guid? OpenId => Guid.TryParse(OpenText, out Guid g) ? g : null;
@@ -599,6 +669,20 @@ else
         }
         folders = await Mail.ListFoldersAsync(mailboxId.Value);
         notices = await Mail.TakeNoticesAsync(mailboxId.Value);
+        if (Name == FolderRow.Inbox)
+        {
+            awayOn = await Mail.AwayActiveAsync(mailboxId.Value);
+            heldCount = await Mail.HeldCountAsync(mailboxId.Value);
+            woken = await Mail.WokenAsync(mailboxId.Value);
+            if (pageIndex == 0 && Show == "all" && OpenId is null)
+            {
+                sectionViews = await Mail.SectionViewsAsync(mailboxId.Value);
+            }
+        }
+        if (Name == MailboxService.SnoozedFolder)
+        {
+            snoozed = await Mail.SnoozeOfAsync(mailboxId.Value);
+        }
         folder = await Mail.GetFolderAsync(mailboxId.Value, Name);
         if (folder is null)
         {
@@ -640,6 +724,16 @@ else
         {
             pageIndex = (int)((total - 1) / pageSize);
             (items, total) = await Mail.ListSortedAsync(mailboxId.Value, folder.Id, Show, sort, IsOutgoing, pageIndex, pageSize);
+        }
+        // rc.22 (item 31): mail woken from snooze sits on top of its folder for a day, under its own id.
+        if (pageIndex == 0 && Show == "all" && sort == MailboxService.NewestFirst)
+        {
+            IReadOnlyList<MessageRow> wokenRows = await Mail.WokenRowsAsync(mailboxId.Value, folder.Id);
+            if (wokenRows.Count > 0)
+            {
+                var wokenIds = wokenRows.Select(w => w.Id).ToHashSet();
+                items = wokenRows.Concat(items.Where(m => !wokenIds.Contains(m.Id))).ToList();
+            }
         }
         // The reader marks the open message read after the list has loaded; show it read here too.
         bool openedNow = false;

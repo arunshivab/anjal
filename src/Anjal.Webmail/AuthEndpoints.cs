@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using Anjal.Store;
 using Anjal.Webmail.Services;
@@ -28,14 +29,27 @@ internal static class AuthEndpoints
     /// <summary>Set when a request's session was found idle or ended, for the sign-in redirect.</summary>
     internal const string EndedItem = "anjal.ended";
 
+    /// <summary>rc.22 (item 33): the other accounts signed in on this browser, sealed; each has its own session.</summary>
+    internal const string AccountsCookie = "anjal.accounts";
+
+    /// <summary>The most accounts signed in together.</summary>
+    internal const int MaxAccounts = 5;
+
+    private const string AccountsItem = "anjal.accounts.written";
+
     private const string Scheme = CookieAuthenticationDefaults.AuthenticationScheme;
 
     internal static void Map(WebApplication app)
     {
-        app.MapPost("/auth/login", async (HttpContext http, [FromForm] string address, [FromForm] string password, [FromForm] string? device,
+        app.MapPost("/auth/login", async (HttpContext http, [FromForm] string address, [FromForm] string password, [FromForm] string? device, [FromForm] string? add,
             WebmailAuthService auth, MailboxService svc, LoginThrottle throttle, AuditTrail audit, CancellationToken ct) =>
         {
             string client = ClientOf(http);
+            // rc.22 (item 33): "Add another account" keeps the account signed in now; switching is in the initials menu.
+            if (add == "1" && device != "shared")
+            {
+                await KeepCurrentAccountAsync(http).ConfigureAwait(false);
+            }
             OrganisationIdentity? org = await svc.OrganisationForHostAsync(http.Request.Host.Host, ct).ConfigureAwait(false);
             string account = MailboxService.FullAddress(address, org?.Domain);
             string typed = (address ?? string.Empty).Trim();
@@ -104,15 +118,38 @@ internal static class AuthEndpoints
             await antiforgery.ValidateRequestAsync(http).ConfigureAwait(false);
             IFormCollection form = await http.Request.ReadFormAsync().ConfigureAwait(false);
             bool idle = form["reason"] == "idle";
+            bool all = form["all"] == "1";
             string who = http.User.Identity?.Name ?? string.Empty;
             string tz = WebmailAuthService.ClockOf(http.User).ZoneId;
             if (who.Length > 0)
             {
                 await audit.RecordAsync(who, idle ? "webmail.signout.idle" : "webmail.signout", who, ClientOf(http)).ConfigureAwait(false);
             }
-            if (WebmailAuthService.PersonIdOf(http.User) is Guid mailboxId && SessionRegistry.SessionOf(http.User) is string sid)
+            Guid? me = WebmailAuthService.PersonIdOf(http.User);
+            if (me is Guid mailboxId && SessionRegistry.SessionOf(http.User) is string sid)
             {
                 await sessions.EndAsync(mailboxId, sid).ConfigureAwait(false);
+            }
+            // rc.22 (item 33): the other accounts on this browser - all signed out, or the next one opened.
+            List<(Guid Mailbox, string Sid)> others = ReadAccounts(http).Where(o => o.Mailbox != me).ToList();
+            if (all || idle)
+            {
+                foreach ((Guid m, string s2) in others)
+                {
+                    await sessions.EndAsync(m, s2).ConfigureAwait(false);
+                }
+                http.Response.Cookies.Delete(AccountsCookie);
+            }
+            else if (others.Count > 0)
+            {
+                foreach ((Guid m, string s2) in others)
+                {
+                    if (await SwitchToAsync(http, m, s2, others.Where(o => o.Mailbox != m).ToList()).ConfigureAwait(false))
+                    {
+                        return Results.Redirect("/folder/INBOX?switched=1");
+                    }
+                }
+                http.Response.Cookies.Delete(AccountsCookie);
             }
             await http.SignOutAsync(Scheme).ConfigureAwait(false);
             // "Leaves nothing behind": the browser drops this site's cache and storage.
@@ -390,6 +427,90 @@ internal static class AuthEndpoints
             return Results.Redirect(next is null ? "/sign-in" : "/settings/security/two-step?welcome=1");
         });
 
+        // ---- rc.22 (item 5): registration from an invitation; nothing exists until Submit ----
+        app.MapPost("/auth/join", async (HttpContext http, [FromForm] string? token, [FromForm] string? first, [FromForm] string? last, [FromForm] string? phone,
+            [FromForm] string? dob, [FromForm] string? local, [FromForm] string? password, [FromForm] string? terms, [FromForm] string? disclaimer,
+            MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            PendingView? found = await svc.FindPendingAsync(token, ct).ConfigureAwait(false);
+            if (found is null)
+            {
+                return Results.Redirect("/join/expired");
+            }
+            DateOnly? born = DateOnly.TryParseExact((dob ?? string.Empty).Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly d) ? d : null;
+            (string? error, MailboxRow? mailbox) = await svc.RegisterAsync(token, first ?? string.Empty, last ?? string.Empty, phone ?? string.Empty, born, local ?? string.Empty,
+                password ?? string.Empty, terms == "1", disclaimer == "1", OriginOf(http), ct).ConfigureAwait(false);
+            if (error is not null || mailbox is null)
+            {
+                string kept = string.Join("&", new[]
+                {
+                    "e=" + Uri.EscapeDataString(Note(dp, error ?? "The mailbox could not be made.")),
+                    "first=" + Uri.EscapeDataString(first ?? string.Empty),
+                    "last=" + Uri.EscapeDataString(last ?? string.Empty),
+                    "phone=" + Uri.EscapeDataString(phone ?? string.Empty),
+                    "dob=" + Uri.EscapeDataString(dob ?? string.Empty),
+                    "local=" + Uri.EscapeDataString(local ?? string.Empty),
+                });
+                return Results.Redirect("/join/" + Uri.EscapeDataString(token!) + "?" + kept);
+            }
+            await audit.RecordAsync(mailbox.Address, "webmail.registered", mailbox.Address, ClientOf(http), found.Invitation.Individual ? "individual" : "organisation").ConfigureAwait(false);
+            string? next = await CompleteAsync(http, mailbox.Id, false, "registration", ct).ConfigureAwait(false);
+            return Results.Redirect(next is null ? "/sign-in" : "/settings/security/two-step?welcome=1");
+        });
+
+        // The username, checked as the person leaves the box: from the registration page (with its
+        // token) or by an administrator adding a person. Answers whether it is free and, if not, a few that are.
+        app.MapGet("/auth/username", async (HttpContext http, string? local, string? domain, string? token, string? first, string? last, MailboxService svc, CancellationToken ct) =>
+        {
+            TenantRow? tenant = null;
+            bool individual = false;
+            string d = (domain ?? string.Empty).Trim().ToLowerInvariant();
+            if (!string.IsNullOrEmpty(token))
+            {
+                PendingView? found = await svc.FindPendingAsync(token, ct).ConfigureAwait(false);
+                if (found is null)
+                {
+                    return Results.Json(new { ok = false, problem = "This invitation has expired." });
+                }
+                tenant = found.Tenant;
+                individual = found.Individuals;
+                d = found.Invitation.Domain;
+            }
+            else if (WebmailAuthService.PersonIdOf(http.User) is Guid person && await svc.IsOrgAdminAsync(person, ct).ConfigureAwait(false))
+            {
+                tenant = (await svc.GetContextAsync(person, ct).ConfigureAwait(false))?.Tenant;
+                individual = tenant is not null && await svc.IsIndividualsTenantAsync(tenant.Id, ct).ConfigureAwait(false);
+            }
+            if (tenant is null)
+            {
+                return Results.Json(new { ok = false, problem = "Sign in first." });
+            }
+            string u = (local ?? string.Empty).Trim().ToLowerInvariant();
+            if (MailboxService.UsernameProblem(u, individual) is string bad)
+            {
+                return Results.Json(new { ok = false, problem = bad, address = u + "@" + d });
+            }
+            (bool free, IReadOnlyList<string> suggestions) = await svc.UsernameFreeAsync(tenant, u, d, first ?? string.Empty, last ?? string.Empty, ct).ConfigureAwait(false);
+            return Results.Json(new { ok = free, address = u + "@" + d, suggestions });
+        });
+
+        // The Terms accepted at the first sign-in (item 5).
+        app.MapPost("/auth/terms", async (HttpContext http, [FromForm] string? terms, [FromForm] string? disclaimer, MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.AcceptTermsAsync(person, terms == "1", disclaimer == "1", ct).ConfigureAwait(false);
+            if (error is not null)
+            {
+                return Results.Redirect("/terms/accept?e=" + Uri.EscapeDataString(Note(dp, error)));
+            }
+            string who = http.User.Identity?.Name ?? string.Empty;
+            await audit.RecordAsync(who, "webmail.terms.accepted", who, ClientOf(http), LegalText.Version).ConfigureAwait(false);
+            return Results.Redirect(await svc.LandingAsync(person, ct).ConfigureAwait(false));
+        }).RequireAuthorization();
+
         // ---- the password rules, ticked as the person types ----
         app.MapPost("/auth/password-check", async (HttpContext http, [FromForm] string? password, [FromForm] string? t, [FromForm] string? token,
             MailboxService svc, IDataProtectionProvider dp, CancellationToken ct) =>
@@ -410,6 +531,12 @@ internal static class AuthEndpoints
             {
                 mailbox = (await svc.FindInvitationAsync(token, ct).ConfigureAwait(false))?.Mailbox;
                 least = mailbox is null ? least : await svc.PasswordLengthForAsync(mailbox, null, ct).ConfigureAwait(false);
+                if (mailbox is null && await svc.FindPendingAsync(token, ct).ConfigureAwait(false) is PendingView pending)
+                {
+                    // rc.22: a registration in progress; the rules of its organisation.
+                    mailbox = new MailboxRow { LocalPart = pending.Invitation.Local, Domain = pending.Invitation.Domain, DisplayName = pending.Invitation.FirstName + " " + pending.Invitation.LastName };
+                    least = (await svc.SignInPolicyOfAsync(pending.Tenant.Id, ct).ConfigureAwait(false)).LengthFor(false);
+                }
             }
             Anjal.Smtp.PasswordRuleResults r = Anjal.Smtp.PasswordPolicy.Evaluate(password ?? string.Empty, mailbox?.Address, mailbox?.DisplayName, least);
             return Results.Json(new { length = r.LongEnough, common = r.NotCommon, personal = r.NotPersonal, least });
@@ -485,6 +612,44 @@ internal static class AuthEndpoints
             string who = http.User.Identity?.Name ?? string.Empty;
             string box = (await svc.GetContextAsync(id, ct).ConfigureAwait(false))?.Mailbox.Address ?? id.ToString();
             await audit.RecordAsync(who, "webmail.shared.opened", box, ClientOf(http)).ConfigureAwait(false);
+            return Results.Redirect("/folder/INBOX");
+        }).RequireAuthorization();
+
+        // rc.22 (item 33): switch to another account signed in on this browser; the one left stays signed in.
+        app.MapPost("/auth/switch", async (HttpContext http, [FromForm] Guid to, [FromForm] string? back, SessionRegistry sessions, AuditTrail audit, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid current || SessionRegistry.SessionOf(http.User) is not string currentSid || SessionRegistry.IsShared(http.User))
+            {
+                return Results.Redirect("/sign-in");
+            }
+            List<(Guid Mailbox, string Sid)> others = ReadAccounts(http);
+            (Guid Mailbox, string Sid) target = others.FirstOrDefault(o => o.Mailbox == to);
+            if (target.Sid is null)
+            {
+                return Results.Redirect("/folder/INBOX?account=gone");
+            }
+            var rest = others.Where(o => o.Mailbox != to && o.Mailbox != current).ToList();
+            rest.Insert(0, (current, currentSid));
+            if (!await SwitchToAsync(http, to, target.Sid, rest).ConfigureAwait(false))
+            {
+                WriteAccounts(http, others.Where(o => o.Mailbox != to).ToList());
+                return Results.Redirect("/folder/INBOX?account=gone");
+            }
+            string who = http.User.Identity?.Name ?? string.Empty;
+            await audit.RecordAsync(who, "webmail.account.switched", to.ToString(), ClientOf(http)).ConfigureAwait(false);
+            return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        // Forget one of the other accounts without signing it out elsewhere.
+        app.MapPost("/auth/switch/forget", async (HttpContext http, [FromForm] Guid to, SessionRegistry sessions, CancellationToken ct) =>
+        {
+            List<(Guid Mailbox, string Sid)> others = ReadAccounts(http);
+            (Guid Mailbox, string Sid) target = others.FirstOrDefault(o => o.Mailbox == to);
+            if (target.Sid is not null)
+            {
+                await sessions.EndAsync(to, target.Sid, ct).ConfigureAwait(false);
+            }
+            WriteAccounts(http, others.Where(o => o.Mailbox != to).ToList());
             return Results.Redirect("/folder/INBOX");
         }).RequireAuthorization();
 
@@ -568,6 +733,11 @@ internal static class AuthEndpoints
         if ((page || post) && !DemandAllows(path))
         {
             string? demand = await svc.SignInDemandCachedAsync(person, http.RequestAborted).ConfigureAwait(false);
+            if (demand == "terms" && !path.StartsWith("/terms", StringComparison.Ordinal) && path != "/disclaimer")
+            {
+                http.Response.Redirect("/terms/accept");
+                return;
+            }
             if (demand == "password" && !path.StartsWith("/settings/security", StringComparison.Ordinal) && path != "/settings/password")
             {
                 http.Response.Redirect("/settings/security?change=1");
@@ -593,6 +763,7 @@ internal static class AuthEndpoints
     private static bool DemandAllows(string path) =>
         path.StartsWith("/auth/", StringComparison.Ordinal) || path == "/sign-out" || path == "/signed-out"
         || path.StartsWith("/sign-in", StringComparison.Ordinal) || path.StartsWith("/invite/", StringComparison.Ordinal)
+        || path.StartsWith("/join/", StringComparison.Ordinal) || path == "/terms" || path == "/disclaimer"
         || path == "/settings/welcome" || path == "/settings/rail";
 
     /// <summary>The signed-out page for a sign-out at this moment.</summary>
@@ -1036,6 +1207,97 @@ internal static class AuthEndpoints
     /// 30 days on the person's own. Returns where to go, or null when the
     /// mailbox can no longer sign in.
     /// </summary>
+    /// <summary>The other accounts signed in on this browser (rc.22, item 33), from the sealed cookie.</summary>
+    /// <param name="http">The request.</param>
+    /// <returns>Each account's mailbox and session, most recent first.</returns>
+    internal static List<(Guid Mailbox, string Sid)> ReadAccounts(HttpContext http)
+    {
+        var result = new List<(Guid, string)>();
+        if (http.Items.TryGetValue(AccountsItem, out object? written) && written is IReadOnlyList<(Guid Mailbox, string Sid)> fresh)
+        {
+            // Written earlier in this same request: the request's cookie is the old one.
+            result.AddRange(fresh);
+            return result;
+        }
+        string? cookie = http.Request.Cookies[AccountsCookie];
+        if (string.IsNullOrEmpty(cookie))
+        {
+            return result;
+        }
+        try
+        {
+            IDataProtectionProvider dp = http.RequestServices.GetRequiredService<IDataProtectionProvider>();
+            string text = dp.CreateProtector("anjal.accounts.v1").Unprotect(cookie);
+            foreach (string part in text.Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                string[] bits = part.Split('|', 2);
+                if (bits.Length == 2 && Guid.TryParse(bits[0], out Guid m) && bits[1].Length > 0 && !result.Any(r => r.Item1 == m))
+                {
+                    result.Add((m, bits[1]));
+                }
+            }
+        }
+        catch (System.Security.Cryptography.CryptographicException)
+        {
+            http.Response.Cookies.Delete(AccountsCookie);
+        }
+        return result;
+    }
+
+    /// <summary>Write the other accounts (rc.22, item 33); none removes the cookie.</summary>
+    /// <param name="http">The request.</param>
+    /// <param name="accounts">The accounts.</param>
+    internal static void WriteAccounts(HttpContext http, IReadOnlyList<(Guid Mailbox, string Sid)> accounts)
+    {
+        http.Items[AccountsItem] = accounts.Take(MaxAccounts).ToList();
+        if (accounts.Count == 0)
+        {
+            http.Response.Cookies.Delete(AccountsCookie);
+            return;
+        }
+        IDataProtectionProvider dp = http.RequestServices.GetRequiredService<IDataProtectionProvider>();
+        string text = string.Join(";", accounts.Take(MaxAccounts).Select(a => a.Mailbox.ToString("N") + "|" + a.Sid));
+        http.Response.Cookies.Append(AccountsCookie, dp.CreateProtector("anjal.accounts.v1").Protect(text), ShortCookie(http, SessionRegistry.OwnLife));
+    }
+
+    /// <summary>Before another account is signed in: keep this one (rc.22, item 33) when its session is good.</summary>
+    private static async Task KeepCurrentAccountAsync(HttpContext http)
+    {
+        AuthenticateResult current = await http.AuthenticateAsync(Scheme).ConfigureAwait(false);
+        if (current.Principal is not ClaimsPrincipal user || WebmailAuthService.PersonIdOf(user) is not Guid m || SessionRegistry.SessionOf(user) is not string sid || SessionRegistry.IsShared(user))
+        {
+            return;
+        }
+        List<(Guid Mailbox, string Sid)> others = ReadAccounts(http);
+        others.RemoveAll(o => o.Mailbox == m);
+        others.Insert(0, (m, sid));
+        WriteAccounts(http, others);
+    }
+
+    /// <summary>
+    /// Sign in as another account whose session is still good (rc.22, item 33): its cookie replaces this one and the
+    /// rest are kept. False when that session has ended.
+    /// </summary>
+    private static async Task<bool> SwitchToAsync(HttpContext http, Guid mailboxId, string sid, IReadOnlyList<(Guid Mailbox, string Sid)> rest)
+    {
+        WebmailAuthService auth = http.RequestServices.GetRequiredService<WebmailAuthService>();
+        SessionRegistry sessions = http.RequestServices.GetRequiredService<SessionRegistry>();
+        ClaimsPrincipal? principal = await auth.PrincipalForAsync(mailboxId, http.RequestAborted).ConfigureAwait(false);
+        if (principal is null)
+        {
+            return false;
+        }
+        principal = WebmailAuthService.WithSession(principal, sid, false);
+        if (await sessions.CheckAsync(principal, true, http.RequestAborted).ConfigureAwait(false) != SessionState.Valid)
+        {
+            return false;
+        }
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        await http.SignInAsync(Scheme, principal, new AuthenticationProperties { IsPersistent = true, IssuedUtc = now, ExpiresUtc = now + SessionRegistry.OwnLife }).ConfigureAwait(false);
+        WriteAccounts(http, rest);
+        return true;
+    }
+
     private static async Task<string?> CompleteAsync(HttpContext http, Guid mailboxId, bool shared, string via, CancellationToken ct)
     {
         WebmailAuthService auth = http.RequestServices.GetRequiredService<WebmailAuthService>();
@@ -1055,6 +1317,9 @@ internal static class AuthEndpoints
             ExpiresUtc = now + (shared ? SessionRegistry.SharedLife : SessionRegistry.OwnLife),
         }).ConfigureAwait(false);
         string who = principal.Identity?.Name ?? string.Empty;
+        // rc.22 (item 33): the account just signed in is never also listed as "another"; a shared computer keeps none.
+        List<(Guid Mailbox, string Sid)> others = ReadAccounts(http);
+        WriteAccounts(http, shared ? Array.Empty<(Guid, string)>() : others.Where(o => o.Mailbox != mailboxId).ToList());
         AuditTrail audit = http.RequestServices.GetRequiredService<AuditTrail>();
         await audit.RecordAsync(who, "webmail.signin", who + " (" + via + (shared ? ", shared computer" : string.Empty) + ")", ClientOf(http)).ConfigureAwait(false);
         // rc.15 (item 59): a sign-in from a network this person has not used before is noted, with its town and country.

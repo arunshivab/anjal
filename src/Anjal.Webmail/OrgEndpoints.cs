@@ -20,22 +20,117 @@ internal static class OrgEndpoints
     internal static void Map(WebApplication app)
     {
         // ---- people ----
-        app.MapPost("/org/people/invite", async (HttpContext http, [FromForm] string? name, [FromForm] string? local, [FromForm] string? domain, [FromForm] string? personal, [FromForm] string? role,
-            MailboxService svc, SessionRegistry sessions, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        app.MapPost("/org/people/invite", async (HttpContext http, [FromForm] string? first, [FromForm] string? last, [FromForm] string? local, [FromForm] string? domain, [FromForm] string? personal,
+            [FromForm] string? phone, [FromForm] string? dob, [FromForm] string? role, MailboxService svc, SessionRegistry sessions, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
         {
             if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
             {
                 return Results.NotFound();
             }
-            string address = (local ?? string.Empty).Trim() + "@" + (domain ?? string.Empty).Trim();
-            (string? error, string? token) = await svc.InviteAsync(a.Tenant, name ?? string.Empty, address, personal ?? string.Empty, role == "admin", a.Me.DisplayName.Length > 0 ? a.Me.DisplayName : a.Me.Address, BaseUrl(http), ct).ConfigureAwait(false);
+            // rc.22 (item 5): nothing is created until the person presses Submit on the registration page.
+            (string? error, string? token) = await svc.InvitePendingAsync(a.Tenant, first ?? string.Empty, last ?? string.Empty, local ?? string.Empty, domain ?? string.Empty, personal ?? string.Empty,
+                phone ?? string.Empty, ParseDate(dob), role == "admin", a.Me.DisplayName.Length > 0 ? a.Me.DisplayName : a.Me.Address, BaseUrl(http), ct).ConfigureAwait(false);
             if (error is not null)
             {
-                return Results.Redirect("/org/people?invite=1&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
+                return Results.Redirect("/org/people?add=1&mode=invite&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
             }
-            await audit.RecordAsync(a.Me.Address, "org.person.invited", address.ToLowerInvariant(), Client(http)).ConfigureAwait(false);
-            sessions.Reveal(SessionRegistry.SessionOf(http.User) ?? string.Empty, new[] { address.ToLowerInvariant() + "|" + BaseUrl(http) + "/invite/" + token });
-            return Results.Redirect("/org/people?links=1");
+            string who = (local ?? string.Empty).Trim().Length > 0 ? (local ?? string.Empty).Trim().ToLowerInvariant() + "@" + (domain ?? string.Empty).Trim().ToLowerInvariant() : (personal ?? string.Empty).Trim().ToLowerInvariant();
+            await audit.RecordAsync(a.Me.Address, "org.person.invited", who, Client(http)).ConfigureAwait(false);
+            sessions.Reveal(SessionRegistry.SessionOf(http.User) ?? string.Empty, new[] { who + "|" + BaseUrl(http) + "/join/" + token });
+            return Results.Redirect("/org/people?links=1&saved=invited");
+        }).RequireAuthorization();
+
+        // rc.22 (item 5, "Fill in everything"): the mailbox is made at once; the Terms go to the
+        // personal email and are accepted at the first sign-in, where the password is changed too.
+        app.MapPost("/org/people/add", async (HttpContext http, [FromForm] string? first, [FromForm] string? last, [FromForm] string? local, [FromForm] string? domain, [FromForm] string? personal,
+            [FromForm] string? phone, [FromForm] string? dob, [FromForm] string? password, [FromForm] string? name, [FromForm] string? role, MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            (string? error, MailboxRow? made) = await svc.AddPersonAsync(a.Tenant, first ?? string.Empty, last ?? string.Empty, local ?? string.Empty, domain ?? string.Empty, personal ?? string.Empty,
+                phone ?? string.Empty, ParseDate(dob), password ?? string.Empty, name ?? string.Empty, role == "admin", a.Me.Address, BaseUrl(http), ct).ConfigureAwait(false);
+            if (error is not null || made is null)
+            {
+                return Results.Redirect("/org/people?add=1&mode=fill&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error ?? "The mailbox could not be made.")));
+            }
+            await audit.RecordAsync(a.Me.Address, "org.person.added", made.Address, Client(http)).ConfigureAwait(false);
+            return Results.Redirect("/org/people?sel=" + made.Id + "&saved=added");
+        }).RequireAuthorization();
+
+        app.MapPost("/org/people/pending/{id:guid}/withdraw", async (HttpContext http, Guid id, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            if (!await svc.WithdrawPendingAsync(a.Tenant.Id, id, ct).ConfigureAwait(false))
+            {
+                return Results.NotFound();
+            }
+            await audit.RecordAsync(a.Me.Address, "org.person.pending-withdrawn", id.ToString(), Client(http)).ConfigureAwait(false);
+            return Results.Redirect("/org/people?saved=withdrawn");
+        }).AddEndpointFilter(Program.RequireAntiforgery).RequireAuthorization();
+
+        // rc.22 (item 41, mockup 17): extra addresses and group addresses.
+        app.MapPost("/org/addresses/alias", async (HttpContext http, [FromForm] string? local, [FromForm] string? domain, [FromForm] Guid person, [FromForm] string? canSend, [FromForm] string? remove,
+            MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            if (remove is { Length: > 0 })
+            {
+                await svc.RemoveAliasAsync(a.Tenant, remove, ct).ConfigureAwait(false);
+                await audit.RecordAsync(a.Me.Address, "org.addresses", remove, Client(http), "extra address removed").ConfigureAwait(false);
+                return Results.Redirect("/org/addresses?saved=removed");
+            }
+            string? error = await svc.AddAliasAsync(a.Tenant, local ?? string.Empty, domain ?? string.Empty, person, canSend == "1", ct).ConfigureAwait(false);
+            if (error is not null)
+            {
+                return Results.Redirect("/org/addresses?new=alias&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
+            }
+            string address = (local ?? string.Empty).Trim().ToLowerInvariant() + "@" + (domain ?? string.Empty).Trim().ToLowerInvariant();
+            await audit.RecordAsync(a.Me.Address, "org.addresses", address, Client(http), "extra address added").ConfigureAwait(false);
+            return Results.Redirect("/org/addresses?saved=alias");
+        }).RequireAuthorization();
+
+        app.MapPost("/org/addresses/group", async (HttpContext http, [FromForm] string? local, [FromForm] string? domain, [FromForm] Guid[] members, [FromForm] string? orgOnly, [FromForm] string? remove,
+            MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            if (remove is { Length: > 0 })
+            {
+                await svc.RemoveGroupAsync(a.Tenant, remove, ct).ConfigureAwait(false);
+                await audit.RecordAsync(a.Me.Address, "org.addresses", remove, Client(http), "group address removed").ConfigureAwait(false);
+                return Results.Redirect("/org/addresses?saved=removed");
+            }
+            string? error = await svc.SaveGroupAsync(a.Tenant, local ?? string.Empty, domain ?? string.Empty, members, orgOnly == "1", ct).ConfigureAwait(false);
+            string address = (local ?? string.Empty).Trim().ToLowerInvariant() + "@" + (domain ?? string.Empty).Trim().ToLowerInvariant();
+            if (error is not null)
+            {
+                return Results.Redirect("/org/addresses?new=group&sel=" + Uri.EscapeDataString(address) + "&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
+            }
+            await audit.RecordAsync(a.Me.Address, "org.addresses", address, Client(http), $"group address, {members.Length} member(s)").ConfigureAwait(false);
+            return Results.Redirect("/org/addresses?saved=group");
+        }).RequireAuthorization();
+
+        // rc.22 (mockup 13): the organisation's mail rules.
+        app.MapPost("/org/rules", async (HttpContext http, [FromForm] string? forward, [FromForm] string? nicknames, [FromForm] string? away, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            var policy = new Anjal.Mailbox.OrgMailPolicy { ForwardingOutside = forward == "1", Nicknames = nicknames == "1", AwayOutside = away == "1" };
+            await svc.SaveMailPolicyAsync(a.Tenant.Id, policy, ct).ConfigureAwait(false);
+            await audit.RecordAsync(a.Me.Address, "org.rules", a.Tenant.Slug, Client(http), $"forwarding outside {(policy.ForwardingOutside ? "allowed" : "not allowed")}, nicknames {(policy.Nicknames ? "allowed" : "off")}, away replies {(policy.AwayOutside ? "inside and outside" : "inside only")}").ConfigureAwait(false);
+            return Results.Redirect("/org/rules?saved=1");
         }).RequireAuthorization();
 
         app.MapPost("/org/people/import", async (HttpContext http, IFormFile? list, MailboxService svc, SessionRegistry sessions, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
@@ -56,7 +151,7 @@ internal static class OrgEndpoints
             IReadOnlyList<(string Address, string? Token, string? Error)> results = await svc.ImportPeopleAsync(a.Tenant, csv, a.Me.DisplayName.Length > 0 ? a.Me.DisplayName : a.Me.Address, BaseUrl(http), ct).ConfigureAwait(false);
             await audit.RecordAsync(a.Me.Address, "org.person.imported", $"{results.Count(r => r.Token is not null)} of {results.Count}", Client(http)).ConfigureAwait(false);
             sessions.Reveal(SessionRegistry.SessionOf(http.User) ?? string.Empty,
-                results.Select(r => r.Address + "|" + (r.Token is null ? "!" + r.Error : BaseUrl(http) + "/invite/" + r.Token)).ToList());
+                results.Select(r => r.Address + "|" + (r.Token is null ? "!" + r.Error : BaseUrl(http) + "/join/" + r.Token)).ToList());
             return Results.Redirect("/org/people?links=1");
         }).RequireAuthorization();
 
@@ -123,6 +218,25 @@ internal static class OrgEndpoints
                 case "twostep-off":
                     await svc.AdminTurnOffTwoStepAsync(id, ct).ConfigureAwait(false);
                     logged = "org.person.twostepoff";
+                    break;
+                case "delete":
+                    // rc.22 (item 40): the administrator confirms by typing the address; the address is retired for ever.
+                    if (!string.Equals((value ?? string.Empty).Trim(), person.Address, StringComparison.OrdinalIgnoreCase))
+                    {
+                        error = "Type the person's address exactly to confirm.";
+                        logged = string.Empty;
+                        break;
+                    }
+                    if (id == a.Me.Id)
+                    {
+                        error = "You cannot delete yourself.";
+                        logged = string.Empty;
+                        break;
+                    }
+                    await sessions.EndOthersAsync(id, null, ct).ConfigureAwait(false);
+                    error = await svc.DeleteAccountAsync(a.Tenant, id, OpsEndpoints.RootOf(http.RequestServices.GetRequiredService<Anjal.Mailbox.IMaildirStore>()), ct).ConfigureAwait(false);
+                    back = "/org/people";
+                    logged = "org.person.deleted";
                     break;
                 case "hold":
                     error = await svc.SetHoldAsync(a.Tenant, id, true, a.Me.DisplayName.Length > 0 ? a.Me.DisplayName : a.Me.Address, value ?? string.Empty, ct).ConfigureAwait(false);
@@ -469,6 +583,7 @@ internal static class OrgEndpoints
 
         // ---- branding ----
         app.MapPost("/org/branding", async (HttpContext http, [FromForm] string? title, [FromForm] string? theme, [FromForm] string? language, [FromForm] string? clock, [FromForm] string? message, [FromForm] string? removeLogo, [FromForm] string? who, IFormFile? logo,
+            [FromForm] int? design, [FromForm] string? colour, [FromForm] string? anjalColour, IFormFile? background, [FromForm] string? removeBackground, [FromForm] string? welcome, [FromForm] string? helpline,
             MailboxService svc, Words words, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
         {
             if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
@@ -489,6 +604,24 @@ internal static class OrgEndpoints
             {
                 b.Logo = string.Empty;
             }
+            // rc.22 (mockups 30-40): design, colour, picture, welcome line, help line.
+            if (background is not null && background.Length > 0)
+            {
+                (string? uri, string? problem) = await PictureData(background, ct).ConfigureAwait(false);
+                if (problem is not null)
+                {
+                    return Results.Redirect("/org/branding?e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, problem)));
+                }
+                b.Background = uri!;
+            }
+            else if (removeBackground == "1")
+            {
+                b.Background = string.Empty;
+            }
+            b.Design = SignInDesigns.Clean(design);
+            b.Colour = anjalColour == "1" ? string.Empty : Branding.CleanColour(colour);
+            b.Welcome = Clip(welcome, 120);
+            b.HelpLine = Clip(helpline, 140);
             string themeBefore = b.DefaultTheme;
             string languageBefore = b.DefaultLanguage;
             string clockBefore = b.DefaultClock;
@@ -634,6 +767,12 @@ internal static class OrgEndpoints
         return context is null ? null : (context.Value.Tenant, context.Value.Mailbox);
     }
 
+    /// <summary>A date typed in a date box (yyyy-MM-dd), or null.</summary>
+    /// <param name="text">The value.</param>
+    /// <returns>The date, or null.</returns>
+    internal static DateOnly? ParseDate(string? text) =>
+        DateOnly.TryParseExact((text ?? string.Empty).Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateOnly d) ? d : null;
+
     /// <summary>The webmail's own address, for links in mail.</summary>
     /// <param name="http">The request.</param>
     /// <returns>For example https://mail.example.in.</returns>
@@ -650,6 +789,28 @@ internal static class OrgEndpoints
 
     // A logo: PNG, JPEG, WebP or SVG, up to 256 KB, kept as a data address. An
     // SVG is shown only as an image, where it can run nothing.
+    private static string Clip(string? text, int max)
+    {
+        string t = (text ?? string.Empty).Trim().Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", " ", StringComparison.Ordinal);
+        return t.Length > max ? t[..max] : t;
+    }
+
+    private static async Task<(string? Uri, string? Problem)> PictureData(IFormFile file, CancellationToken ct)
+    {
+        if (file.Length > 1024 * 1024)
+        {
+            return (null, "The picture must be 1 MB or smaller.");
+        }
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms, ct).ConfigureAwait(false);
+        byte[] b = ms.ToArray();
+        string? type = b.Length > 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47 ? "image/png"
+            : b.Length > 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF ? "image/jpeg"
+            : b.Length > 12 && Encoding.ASCII.GetString(b, 0, 4) == "RIFF" && Encoding.ASCII.GetString(b, 8, 4) == "WEBP" ? "image/webp"
+            : null;
+        return type is null ? (null, "The picture must be a JPEG, PNG or WebP.") : ("data:" + type + ";base64," + Convert.ToBase64String(b), null);
+    }
+
     private static async Task<(string? Uri, string? Problem)> LogoData(IFormFile file, CancellationToken ct)
     {
         if (file.Length > 256 * 1024)
@@ -702,6 +863,17 @@ internal static class OrgLog
         ["webmail.approval.given"] = "Approved another device",
         ["webmail.approval.refused"] = "Refused another device",
         ["webmail.invitation.accepted"] = "Accepted the invitation",
+        ["webmail.registered"] = "Registered from an invitation",
+        ["webmail.terms.accepted"] = "Accepted the Terms of Service",
+        ["webmail.forwarded"] = "Forwarded a copy by rule",
+        ["webmail.data.export"] = "Asked for a copy of their data",
+        ["webmail.data.delete-asked"] = "Asked for the account to be deleted",
+        ["webmail.account.switched"] = "Switched to another account",
+        ["org.person.added"] = "Added a person (filled in)",
+        ["org.person.pending-withdrawn"] = "Withdrew an invitation",
+        ["org.person.deleted"] = "Deleted an account",
+        ["org.rules"] = "Changed the mail rules",
+        ["org.addresses"] = "Changed extra or group addresses",
         ["webmail.shared.opened"] = "Opened a shared mailbox",
         ["webmail.offline.on"] = "Turned on offline mail",
         ["webmail.offline.off"] = "Turned off offline mail",

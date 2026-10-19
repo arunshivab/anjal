@@ -7,15 +7,17 @@
    is Anjal's teal and carries the promise and the scripts; the languages move to a menu at the
    top right of the form side, listing only the languages that are switched on; an organisation
    with no logo shows its initials, so the Anjal mark is never shown twice. *@
-<div class="authpage">
-    <section class="authbrand">
+@* rc.22 (mockups 30-39): the organisation's design, colour, picture, welcome line and help line.
+   Only the frame changes; the form inside is always Anjal's. *@
+<div class="authpage" data-design="@(Org?.Design ?? 1)" style="@BrandStyle">
+    <section class="authbrand" style="@PanelStyle">
         <span class="mark-tile authmark" aria-hidden="true">
             <svg viewBox="0 0 148 148" width="72" height="72"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg>
             @* DES-11 D6 (item 39): the letter of the language shown, as on every other screen. *@
             <span class="mt-letter" lang="@L.Language">@Words.MarkLetter(L.Language)</span>
         </span>
         <div class="authpromise">
-            <p class="authhead">@L["Mail for every organisation, in every script its people read."]</p>
+            <p class="authhead">@(Org is not null && Org.Welcome.Length > 0 ? Org.Welcome : L["Mail for every organisation, in every script its people read."])</p>
             <p class="authscript"><span lang="@(L.Language == "en" ? "ta" : L.Language)">@Words.ProductName(L.Language)</span> · @L["mail, in your script"]</p>
         </div>
         <p class="authlock"><LipiIcon Name="lock" Size="16" /><span>@L["Encrypted both ways. Every original kept as proof."]</span></p>
@@ -43,6 +45,10 @@
                 <span><b>@(Org is null ? L["Mail"] : Org.Title.Length > 0 ? Org.Title : L["{organisation} mail"].Replace("{organisation}", Org.Name, StringComparison.Ordinal))</b><span class="hostline">@HostName</span></span>
             </div>
             @ChildContent
+            @if (Org is not null && Org.HelpLine.Length > 0)
+            {
+                <p class="authnote authhelp">@Org.HelpLine</p>
+            }
         </div>
     </section>
     <JsWords L="L" />
@@ -59,6 +65,10 @@
     [Parameter] public OrganisationIdentity? Org { get; set; }
 
     private string HostName => Http.HttpContext?.Request.Host.Host ?? string.Empty;
+
+    private string? BrandStyle => Org is not null && Org.Colour.Length > 0 ? "--org:" + Org.Colour : null;
+
+    private string? PanelStyle => Org is not null && Org.Background.Length > 0 && SignInDesigns.WithPicture.Contains(Org.Design) ? "background-image:url(" + Org.Background + ")" : null;
 
     private string Here => (Http.HttpContext?.Request.Path.Value ?? "/sign-in") + (Http.HttpContext?.Request.QueryString.Value ?? string.Empty);
 

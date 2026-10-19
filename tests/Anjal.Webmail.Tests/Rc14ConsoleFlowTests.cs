@@ -22,7 +22,8 @@ namespace Anjal.Webmail.Tests;
 public sealed class Rc14ConsoleFlowTests : IAsyncLifetime, IDisposable
 {
     private static readonly Regex TokenRegex = new("name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"", RegexOptions.CultureInvariant);
-    private static readonly Regex InviteRegex = new("/invite/([A-Za-z0-9_-]{20,})", RegexOptions.CultureInvariant);
+    // rc.22: an invitation leads to the registration page; nothing is made until Submit.
+    private static readonly Regex InviteRegex = new("/join/([A-Za-z0-9_-]{20,})", RegexOptions.CultureInvariant);
 
     private readonly string root = Path.Combine(Path.GetTempPath(), "anjal-rc14e-" + Guid.NewGuid().ToString("N"));
     private readonly InMemoryMessageStore store = new();
@@ -90,16 +91,19 @@ public sealed class Rc14ConsoleFlowTests : IAsyncLifetime, IDisposable
     {
         HttpClient admin = this.Client();
         await SignInAsync(admin, "arun", "correct horse battery");
-        string token = Token(await admin.GetStringAsync("org/people?invite=1"));
-        HttpResponseMessage res = await Post(admin, "org/people/invite", token, ("name", "Rahul Desai"), ("local", "rahul.desai"), ("domain", "anjal.co.in"));
-        Assert.Equal("/org/people?links=1", res.Headers.Location!.ToString());
+        string token = Token(await admin.GetStringAsync("org/people?add=1&mode=invite"));
+        HttpResponseMessage res = await Post(admin, "org/people/invite", token, ("first", "Rahul"), ("last", "Desai"), ("local", "rahul.desai"), ("domain", "anjal.co.in"));
+        Assert.Equal("/org/people?links=1&saved=invited", res.Headers.Location!.ToString());
         string shown = await admin.GetStringAsync("org/people?links=1");
         Match link = InviteRegex.Match(shown);
         Assert.True(link.Success);
         Assert.DoesNotMatch(InviteRegex, await admin.GetStringAsync("org/people?links=1"));
+        // rc.22: no mailbox yet - only the invitation, listed as waiting.
+        Assert.Null(await this.store.GetMailboxAsync("rahul.desai", "anjal.co.in"));
+        Assert.Contains("Invited", shown, StringComparison.Ordinal);
 
         HttpClient rahul = this.Client();
-        string invite = await rahul.GetStringAsync("invite/" + link.Groups[1].Value);
+        string invite = await rahul.GetStringAsync("join/" + link.Groups[1].Value);
         Assert.Contains("rahul.desai@anjal.co.in", invite, StringComparison.Ordinal);
 
         string csv = await admin.GetStringAsync("org/log.csv");

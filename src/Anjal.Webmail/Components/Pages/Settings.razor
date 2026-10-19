@@ -103,6 +103,52 @@
             </fieldset>
             <noscript><button type="submit" class="btn btn-p">@L["Save"]</button></noscript>
         </form>
+        @* rc.22 (item 55, mockup 20; owner 18 Oct 2026: not the default, an option here). *@
+        <section class="formcard setcard">
+            <h2>@L["Inbox sections"]</h2>
+            <p class="hint">@L["Off by default. Split the Inbox into boxes, each a saved search, so the important things are in view without opening folders."]</p>
+            <form method="post" action="/settings/sections" class="setfield">
+                <AntiforgeryToken />
+                <label class="mtoggle">
+                    <input type="checkbox" name="on" value="1" checked="@sections.On" data-autosubmit role="switch" />
+                    <span class="toggle" aria-hidden="true"><i></i></span>
+                    <span>@L["Show sections above my Inbox"]</span>
+                </label>
+                <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+            </form>
+            @if (sections.List.Count > 0)
+            {
+                <table class="orgtable">
+                    <thead><tr><th>@L["Section"]</th><th>@L["Shows"]</th><th>@L["Rows"]</th><th></th></tr></thead>
+                    <tbody>
+                    @for (int i = 0; i < sections.List.Count; i++)
+                    {
+                        InboxSection sec = sections.List[i];
+                        int index = i;
+                        <tr>
+                            <td>@sec.Name</td>
+                            <td><code class="mono">@sec.Query</code></td>
+                            <td>@sec.Rows</td>
+                            <td><form method="post" action="/settings/sections/delete" class="inline"><AntiforgeryToken /><input type="hidden" name="index" value="@index" /><button type="submit" class="btn btn-q btn-sm">@L["Remove"]</button></form></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+            <form method="post" action="/settings/sections/add" class="ruleadd sectionadd">
+                <AntiforgeryToken />
+                <input class="inp" name="name" placeholder="@L["Name"]" maxlength="40" required aria-label="@L["Section name"]" />
+                <input class="inp" name="query" placeholder="@L["Search, e.g. from:lab@sgh.in or is:unread"]" maxlength="200" required aria-label="@L["Search"]" />
+                <select class="setsel" name="rows" aria-label="@L["Rows"]">
+                    @foreach (int n in InboxSections.RowChoices)
+                    {
+                        <option value="@n" selected="@(n == 5)">@L["{n} rows"].Replace("{n}", n.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</option>
+                    }
+                </select>
+                <button type="submit" class="btn btn-s btn-sm" title="@L["Add a box above the Inbox showing this search."]">@L["Add a section"]</button>
+            </form>
+            <p class="hint">@L["Searches understand is:unread, is:flagged, from:name, has:attachment, newer:7d and plain words."]</p>
+        </section>
     }
     @if (Current == "language")
     {
@@ -180,6 +226,160 @@
             <noscript><button type="submit" class="btn btn-p">@L["Save"]</button></noscript>
         </form>
     }
+    @if (Current == "profile")
+    {
+        @* rc.22 (item 37, mockup 11): who you are. The organisation keeps the first and last name; the
+           name on mails is first name + last name unless the organisation allows nicknames; individuals choose. *@
+        <section class="formcard setcard">
+            <h2>@L["Profile"]</h2>
+            <p class="hint">@(individual ? L["Who you are. Keep it up to date; the phone is verified by code in a later release."] : L["Who you are. Your organisation keeps your first and last name; the rest is yours."])</p>
+            <form method="post" action="/settings/profile" class="setgrid">
+                <AntiforgeryToken />
+                <div class="setfield">
+                    <label class="setlbl" for="pfirst">@L["First name"] @if (!individual) {<span class="setlock"><LipiIcon Name="lock" Size="12" />@L["set by your organisation"]</span>}</label>
+                    <input class="inp" id="pfirst" name="first" value="@profile.FirstName" maxlength="60" disabled="@(!individual)" required="@individual" />
+                </div>
+                <div class="setfield">
+                    <label class="setlbl" for="plast">@L["Last name"] @if (!individual) {<span class="setlock"><LipiIcon Name="lock" Size="12" />@L["set by your organisation"]</span>}</label>
+                    <input class="inp" id="plast" name="last" value="@profile.LastName" maxlength="60" disabled="@(!individual)" required="@individual" />
+                </div>
+                <div class="setfield">
+                    <label class="setlbl" for="pphone">@L["Phone"]</label>
+                    <input class="inp" id="pphone" name="phone" type="tel" value="@profile.Phone" maxlength="30" placeholder="+91 " required="@individual" />
+                    <p class="hint">@(profile.Phone.Length == 0 ? L["Not given"] : profile.PhoneVerified ? L["Verified"] : L["Not verified yet"])</p>
+                </div>
+                <div class="setfield">
+                    <label class="setlbl" for="pdob">@L["Date of birth"]</label>
+                    <input class="inp" id="pdob" name="dob" type="date" value="@(profile.DateOfBirth is DateOnly born ? born.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : string.Empty)" max="@DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-18).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)" required="@individual" />
+                    <p class="hint">@(individual ? L["Required: Anjal accounts are for people aged 18 or over."] : L["Optional. Your organisation did not ask for it."])</p>
+                </div>
+                <div class="setactions"><button type="submit" class="btn btn-p btn-sm">@L["Save"]</button></div>
+            </form>
+            <form method="post" action="/settings/name" class="setrow">
+                <AntiforgeryToken />
+                <label class="setlbl" for="displayName">@L["Name on your mails"] @if (!nicknames) {<span class="setlock"><LipiIcon Name="lock" Size="12" />@L["first name + last name"]</span>}</label>
+                <div class="setinline">
+                    <input class="inp" id="displayName" name="displayName" type="text" value="@displayName" maxlength="100" disabled="@(!nicknames)" />
+                    @if (nicknames)
+                    {
+                        <button type="submit" class="btn btn-s">@L["Save"]</button>
+                    }
+                </div>
+                <p class="hint">@L["It goes on every mail you send: {from}"].Replace("{from}", FromLine, StringComparison.Ordinal)</p>
+                @if (!nicknames)
+                {
+                    <p class="hint">@L["First name + last name, as {organisation} requires. Its administrator can allow nicknames under Organisation, Mail rules."].Replace("{organisation}", tenantName, StringComparison.Ordinal)</p>
+                }
+            </form>
+            <p class="hint"><a class="authlink" href="/settings/security">@L["Recovery email and password are under Security."]</a></p>
+        </section>
+    }
+    @if (Current == "away")
+    {
+        @* rc.22 (item 30, mockup 14): the out-of-office reply. Each sender gets it once; never automatic mail. *@
+        <form method="post" action="/settings/away" class="formcard setcard">
+            <AntiforgeryToken />
+            <h2>@L["Away"]</h2>
+            <p class="hint">@L["An automatic reply while you are away. Each sender gets it once."]</p>
+            <label class="mtoggle setblock">
+                <input type="checkbox" name="on" value="1" checked="@away.On" role="switch" />
+                <span class="toggle" aria-hidden="true"><i></i></span>
+                <span>@L["Send an automatic reply"]</span>
+            </label>
+            <div class="setgrid">
+                <div class="setfield">
+                    <label class="setlbl" for="afrom">@L["From"]</label>
+                    <input class="inp" id="afrom" name="from" type="datetime-local" value="@LocalText(away.From)" />
+                    <p class="hint">@L["Empty: from now."]</p>
+                </div>
+                <div class="setfield">
+                    <label class="setlbl" for="auntil">@L["Until"]</label>
+                    <input class="inp" id="auntil" name="until" type="datetime-local" value="@LocalText(away.Until)" />
+                    <p class="hint">@L["Turns itself off then. Empty: until you turn it off."]</p>
+                </div>
+                <div class="setfield">
+                    <label class="setlbl" for="asubject">@L["Subject"]</label>
+                    <input class="inp" id="asubject" name="subject" value="@away.Subject" maxlength="200" placeholder="@L["Automatic reply: (the mail's subject)"]" />
+                </div>
+            </div>
+            <div class="setrow">
+                <label class="setlbl" for="atext">@L["Message"]</label>
+                <textarea class="inp" id="atext" name="text" rows="6" maxlength="4000" required>@away.Text</textarea>
+            </div>
+            <div class="setgrid">
+                <div class="setfield">
+                    <span class="setlbl" id="areply-lbl">@L["Reply to"]</span>
+                    <div class="seg" role="radiogroup" aria-labelledby="areply-lbl">
+                        <label class="segopt"><input type="radio" name="replyTo" value="org" checked="@(away.ReplyTo == "org")" /><span>@L["My organisation"]</span></label>
+                        <label class="segopt"><input type="radio" name="replyTo" value="everyone" checked="@(away.ReplyTo == "everyone")" /><span>@L["Everyone"]</span></label>
+                        <label class="segopt"><input type="radio" name="replyTo" value="contacts" checked="@(away.ReplyTo == "contacts")" /><span>@L["My contacts"]</span></label>
+                    </div>
+                    <p class="hint">@(awayOutsideAllowed ? L["Your organisation allows replies to outside senders."] : L["Your organisation sends automatic replies only inside it; outside senders get none whatever you choose here."])</p>
+                </div>
+                <div class="setfield">
+                    <label class="setlbl" for="askip">@L["Do not reply to"]</label>
+                    <input class="inp" id="askip" name="skip" value="@away.Skip" maxlength="300" placeholder="@L["Addresses or words"]" />
+                    <p class="hint">@L["Mail from applications, lists and no-reply addresses never gets a reply."]</p>
+                </div>
+            </div>
+            <div class="setactions"><button type="submit" class="btn btn-p btn-sm">@L["Save"]</button></div>
+        </form>
+    }
+    @if (Current == "data")
+    {
+        @* rc.22 (item 40, mockup 18): the person's rights under India's Digital Personal Data Protection Act. *@
+        <section class="formcard setcard">
+            <h2>@L["Your data"]</h2>
+            <p class="hint">@L["Your rights under India's Digital Personal Data Protection Act."]</p>
+            <h3 class="sethead">@L["Download all your data"]</h3>
+            <p class="hint">@L["Every message in every folder (as .eml files), your contacts (vCard), rules, settings and the activity log about you, in one zip. Usually ready within minutes; you get a mail with a link that works for 7 days."]</p>
+            @if (export is not null && export.Busy)
+            {
+                <div class="notice n-info"><LipiIcon Name="clock" Size="16" /><span>@L["Being prepared since {time}. You will get a mail when it is ready."].Replace("{time}", clock.Full(export.RequestedAt), StringComparison.Ordinal)</span></div>
+            }
+            else if (export is not null && export.Ready(DateTimeOffset.UtcNow))
+            {
+                <div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Ready: {size}, {n} messages, prepared {date}. Works until {until}."].Replace("{size}", Layout.MainLayout.Size(export.Bytes), StringComparison.Ordinal).Replace("{n}", export.Messages.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{date}", clock.Date(export.ReadyAt!.Value), StringComparison.Ordinal).Replace("{until}", clock.Date(export.Expires!.Value), StringComparison.Ordinal)</span></div>
+                <div class="setactions"><a class="btn btn-p" href="/settings/data/download"><LipiIcon Name="download" Size="16" />@L["Download the zip"]</a></div>
+            }
+            else if (export is not null && export.Error.Length > 0)
+            {
+                <div class="notice n-err"><LipiIcon Name="warning" Size="16" /><span>@L.Say(export.Error)</span></div>
+            }
+            <form method="post" action="/settings/data/export" class="setactions">
+                <AntiforgeryToken />
+                <button type="submit" class="btn @(export is not null && export.Ready(DateTimeOffset.UtcNow) ? "btn-s" : "btn-p")" disabled="@(export is not null && export.Busy)" title="@L["Put everything in one file; you get a mail when it is ready."]"><LipiIcon Name="download" Size="16" />@L["Prepare my download"]</button>
+            </form>
+            <h3 class="sethead">@L["What Anjal holds about you"]</h3>
+            <table class="orgtable">
+                <thead><tr><th>@L["What"]</th><th>@L["Kept"]</th><th>@L["Why"]</th></tr></thead>
+                <tbody>
+                    <tr><td>@L["First name, last name, phone, date of birth, personal email"]</td><td>@L["While the account exists"]</td><td>@(profile.TermsAcceptedAt is DateTimeOffset t ? L["To run the account; the Terms you accepted on {date}"].Replace("{date}", clock.Date(t), StringComparison.Ordinal) : L["To run the account"])</td></tr>
+                    <tr><td>@L["Your mail"]</td><td>@L["Until you delete it; evidence copies {years} years after"].Replace("{years}", retention.EvidenceYears.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</td><td>@L["The service itself; legal evidence (CMP-02)"]</td></tr>
+                    <tr><td>@L["Sign-in records"]</td><td>@L["1 year"]</td><td>@L["Security"]</td></tr>
+                </tbody>
+            </table>
+            <h3 class="sethead">@L["Delete your account"]</h3>
+            @if (deletion is not null)
+            {
+                <div class="notice n-warn"><LipiIcon Name="warning" Size="16" /><span>@L["You asked on {date} for your account to be deleted. Your administrator confirms it; you will be told by mail."].Replace("{date}", clock.Date(deletion.RequestedAt), StringComparison.Ordinal)</span></div>
+                <form method="post" action="/settings/data/delete/withdraw" class="setactions"><AntiforgeryToken /><button type="submit" class="btn btn-s">@L["Withdraw the request"]</button></form>
+            }
+            else
+            {
+                <p class="hint">@L["Asks Anjal to close the account and erase your data. In an organisation, your administrator confirms it; the address is never given to anyone else. Evidence copies are kept for the legal period and then erased."]</p>
+                <details class="confirm">
+                    <summary class="btn btn-danger-q" title="@L["Ask your administrator to delete this account for good."]"><LipiIcon Name="trash" Size="16" />@L["Ask to delete my account"]</summary>
+                    <form method="post" action="/settings/data/delete" class="setrow">
+                        <AntiforgeryToken />
+                        <label class="setlbl" for="dreason">@L["Anything you want to say (optional)"]</label>
+                        <textarea class="inp" id="dreason" name="reason" rows="3" maxlength="500"></textarea>
+                        <div class="setactions"><button type="submit" class="btn btn-danger" title="@L["Send the deletion request to your administrator."]">@L["Send the request"]</button></div>
+                    </form>
+                </details>
+            }
+        </section>
+    }
     @if (Current == "mail")
     {
         @* The approved Mail board (SetMail, rc.13). Each choice saves as it is made. *@
@@ -218,6 +418,24 @@
                             <option value="@sec" selected="@(mailSettings.UndoSeconds == sec)">@(sec == 0 ? L["Off: send at once"] : L["{n} seconds"].Replace("{n}", sec.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</option>
                         }
                     </select>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                <form method="post" action="/settings/notify" class="setfield setfield-wide" data-notify-form>
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="/settings/mail?saved=mail" />
+                    <span class="setlbl">@L["New mail on the desktop"]</span>
+                    @* rc.22 (item 35, mockup 19): the browser's pop-up, even when Anjal is in another tab. *@
+                    <label class="mtoggle">
+                        <input type="checkbox" name="on" value="1" checked="@mailSettings.DesktopNotify" data-autosubmit data-notify-toggle role="switch" />
+                        <span class="toggle" aria-hidden="true"><i></i></span>
+                        <span>@L["Show a desktop notification"]</span>
+                    </label>
+                    <p class="hint">@L["A small pop-up from your browser - \"Meera Iyer: Duty roster for Monday\" - even when Anjal is in another tab or the window is behind. Click it to open the mail. Your browser asks once for permission."]</p>
+                    <div class="seg" role="radiogroup">
+                        <label class="segopt"><input type="radio" name="scope" value="inbox" checked="@(mailSettings.NotifyScope != "contacts")" data-autosubmit /><span>@L["Every new mail"]</span></label>
+                        <label class="segopt"><input type="radio" name="scope" value="contacts" checked="@(mailSettings.NotifyScope == "contacts")" data-autosubmit /><span>@L["From my contacts"]</span></label>
+                    </div>
+                    <p class="hint" data-notify-state hidden></p>
                     <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
                 </form>
                 <form method="post" action="/settings/sound" class="setfield">
@@ -326,16 +544,6 @@
                     <button type="button" class="btn btn-s btn-sm" data-offline-passkey-add hidden>@L["Also open it with my passkey"]</button>
                 </div>
             }
-
-            <form method="post" action="/settings/name" class="setrow">
-                <AntiforgeryToken />
-                <label class="setlbl" for="displayName">@L["Your name"]</label>
-                <div class="setinline">
-                    <input class="inp" id="displayName" name="displayName" type="text" value="@displayName" maxlength="100" />
-                    <button type="submit" class="btn btn-s">@L["Save"]</button>
-                </div>
-                <p class="hint">@L["Recipients see it beside your address: {from}"].Replace("{from}", FromLine, StringComparison.Ordinal)</p>
-            </form>
 
             <form method="post" action="/settings/signature" class="setrow">
                 <AntiforgeryToken />
@@ -646,8 +854,34 @@
     {
         <div class="formcard setcard" id="senders">
             <h2>@L["Senders"]</h2>
-            <p class="hint">@L["Report spam and Not spam decide where a sender's mail goes in your mailbox only. Remove a rule here and that sender's mail is judged afresh."]</p>
-            <div class="rhead"><h3>@L["Blocked and allowed"]</h3><span class="lh-grow"></span>
+            <p class="hint">@L["Who always reaches you, who goes to Junk, and who is blocked. Report spam and Not spam decide where a sender's mail goes in your mailbox only. Remove a rule here and that sender's mail is judged afresh."]</p>
+            @* rc.22 (item 32, mockup 16): Blocked, separate from Junk - discarded silently, nothing shown, nothing sent back. *@
+            <div class="rhead"><h3>@L["Blocked"]</h3><span class="lh-grow"></span>
+                <form method="post" action="/settings/senders/add" class="ruleadd inline">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="rule" value="discard" />
+                    <input class="railinp" name="pattern" placeholder="@L["name@example.com or @example.com"]" aria-label="@L["Sender address or domain"]" required />
+                    <button type="submit" class="btn btn-p" data-needs-server title="@L["Discard this sender's mail silently from now on."]">@L["Block"]</button>
+                </form>
+            </div>
+            <div class="notice n-info"><LipiIcon Name="security" Size="16" /><span>@L["Blocked mail is discarded silently: it never appears in any of your folders, and the sender is not told. As with all mail, the original is still kept as legal evidence."]</span></div>
+            @if (!senderRules.Any(r => r.Action == SenderRuleAction.Discard))
+            {
+                <p class="sempty">@L["Nobody is blocked. Block a sender from a message's More menu, or add one above."]</p>
+            }
+            @foreach (SenderRuleRow r in senderRules.Where(r => r.Action == SenderRuleAction.Discard))
+            {
+                <div class="catrow">
+                    <span class="mono">@r.Pattern</span>
+                    <span class="catmeta">@L["since {date}"].Replace("{date}", clock.Date(r.CreatedAt), StringComparison.Ordinal) · @(MailboxService.DiscardedBy(r.Pattern, discards) is int n && n == 1 ? L["1 mail discarded"] : L["{n} mails discarded"].Replace("{n}", MailboxService.DiscardedBy(r.Pattern, discards).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</span>
+                    <form method="post" action="/settings/senders/delete" class="inline catdel">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="ruleId" value="@r.Id" />
+                        <button type="submit" class="btn btn-q btn-sm" data-needs-server>@L["Unblock"]</button>
+                    </form>
+                </div>
+            }
+            <div class="rhead"><h3>@L["Always or never to Junk"]</h3><span class="lh-grow"></span>
                 <details class="pmenu pmenu-right">
                     <summary class="btn btn-s"><LipiIcon Name="plus" Size="15" />@L["New sender rule"]</summary>
                     <form method="post" action="/settings/senders/add" class="pmenu-body ruleadd">
@@ -665,11 +899,11 @@
                     </form>
                 </details>
             </div>
-            @if (senderRules.Count == 0)
+            @if (!senderRules.Any(r => r.Action != SenderRuleAction.Discard))
             {
                 <p class="sempty">@L["None yet. Rules appear here when you use Report spam or Not spam, or add one."]</p>
             }
-            @foreach (SenderRuleRow r in senderRules)
+            @foreach (SenderRuleRow r in senderRules.Where(r => r.Action != SenderRuleAction.Discard))
             {
                 <div class="catrow">
                     <span class="mono">@r.Pattern</span>
@@ -705,6 +939,35 @@
     @if (Aside)
     {
         <aside class="setaside" aria-label="@L["About this section"]">
+            @if (Current == "profile")
+            {
+                <h2 class="asidehead">@L["Profile"]</h2>
+                <p class="asidetext">@L["The name on your mails is what people see in their inbox: {from}"].Replace("{from}", FromLine, StringComparison.Ordinal)</p>
+                @if (!individual)
+                {
+                    <p class="asidetext">@L["Change your first or last name? Ask your administrator."]</p>
+                }
+                @if (profile.TermsAcceptedAt is DateTimeOffset accepted)
+                {
+                    <div class="asidecard"><span>@L["Terms accepted"]</span><b>@clock.Date(accepted)</b></div>
+                    <p class="asidetext"><a class="authlink" href="/terms" target="_blank" rel="noopener">@L["Terms of Service"]</a> · <a class="authlink" href="/disclaimer" target="_blank" rel="noopener">@L["Disclaimer"]</a></p>
+                }
+            }
+            @if (Current == "away")
+            {
+                <h2 class="asidehead">@L["Away"]</h2>
+                <p class="asidetext">@L["While it is on, a yellow line shows at the top of your Inbox with a button to turn it off."]</p>
+                @if (away.Replied.Count > 0)
+                {
+                    <div class="asidecard"><span>@L["Answered so far"]</span><b>@away.Replied.Count</b></div>
+                }
+            }
+            @if (Current == "data")
+            {
+                <h2 class="asidehead">@L["Your data"]</h2>
+                <p class="asidetext">@L["A request is answered within the time the law allows, and you are told by mail at each step."]</p>
+                <p class="asidetext"><a class="authlink" href="/terms" target="_blank" rel="noopener">@L["Terms of Service"]</a> · <a class="authlink" href="/disclaimer" target="_blank" rel="noopener">@L["Disclaimer"]</a></p>
+            }
             @if (Current == "appearance")
             {
                 <h2 class="asidehead">@L["Preview"]</h2>
@@ -820,10 +1083,13 @@
     // Mail (signature, sound) - then Security; "Senders" is named for what it is about, Junk.
     private static readonly (string Key, string Label, string Sub, string Icon)[] Sections =
     {
+        ("profile", "Profile", "Your name, phone, the name on your mails", "user"),
         ("mail", "Mail", "Open on, signature, sound, Undo send", "email"),
+        ("away", "Away", "Out of office, automatic reply", "clock"),
         ("security", "Security", "Password, two-step, devices", "lock"),
+        ("data", "Your data", "Download everything, delete your account", "download"),
         ("rules", "Folders and rules", "Your folders, rules that file mail", "folder"),
-        ("senders", "Junk and senders", "Always or never to Junk", "security"),
+        ("senders", "Junk and senders", "Blocked, always or never to Junk", "security"),
         ("categories", "Categories", "Shared and your own", "tag"),
         ("appearance", "Appearance", "Theme, density, layout", "contrast"),
         ("language", "Language and time", "Language, time zone, dates", "world-route"),
@@ -833,7 +1099,10 @@
     // "Find a setting": words that lead to each section, besides its name and line.
     private static readonly IReadOnlyDictionary<string, string> FindWords = new Dictionary<string, string>(StringComparer.Ordinal)
     {
-        ["mail"] = "today inbox open signature sound undo send trash empty per page offline",
+        ["profile"] = "name first last phone date of birth nickname display from",
+        ["away"] = "away vacation out of office holiday automatic reply responder leave",
+        ["data"] = "download export delete account privacy dpdp data rights",
+        ["mail"] = "today inbox open signature sound undo send trash empty per page offline notification desktop",
         ["security"] = "password two-step authenticator passkey backup codes devices sign out recovery",
         ["rules"] = "folder rule filter move file",
         ["senders"] = "junk spam block trust allow sender",
@@ -846,7 +1115,7 @@
     // Addresses from before rc.13 still land in the right place.
     private string Current => Section switch
     {
-        "profile" or "signature" => "mail",
+        "signature" => "mail",
         "password" => "security",
         _ when Sections.Any(x => x.Key == Section) => Section!,
         _ => "mail",
@@ -877,6 +1146,18 @@
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private string displayName = string.Empty;
+    private PersonProfile profile = new();
+    private bool individual;
+    private bool nicknames = true;
+    private IReadOnlyDictionary<string, int> discards = new Dictionary<string, int>();
+    private InboxSections sections = new();
+    private ExportState? export;
+    private DeletionRequest? deletion;
+    private RetentionPolicy retention = new();
+    private Anjal.Mailbox.AwayReply away = new();
+    private bool awayOutsideAllowed = true;
+
+    private string LocalText(DateTimeOffset? at) => at is DateTimeOffset t ? clock.Local(t).ToString("yyyy-MM-dd'T'HH:mm", System.Globalization.CultureInfo.InvariantCulture) : string.Empty;
     private string theme = MailboxRow.DefaultTheme;
     private Lexicon L = new("en", new Dictionary<string, string>());
     private string colour = "anjal";
@@ -987,6 +1268,13 @@
 
     private string SavedMessage => Saved switch
     {
+        "profile" => L["Profile saved."],
+        "away" => L["Away reply saved."],
+        "sections" => L["Inbox sections saved."],
+        "away-off" => L["Away reply turned off."],
+        "export" => L["Your download is being prepared. You will get a mail with the link when it is ready."],
+        "delete" => L["Your request is recorded and your administrator has been told."],
+        "withdrawn" => L["Your request is withdrawn."],
         "name" => L["Your name is saved."],
         "theme" => L["Theme saved."],
         "appearance" => L["Appearance saved."],
@@ -1048,6 +1336,28 @@
         if (context is not null)
         {
             displayName = context.Value.Mailbox.DisplayName;
+            if (Current == "profile")
+            {
+                profile = await Mail.ProfileOfAsync(mailboxId.Value);
+                individual = await Mail.IsIndividualAsync(mailboxId.Value);
+                nicknames = await Mail.NicknamesAllowedAsync(mailboxId.Value) || profile.FullName.Length == 0;
+            }
+            if (Current == "appearance")
+            {
+                sections = await Mail.SectionsOfAsync(mailboxId.Value);
+            }
+            if (Current == "away")
+            {
+                away = await Mail.AwayOfAsync(mailboxId.Value);
+                awayOutsideAllowed = await Mail.IsIndividualAsync(mailboxId.Value) || (await Mail.MailPolicyOfAsync(context.Value.Tenant.Id)).AwayOutside;
+            }
+            if (Current == "data")
+            {
+                profile = await Mail.ProfileOfAsync(mailboxId.Value);
+                export = await Mail.ExportStateAsync(mailboxId.Value);
+                deletion = await Mail.DeletionRequestOfAsync(mailboxId.Value);
+                retention = await Mail.RetentionOfAsync(context.Value.Tenant);
+            }
             theme = MailboxRow.NormalizeTheme(context.Value.Mailbox.Theme);
             colour = theme[..theme.LastIndexOf('-')];
             mode = theme[(theme.LastIndexOf('-') + 1)..];
@@ -1077,6 +1387,7 @@
                 categories = await Mail.ListCategoriesAsync(mailboxId.Value);
                 rules = await Mail.ListCategoryRulesAsync(mailboxId.Value);
                 senderRules = await Mail.ListSenderRulesAsync(mailboxId.Value);
+                discards = await Mail.DiscardCountsAsync(mailboxId.Value);
                 break;
             case "mail":
                 shared = SessionRegistry.IsShared(user);

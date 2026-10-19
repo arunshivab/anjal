@@ -96,11 +96,39 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                 : null;
         }
         (Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)? direct = await this.ResolveMailboxAsync(local, domain, ct).ConfigureAwait(false);
-        if (direct is not null || !IsRoleAddress(local))
+        if (direct is not null)
         {
             return direct;
         }
-        return await this.ResolveRoleAsync(local, domain, ct).ConfigureAwait(false);
+        if (IsRoleAddress(local) || local.Equals(UnsubscribeLocal, System.StringComparison.OrdinalIgnoreCase))
+        {
+            return await this.ResolveRoleAsync(local, domain, ct).ConfigureAwait(false);
+        }
+        return await this.ResolveExtraAsync(local, domain, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// rc.22 (item 41): an extra address gives its mailbox; a group address gives its first member,
+    /// so the address exists at RCPT TO and the webmail knows it is here. Delivery expands a group
+    /// to every member with <see cref="ExpandAsync"/>.
+    /// </summary>
+    private async System.Threading.Tasks.Task<(Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)?> ResolveExtraAsync(string local, string domain, System.Threading.CancellationToken ct)
+    {
+        Anjal.Store.TenantDomainRow? domainRow = await this.store.GetTenantDomainAsync(domain, ct).ConfigureAwait(false);
+        Anjal.Store.TenantRow? tenant = domainRow is null ? null : await this.store.GetTenantByIdAsync(domainRow.TenantId, ct).ConfigureAwait(false);
+        if (tenant is null || !tenant.Enabled)
+        {
+            return null;
+        }
+        AddressBook book = await AddressBook.ReadAsync(this.store, tenant.Id, ct).ConfigureAwait(false);
+        string full = local + "@" + domain;
+        System.Guid? id = book.AliasAt(full)?.MailboxId ?? book.GroupAt(full)?.Members.FirstOrDefault();
+        if (id is null || id == System.Guid.Empty)
+        {
+            return null;
+        }
+        Anjal.Store.MailboxRow? m = await this.store.GetMailboxByIdAsync(id.Value, ct).ConfigureAwait(false);
+        return m is null || !m.Enabled || m.TenantId != tenant.Id ? null : (tenant, m);
     }
 
     /// <summary>This server's own name, for postmaster@ it (v1.0.0-rc.8); null to not recognise it.</summary>
@@ -108,6 +136,124 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
 
     /// <summary>The operator's mailbox for postmaster@ this server; null for postmaster@ its parent domain.</summary>
     public string? OperatorPostmaster { get; init; }
+
+    /// <summary>The virus scanner for files on mail from outside (rc.22, item 39); null when scanning is off.</summary>
+    public IVirusScanner? Scanner { get; init; }
+
+    /// <summary>The header a forwarded copy carries (rc.22, item 29): each mailbox it passed, so a loop stops.</summary>
+    public const string ForwardedHeader = "X-Anjal-Forwarded";
+
+    /// <summary>The most mailboxes a copy is forwarded through in a chain.</summary>
+    public const int MaxForwardHops = 3;
+
+    /// <summary>The audit action written for every forward (rc.22, item 29: forwards are logged).</summary>
+    public const string ForwardAudit = "webmail.forwarded";
+
+    /// <summary>The mailbox document counting mail discarded from blocked senders (rc.22, item 32), by sender.</summary>
+    public const string DiscardsKind = "discards";
+
+    /// <summary>
+    /// Whether a message is automatic - a list, a bounce, an auto-reply or any other machine mail -
+    /// which is never answered automatically and never forwarded by a rule (RFC 3834).
+    /// </summary>
+    /// <param name="headers">The message's headers.</param>
+    /// <returns>True for automatic mail.</returns>
+    public static bool IsAutomaticMail(Anjal.Mime.HeaderCollection headers)
+    {
+        System.ArgumentNullException.ThrowIfNull(headers);
+        string auto = (headers.Get("Auto-Submitted") ?? "no").Trim();
+        if (!auto.StartsWith("no", System.StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+        if (headers.Contains("List-Id") || headers.Contains("List-Unsubscribe") || headers.Contains("X-Auto-Response-Suppress"))
+        {
+            return true;
+        }
+        string precedence = (headers.Get("Precedence") ?? string.Empty).Trim();
+        return precedence.Equals("bulk", System.StringComparison.OrdinalIgnoreCase)
+            || precedence.Equals("list", System.StringComparison.OrdinalIgnoreCase)
+            || precedence.Equals("junk", System.StringComparison.OrdinalIgnoreCase)
+            || precedence.Equals("auto_reply", System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Every mailbox an address reaches (rc.22, item 41): the mailbox itself, the mailbox an extra
+    /// address delivers to, or each member of a group address. Empty when the address is not here.
+    /// A group that takes mail only from its organisation gives no mailboxes to a sender outside it,
+    /// and says so.
+    /// </summary>
+    /// <param name="address">The envelope recipient.</param>
+    /// <param name="senderDomain">The sender's domain, for a group's "only the organisation" rule; empty for a signed-in sender.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The mailboxes, and a refusal in words when a group refused the sender.</returns>
+    public async System.Threading.Tasks.Task<(IReadOnlyList<(Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)> Targets, string? Refusal)> ExpandAsync(string address, string senderDomain, System.Threading.CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(address);
+        System.ArgumentNullException.ThrowIfNull(senderDomain);
+        var targets = new System.Collections.Generic.List<(Anjal.Store.TenantRow, Anjal.Store.MailboxRow)>();
+        // The address book first: ResolveAsync answers a group with its first member (so RCPT TO
+        // accepts it), but delivery must reach every member and honour "organisation only".
+        if (!TrySplitAddress(address, out string local, out string domain))
+        {
+            return (targets, null);
+        }
+        Anjal.Store.TenantDomainRow? domainRow = await this.store.GetTenantDomainAsync(domain, ct).ConfigureAwait(false);
+        Anjal.Store.TenantRow? tenant = domainRow is null ? null : await this.store.GetTenantByIdAsync(domainRow.TenantId, ct).ConfigureAwait(false);
+        if (tenant is null || !tenant.Enabled)
+        {
+            (Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)? elsewhere = await this.ResolveAsync(address, ct).ConfigureAwait(false);
+            if (elsewhere is not null)
+            {
+                targets.Add(elsewhere.Value);
+            }
+            return (targets, null);
+        }
+        AddressBook book = await AddressBook.ReadAsync(this.store, tenant.Id, ct).ConfigureAwait(false);
+        string full = local.ToLowerInvariant() + "@" + domain.ToLowerInvariant();
+        if (book.AliasAt(full) is null && book.GroupAt(full) is null)
+        {
+            (Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)? direct = await this.ResolveAsync(address, ct).ConfigureAwait(false);
+            if (direct is not null)
+            {
+                targets.Add(direct.Value);
+            }
+            return (targets, null);
+        }
+        if (book.AliasAt(full) is AliasEntry alias)
+        {
+            Anjal.Store.MailboxRow? m = await this.store.GetMailboxByIdAsync(alias.MailboxId, ct).ConfigureAwait(false);
+            if (m is not null && m.Enabled && m.TenantId == tenant.Id)
+            {
+                targets.Add((tenant, m));
+            }
+            return (targets, null);
+        }
+        if (book.GroupAt(full) is GroupEntry group)
+        {
+            if (group.OrgOnly && senderDomain.Length > 0)
+            {
+                bool inside = false;
+                foreach (Anjal.Store.TenantDomainRow d in await this.store.ListTenantDomainsAsync(tenant.Id, ct).ConfigureAwait(false))
+                {
+                    inside |= string.Equals(d.Domain, senderDomain, System.StringComparison.OrdinalIgnoreCase);
+                }
+                if (!inside)
+                {
+                    return (targets, $"{full} takes mail only from its own organisation");
+                }
+            }
+            foreach (System.Guid id in group.Members)
+            {
+                Anjal.Store.MailboxRow? m = await this.store.GetMailboxByIdAsync(id, ct).ConfigureAwait(false);
+                if (m is not null && m.Enabled && m.TenantId == tenant.Id)
+                {
+                    targets.Add((tenant, m));
+                }
+            }
+        }
+        return (targets, null);
+    }
 
     /// <summary>
     /// The message as filed at final delivery (v1.0.0-rc.9, DEF-069; RFC 5321 4.4):
@@ -281,18 +427,36 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             };
         }
 
-        Anjal.Mime.MimeMessage? parsed;
-        try
+        Anjal.Mime.MimeMessage? parsed = this.ParseQuietly(ctx.RawBytes);
+        byte[] raw = ctx.RawBytes;
+
+        // rc.22 (item 39, decisions of 2 Oct 2026): the files on mail from outside, before anything
+        // else. Programs and scripts are refused outright; a virus is removed and the message
+        // delivered without it; a disk image goes to Junk; with the scanner down, the mail is held.
+        FileJudgement files = ctx.AuthenticatedUser is null
+            ? await AttachmentPolicy.JudgeAsync(parsed, this.Scanner, ct).ConfigureAwait(false)
+            : new FileJudgement(FileVerdict.Clean, System.Array.Empty<string>(), string.Empty, null, 0);
+        if (files.Scanned > 0 || files.Verdict != FileVerdict.Clean)
         {
-            parsed = Anjal.Mime.MimeParser.Parse(ctx.RawBytes);
+            await this.CountFilesAsync(files, ct).ConfigureAwait(false);
         }
-#pragma warning disable CA1031 // Intentional: an unparseable message still gets stored - the raw bytes are the truth.
-        catch (System.Exception ex)
+        if (files.Verdict == FileVerdict.Refused)
         {
-            this.log?.Invoke($"Mailbox: MIME parse failed, storing with empty headers: {ex.GetType().Name}: {ex.Message}");
-            parsed = null;
+            this.log?.Invoke($"Mailbox: refused, programs or scripts attached: {string.Join(", ", files.Files)}");
+            Anjal.Smtp.Counters.Increment("anjal_virus_refused_total");
+            return new Anjal.Smtp.DeliveryResult
+            {
+                Outcome = Anjal.Smtp.DeliveryOutcome.PermanentFailure,
+                ReplyText = "Programs and scripts are not accepted (" + string.Join(", ", files.Files) + "); send them another way",
+            };
         }
-#pragma warning restore CA1031
+        if (files.Verdict == FileVerdict.Removed && files.RawBytes is not null)
+        {
+            raw = files.RawBytes;
+            parsed = this.ParseQuietly(raw);
+            this.log?.Invoke($"Mailbox: virus removed: {string.Join(", ", files.Files)} ({files.Detail})");
+            Anjal.Smtp.Counters.Increment("anjal_virus_removed_total");
+        }
 
         int spamScore = Anjal.Spam.SpamHeaders.ScoreOf(parsed);
 
@@ -302,141 +466,198 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         // headers it carries.
         bool spamChecked = ctx.AuthenticatedUser is null && parsed?.Headers.Get(Anjal.Spam.SpamHeaders.Score) is not null;
         string fromHeaderAddress = parsed is null ? string.Empty : Anjal.Spam.SpamScorer.FirstAddress(parsed.Headers.Get("From") ?? string.Empty);
+        string senderDomain = ctx.AuthenticatedUser is not null ? string.Empty : Anjal.Spam.SpamScorer.DomainOf(ctx.EnvelopeFrom.Length > 0 ? ctx.EnvelopeFrom : fromHeaderAddress);
         var rulesByTenant = new System.Collections.Generic.Dictionary<System.Guid, System.Collections.Generic.IReadOnlyList<Anjal.Store.SenderRuleRow>>();
 
         int delivered = 0;
         bool transient = false;
+        string? refusal = null;
         var seenMailboxes = new System.Collections.Generic.HashSet<System.Guid>();
+        var heldFor = new System.Collections.Generic.List<string>();
 
         foreach (string rcpt in ctx.EnvelopeTo)
         {
-            (Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)? resolved =
-                await this.ResolveAsync(rcpt, ct).ConfigureAwait(false);
-            if (resolved is null)
+            // rc.22 (item 51): unsubscribe@ an organisation's domain, the address applications' mail
+            // offers in List-Unsubscribe, puts the sender on the organisation's do-not-send list.
+            if (await this.UnsubscribeAsync(rcpt, ctx.EnvelopeFrom, fromHeaderAddress, parsed, ct).ConfigureAwait(false))
+            {
+                delivered++;
+                continue;
+            }
+            (IReadOnlyList<(Anjal.Store.TenantRow Tenant, Anjal.Store.MailboxRow Mailbox)> targets, string? refused) =
+                await this.ExpandAsync(rcpt, senderDomain, ct).ConfigureAwait(false);
+            if (refused is not null)
+            {
+                this.log?.Invoke($"Mailbox: {rcpt} refused the sender: {refused}");
+                refusal ??= refused;
+                continue;
+            }
+            if (targets.Count == 0)
             {
                 this.log?.Invoke($"Mailbox: no mailbox for {rcpt}");
                 continue;
             }
 
-            (Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox) = resolved.Value;
-            if (!seenMailboxes.Add(mailbox.Id))
+            foreach ((Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox) in targets)
             {
-                // Same mailbox listed twice (e.g. once with a +tag) - deliver once.
-                delivered++;
-                continue;
-            }
-
-            // DES-11 D2 (owner, 10 Oct 2026): a full mailbox receives nothing - the organisation's
-            // storage plan taken in - except Anjal's own security mail. Deferred, so a sender retries.
-            if (!ctx.AnjalSecurityMail && (await Anjal.Store.StoragePlan.StateOfAsync(this.store, mailbox, ct).ConfigureAwait(false)).Full)
-            {
-                this.log?.Invoke($"Mailbox: {mailbox.Address} is full; not delivered");
-                Anjal.Smtp.Counters.Increment("anjal_quota_refusals_total");
-                transient = true;
-                continue;
-            }
-
-            try
-            {
-                if (!rulesByTenant.TryGetValue(tenant.Id, out System.Collections.Generic.IReadOnlyList<Anjal.Store.SenderRuleRow>? rules))
+                if (!seenMailboxes.Add(mailbox.Id))
                 {
-                    rules = await this.store.ListSenderRulesAsync(tenant.Id, ct).ConfigureAwait(false);
-                    rulesByTenant[tenant.Id] = rules;
-                }
-                // The tenant's rules (set by an administrator) and this
-                // mailbox's own (from its Report spam / Not spam) are judged
-                // together: an exact address beats a domain, block beats allow.
-                IReadOnlyList<Anjal.Store.SenderRuleRow> personal = await this.store.ListMailboxSenderRulesAsync(mailbox.Id, ct).ConfigureAwait(false);
-                IReadOnlyList<Anjal.Store.SenderRuleRow> effective = personal.Count == 0
-                    ? rules
-                    : new System.Collections.Generic.List<Anjal.Store.SenderRuleRow>(rules.Concat(personal));
-                string folderName = ChooseFolder(spamScore, tenant.SpamThreshold, Anjal.Spam.SenderRules.Evaluate(effective, ctx.EnvelopeFrom, fromHeaderAddress));
-
-                // Unencrypted mail from outside (v1.0.0-rc.7): filed in the
-                // tenant's chosen folder, if it has one, unless the recipient
-                // trusts the sender. Junk decisions come first.
-                if (ctx.AuthenticatedUser is null && ctx.TransportTls is null
-                    && !string.IsNullOrWhiteSpace(tenant.UnencryptedFolder)
-                    && string.Equals(folderName, "INBOX", System.StringComparison.OrdinalIgnoreCase)
-                    && !await this.IsTrustedAsync(mailbox.Id, fromHeaderAddress, ctx.EnvelopeFrom, ct).ConfigureAwait(false))
-                {
-                    folderName = tenant.UnencryptedFolder.Trim();
+                    // Same mailbox listed twice (e.g. once with a +tag, or through a group) - deliver once.
+                    delivered++;
+                    continue;
                 }
 
-                // rc.12 (items 24, 31): the person's own rules, for mail on its way to INBOX.
-                // Junk stays Junk: a rule never brings mail out of it.
-                RuleOutcome? ruled = null;
-                if (parsed is not null && string.Equals(folderName, Anjal.Store.FolderRow.Inbox, System.StringComparison.OrdinalIgnoreCase))
+                // DES-11 D2 (owner, 10 Oct 2026): a full mailbox receives nothing - the organisation's
+                // storage plan taken in - except Anjal's own security mail. Deferred, so a sender retries.
+                if (!ctx.AnjalSecurityMail && (await Anjal.Store.StoragePlan.StateOfAsync(this.store, mailbox, ct).ConfigureAwait(false)).Full)
                 {
-                    ruled = await this.RuleForAsync(tenant, mailbox, parsed, fromHeaderAddress, ct).ConfigureAwait(false);
-                    if (ruled is not null && IsRuleTarget(ruled.MoveTo))
+                    this.log?.Invoke($"Mailbox: {mailbox.Address} is full; not delivered");
+                    Anjal.Smtp.Counters.Increment("anjal_quota_refusals_total");
+                    transient = true;
+                    continue;
+                }
+
+                try
+                {
+                    if (!rulesByTenant.TryGetValue(tenant.Id, out System.Collections.Generic.IReadOnlyList<Anjal.Store.SenderRuleRow>? rules))
                     {
-                        folderName = ruled.MoveTo;
+                        rules = await this.store.ListSenderRulesAsync(tenant.Id, ct).ConfigureAwait(false);
+                        rulesByTenant[tenant.Id] = rules;
+                    }
+                    // The tenant's rules (set by an administrator) and this
+                    // mailbox's own (from its Report spam / Not spam / Block) are judged
+                    // together: an exact address beats a domain, discard beats block beats allow.
+                    IReadOnlyList<Anjal.Store.SenderRuleRow> personal = await this.store.ListMailboxSenderRulesAsync(mailbox.Id, ct).ConfigureAwait(false);
+                    IReadOnlyList<Anjal.Store.SenderRuleRow> effective = personal.Count == 0
+                        ? rules
+                        : new System.Collections.Generic.List<Anjal.Store.SenderRuleRow>(rules.Concat(personal));
+                    Anjal.Store.SenderRuleAction? senderRule = Anjal.Spam.SenderRules.Evaluate(effective, ctx.EnvelopeFrom, fromHeaderAddress);
+
+                    // rc.22 (item 32, owner 18 Oct 2026, option (b)): a blocked sender's mail is
+                    // discarded silently - no folder sees it, the sender is not told. Accepted on the
+                    // wire, so the as-received evidence copy is kept like every other message.
+                    if (senderRule == Anjal.Store.SenderRuleAction.Discard)
+                    {
+                        await this.CountDiscardAsync(mailbox.Id, fromHeaderAddress.Length > 0 ? fromHeaderAddress : ctx.EnvelopeFrom, ct).ConfigureAwait(false);
+                        this.log?.Invoke($"Mailbox: {mailbox.Address} discarded mail from a blocked sender ({ctx.EnvelopeFrom})");
+                        Anjal.Smtp.Counters.Increment("anjal_mailbox_discarded_total");
+                        delivered++;
+                        continue;
+                    }
+
+                    string folderName = files.Verdict == FileVerdict.Held ? AttachmentPolicy.QuarantineFolder
+                        : files.Verdict == FileVerdict.Junk && senderRule != Anjal.Store.SenderRuleAction.Allow ? JunkFolder
+                        : ChooseFolder(spamScore, tenant.SpamThreshold, senderRule);
+
+                    // Unencrypted mail from outside (v1.0.0-rc.7): filed in the
+                    // tenant's chosen folder, if it has one, unless the recipient
+                    // trusts the sender. Junk decisions come first.
+                    if (ctx.AuthenticatedUser is null && ctx.TransportTls is null
+                        && !string.IsNullOrWhiteSpace(tenant.UnencryptedFolder)
+                        && string.Equals(folderName, "INBOX", System.StringComparison.OrdinalIgnoreCase)
+                        && !await this.IsTrustedAsync(mailbox.Id, fromHeaderAddress, ctx.EnvelopeFrom, ct).ConfigureAwait(false))
+                    {
+                        folderName = tenant.UnencryptedFolder.Trim();
+                    }
+
+                    // rc.12 (items 24, 31): the person's own rules, for mail on its way to INBOX.
+                    // Junk stays Junk: a rule never brings mail out of it.
+                    RuleOutcome? ruled = null;
+                    if (parsed is not null && string.Equals(folderName, Anjal.Store.FolderRow.Inbox, System.StringComparison.OrdinalIgnoreCase))
+                    {
+                        ruled = await this.RuleForAsync(tenant, mailbox, parsed, fromHeaderAddress, ct).ConfigureAwait(false);
+                        if (ruled is not null && IsRuleTarget(ruled.MoveTo))
+                        {
+                            folderName = ruled.MoveTo;
+                        }
+                    }
+
+                    Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
+                    MaildirWriteResult written = await this.maildir
+                        .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, WithReturnPath(raw, ctx.EnvelopeFrom), ct)
+                        .ConfigureAwait(false);
+                    string storedFile = written.RelativePath;
+                    if (ruled is not null && (ruled.MarkRead || ruled.Flag))
+                    {
+                        storedFile = this.maildir.SetFlags(tenant.Slug, mailbox.Address, folder.Name, written.RelativePath, seen: ruled.MarkRead, flagged: ruled.Flag, answered: false) ?? written.RelativePath;
+                    }
+
+                    await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
+                    {
+                        MailboxId = mailbox.Id,
+                        FolderId = folder.Id,
+                        MaildirFile = storedFile,
+                        Seen = ruled?.MarkRead == true,
+                        Flagged = ruled?.Flag == true,
+                        EnvelopeFrom = ctx.EnvelopeFrom,
+                        MessageId = parsed?.MessageId ?? string.Empty,
+                        FromHeader = parsed?.Headers.Get("From") ?? string.Empty,
+                        ToHeader = parsed?.Headers.Get("To") ?? string.Empty,
+                        Subject = parsed?.Subject ?? string.Empty,
+                        DateHeader = parsed?.Date ?? string.Empty,
+                        SizeBytes = written.SizeBytes,
+                        SpamScore = spamScore,
+                        SpamChecked = spamChecked,
+                        TransportEncrypted = ctx.AuthenticatedUser is null ? ctx.TransportTls is not null : null,
+                        TransportTls = ctx.AuthenticatedUser is null ? ctx.TransportTls : null,
+                        EvidenceId = ctx.EvidenceId,
+                        HasAttachments = HasAttachment(parsed?.Body),
+                        BodyText = MessageText.Extract(parsed),
+                        CategoryId = await this.CategoryForAsync(mailbox.Id, ctx.EnvelopeFrom, parsed?.Headers.Get("From") ?? string.Empty, ct).ConfigureAwait(false),
+                    }, ct).ConfigureAwait(false);
+
+                    // v1.0.0-rc.8: the evidence is kept at least as long as this tenant requires.
+                    if (ctx.EvidenceId is System.Guid evidenceId && this.store is Anjal.Store.IEvidenceStore evidenceStore)
+                    {
+                        await evidenceStore.RaiseEvidenceRetentionAsync(evidenceId, tenant.EvidenceRetentionDays, ct).ConfigureAwait(false);
+                    }
+
+                    long? used = await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
+                    if (used is long u && mailbox.QuotaBytes > 0 && u > mailbox.QuotaBytes)
+                    {
+                        // The message that filled it was let in whole; the next is refused (DES-11 D2).
+                        this.log?.Invoke($"Mailbox: {mailbox.Address} is now full ({u} of {mailbox.QuotaBytes} bytes)");
+                    }
+
+                    this.log?.Invoke($"Delivered {rcpt} -> {tenant.Slug}/{mailbox.Address}/{Anjal.Store.FolderRow.MaildirNameFor(folder.Name)}/{written.RelativePath} ({written.SizeBytes} bytes, spam score {spamScore})");
+                    Anjal.Smtp.Counters.Increment(folderName == JunkFolder ? "anjal_mailbox_junked_total" : "anjal_mailbox_delivered_total");
+                    Anjal.Smtp.Counters.Add("anjal_mailbox_bytes_stored_total", written.SizeBytes);
+                    delivered++;
+
+                    if (files.Verdict == FileVerdict.Held)
+                    {
+                        heldFor.Add(mailbox.Address);
+                        continue;
+                    }
+
+                    // rc.22 (item 29): a rule that forwards sends a copy on; the original stays above.
+                    if (ruled is not null && ruled.ForwardTo.Length > 0 && parsed is not null)
+                    {
+                        await this.ForwardAsync(tenant, mailbox, ruled.ForwardTo, raw, parsed, ctx, ct).ConfigureAwait(false);
+                    }
+
+                    // rc.22 (item 30): the out-of-office reply, once per sender, never to automatic mail.
+                    if (parsed is not null && !ctx.AnjalSecurityMail && folderName != JunkFolder)
+                    {
+                        await this.AwayReplyAsync(tenant, mailbox, parsed, fromHeaderAddress, ctx, ct).ConfigureAwait(false);
                     }
                 }
-
-                Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
-                MaildirWriteResult written = await this.maildir
-                    .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, WithReturnPath(ctx.RawBytes, ctx.EnvelopeFrom), ct)
-                    .ConfigureAwait(false);
-                string storedFile = written.RelativePath;
-                if (ruled is not null && (ruled.MarkRead || ruled.Flag))
+                catch (System.IO.IOException ex)
                 {
-                    storedFile = this.maildir.SetFlags(tenant.Slug, mailbox.Address, folder.Name, written.RelativePath, seen: ruled.MarkRead, flagged: ruled.Flag, answered: false) ?? written.RelativePath;
+                    this.log?.Invoke($"Mailbox: I/O failure for {rcpt}: {ex.Message}");
+                    transient = true;
                 }
-
-                await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
+                catch (System.UnauthorizedAccessException ex)
                 {
-                    MailboxId = mailbox.Id,
-                    FolderId = folder.Id,
-                    MaildirFile = storedFile,
-                    Seen = ruled?.MarkRead == true,
-                    Flagged = ruled?.Flag == true,
-                    EnvelopeFrom = ctx.EnvelopeFrom,
-                    MessageId = parsed?.MessageId ?? string.Empty,
-                    FromHeader = parsed?.Headers.Get("From") ?? string.Empty,
-                    ToHeader = parsed?.Headers.Get("To") ?? string.Empty,
-                    Subject = parsed?.Subject ?? string.Empty,
-                    DateHeader = parsed?.Date ?? string.Empty,
-                    SizeBytes = written.SizeBytes,
-                    SpamScore = spamScore,
-                    SpamChecked = spamChecked,
-                    TransportEncrypted = ctx.AuthenticatedUser is null ? ctx.TransportTls is not null : null,
-                    TransportTls = ctx.AuthenticatedUser is null ? ctx.TransportTls : null,
-                    EvidenceId = ctx.EvidenceId,
-                    HasAttachments = HasAttachment(parsed?.Body),
-                    BodyText = MessageText.Extract(parsed),
-                    CategoryId = await this.CategoryForAsync(mailbox.Id, ctx.EnvelopeFrom, parsed?.Headers.Get("From") ?? string.Empty, ct).ConfigureAwait(false),
-                }, ct).ConfigureAwait(false);
-
-                // v1.0.0-rc.8: the evidence is kept at least as long as this tenant requires.
-                if (ctx.EvidenceId is System.Guid evidenceId && this.store is Anjal.Store.IEvidenceStore evidenceStore)
-                {
-                    await evidenceStore.RaiseEvidenceRetentionAsync(evidenceId, tenant.EvidenceRetentionDays, ct).ConfigureAwait(false);
+                    this.log?.Invoke($"Mailbox: permission failure for {rcpt}: {ex.Message}");
+                    transient = true;
                 }
+            }
+        }
 
-                long? used = await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
-                if (used is long u && mailbox.QuotaBytes > 0 && u > mailbox.QuotaBytes)
-                {
-                    // The message that filled it was let in whole; the next is refused (DES-11 D2).
-                    this.log?.Invoke($"Mailbox: {mailbox.Address} is now full ({u} of {mailbox.QuotaBytes} bytes)");
-                }
-
-                this.log?.Invoke($"Delivered {rcpt} -> {tenant.Slug}/{mailbox.Address}/{Anjal.Store.FolderRow.MaildirNameFor(folder.Name)}/{written.RelativePath} ({written.SizeBytes} bytes, spam score {spamScore})");
-                Anjal.Smtp.Counters.Increment(folderName == JunkFolder ? "anjal_mailbox_junked_total" : "anjal_mailbox_delivered_total");
-                Anjal.Smtp.Counters.Add("anjal_mailbox_bytes_stored_total", written.SizeBytes);
-                delivered++;
-            }
-            catch (System.IO.IOException ex)
-            {
-                this.log?.Invoke($"Mailbox: I/O failure for {rcpt}: {ex.Message}");
-                transient = true;
-            }
-            catch (System.UnauthorizedAccessException ex)
-            {
-                this.log?.Invoke($"Mailbox: permission failure for {rcpt}: {ex.Message}");
-                transient = true;
-            }
+        if (heldFor.Count > 0)
+        {
+            await this.HeldNoticeAsync(heldFor, ctx, files, ct).ConfigureAwait(false);
         }
 
         if (delivered > 0)
@@ -460,8 +681,411 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         return new Anjal.Smtp.DeliveryResult
         {
             Outcome = Anjal.Smtp.DeliveryOutcome.PermanentFailure,
-            ReplyText = "No such mailbox",
+            ReplyText = refusal ?? "No such mailbox",
         };
+    }
+
+    /// <summary>The local part that takes unsubscribe requests for an organisation's applications (rc.22, item 51).</summary>
+    public const string UnsubscribeLocal = "unsubscribe";
+
+    private async System.Threading.Tasks.Task<bool> UnsubscribeAsync(string rcpt, string envelopeFrom, string fromHeaderAddress, Anjal.Mime.MimeMessage? parsed, System.Threading.CancellationToken ct)
+    {
+        if (!TrySplitAddress(rcpt, out string local, out string domain) || !local.Equals(UnsubscribeLocal, System.StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+        if (await this.store.GetMailboxAsync(local, domain, ct).ConfigureAwait(false) is not null)
+        {
+            // Someone made a real mailbox called unsubscribe@: it is theirs.
+            return false;
+        }
+        Anjal.Store.TenantDomainRow? domainRow = await this.store.GetTenantDomainAsync(domain, ct).ConfigureAwait(false);
+        if (domainRow is null)
+        {
+            return false;
+        }
+        var who = new System.Collections.Generic.List<string>();
+        foreach (string a in new[] { envelopeFrom, fromHeaderAddress })
+        {
+            if (TrySplitAddress(a, out string l, out string d) && !who.Contains(l + "@" + d))
+            {
+                who.Add(l + "@" + d);
+            }
+        }
+        // The subject may name the address being unsubscribed (List-Unsubscribe: ...?subject=unsubscribe%20addr).
+        string subject = parsed?.Subject ?? string.Empty;
+        foreach (string word in subject.Split(' ', System.StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (TrySplitAddress(word.Trim('<', '>', ',', ';'), out string l, out string d) && !who.Contains(l + "@" + d))
+            {
+                who.Add(l + "@" + d);
+            }
+        }
+        if (who.Count == 0)
+        {
+            return true;
+        }
+        Anjal.Store.DoNotSendDocument doc = await Anjal.Store.DoNotSend.ReadAsync(this.store, domainRow.TenantId, ct).ConfigureAwait(false);
+        System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
+        bool changed = false;
+        foreach (string address in who)
+        {
+            if (!doc.Entries.Any(e => string.Equals(e.Address, address, System.StringComparison.OrdinalIgnoreCase)))
+            {
+                doc.Entries.Add(new Anjal.Store.DoNotSendEntry { Address = address, Reason = "Unsubscribed", Added = now, By = Anjal.Store.DoNotSend.ByAnjal });
+                changed = true;
+            }
+        }
+        if (changed)
+        {
+            await Anjal.Store.DoNotSend.WriteAsync(this.store, domainRow.TenantId, doc, ct).ConfigureAwait(false);
+        }
+        this.log?.Invoke($"Mailbox: {rcpt}: {string.Join(", ", who)} unsubscribed from the organisation's applications");
+        Anjal.Smtp.Counters.Increment("anjal_unsubscribe_total");
+        return true;
+    }
+
+    /// <summary>Parse a message, or null when it cannot be parsed: the raw bytes are the truth and are stored anyway.</summary>
+    private Anjal.Mime.MimeMessage? ParseQuietly(byte[] raw)
+    {
+        try
+        {
+            return Anjal.Mime.MimeParser.Parse(raw);
+        }
+#pragma warning disable CA1031 // Intentional: an unparseable message still gets stored - the raw bytes are the truth.
+        catch (System.Exception ex)
+        {
+            this.log?.Invoke($"Mailbox: MIME parse failed, storing with empty headers: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+#pragma warning restore CA1031
+    }
+
+    private async System.Threading.Tasks.Task CountFilesAsync(FileJudgement files, System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            await VirusStats.UpdateAsync(this.store, stats =>
+            {
+                stats.Scanned += files.Scanned;
+                switch (files.Verdict)
+                {
+                    case FileVerdict.Refused:
+                        stats.Refused++;
+                        break;
+                    case FileVerdict.Junk:
+                        stats.Junked++;
+                        break;
+                    case FileVerdict.Removed:
+                        stats.Removed++;
+                        break;
+                    case FileVerdict.Held:
+                        stats.Held++;
+                        stats.LastDown = System.DateTimeOffset.UtcNow;
+                        break;
+                    default:
+                        break;
+                }
+                if (files.Scanned > 0)
+                {
+                    stats.LastSeen = System.DateTimeOffset.UtcNow;
+                }
+            }, ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // The count is a convenience; delivery must not fail for it.
+        catch (System.Exception ex)
+        {
+            this.log?.Invoke($"Mailbox: virus counts not updated: {ex.Message}");
+        }
+#pragma warning restore CA1031
+    }
+
+    private async System.Threading.Tasks.Task CountDiscardAsync(System.Guid mailboxId, string sender, System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            System.Collections.Generic.Dictionary<string, int> counts = MailDocuments.Parse<System.Collections.Generic.Dictionary<string, int>>(
+                await this.store.GetMailboxDocumentAsync(mailboxId, DiscardsKind, ct).ConfigureAwait(false)) ?? new System.Collections.Generic.Dictionary<string, int>();
+            var kept = new System.Collections.Generic.Dictionary<string, int>(counts, System.StringComparer.OrdinalIgnoreCase);
+            string key = sender.Trim().ToLowerInvariant();
+            kept[key] = kept.TryGetValue(key, out int n) ? n + 1 : 1;
+            await this.store.SetMailboxDocumentAsync(mailboxId, DiscardsKind, MailDocuments.Write(kept), ct).ConfigureAwait(false);
+        }
+#pragma warning disable CA1031 // The count is a convenience.
+        catch (System.Exception ex)
+        {
+            this.log?.Invoke($"Mailbox: discard count not updated: {ex.Message}");
+        }
+#pragma warning restore CA1031
+    }
+
+    /// <summary>
+    /// rc.22 (item 29, owner 18 Oct 2026): send a copy on. Always keeps the original; only by rule;
+    /// outside the organisation only when its administrator allows it (individuals may forward
+    /// anywhere); every forward is written to the audit trail. Automatic mail and bounces are never
+    /// forwarded, and a copy stops after three mailboxes, so two rules cannot chase each other.
+    /// </summary>
+    private async System.Threading.Tasks.Task ForwardAsync(Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox, string target, byte[] raw, Anjal.Mime.MimeMessage parsed, Anjal.Smtp.DeliveryContext ctx, System.Threading.CancellationToken ct)
+    {
+        if (!TrySplitAddress(target, out string tl, out string td) || string.Equals(target, mailbox.Address, System.StringComparison.OrdinalIgnoreCase)
+            || ctx.EnvelopeFrom.Length == 0 || IsAutomaticMail(parsed.Headers))
+        {
+            return;
+        }
+        IReadOnlyList<string> hops = parsed.Headers.GetAll(ForwardedHeader);
+        if (hops.Count >= MaxForwardHops || hops.Any(h => h.Contains(mailbox.Address, System.StringComparison.OrdinalIgnoreCase)))
+        {
+            this.log?.Invoke($"Mailbox: not forwarded again from {mailbox.Address}: already passed {hops.Count} mailbox(es)");
+            return;
+        }
+        string targetAddress = tl + "@" + td;
+        bool outside = true;
+        foreach (Anjal.Store.TenantDomainRow d in await this.store.ListTenantDomainsAsync(tenant.Id, ct).ConfigureAwait(false))
+        {
+            outside &= !string.Equals(d.Domain, td, System.StringComparison.OrdinalIgnoreCase);
+        }
+        if (outside && !await TenantKind.IsIndividualsAsync(this.store, tenant.Id, ct).ConfigureAwait(false)
+            && !(await OrgMailPolicy.ReadAsync(this.store, tenant.Id, ct).ConfigureAwait(false)).ForwardingOutside)
+        {
+            this.log?.Invoke($"Mailbox: {mailbox.Address} may not forward outside {tenant.Slug}; copy to {targetAddress} not sent");
+            return;
+        }
+        string now = System.DateTimeOffset.UtcNow.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", System.Globalization.CultureInfo.InvariantCulture);
+        string head = "Resent-From: <" + mailbox.Address + ">\r\n"
+            + "Resent-To: <" + targetAddress + ">\r\n"
+            + "Resent-Date: " + now + "\r\n"
+            + "Resent-Message-ID: <" + System.Guid.NewGuid().ToString("N") + "@" + mailbox.Domain + ">\r\n"
+            + ForwardedHeader + ": " + mailbox.Address + "\r\n";
+        byte[] copy = Prepend(System.Text.Encoding.ASCII.GetBytes(head), StripReturnPath(raw));
+        await this.SendOnAsync(mailbox.Address, targetAddress, copy, ct).ConfigureAwait(false);
+        if (this.store is Anjal.Store.IMessageStore audit)
+        {
+            await audit.AppendAuditAsync(new Anjal.Store.AuditEvent
+            {
+                Actor = mailbox.Address,
+                Action = ForwardAudit,
+                Subject = targetAddress,
+                Detail = Clip(parsed.Subject, 120),
+            }, ct).ConfigureAwait(false);
+        }
+        this.log?.Invoke($"Mailbox: {mailbox.Address} forwarded a copy to {targetAddress}");
+        Anjal.Smtp.Counters.Increment("anjal_mailbox_forwarded_total");
+    }
+
+    /// <summary>
+    /// rc.22 (item 30): the out-of-office reply. Once per sender while it is on; never to
+    /// automatic mail, lists, no-reply addresses or the mailbox itself; outside the organisation
+    /// only when the organisation and the person both allow it.
+    /// </summary>
+    private async System.Threading.Tasks.Task AwayReplyAsync(Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox, Anjal.Mime.MimeMessage parsed, string fromHeaderAddress, Anjal.Smtp.DeliveryContext ctx, System.Threading.CancellationToken ct)
+    {
+        System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
+        AwayReply away = await AwayReply.ReadAsync(this.store, mailbox.Id, ct).ConfigureAwait(false);
+        if (!away.IsActive(now))
+        {
+            return;
+        }
+        string sender = (fromHeaderAddress.Length > 0 ? fromHeaderAddress : ctx.EnvelopeFrom).Trim().ToLowerInvariant();
+        if (ctx.EnvelopeFrom.Length == 0 || away.Skips(sender, parsed.Headers) || string.Equals(sender, mailbox.Address, System.StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+        if (away.Replied.TryGetValue(sender, out System.DateTimeOffset when) && when >= (away.From ?? System.DateTimeOffset.MinValue))
+        {
+            return;
+        }
+        string senderDomain = Anjal.Spam.SpamScorer.DomainOf(sender);
+        bool outside = true;
+        foreach (Anjal.Store.TenantDomainRow d in await this.store.ListTenantDomainsAsync(tenant.Id, ct).ConfigureAwait(false))
+        {
+            outside &= !string.Equals(d.Domain, senderDomain, System.StringComparison.OrdinalIgnoreCase);
+        }
+        if (outside)
+        {
+            if (away.ReplyTo == "org" || (!(await OrgMailPolicy.ReadAsync(this.store, tenant.Id, ct).ConfigureAwait(false)).AwayOutside
+                && !await TenantKind.IsIndividualsAsync(this.store, tenant.Id, ct).ConfigureAwait(false)))
+            {
+                return;
+            }
+            if (away.ReplyTo == "contacts" && !await this.IsContactAsync(mailbox.Id, sender, ct).ConfigureAwait(false))
+            {
+                return;
+            }
+        }
+        string subject = away.Subject.Trim().Length > 0 ? away.Subject.Trim() : "Automatic reply: " + parsed.Subject;
+        string messageId = parsed.Headers.Get("Message-ID")?.Trim() ?? string.Empty;
+        var sb = new System.Text.StringBuilder();
+        sb.Append("From: ").Append(FromLine(mailbox)).Append("\r\n");
+        sb.Append("To: <").Append(sender).Append(">\r\n");
+        sb.Append("Subject: ").Append(EncodeHeader(subject)).Append("\r\n");
+        sb.Append("Date: ").Append(now.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
+        sb.Append("Message-ID: <").Append(System.Guid.NewGuid().ToString("N")).Append('@').Append(mailbox.Domain).Append(">\r\n");
+        if (messageId.Length > 0)
+        {
+            sb.Append("In-Reply-To: ").Append(messageId).Append("\r\n");
+            sb.Append("References: ").Append(messageId).Append("\r\n");
+        }
+        sb.Append("Auto-Submitted: auto-replied\r\n");
+        sb.Append("X-Auto-Response-Suppress: All\r\n");
+        sb.Append("Precedence: auto_reply\r\n");
+        sb.Append("MIME-Version: 1.0\r\n");
+        sb.Append("Content-Type: text/plain; charset=utf-8\r\n");
+        sb.Append("Content-Transfer-Encoding: 8bit\r\n\r\n");
+        sb.Append(away.Text.Replace("\r\n", "\n", System.StringComparison.Ordinal).Replace("\n", "\r\n", System.StringComparison.Ordinal)).Append("\r\n");
+        byte[] reply = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        // RFC 3834: an automatic reply goes with an empty envelope sender, so it can never bounce back and forth.
+        await this.SendOnAsync(string.Empty, sender, reply, ct, mailbox.Address).ConfigureAwait(false);
+        away.Replied[sender] = now;
+        foreach (string old in away.Replied.Where(kv => kv.Value < now.AddDays(-90)).Select(kv => kv.Key).ToList())
+        {
+            away.Replied.Remove(old);
+        }
+        await AwayReply.WriteAsync(this.store, mailbox.Id, away, ct).ConfigureAwait(false);
+        this.log?.Invoke($"Mailbox: {mailbox.Address} sent its away reply to {sender}");
+        Anjal.Smtp.Counters.Increment("anjal_mailbox_away_replies_total");
+    }
+
+    /// <summary>
+    /// rc.22 (item 39): the operator hears at once when mail is held because the scanner is down.
+    /// The webmail repeats the notice every 30 minutes while anything is still held.
+    /// </summary>
+    private async System.Threading.Tasks.Task HeldNoticeAsync(System.Collections.Generic.List<string> heldFor, Anjal.Smtp.DeliveryContext ctx, FileJudgement files, System.Threading.CancellationToken ct)
+    {
+        this.log?.Invoke($"Mailbox: scanner unavailable ({files.Detail}); mail from {ctx.EnvelopeFrom} held for {string.Join(", ", heldFor)}");
+        Anjal.Smtp.Counters.Increment("anjal_virus_held_total");
+        string? ops = this.OperatorPostmaster ?? (this.ServerHostName is string host ? "postmaster@" + ParentDomain(host) : null);
+        if (ops is null || !TrySplitAddress(ops, out string ol, out string od))
+        {
+            return;
+        }
+        string text = "The virus scanner (ClamAV) did not answer: " + files.Detail + "\r\n\r\n"
+            + "A message with files from " + ctx.EnvelopeFrom + " is held in quarantine for " + string.Join(", ", heldFor) + ".\r\n"
+            + "Files: " + string.Join(", ", files.Files) + "\r\n\r\n"
+            + "Check clamd (systemctl status clamav-daemon). Held mail is scanned again every five minutes and delivered once the scanner answers; the Anjal console (Virus scanning) lists what is held.\r\n";
+        var sb = new System.Text.StringBuilder();
+        sb.Append("From: \"Anjal\" <no-reply@").Append(od).Append(">\r\n");
+        sb.Append("To: <").Append(ol).Append('@').Append(od).Append(">\r\n");
+        sb.Append("Subject: Mail held: the virus scanner is not answering\r\n");
+        sb.Append("Date: ").Append(System.DateTimeOffset.UtcNow.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
+        sb.Append("Message-ID: <").Append(System.Guid.NewGuid().ToString("N")).Append('@').Append(od).Append(">\r\n");
+        sb.Append("Auto-Submitted: auto-generated\r\n");
+        sb.Append("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
+        sb.Append(text);
+        await this.SendOnAsync(string.Empty, ol + "@" + od, System.Text.Encoding.UTF8.GetBytes(sb.ToString()), ct, "no-reply@" + od, security: true).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Deliver a message Anjal itself makes (a forwarded copy, an away reply, a notice): here when
+    /// the recipient is a mailbox on this server, otherwise through the outgoing queue.
+    /// </summary>
+    private async System.Threading.Tasks.Task SendOnAsync(string envelopeFrom, string to, byte[] bytes, System.Threading.CancellationToken ct, string? asUser = null, bool security = false)
+    {
+        if (await this.ResolveAsync(to, ct).ConfigureAwait(false) is not null)
+        {
+            await this.DeliverAsync(new Anjal.Smtp.DeliveryContext
+            {
+                EnvelopeFrom = envelopeFrom,
+                EnvelopeTo = new[] { to },
+                RawBytes = bytes,
+                AuthenticatedUser = asUser ?? (envelopeFrom.Length > 0 ? envelopeFrom : "anjal"),
+                AnjalSecurityMail = security,
+            }, ct).ConfigureAwait(false);
+            return;
+        }
+        if (this.store is Anjal.Store.IMessageStore queue)
+        {
+            System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
+            await queue.EnqueueOutboundAsync(new Anjal.Store.OutboundMessage
+            {
+                EnvelopeFrom = envelopeFrom,
+                EnvelopeTo = to,
+                RawBytes = bytes,
+                CreatedAt = now,
+                NextAttemptAt = now,
+                GiveUpAt = now + Anjal.Store.OutboundMessage.DefaultGiveUp,
+            }, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            this.log?.Invoke($"Mailbox: no outgoing queue; message to {to} not sent");
+        }
+    }
+
+    private async System.Threading.Tasks.Task<bool> IsContactAsync(System.Guid mailboxId, string address, System.Threading.CancellationToken ct)
+    {
+        string? json = await this.store.GetMailboxDocumentAsync(mailboxId, "contacts", ct).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return false;
+        }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return false;
+            }
+            foreach (System.Text.Json.JsonElement c in doc.RootElement.EnumerateArray())
+            {
+                if (c.TryGetProperty("Address", out System.Text.Json.JsonElement a) && a.ValueKind == System.Text.Json.JsonValueKind.String
+                    && string.Equals(a.GetString(), address, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+        return false;
+    }
+
+    private static string FromLine(Anjal.Store.MailboxRow mailbox)
+    {
+        string name = mailbox.DisplayName.Trim();
+        if (name.Length == 0)
+        {
+            return "<" + mailbox.Address + ">";
+        }
+        return EncodeHeader("\"" + name.Replace("\\", "\\\\", System.StringComparison.Ordinal).Replace("\"", "\\\"", System.StringComparison.Ordinal) + "\"") + " <" + mailbox.Address + ">";
+    }
+
+    /// <summary>A header value as RFC 2047 text when it is not plain ASCII.</summary>
+    /// <param name="text">The value.</param>
+    /// <returns>The value, or an encoded word.</returns>
+    public static string EncodeHeader(string text)
+    {
+        System.ArgumentNullException.ThrowIfNull(text);
+        foreach (char c in text)
+        {
+            if (c > 126 || c < 32)
+            {
+                return "=?utf-8?B?" + System.Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(text)) + "?=";
+            }
+        }
+        return text;
+    }
+
+    private static byte[] Prepend(byte[] head, byte[] body)
+    {
+        var result = new byte[head.Length + body.Length];
+        head.CopyTo(result, 0);
+        body.CopyTo(result, head.Length);
+        return result;
+    }
+
+    private static byte[] StripReturnPath(byte[] raw)
+    {
+        byte[] withLine = WithReturnPath(raw, string.Empty);
+        int nl = System.Array.IndexOf(withLine, (byte)'\n');
+        return nl < 0 ? raw : withLine[(nl + 1)..];
+    }
+
+    private static string Clip(string text, int max)
+    {
+        string t = (text ?? string.Empty).Trim();
+        return t.Length <= max ? t : t[..max];
     }
 
     /// <summary>

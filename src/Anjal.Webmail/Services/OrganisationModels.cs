@@ -166,6 +166,56 @@ public sealed class Branding
 
     /// <summary>One line under the sign-in form; empty for none.</summary>
     public string Message { get; set; } = string.Empty;
+
+    /// <summary>rc.22 (mockups 30-40): the sign-in page's design, 1 to 10 (<see cref="SignInDesigns"/>).</summary>
+    public int Design { get; set; } = 1;
+
+    /// <summary>rc.22: the organisation's colour for the brand panel and buttons, as #rrggbb; empty for Anjal's teal.</summary>
+    public string Colour { get; set; } = string.Empty;
+
+    /// <summary>rc.22: a background picture for the brand panel (designs 1, 5 and 7), as a data: address; empty for none.</summary>
+    public string Background { get; set; } = string.Empty;
+
+    /// <summary>rc.22: the welcome line on the brand panel, in place of Anjal's promise; empty for Anjal's.</summary>
+    public string Welcome { get; set; } = string.Empty;
+
+    /// <summary>rc.22: the help line under the form ("IT desk: 020 2611 0100"); empty for none.</summary>
+    public string HelpLine { get; set; } = string.Empty;
+
+    /// <summary>A colour as #rrggbb, or empty when it is not one.</summary>
+    /// <param name="text">What was typed.</param>
+    /// <returns>The colour, lower case, or empty.</returns>
+    public static string CleanColour(string? text)
+    {
+        string t = (text ?? string.Empty).Trim();
+        if (t.Length == 7 && t[0] == '#' && t.Skip(1).All(Uri.IsHexDigit))
+        {
+            return t.ToLowerInvariant();
+        }
+        return string.Empty;
+    }
+}
+
+/// <summary>
+/// rc.22 (mockups 30-39; owner 18 Oct 2026): the ten sign-in page designs an organisation picks
+/// from. Only the frame changes - the form itself is always Anjal's, so a page can never be made
+/// to steal passwords.
+/// </summary>
+public static class SignInDesigns
+{
+    /// <summary>The designs, in order; the number is its position plus one.</summary>
+    public static readonly IReadOnlyList<string> Names = new[]
+    {
+        "Classic split", "Clean centre", "Hospital white", "Marigold band", "Photo panel", "Dark", "Crimson", "Top bar", "Paper", "Navy",
+    };
+
+    /// <summary>The designs that show a background picture on the brand panel.</summary>
+    public static readonly IReadOnlyList<int> WithPicture = new[] { 1, 5, 7 };
+
+    /// <summary>A design number in range: 1 to 10, else 1.</summary>
+    /// <param name="n">What was chosen.</param>
+    /// <returns>The number.</returns>
+    public static int Clean(int? n) => n is >= 1 and <= 10 ? n.Value : 1;
 }
 
 /// <summary>How long an organisation keeps mail and records (rc.14, board OrgRetention, policy CMP-02).</summary>

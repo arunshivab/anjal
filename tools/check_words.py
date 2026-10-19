@@ -138,7 +138,7 @@ def typed_into_pages():
 
 # Where a sentence is not screen text: log lines and exceptions, the festival
 # lines of the mail templates (they have their own sheet), and start-up notes.
-SKIP_FILES = {"TemplateCatalogue.cs", "MtaStsPolicy.cs", "LajnaLetters.cs"}  # LajnaLetters: the letters Lajna drafts, in the letter's language
+SKIP_FILES = {"TemplateCatalogue.cs", "MtaStsPolicy.cs", "LajnaLetters.cs", "LegalText.cs"}  # LajnaLetters: the letters Lajna drafts, in the letter's language; LegalText: the Terms, English until vetted (rc.22)
 SKIP_LINE = re.compile(r"Console\.|\blog\(|\bLog\(|throw new|Exception\(|^\s*//")
 SKIP_TEXT = re.compile(r"^(?:HTTP/3|Evidence:|MTA-STS|Settings:)")
 SENTENCE = re.compile(r"^[A-Z][^\n]*\s[^\n]*[.!?]$")

@@ -63,6 +63,21 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
         int at = ctx.EnvelopeFrom.LastIndexOf('@');
         ctx = ctx.WithRawBytes(SubmissionHeaders.Complete(ctx.RawBytes, at >= 0 ? ctx.EnvelopeFrom[(at + 1)..] : string.Empty, this.clock()));
 
+        // rc.22 (item 51): mail an application sends offers a way out - a List-Unsubscribe header
+        // pointing at unsubscribe@ its domain, which puts the recipient on the organisation's
+        // do-not-send list - unless the application wrote its own.
+        if (at >= 0 && (ctx.AuthenticatedUser ?? string.Empty).StartsWith("app-", System.StringComparison.OrdinalIgnoreCase)
+            && !HasHeader(ctx.RawBytes, "List-Unsubscribe"))
+        {
+            string domain = ctx.EnvelopeFrom[(at + 1)..];
+            string line = "List-Unsubscribe: <mailto:" + Anjal.Mailbox.MailboxSink.UnsubscribeLocal + "@" + domain + "?subject=unsubscribe>\r\n";
+            byte[] head = System.Text.Encoding.ASCII.GetBytes(line);
+            var withHeader = new byte[head.Length + ctx.RawBytes.Length];
+            head.CopyTo(withHeader, 0);
+            ctx.RawBytes.CopyTo(withHeader, head.Length);
+            ctx = ctx.WithRawBytes(withHeader);
+        }
+
         var local = new System.Collections.Generic.List<string>();
         var external = new System.Collections.Generic.List<string>();
         foreach (string rcpt in ctx.EnvelopeTo)
@@ -156,5 +171,33 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
             return await this.localDomains.IsLocalAsync(recipient.Substring(at + 1), ct).ConfigureAwait(false);
         }
         return this.mailboxes is not null && await this.mailboxes.ResolveAsync(recipient, ct).ConfigureAwait(false) is not null;
+    }
+
+    /// <summary>Whether the header block names a header (rc.22).</summary>
+    /// <param name="raw">The message.</param>
+    /// <param name="name">The header's name.</param>
+    /// <returns>True when present.</returns>
+    public static bool HasHeader(byte[] raw, string name)
+    {
+        System.ArgumentNullException.ThrowIfNull(raw);
+        System.ArgumentNullException.ThrowIfNull(name);
+        int end = raw.Length;
+        for (int i = 0; i + 1 < raw.Length; i++)
+        {
+            if (raw[i] == (byte)'\n' && (raw[i + 1] == (byte)'\n' || (raw[i + 1] == (byte)'\r' && i + 2 < raw.Length && raw[i + 2] == (byte)'\n')))
+            {
+                end = i;
+                break;
+            }
+        }
+        string head = System.Text.Encoding.ASCII.GetString(raw, 0, end);
+        foreach (string line in head.Split('\n'))
+        {
+            if (line.StartsWith(name + ":", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }

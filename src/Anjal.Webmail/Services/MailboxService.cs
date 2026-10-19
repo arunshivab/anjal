@@ -153,6 +153,9 @@ public sealed class ComposeRequest
     /// server from the signed-in person, never from the form.
     /// </summary>
     public string Sender { get; set; } = string.Empty;
+
+    /// <summary>rc.22 (item 41): an extra address the person sends from instead of their own; empty for their own.</summary>
+    public string FromAddress { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -170,7 +173,7 @@ public sealed partial class MailboxService
     /// (rc.11): Inbox, Scheduled, Outbox, Drafts, Sent, Archive, Junk, Trash;
     /// the person's own folders follow, in alphabetical order.
     /// </summary>
-    private static readonly string[] RailOrder = { FolderRow.Inbox, "Scheduled", "Outbox", "Drafts", "Sent", "Archive", MailboxSink.JunkFolder, "Trash" };
+    private static readonly string[] RailOrder = { FolderRow.Inbox, "Scheduled", "Outbox", SnoozedFolder, "Drafts", "Sent", "Archive", MailboxSink.JunkFolder, "Trash" };
 
     private readonly IMailboxStore store;
     private readonly IMessageStore messageStore;
@@ -235,6 +238,11 @@ public sealed partial class MailboxService
         var result = new List<FolderView>();
         foreach (FolderRow f in await this.store.ListFoldersAsync(mailboxId, ct).ConfigureAwait(false))
         {
+            if (string.Equals(f.Name, AttachmentPolicy.QuarantineFolder, StringComparison.Ordinal))
+            {
+                // rc.22 (item 39): held mail is not a folder of the person's own; the Inbox says it is held.
+                continue;
+            }
             long count = await this.store.CountMessagesAsync(mailboxId, f.Id, ct).ConfigureAwait(false);
             long unread = await this.store.CountUnreadAsync(mailboxId, f.Id, ct).ConfigureAwait(false);
             result.Add(new FolderView { Id = f.Id, Name = f.Name, Count = count, Unread = unread });
@@ -588,7 +596,8 @@ public sealed partial class MailboxService
         {
             return null;
         }
-        await this.AddSenderRuleAsync(mailboxId, row, SenderRuleAction.Block, ct).ConfigureAwait(false);
+        // rc.22 (item 32, owner 18 Oct 2026, option (b)): blocking is silent discard, separate from spam.
+        await this.AddSenderRuleAsync(mailboxId, row, SenderRuleAction.Discard, ct).ConfigureAwait(false);
         return SenderOf(row);
     }
 
@@ -967,7 +976,7 @@ public sealed partial class MailboxService
         }
 
         var msg = new MimeMessage(root);
-        msg.Headers.Add("From", FormatFrom(mailbox));
+        msg.Headers.Add("From", request.FromAddress.Length > 0 && mailbox.DisplayName.Trim().Length > 0 ? $"{QuoteDisplayName(mailbox.DisplayName.Trim())} <{request.FromAddress}>" : request.FromAddress.Length > 0 ? request.FromAddress : FormatFrom(mailbox));
         if (request.Sender.Trim().Length > 0)
         {
             msg.Headers.Add("Sender", MimeHeader.Neutralise(request.Sender.Trim()));

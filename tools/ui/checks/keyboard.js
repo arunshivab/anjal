@@ -43,17 +43,26 @@ function look() {
   const all = () => near.map(style).join('#');
   const focused = all();
   const ring = getComputedStyle(e).outlineStyle !== 'none' && parseFloat(getComputedStyle(e).outlineWidth) > 0;
-  e.blur();
-  const plain = all();
-  e.focus();
+  // rc.22: a date or time box has parts (day, month, year...); taking focus away and giving it back
+  // would put it on the first part again, so it is left alone and its ring stands for the sign.
+  const parts = e.tagName === 'INPUT' && /^(date|datetime-local|time|month|week)$/.test(e.type) ? 6 : 0;
+  let plain = focused;
+  if (!parts) {
+    e.blur();
+    plain = all();
+    e.focus();
+  }
   const name = e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/)[0] : '') + ' "' + (e.getAttribute('aria-label') || e.textContent || e.value || e.name || '').trim().replace(/\s+/g, ' ').slice(0, 30) + '"';
   return {
     id: e.dataset.kb === undefined ? name : e.dataset.kb,
     name,
     iframe: e.tagName === 'IFRAME',
+    // rc.22: a date or time box is one control with several parts (day, month, year, hour, minute):
+    // Tab moves through the parts before leaving it, which is not a trap.
+    parts,
     // rc.20: sizes in page pixels, so a person's smaller size on screen (zoom) is not taken for hidden.
     seen: r.width / (e.currentCSSZoom || 1) >= 0.99 && r.height / (e.currentCSSZoom || 1) >= 0.99 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth,
-    shows: ring || focused !== plain || e.tagName === 'IFRAME',
+    shows: ring || focused !== plain || e.tagName === 'IFRAME' || parts > 0,
   };
 }
 
@@ -91,7 +100,7 @@ module.exports = {
           if (first === null) { first = at.id; } else if (at.id === first) { done = true; break; }
           if (at.id === last) {
             same++;
-            if (same > (at.iframe ? 80 : 2)) { problems.push('focus is trapped on ' + at.name); break; }
+            if (same > (at.iframe ? 80 : at.parts || 2)) { problems.push('focus is trapped on ' + at.name); break; }
             continue;
           }
           same = 0; last = at.id; stops++;

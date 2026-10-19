@@ -107,6 +107,7 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         {
             { new StringContent(token), "__RequestVerificationToken" },
             { new StringContent(to), "to" },
+            { new StringContent("1"), "patientOk" },   // rc.22: the patient-information warning is its own test
             { new StringContent(subject), "subject" },
             { new StringContent("Body text."), "body" },
         };
@@ -631,9 +632,9 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         // rc.16, design review 9: Settings opens on Mail, the section people use most.
         Assert.Contains("<h2>Mail</h2>", first, StringComparison.Ordinal);
         Assert.DoesNotContain("<h2>Appearance</h2>", first, StringComparison.Ordinal);
-        // The addresses of before rc.13 still land where those settings now live.
+        // The addresses of before rc.13 still land where those settings now live (rc.22: Profile is its own section).
         string profile = await this.client.GetStringAsync("settings/profile");
-        Assert.Contains("<h2>Mail</h2>", profile, StringComparison.Ordinal);
+        Assert.Contains("<h2>Profile</h2>", profile, StringComparison.Ordinal);
         Assert.Contains("name=\"displayName\"", profile, StringComparison.Ordinal);
         string signature = await this.client.GetStringAsync("settings/signature");
         Assert.Contains("name=\"signatureHtml\"", signature, StringComparison.Ordinal);

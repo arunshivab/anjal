@@ -608,3 +608,10 @@ WHERE status IN (2, 3) AND finished_at IS NULL;
 CREATE INDEX IF NOT EXISTS outbound_messages_content_kept_idx
     ON outbound_messages (finished_at)
     WHERE status IN (2, 3) AND body_removed_at IS NULL;
+
+-- v1.0.0-rc.22 (item 32, owner 18 Oct 2026, option (b)): a third sender rule, "discard" - mail from
+-- a blocked sender or domain is discarded silently; the as-received evidence copy is still kept.
+ALTER TABLE sender_rules DROP CONSTRAINT IF EXISTS sender_rules_action_check;
+ALTER TABLE sender_rules ADD CONSTRAINT sender_rules_action_check CHECK (action IN ('allow', 'block', 'discard'));
+ALTER TABLE mailbox_sender_rules DROP CONSTRAINT IF EXISTS mailbox_sender_rules_action_check;
+ALTER TABLE mailbox_sender_rules ADD CONSTRAINT mailbox_sender_rules_action_check CHECK (action IN ('allow', 'block', 'discard'));

@@ -107,10 +107,11 @@ public sealed class Rc12ServiceTests : System.IDisposable
     // ---------------- Templates ----------------
 
     [Fact]
-    public void TheStarterSet_Is62Templates_In9Groups_EachWithAtLeastFive()
+    public void TheStarterSet_Is67Templates_In10Groups_EachWithAtLeastFive()
     {
-        Assert.Equal(62, TemplateCatalogue.All.Count);
-        Assert.Equal(9, TemplateCatalogue.Groups.Count);
+        // rc.22 (item 50): the Hospital and clinic group, with the referral letter.
+        Assert.Equal(67, TemplateCatalogue.All.Count);
+        Assert.Equal(10, TemplateCatalogue.Groups.Count);
         foreach (string g in TemplateCatalogue.Groups)
         {
             Assert.True(TemplateCatalogue.All.Count(t => t.Group == g) >= 5, g);

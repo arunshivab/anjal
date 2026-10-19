@@ -273,9 +273,13 @@ public static class Program
                 ? $"Evidence: not kept for webmail sends (no folder at {evidenceRoot})."
                 : $"Evidence: originals of webmail sends kept in {evidenceRoot}; a message is not sent unless its original is kept.");
         }
+        // rc.22 (item 39): the same scanner the mail server uses, for held mail and the console.
+        Anjal.Mailbox.ClamdScanner? scanner = Anjal.Mailbox.ClamdScanner.FromSetting(Environment.GetEnvironmentVariable(Anjal.Mailbox.ClamdScanner.Setting));
         builder.Services.AddSingleton(sp => new MailboxService(mailboxStore, store, maildir, hostName)
         {
             Evidence = evidence,
+            Scanner = scanner,
+            OperatorAddress = (Environment.GetEnvironmentVariable("ANJAL_POSTMASTER") ?? string.Empty).Trim(),
             // rc.13: authenticator secrets are kept encrypted with the webmail's own keys.
             Protector = sp.GetRequiredService<IDataProtectionProvider>().CreateProtector("anjal.secrets.v1"),
         });
@@ -753,6 +757,43 @@ public static class Program
             return Results.Redirect(blocked is null ? "/folder/INBOX" : $"/message/{id}?blocked={Uri.EscapeDataString(blocked)}");
         }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
+        // rc.22 (item 31): snooze until a preset or a picked time; bring it back now.
+        app.MapPost("/message/{id:guid}/snooze", async (HttpContext http, Guid id, [FromForm] string? until, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            DateTimeOffset? at = MailboxService.SnoozeTime(WebmailAuthService.ClockOf(http.User), DateTimeOffset.UtcNow, until);
+            string? error = at is null ? "Choose when it should come back." : await svc.SnoozeAsync(mailboxId.Value, id, at.Value, ct).ConfigureAwait(false);
+            string target = SafeBack(back, "/folder/INBOX");
+            return Results.Redirect(error is null ? target + (target.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "snoozed=1" : $"/message/{id}?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
+        app.MapPost("/message/{id:guid}/unsnooze", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.UnsnoozeAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect("/folder/INBOX");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        // rc.22 (item 51): the one-press Unsubscribe.
+        app.MapPost("/message/{id:guid}/unsubscribe", async (HttpContext http, Guid id, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.UnsubscribeAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            return Results.Redirect(error is null ? $"/message/{id}?unsubscribed=1" : $"/message/{id}?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
         // rc.11 (D-103): print - the letter with its envelope details. The body is
         // the same cleaned HTML the message page shows; everything else is
         // escaped; and this page's own policy allows no outside loading at all.
@@ -798,7 +839,7 @@ public static class Program
         }).RequireAuthorization();
 
         // ---- a folder full of messages ----
-        app.MapPost("/folder/{name}/bulk", async (HttpContext http, string name, [FromForm] string action, [FromForm] Guid[] id, [FromForm] int? page, [FromForm] string? categoryId, [FromForm] string? to, [FromForm] string? all, [FromForm] string? show, [FromForm] string? back, [FromQuery] Guid? one, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/folder/{name}/bulk", async (HttpContext http, string name, [FromForm] string action, [FromForm] Guid[] id, [FromForm] int? page, [FromForm] string? categoryId, [FromForm] string? to, [FromForm] string? all, [FromForm] string? show, [FromForm] string? back, [FromForm] string? until, [FromQuery] Guid? one, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -868,6 +909,18 @@ public static class Program
             if (bulk is not null && id.Length > 0)
             {
                 await svc.BulkAsync(mailboxId.Value, id, bulk.Value, ct).ConfigureAwait(false);
+            }
+            else if (action == "snooze" && id.Length > 0)
+            {
+                // rc.22 (item 31): the selected mail sleeps until the preset chosen.
+                DateTimeOffset? at = MailboxService.SnoozeTime(WebmailAuthService.ClockOf(http.User), DateTimeOffset.UtcNow, until ?? "tomorrow");
+                if (at is DateTimeOffset when)
+                {
+                    foreach (Guid messageId in id.Take(200))
+                    {
+                        await svc.SnoozeAsync(mailboxId.Value, messageId, when, ct).ConfigureAwait(false);
+                    }
+                }
             }
             else if (action == "categorise" && id.Length > 0)
             {
@@ -979,10 +1032,23 @@ public static class Program
             ReadCarry(http.Request.Form, request);
             // rc.14: from a shared mailbox set to send "on behalf", the person is named as the Sender.
             request.Sender = await svc.SenderForAsync(WebmailAuthService.PersonIdOf(http.User), mailboxId.Value, ct).ConfigureAwait(false);
+            // rc.22 (item 41): sending from an extra address the administrator allowed.
+            string fromChosen = http.Request.Form["from"].ToString().Trim().ToLowerInvariant();
+            if (fromChosen.Length > 0 && (await svc.SendAsAddressesAsync(mailboxId.Value, ct).ConfigureAwait(false)).Contains(fromChosen, StringComparer.Ordinal))
+            {
+                request.FromAddress = fromChosen;
+            }
             string? carryError = await svc.AddCarriedAttachmentsAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
             if (carryError is not null)
             {
                 return Results.Redirect("/compose" + ComposeQuery(carryError, request));
+            }
+
+            // rc.22 (item 50, mockup 24): patient information on its way outside the organisation - ask once.
+            if (http.Request.Form["patientOk"] != "1" && await svc.PatientWarningAsync(mailboxId.Value, request, ct).ConfigureAwait(false) is { Count: > 0 } signs)
+            {
+                Guid? held = await svc.SaveDraftAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
+                return Results.Redirect((held is Guid h ? $"/draft/{h}" : "/compose" + ComposeQuery(string.Empty, request).Replace("?error=&", "?", StringComparison.Ordinal)) + (held is null ? "&" : "?") + "patient=" + Uri.EscapeDataString(string.Join("; ", signs)));
             }
 
             // rc.15 (item 63): "Expect a reply" - counted on the dashboard if no answer comes in three days.
@@ -1090,6 +1156,12 @@ public static class Program
             ReadCarry(http.Request.Form, request);
             // rc.14: from a shared mailbox set to send "on behalf", the person is named as the Sender.
             request.Sender = await svc.SenderForAsync(WebmailAuthService.PersonIdOf(http.User), mailboxId.Value, ct).ConfigureAwait(false);
+            // rc.22 (item 41): sending from an extra address the administrator allowed.
+            string fromChosen = http.Request.Form["from"].ToString().Trim().ToLowerInvariant();
+            if (fromChosen.Length > 0 && (await svc.SendAsAddressesAsync(mailboxId.Value, ct).ConfigureAwait(false)).Contains(fromChosen, StringComparer.Ordinal))
+            {
+                request.FromAddress = fromChosen;
+            }
             string? carryError = await svc.AddCarriedAttachmentsAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
             if (carryError is not null)
             {
@@ -1318,14 +1390,144 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
-            string? error = await svc.SetDisplayNameAsync(mailboxId.Value, displayName ?? string.Empty, ct).ConfigureAwait(false);
+            // rc.22 (item 37): the name on mails, within the organisation's rule.
+            string? error = await svc.SetNameOnMailsAsync(mailboxId.Value, displayName ?? string.Empty, ct).ConfigureAwait(false);
             if (error is null)
             {
                 string who = http.User.Identity?.Name ?? string.Empty;
                 await http.RequestServices.GetRequiredService<AuditTrail>().RecordAsync(
                     who, "webmail.displayname.changed", who, http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
             }
-            return Results.Redirect(error is null ? "/settings/mail?saved=name" : "/settings/mail?error=" + Uri.EscapeDataString(error));
+            return Results.Redirect(error is null ? "/settings/profile?saved=name" : "/settings/profile?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
+        // rc.22 (item 30, mockup 14): the away reply.
+        app.MapPost("/settings/away", async (HttpContext http, [FromForm] string? on, [FromForm] string? from, [FromForm] string? until, [FromForm] string? subject, [FromForm] string? text, [FromForm] string? replyTo, [FromForm] string? skip, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            ZonedClock clock = WebmailAuthService.ClockOf(http.User);
+            DateTimeOffset? Local(string? v) => DateTime.TryParseExact(v ?? string.Empty, LocalTimeFormats, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime local) ? MailboxService.AtLocal(clock, local) : null;
+            AwayReply current = await svc.AwayOfAsync(person, ct).ConfigureAwait(false);
+            if (text is null && subject is null && on is null)
+            {
+                // The Inbox's "Turn off" button.
+                current.On = false;
+                await svc.SaveAwayAsync(person, current, ct).ConfigureAwait(false);
+                return Results.Redirect(SafeBack(back, "/folder/INBOX") + (SafeBack(back, "/folder/INBOX").Contains('?', StringComparison.Ordinal) ? "&" : "?") + "saved=away-off");
+            }
+            var away = new AwayReply
+            {
+                On = on == "1",
+                From = Local(from),
+                Until = Local(until),
+                Subject = subject ?? string.Empty,
+                Text = text ?? string.Empty,
+                ReplyTo = replyTo ?? "everyone",
+                Skip = skip ?? string.Empty,
+            };
+            string? error = await svc.SaveAwayAsync(person, away, ct).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/settings/away?saved=away" : "/settings/away?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
+        // rc.22 (item 40, mockup 18): the person's data - download everything, ask for the account to be deleted.
+        app.MapPost("/settings/data/export", async (HttpContext http, MailboxService svc, IMaildirStore maildir, AuditTrail audit, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.RequestExportAsync(person, OpsEndpoints.RootOf(maildir), http.Request.Scheme + "://" + http.Request.Host.Value, ct).ConfigureAwait(false);
+            string who = http.User.Identity?.Name ?? string.Empty;
+            await audit.RecordAsync(who, "webmail.data.export", who, http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/settings/data?saved=export" : "/settings/data?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        app.MapGet("/settings/data/download", async (HttpContext http, MailboxService svc, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            ExportState? state = await svc.ExportStateAsync(person, ct).ConfigureAwait(false);
+            if (state is null || !state.Ready(DateTimeOffset.UtcNow) || !File.Exists(state.File))
+            {
+                return Results.Redirect("/settings/data?error=" + Uri.EscapeDataString("There is no download ready. Prepare one first."));
+            }
+            return Results.File(state.File, "application/zip", "anjal-" + (http.User.Identity?.Name ?? "mail").Replace('@', '-') + ".zip");
+        }).RequireAuthorization();
+
+        app.MapPost("/settings/data/delete", async (HttpContext http, [FromForm] string? reason, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.RequestDeletionAsync(person, reason ?? string.Empty, http.Request.Scheme + "://" + http.Request.Host.Value, ct).ConfigureAwait(false);
+            string who = http.User.Identity?.Name ?? string.Empty;
+            await audit.RecordAsync(who, "webmail.data.delete-asked", who, http.Connection.RemoteIpAddress?.ToString() ?? string.Empty).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/settings/data?saved=delete" : "/settings/data?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
+        app.MapPost("/settings/data/delete/withdraw", async (HttpContext http, MailboxService svc, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.WithdrawDeletionAsync(person, ct).ConfigureAwait(false);
+            return Results.Redirect("/settings/data?saved=withdrawn");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        // rc.22 (mockup 11): the profile - first and last name (individuals only), phone, date of birth.
+        app.MapPost("/settings/profile", async (HttpContext http, [FromForm] string? first, [FromForm] string? last, [FromForm] string? phone, [FromForm] string? dob, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            PersonProfile profile = await svc.ProfileOfAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            bool individual = await svc.IsIndividualAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            string? error = null;
+            if (individual)
+            {
+                string f = (first ?? string.Empty).Trim();
+                string l = (last ?? string.Empty).Trim();
+                if (f.Length == 0 || l.Length == 0)
+                {
+                    error = "Give your first name and your last name.";
+                }
+                else
+                {
+                    profile.FirstName = f.Length > 60 ? f[..60] : f;
+                    profile.LastName = l.Length > 60 ? l[..60] : l;
+                }
+            }
+            DateOnly? born = OrgEndpoints.ParseDate(dob);
+            error ??= MailboxService.PhoneProblem(phone) ?? MailboxService.AgeProblem(born, individual, DateOnly.FromDateTime(DateTime.UtcNow));
+            if (individual && (phone ?? string.Empty).Trim().Length == 0)
+            {
+                error ??= "Give your phone number. It is recorded now and verified later.";
+            }
+            if (error is not null)
+            {
+                return Results.Redirect("/settings/profile?error=" + Uri.EscapeDataString(error));
+            }
+            if (!string.Equals(profile.Phone, (phone ?? string.Empty).Trim(), StringComparison.Ordinal))
+            {
+                profile.Phone = (phone ?? string.Empty).Trim();
+                profile.PhoneVerified = false;
+            }
+            profile.DateOfBirth = born;
+            await svc.SaveProfileAsync(mailboxId.Value, profile, ct).ConfigureAwait(false);
+            if (individual && !await svc.NicknamesAllowedAsync(mailboxId.Value, ct).ConfigureAwait(false))
+            {
+                await svc.SetNameOnMailsAsync(mailboxId.Value, profile.FullName, ct).ConfigureAwait(false);
+            }
+            return Results.Redirect("/settings/profile?saved=profile");
         }).RequireAuthorization();
 
         app.MapPost("/settings/theme", async (HttpContext http, [FromForm] string theme, MailboxService svc, CancellationToken ct) =>
@@ -1519,6 +1721,60 @@ public static class Program
         }).RequireAuthorization();
 
         // rc.15 (item 58): "Your habits" on the person's dashboard - on unless they turn it off.
+        // rc.22 (item 55): Inbox sections.
+        app.MapPost("/settings/sections", async (HttpContext http, [FromForm] string? on, MailboxService svc, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetSectionsOnAsync(person, on is "1" or "on", ct).ConfigureAwait(false);
+            return Results.Redirect("/settings/appearance?saved=sections");
+        }).RequireAuthorization();
+
+        app.MapPost("/settings/sections/add", async (HttpContext http, [FromForm] string? name, [FromForm] string? query, [FromForm] int? rows, MailboxService svc, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.SaveSectionAsync(person, -1, name ?? string.Empty, query ?? string.Empty, rows ?? 5, ct).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/settings/appearance?saved=sections" : "/settings/appearance?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization();
+
+        app.MapPost("/settings/sections/delete", async (HttpContext http, [FromForm] int index, MailboxService svc, CancellationToken ct) =>
+        {
+            if (WebmailAuthService.PersonIdOf(http.User) is not Guid person)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.RemoveSectionAsync(person, index, ct).ConfigureAwait(false);
+            return Results.Redirect("/settings/appearance?saved=sections");
+        }).RequireAuthorization();
+
+        // rc.22 (item 35, mockup 19): desktop notifications.
+        app.MapPost("/settings/notify", async (HttpContext http, [FromForm] string? on, [FromForm] string? scope, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetDesktopNotifyAsync(mailboxId.Value, on is "1" or "on", scope ?? "inbox", ct).ConfigureAwait(false);
+            return Results.Redirect(LocalPath.Safe(back));
+        }).RequireAuthorization();
+
+        app.MapGet("/api/latest", async (HttpContext http, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Unauthorized();
+            }
+            (Guid Id, string From, string Subject, bool Contact)? latest = await svc.LatestForNotifyAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            return latest is null ? Results.Json(new { }) : Results.Json(new { id = latest.Value.Id, from = latest.Value.From, subject = latest.Value.Subject, contact = latest.Value.Contact });
+        }).RequireAuthorization();
+
         app.MapPost("/settings/habits", async (HttpContext http, [FromForm] string? on, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);

@@ -306,7 +306,7 @@ public sealed partial class MailboxService
     /// </summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="pattern">An address, or "@domain".</param>
-    /// <param name="rule">"block", "allow", or "cat:" followed by a category id.</param>
+    /// <param name="rule">"block" (Junk), "discard" (blocked, silent; rc.22), "allow", or "cat:" followed by a category id.</param>
     /// <param name="ct">Cancellation.</param>
     public async Task<string?> AddSenderRuleAsync(Guid mailboxId, string pattern, string rule, CancellationToken ct = default)
     {
@@ -317,9 +317,10 @@ public sealed partial class MailboxService
         {
             return "Enter an address such as name@hospital.example, or a whole domain such as @hospital.example.";
         }
-        if (rule == "block" || rule == "allow")
+        if (rule is "block" or "allow" or "discard")
         {
-            await this.store.UpsertMailboxSenderRuleAsync(mailboxId, p, rule == "block" ? SenderRuleAction.Block : SenderRuleAction.Allow, ct).ConfigureAwait(false);
+            // rc.22 (item 32): "discard" is blocking - silent, nothing shown, nothing sent back.
+            await this.store.UpsertMailboxSenderRuleAsync(mailboxId, p, rule switch { "block" => SenderRuleAction.Block, "discard" => SenderRuleAction.Discard, _ => SenderRuleAction.Allow }, ct).ConfigureAwait(false);
             return null;
         }
         if (rule.StartsWith("cat:", StringComparison.Ordinal) && Guid.TryParse(rule.AsSpan(4), out Guid categoryId))
@@ -341,6 +342,29 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public Task<IReadOnlyList<SenderRuleRow>> ListSenderRulesAsync(Guid mailboxId, CancellationToken ct = default) =>
         this.store.ListMailboxSenderRulesAsync(mailboxId, ct);
+
+    /// <summary>How many mails were discarded from each blocked sender (rc.22, item 32), by the sender's address.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Counts by address, lower case.</returns>
+    public async Task<IReadOnlyDictionary<string, int>> DiscardCountsAsync(Guid mailboxId, CancellationToken ct = default) =>
+        Anjal.Mailbox.MailDocuments.Parse<Dictionary<string, int>>(await this.store.GetMailboxDocumentAsync(mailboxId, Anjal.Mailbox.MailboxSink.DiscardsKind, ct).ConfigureAwait(false)) ?? new Dictionary<string, int>();
+
+    /// <summary>How many discarded mails a block pattern accounts for: its address, or every address at its domain.</summary>
+    /// <param name="pattern">The rule's pattern.</param>
+    /// <param name="counts">The counts by address.</param>
+    /// <returns>The number.</returns>
+    public static int DiscardedBy(string pattern, IReadOnlyDictionary<string, int> counts)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+        ArgumentNullException.ThrowIfNull(counts);
+        if (!pattern.StartsWith('@'))
+        {
+            return counts.TryGetValue(pattern, out int n) ? n : 0;
+        }
+        string d = pattern[1..];
+        return counts.Where(kv => Anjal.Spam.SpamScorer.DomainOf(kv.Key) is string ad && (ad == d || ad.EndsWith("." + d, StringComparison.Ordinal))).Sum(kv => kv.Value);
+    }
 
     /// <summary>
     /// Remove one of this mailbox's own blocked or allowed senders. The store

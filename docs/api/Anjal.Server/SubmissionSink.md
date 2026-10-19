@@ -8,3 +8,4 @@ Delivery for mail submitted by an authenticated user on ports 587 and 465. Local
 
 - **#ctor** *(method)* - Construct.
 - **DeliverAsync** *(method)* - _(no description)_
+- **HasHeader** *(method)* - Whether the header block names a header (rc.22).

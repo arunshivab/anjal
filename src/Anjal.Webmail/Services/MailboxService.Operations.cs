@@ -120,7 +120,33 @@ public sealed partial class MailboxService
     /// <param name="baseUrl">The webmail's address, for the link.</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>The error, or the organisation and token.</returns>
-    public async Task<(string? Error, TenantRow? Tenant, string? Token)> CreateOrganisationAsync(string name, string domain, string adminName, string adminAddress, string personal, string status, string invitedBy, string baseUrl, CancellationToken ct = default)
+    public Task<(string? Error, TenantRow? Tenant, string? Token)> CreateOrganisationAsync(string name, string domain, string adminName, string adminAddress, string personal, string status, string invitedBy, string baseUrl, CancellationToken ct = default) =>
+        this.CreateOrganisationAsync(name, domain, adminName, adminAddress, personal, status, invitedBy, baseUrl, false, ct);
+
+    /// <summary>The setting naming Anjal's shared domain (anjalmail.com): individuals get addresses on it, organisations a subdomain of it.</summary>
+    public const string SharedDomainSetting = "ANJAL_SHARED_DOMAIN";
+
+    /// <summary>Anjal's shared domain, or empty when none is set.</summary>
+    public static string SharedDomain => (Environment.GetEnvironmentVariable(SharedDomainSetting) ?? string.Empty).Trim().ToLowerInvariant();
+
+    /// <summary>
+    /// <see cref="CreateOrganisationAsync(string, string, string, string, string, string, string, string, CancellationToken)"/>, rc.22: the
+    /// first administrator is invited to the registration page (nothing made until Submit); with
+    /// <paramref name="individuals"/> the tenant is the individuals tenant, whose administrator is
+    /// User management; an organisation also gets its subdomain of Anjal's shared domain when one is set.
+    /// </summary>
+    /// <param name="name">The organisation's name.</param>
+    /// <param name="domain">Its first domain.</param>
+    /// <param name="adminName">The first administrator's name (first and last).</param>
+    /// <param name="adminAddress">Their new address, at the domain.</param>
+    /// <param name="personal">Their personal address, to send the invitation to, or empty (the link is then shown once).</param>
+    /// <param name="status">"active", "setting-up" or "trial".</param>
+    /// <param name="invitedBy">The operator, by name.</param>
+    /// <param name="baseUrl">The webmail's address, for the link.</param>
+    /// <param name="individuals">True for the individuals tenant.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The error, or the organisation and token.</returns>
+    public async Task<(string? Error, TenantRow? Tenant, string? Token)> CreateOrganisationAsync(string name, string domain, string adminName, string adminAddress, string personal, string status, string invitedBy, string baseUrl, bool individuals, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(domain);
@@ -151,7 +177,24 @@ public sealed partial class MailboxService
         {
             return (error, null, null);
         }
-        (string? inviteError, string? token) = await this.InviteAsync(tenant, adminName ?? string.Empty, adminAddress, personal ?? string.Empty, true, invitedBy ?? string.Empty, baseUrl ?? string.Empty, ct).ConfigureAwait(false);
+        if (individuals)
+        {
+            await Anjal.Mailbox.TenantKind.WriteAsync(this.store, tenant.Id, true, ct).ConfigureAwait(false);
+        }
+        else if (SharedDomain.Length > 0 && !string.Equals(d, SharedDomain, StringComparison.OrdinalIgnoreCase) && !d.EndsWith("." + SharedDomain, StringComparison.OrdinalIgnoreCase))
+        {
+            // rc.22 (item 7): people without their own domain write as user@org.anjalmail.com.
+            string sub = slug + "." + SharedDomain;
+            if (await this.store.GetTenantDomainAsync(sub, ct).ConfigureAwait(false) is null)
+            {
+                await this.AddTenantDomainAsync(tenant, sub, ct).ConfigureAwait(false);
+            }
+        }
+        string[] names = (adminName ?? string.Empty).Trim().Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        string first = names.Length > 0 ? names[0] : "Administrator";
+        string last = names.Length > 1 ? names[1] : (individuals ? "Anjal" : n);
+        Anjal.Mailbox.MailboxSink.TrySplitAddress(adminAddress, out string adminLocal, out _);
+        (string? inviteError, string? token) = await this.InvitePendingAsync(tenant, first, last, adminLocal, d, personal ?? string.Empty, string.Empty, null, true, invitedBy ?? string.Empty, baseUrl ?? string.Empty, ct).ConfigureAwait(false);
         return (inviteError, tenant, token);
     }
 

@@ -32,6 +32,14 @@
                         <li>@step</li>
                     }
                 </ol>
+                @if (a.Figure is HelpFigure fig)
+                {
+                    @* rc.22: the flow chart (owner, 18 Oct 2026: "we need that in our design documents and also in our help pages"). *@
+                    <figure class="helpfigure" id="h-figure">
+                        <a href="@fig.Src" target="_blank" rel="noopener" title="@L["Open the picture full size."]"><img src="@fig.Src" alt="@fig.Caption" loading="lazy" /></a>
+                        <figcaption>@fig.Caption</figcaption>
+                    </figure>
+                }
                 @if (a.Tip is string tip)
                 {
                     <aside class="helptip" id="h-tip"><LipiIcon Name="info" Size="16" /><span><b>@L["Tip"]</b> @tip</span></aside>
@@ -62,6 +70,10 @@
         <Side>
             <h2>@L["On this page"]</h2>
             <a href="#h-steps">@L["Steps"]</a>
+            @if (a.Figure is not null)
+            {
+                <a href="#h-figure">@L["Picture"]</a>
+            }
             @if (a.Tip is not null)
             {
                 <a href="#h-tip">@L["Tip"]</a>

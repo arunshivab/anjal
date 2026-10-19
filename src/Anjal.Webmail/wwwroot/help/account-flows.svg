@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 695" width="2000" height="695" font-family="LiPi Sans, Inter, system-ui, sans-serif" role="img" aria-labelledby="t d">
+<title id="t">How an account is made in Anjal</title>
+<desc id="d">Four paths: an individual by invitation, an individual filled in by User management, an organisation person by invitation, an organisation person filled in by the administrator; then what changes later. In every path the mailbox exists only after Submit, the Terms are emailed, the first mail is the Welcome mail, and nobody under 18 is accepted.</desc>
+<rect width="2000" height="695" fill="#f4f7f7"/>
+<text x="48" y="52" font-size="26" font-weight="700" fill="#15302f">How an account is made</text>
+<text x="48" y="74" font-size="14" font-weight="400" fill="#5a6b6b">Four paths. In every path the mailbox exists only after Submit, the Terms are emailed, the first mail is the Welcome mail, and nobody under 18 is accepted.</text>
+<rect x="48" y="90" width="170" height="89" rx="12" fill="#0f4c4c"/>
+<text x="62" y="129" font-size="14" font-weight="600" fill="#ffffff">Individual</text>
+<text x="62" y="146" font-size="12" font-weight="400" fill="#ffffffd9">by invitation</text>
+<rect x="236" y="98" width="215" height="73" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="250" y="120" font-size="13.5" font-weight="700" fill="#15302f">User management</text>
+<text x="250" y="137" font-size="13" font-weight="400" fill="#15302f">Invite: first name, last name,</text>
+<text x="250" y="153" font-size="13" font-weight="400" fill="#15302f">personal email</text>
+<line x1="453" y1="134" x2="477" y2="134" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M476,128 L485,134 L476,140 Z" fill="#8aa3a3"/>
+<rect x="485" y="106" width="215" height="57" rx="12" fill="#fff8ea" stroke="#f2a900" stroke-width="1.5"/>
+<text x="499" y="128" font-size="13.5" font-weight="700" fill="#15302f">Invitation email</text>
+<text x="499" y="145" font-size="13" font-weight="400" fill="#15302f">One link, 7 days</text>
+<line x1="702" y1="134" x2="726" y2="134" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M725,128 L734,134 L725,140 Z" fill="#8aa3a3"/>
+<rect x="734" y="90" width="215" height="89" rx="12" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="748" y="112" font-size="13.5" font-weight="700" fill="#15302f">Registration page</text>
+<text x="748" y="129" font-size="13" font-weight="400" fill="#15302f">Phone, date of birth, username</text>
+<text x="748" y="145" font-size="13" font-weight="400" fill="#15302f">(checked live), password,</text>
+<text x="748" y="161" font-size="13" font-weight="400" fill="#15302f">accept Terms + Disclaimer</text>
+<line x1="951" y1="134" x2="975" y2="134" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M974,128 L983,134 L974,140 Z" fill="#8aa3a3"/>
+<rect x="983" y="106" width="215" height="57" rx="12" fill="#fdecec" stroke="#c43c3c" stroke-width="1.5"/>
+<text x="997" y="128" font-size="13.5" font-weight="700" fill="#15302f">Under 18?</text>
+<text x="997" y="145" font-size="13" font-weight="400" fill="#15302f">Refused with a plain message</text>
+<line x1="1200" y1="134" x2="1224" y2="134" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M1223,128 L1232,134 L1223,140 Z" fill="#8aa3a3"/>
+<rect x="1232" y="106" width="215" height="57" rx="12" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="1246" y="128" font-size="13.5" font-weight="700" fill="#15302f">Submit</text>
+<text x="1246" y="145" font-size="13" font-weight="400" fill="#15302f">Mailbox created now</text>
+<line x1="1449" y1="134" x2="1473" y2="134" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M1472,128 L1481,134 L1472,140 Z" fill="#8aa3a3"/>
+<rect x="1481" y="106" width="215" height="57" rx="12" fill="#fff8ea" stroke="#f2a900" stroke-width="1.5"/>
+<text x="1495" y="128" font-size="13.5" font-weight="700" fill="#15302f">Terms email + Welcome mail</text>
+<text x="1495" y="145" font-size="13" font-weight="400" fill="#15302f">In the new Inbox</text>
+<line x1="1698" y1="134" x2="1722" y2="134" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M1721,128 L1730,134 L1721,140 Z" fill="#8aa3a3"/>
+<rect x="1730" y="106" width="215" height="57" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="1744" y="128" font-size="13.5" font-weight="700" fill="#15302f">Signed in</text>
+<text x="1744" y="145" font-size="13" font-weight="400" fill="#15302f">Two-step offered</text>
+<rect x="48" y="205" width="170" height="73" rx="12" fill="#0f4c4c"/>
+<text x="62" y="228" font-size="14" font-weight="600" fill="#ffffff">Individual</text>
+<text x="62" y="246" font-size="12" font-weight="400" fill="#ffffffd9">filled in by User</text>
+<text x="62" y="260" font-size="12" font-weight="400" fill="#ffffffd9">management</text>
+<rect x="236" y="205" width="215" height="73" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="250" y="227" font-size="13.5" font-weight="700" fill="#15302f">User management</text>
+<text x="250" y="244" font-size="13" font-weight="400" fill="#15302f">Add a person: every field,</text>
+<text x="250" y="260" font-size="13" font-weight="400" fill="#15302f">username checked, password set</text>
+<line x1="453" y1="242" x2="477" y2="242" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M476,236 L485,242 L476,248 Z" fill="#8aa3a3"/>
+<rect x="485" y="213" width="215" height="57" rx="12" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="499" y="235" font-size="13.5" font-weight="700" fill="#15302f">Submit</text>
+<text x="499" y="252" font-size="13" font-weight="400" fill="#15302f">Mailbox created now</text>
+<line x1="702" y1="242" x2="726" y2="242" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M725,236 L734,242 L725,248 Z" fill="#8aa3a3"/>
+<rect x="734" y="213" width="215" height="57" rx="12" fill="#fff8ea" stroke="#f2a900" stroke-width="1.5"/>
+<text x="748" y="235" font-size="13.5" font-weight="700" fill="#15302f">Terms email + Welcome mail</text>
+<text x="748" y="252" font-size="13" font-weight="400" fill="#15302f">Terms to the personal address</text>
+<line x1="951" y1="242" x2="975" y2="242" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M974,236 L983,242 L974,248 Z" fill="#8aa3a3"/>
+<rect x="983" y="213" width="215" height="57" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="997" y="235" font-size="13.5" font-weight="700" fill="#15302f">First sign-in</text>
+<text x="997" y="252" font-size="13" font-weight="400" fill="#15302f">Password given by hand</text>
+<line x1="1200" y1="242" x2="1224" y2="242" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M1223,236 L1232,242 L1223,248 Z" fill="#8aa3a3"/>
+<rect x="1232" y="213" width="215" height="57" rx="12" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="1246" y="235" font-size="13.5" font-weight="700" fill="#15302f">Accept the Terms</text>
+<text x="1246" y="252" font-size="13" font-weight="400" fill="#15302f">Nothing opens until ticked</text>
+<line x1="1449" y1="242" x2="1473" y2="242" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M1472,236 L1481,242 L1472,248 Z" fill="#8aa3a3"/>
+<rect x="1481" y="213" width="215" height="57" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="1495" y="235" font-size="13.5" font-weight="700" fill="#15302f">Inbox</text>
+<text x="1495" y="252" font-size="13" font-weight="400" fill="#15302f">Change password prompted</text>
+<rect x="48" y="304" width="170" height="105" rx="12" fill="#0f4c4c"/>
+<text x="62" y="351" font-size="14" font-weight="600" fill="#ffffff">Organisation</text>
+<text x="62" y="368" font-size="12" font-weight="400" fill="#ffffffd9">by invitation</text>
+<rect x="236" y="304" width="215" height="105" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="250" y="326" font-size="13.5" font-weight="700" fill="#15302f">Administrator</text>
+<text x="250" y="343" font-size="13" font-weight="400" fill="#15302f">Add a person: first name, last</text>
+<text x="250" y="359" font-size="13" font-weight="400" fill="#15302f">name, username chosen by the</text>
+<text x="250" y="375" font-size="13" font-weight="400" fill="#15302f">admin, phone and DOB optional,</text>
+<text x="250" y="391" font-size="13" font-weight="400" fill="#15302f">personal email</text>
+<line x1="453" y1="356" x2="477" y2="356" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M476,350 L485,356 L476,362 Z" fill="#8aa3a3"/>
+<rect x="485" y="328" width="215" height="57" rx="12" fill="#fff8ea" stroke="#f2a900" stroke-width="1.5"/>
+<text x="499" y="350" font-size="13.5" font-weight="700" fill="#15302f">Invitation email</text>
+<text x="499" y="367" font-size="13" font-weight="400" fill="#15302f">One link, 7 days</text>
+<line x1="702" y1="356" x2="726" y2="356" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M725,350 L734,356 L725,362 Z" fill="#8aa3a3"/>
+<rect x="734" y="312" width="215" height="89" rx="12" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="748" y="334" font-size="13.5" font-weight="700" fill="#15302f">Registration page</text>
+<text x="748" y="351" font-size="13" font-weight="400" fill="#15302f">Details shown, password</text>
+<text x="748" y="367" font-size="13" font-weight="400" fill="#15302f">chosen, Terms accepted;</text>
+<text x="748" y="383" font-size="13" font-weight="400" fill="#15302f">username cannot be changed</text>
+<line x1="951" y1="356" x2="975" y2="356" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M974,350 L983,356 L974,362 Z" fill="#8aa3a3"/>
+<rect x="983" y="320" width="215" height="73" rx="12" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="997" y="342" font-size="13.5" font-weight="700" fill="#15302f">Submit</text>
+<text x="997" y="359" font-size="13" font-weight="400" fill="#15302f">Mailbox created now; name on</text>
+<text x="997" y="375" font-size="13" font-weight="400" fill="#15302f">mails = first + last</text>
+<line x1="1200" y1="356" x2="1224" y2="356" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M1223,350 L1232,356 L1223,362 Z" fill="#8aa3a3"/>
+<rect x="1232" y="336" width="215" height="41" rx="12" fill="#fff8ea" stroke="#f2a900" stroke-width="1.5"/>
+<text x="1246" y="358" font-size="13.5" font-weight="700" fill="#15302f">Terms email + Welcome mail</text>
+<line x1="1449" y1="356" x2="1473" y2="356" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M1472,350 L1481,356 L1472,362 Z" fill="#8aa3a3"/>
+<rect x="1481" y="320" width="215" height="73" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="1495" y="342" font-size="13.5" font-weight="700" fill="#15302f">Signed in</text>
+<text x="1495" y="359" font-size="13" font-weight="400" fill="#15302f">Two-step if the organisation</text>
+<text x="1495" y="375" font-size="13" font-weight="400" fill="#15302f">requires it</text>
+<rect x="48" y="435" width="170" height="73" rx="12" fill="#0f4c4c"/>
+<text x="62" y="458" font-size="14" font-weight="600" fill="#ffffff">Organisation</text>
+<text x="62" y="476" font-size="12" font-weight="400" fill="#ffffffd9">filled in by the</text>
+<text x="62" y="490" font-size="12" font-weight="400" fill="#ffffffd9">administrator</text>
+<rect x="236" y="435" width="215" height="73" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="250" y="457" font-size="13.5" font-weight="700" fill="#15302f">Administrator</text>
+<text x="250" y="474" font-size="13" font-weight="400" fill="#15302f">Fill in everything, including</text>
+<text x="250" y="490" font-size="13" font-weight="400" fill="#15302f">the password</text>
+<line x1="453" y1="472" x2="477" y2="472" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M476,466 L485,472 L476,478 Z" fill="#8aa3a3"/>
+<rect x="485" y="443" width="215" height="57" rx="12" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="499" y="465" font-size="13.5" font-weight="700" fill="#15302f">Submit</text>
+<text x="499" y="482" font-size="13" font-weight="400" fill="#15302f">Mailbox created now</text>
+<line x1="702" y1="472" x2="726" y2="472" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M725,466 L734,472 L725,478 Z" fill="#8aa3a3"/>
+<rect x="734" y="451" width="215" height="41" rx="12" fill="#fff8ea" stroke="#f2a900" stroke-width="1.5"/>
+<text x="748" y="473" font-size="13.5" font-weight="700" fill="#15302f">Terms email + Welcome mail</text>
+<line x1="951" y1="472" x2="975" y2="472" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M974,466 L983,472 L974,478 Z" fill="#8aa3a3"/>
+<rect x="983" y="442" width="215" height="58" rx="12" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="997" y="464" font-size="13.5" font-weight="700" fill="#15302f">First sign-in: accept the</text>
+<text x="997" y="482" font-size="13.5" font-weight="700" fill="#15302f">Terms</text>
+<line x1="1200" y1="472" x2="1224" y2="472" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M1223,466 L1232,472 L1223,478 Z" fill="#8aa3a3"/>
+<rect x="1232" y="451" width="215" height="41" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="1246" y="473" font-size="13.5" font-weight="700" fill="#15302f">Inbox</text>
+<rect x="48" y="534" width="170" height="89" rx="12" fill="#0f4c4c"/>
+<text x="62" y="573" font-size="14" font-weight="600" fill="#ffffff">Later</text>
+<text x="62" y="590" font-size="12" font-weight="400" fill="#ffffffd9">what else changes</text>
+<rect x="236" y="534" width="215" height="89" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="250" y="556" font-size="13.5" font-weight="700" fill="#15302f">Switch accounts</text>
+<text x="250" y="573" font-size="13" font-weight="400" fill="#15302f">Several accounts signed in</text>
+<text x="250" y="589" font-size="13" font-weight="400" fill="#15302f">together; the initials menu</text>
+<text x="250" y="605" font-size="13" font-weight="400" fill="#15302f">switches</text>
+<line x1="453" y1="578" x2="477" y2="578" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M476,572 L485,578 L476,584 Z" fill="#8aa3a3"/>
+<rect x="485" y="542" width="215" height="73" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="499" y="564" font-size="13.5" font-weight="700" fill="#15302f">Your data</text>
+<text x="499" y="581" font-size="13" font-weight="400" fill="#15302f">Download everything; ask to</text>
+<text x="499" y="597" font-size="13" font-weight="400" fill="#15302f">delete the account (DPDP)</text>
+<line x1="702" y1="578" x2="726" y2="578" stroke="#8aa3a3" stroke-width="2"/>
+<path d="M725,572 L734,578 L725,584 Z" fill="#8aa3a3"/>
+<rect x="734" y="534" width="215" height="89" rx="12" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="748" y="556" font-size="13.5" font-weight="700" fill="#15302f">Delete</text>
+<text x="748" y="573" font-size="13" font-weight="400" fill="#15302f">Admin confirms; address never</text>
+<text x="748" y="589" font-size="13" font-weight="400" fill="#15302f">reissued; evidence kept for</text>
+<text x="748" y="605" font-size="13" font-weight="400" fill="#15302f">its period, then erased</text>
+<rect x="48" y="655" width="14" height="14" rx="4" fill="#ffffff" stroke="#0f4c4c" stroke-width="2.5"/>
+<text x="68" y="666" font-size="12" font-weight="400" fill="#5a6b6b">a step that creates or gates</text>
+<rect x="276.79999999999995" y="655" width="14" height="14" rx="4" fill="#fff8ea" stroke="#f2a900" stroke-width="1.5"/>
+<text x="296.79999999999995" y="666" font-size="12" font-weight="400" fill="#5a6b6b">a mail Anjal sends</text>
+<rect x="439.59999999999997" y="655" width="14" height="14" rx="4" fill="#fdecec" stroke="#c43c3c" stroke-width="1.5"/>
+<text x="459.59999999999997" y="666" font-size="12" font-weight="400" fill="#5a6b6b">refused</text>
+<rect x="529.8" y="655" width="14" height="14" rx="4" fill="#ffffff" stroke="#c9d6d6" stroke-width="1.5"/>
+<text x="549.8" y="666" font-size="12" font-weight="400" fill="#5a6b6b">a screen</text>
+</svg>

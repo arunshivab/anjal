@@ -16,6 +16,11 @@ public sealed record HelpPart(string Id, string Title, string Icon);
 /// <param name="Line">The one line shown beside it.</param>
 public sealed record HelpShow(string Path, string At, string Line);
 
+/// <summary>A picture in an article (rc.22): the flow chart of how an account is made.</summary>
+/// <param name="Src">Its address under the webmail's static files.</param>
+/// <param name="Caption">One line under it.</param>
+public sealed record HelpFigure(string Src, string Caption);
+
 /// <summary>One help article: one task (design review [8b]).</summary>
 /// <param name="Id">Its key, in its address.</param>
 /// <param name="Part">Its part.</param>
@@ -28,7 +33,8 @@ public sealed record HelpShow(string Path, string At, string Line);
 /// <param name="Keywords">Other words people use for it.</param>
 /// <param name="Release">The release it describes.</param>
 /// <param name="Org">What the organisation may set about it, or null.</param>
-public sealed record HelpArticle(string Id, string Part, string Title, string Summary, IReadOnlyList<string> Steps, string? Tip, HelpShow? Show, IReadOnlyList<string> Related, string Keywords, string Release, string? Org)
+/// <param name="Figure">A picture under the steps (rc.22), or null.</param>
+public sealed record HelpArticle(string Id, string Part, string Title, string Summary, IReadOnlyList<string> Steps, string? Tip, HelpShow? Show, IReadOnlyList<string> Related, string Keywords, string Release, string? Org, HelpFigure? Figure = null)
 {
     /// <summary>About how long it takes to read, in minutes (at least one).</summary>
     public int Minutes => Math.Max(1, (int)Math.Round((this.Summary.Length + this.Steps.Sum(s => s.Length) + (this.Tip?.Length ?? 0)) / 900.0));
@@ -86,7 +92,8 @@ public sealed partial class HelpGuide
                 show,
                 a.GetProperty("related").EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToList(),
                 Str(a, "keywords"), Str(a, "release"),
-                a.TryGetProperty("org", out JsonElement o) && o.ValueKind == JsonValueKind.String ? o.GetString() : null));
+                a.TryGetProperty("org", out JsonElement o) && o.ValueKind == JsonValueKind.String ? o.GetString() : null,
+                a.TryGetProperty("figure", out JsonElement f) && f.ValueKind == JsonValueKind.Object ? new HelpFigure(Str(f, "src"), Str(f, "caption")) : null));
         }
         return new HelpGuide(parts, articles);
     }

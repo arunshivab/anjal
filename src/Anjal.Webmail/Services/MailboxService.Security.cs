@@ -136,7 +136,13 @@ public sealed record SignInMark(DateTimeOffset At, string Place, string Device);
 /// <param name="Logo">Its logo as a data address, or empty.</param>
 /// <param name="Title">What the sign-in page calls it, for example "Imagiqa mail" (rc.14).</param>
 /// <param name="Message">One line under the sign-in form, or empty (rc.14).</param>
-public sealed record OrganisationIdentity(Guid TenantId, string Name, string Domain, string Logo, string Title = "", string Message = "");
+/// <param name="Design">The sign-in design, 1 to 10 (rc.22).</param>
+/// <param name="Colour">The organisation's colour as #rrggbb, or empty (rc.22).</param>
+/// <param name="Background">A background picture as a data address, or empty (rc.22).</param>
+/// <param name="Welcome">The welcome line on the brand panel, or empty (rc.22).</param>
+/// <param name="HelpLine">The help line under the form, or empty (rc.22).</param>
+public sealed record OrganisationIdentity(Guid TenantId, string Name, string Domain, string Logo, string Title = "", string Message = "",
+    int Design = 1, string Colour = "", string Background = "", string Welcome = "", string HelpLine = "");
 
 /// <summary>
 /// Accounts and sign-in security (rc.13, boards AuthSignIn, AuthReset,
@@ -271,7 +277,9 @@ public sealed partial class MailboxService
             Branding branding = await this.ReadTenantDocumentAsync<Branding>(tenant.Id, BrandingKind, ct).ConfigureAwait(false) ?? new Branding();
             string logo = branding.Logo.StartsWith("data:image/", StringComparison.Ordinal) ? branding.Logo : string.Empty;
             string name = string.IsNullOrWhiteSpace(tenant.DisplayName) ? tenant.Slug : tenant.DisplayName.Trim();
-            org = new OrganisationIdentity(tenant.Id, name, match.Domain.ToLowerInvariant(), logo, branding.Title.Trim(), branding.Message.Trim());
+            string picture = branding.Background.StartsWith("data:image/", StringComparison.Ordinal) ? branding.Background : string.Empty;
+            org = new OrganisationIdentity(tenant.Id, name, match.Domain.ToLowerInvariant(), logo, branding.Title.Trim(), branding.Message.Trim(),
+                SignInDesigns.Clean(branding.Design), Branding.CleanColour(branding.Colour), picture, branding.Welcome.Trim(), branding.HelpLine.Trim());
         }
         this.organisations[h] = (DateTimeOffset.UtcNow, org);
         return org;

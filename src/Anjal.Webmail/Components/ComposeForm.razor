@@ -21,7 +21,8 @@ else if (Docked)
           data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
           data-word-sendeach="@L["Send {n} separate messages"]">
         <AntiforgeryToken />
-        <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
+        @if (Patient is not null) { <input type="hidden" name="patientOk" value="1" /> }
+            <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
         <input type="hidden" name="inReplyTo" value="@inReplyTo" />
         <input type="hidden" name="back" value="@Back" />
         <input type="hidden" name="next" value="" data-next />
@@ -100,7 +101,8 @@ else
           data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
           data-word-sendeach="@L["Send {n} separate messages"]">
         <AntiforgeryToken />
-        <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
+        @if (Patient is not null) { <input type="hidden" name="patientOk" value="1" /> }
+            <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
         <input type="hidden" name="inReplyTo" value="@inReplyTo" />
         <input type="hidden" name="back" value="@Back" />
         <input type="hidden" name="next" value="" data-next />
@@ -118,6 +120,14 @@ else
             {
                 <div class="notice n-err readnotice">
                     <LipiIcon Name="warning" Size="16" /><span><b>@L["Not sent."]</b> @L.Say(Error)</span>
+                </div>
+            }
+            @if (Patient is not null)
+            {
+                @* rc.22 (item 50, mockup 24): the patient-information warning. A warning, never a block. *@
+                <div class="notice n-warn readnotice">
+                    <LipiIcon Name="warning" Size="16" />
+                    <span><b>@L["This looks like patient information"]</b> @L["({signs}), and it is going outside {org} to {who}. Check that this is allowed and that the address is right. Press Send again to send it anyway; untick a file below to leave it out."].Replace("{signs}", string.Join("; ", PatientSigns.Skip(1)), StringComparison.Ordinal).Replace("{org}", orgName, StringComparison.Ordinal).Replace("{who}", PatientSigns.FirstOrDefault() ?? string.Empty, StringComparison.Ordinal)</span>
                 </div>
             }
             <div class="notice n-err readnotice" data-client-error hidden></div>
@@ -174,6 +184,11 @@ else
                 <label class="clabel" for="from">@L["From"]</label>
                 <select id="from" class="csel" name="from" aria-label="@L["From"]">
                     <option value="@address">@FromLabel</option>
+                    @foreach (string alias in sendAs)
+                    {
+                        @* rc.22 (item 41): an extra address the person may send from. *@
+                        <option value="@alias">@(displayName.Length > 0 ? displayName + ", " + alias : alias)</option>
+                    }
                 </select>
             </div>
 
@@ -349,6 +364,9 @@ else
 
     private static Guid? ParseId(string? text) => Guid.TryParse(text, out Guid id) ? id : null;
     [SupplyParameterFromQuery(Name = "error")] private string? Error { get; set; }
+    [SupplyParameterFromQuery(Name = "patient")] private string? Patient { get; set; }
+
+    private IReadOnlyList<string> PatientSigns => (Patient ?? string.Empty).Split("; ", StringSplitOptions.RemoveEmptyEntries);
     [SupplyParameterFromQuery(Name = "to")] private string? ToQuery { get; set; }
     [SupplyParameterFromQuery(Name = "cc")] private string? CcQuery { get; set; }
     [SupplyParameterFromQuery(Name = "subject")] private string? SubjectQuery { get; set; }
@@ -370,6 +388,7 @@ else
     private Guid? carrySource;
     private IReadOnlyList<AttachmentView> carried = System.Array.Empty<AttachmentView>();
     private string address = string.Empty;
+    private IReadOnlyList<string> sendAs = Array.Empty<string>();
     private string displayName = string.Empty;
     private long used;
     private long quota;
@@ -426,6 +445,7 @@ else
             used = state.Plan == "shared" && state.OwnLimit == 0 ? state.SharedUsed : state.Used;
             quota = state.Plan == "shared" && state.OwnLimit == 0 ? state.Shared : state.OwnLimit;
             address = mb.Address;
+            sendAs = await Mail.SendAsAddressesAsync(mb.Id);
             displayName = mb.DisplayName ?? string.Empty;
             orgName = context.Value.Tenant.DisplayName.Length > 0 ? context.Value.Tenant.DisplayName : context.Value.Tenant.Slug;
         }

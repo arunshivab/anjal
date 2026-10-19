@@ -133,6 +133,9 @@
                 <label class="cfl">@L["or a new folder"]<input class="railinp" name="newFolder" maxlength="100" /></label>
                 <label class="checkline"><input type="checkbox" name="markRead" value="1" checked="@r.MarkRead" /><span>@L["Mark it read"]</span></label>
                 <label class="checkline"><input type="checkbox" name="flag" value="1" checked="@r.Flag" /><span>@L["Flag it"]</span></label>
+                @* rc.22 (item 29, mockup 12): forward a copy. The original always stays; every forward is logged. *@
+                <label class="cfl">@L["Forward a copy to"]<input class="railinp" name="forwardTo" type="email" value="@r.ForwardTo" maxlength="200" placeholder="name@example.com" /></label>
+                <p class="hint rhint">@(forwardingOutside ? L["A copy is sent on; the original always stays in your mailbox. Each forward is written to the activity log."] : L["A copy is sent on; the original always stays. Addresses inside your organisation only: your administrator has not allowed forwarding outside it."])</p>
                 <label class="checkline"><input type="checkbox" name="enabled" value="1" checked="@r.Enabled" /><span>@L["Rule is on"]</span></label>
                 @if (trial is not null)
                 {
@@ -197,6 +200,8 @@
         _ => null,
     };
 
+    private bool forwardingOutside;
+
     private string TrialText => trial is null ? string.Empty
         : trial.Matches == 0 ? L["It would not have moved any message."]
         : L["It would have acted on {n} messages: {who}."].Replace("{n}", MailboxService.Count(trial.Matches), StringComparison.Ordinal)
@@ -226,6 +231,10 @@
         {
             parts.Add(L["flag"]);
         }
+        if (r.ForwardTo.Length > 0)
+        {
+            parts.Add(L["forward a copy to {address}"].Replace("{address}", r.ForwardTo, StringComparison.Ordinal));
+        }
         return string.Join(", ", parts);
     }
 
@@ -243,6 +252,7 @@
             return;
         }
         rules = await Mail.ListRulesAsync(mailboxId.Value);
+        forwardingOutside = await Mail.IsIndividualAsync(mailboxId.Value) || (await Mail.MailPolicyOfAsync((await Mail.TenantOfAsync(mailboxId.Value)) ?? Guid.Empty)).ForwardingOutside;
         own = (await Mail.ListFoldersAsync(mailboxId.Value)).Where(f => !MailboxService.StandardFolders.Contains(f.Name)).ToList();
         if (Selected is MailRule s && TrialFlag == "1")
         {

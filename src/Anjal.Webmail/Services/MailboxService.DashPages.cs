@@ -534,6 +534,31 @@ public sealed partial class MailboxService
     }
 
     // The names and types of a message's attachments, as the reader lists them.
+    /// <summary>The attachments' names on each of some messages (rc.22, item 47): for the file tags on a search page.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageIds">The messages (a page at most).</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Names by message, for those with any.</returns>
+    public async Task<Dictionary<Guid, IReadOnlyList<string>>> AttachmentNamesForAsync(Guid mailboxId, IReadOnlyList<Guid> messageIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(messageIds);
+        var result = new Dictionary<Guid, IReadOnlyList<string>>();
+        foreach (Guid id in messageIds.Take(50))
+        {
+            (MessageRow Row, FolderRow Folder, byte[] Raw)? found = await this.ReadRawAsync(mailboxId, id, ct).ConfigureAwait(false);
+            if (found is null)
+            {
+                continue;
+            }
+            List<(string Name, string Type)> names = AttachmentNames(found.Value.Raw);
+            if (names.Count > 0)
+            {
+                result[id] = names.Select(n => n.Name).ToList();
+            }
+        }
+        return result;
+    }
+
     private static List<(string Name, string Type)> AttachmentNames(byte[] raw)
     {
         var found = new List<(string Name, string Type)>();

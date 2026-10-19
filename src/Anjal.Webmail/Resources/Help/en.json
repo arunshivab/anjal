@@ -1214,6 +1214,410 @@
    "keywords": "spf dkim dmarc mta-sts dns deliverability",
    "release": "rc.17",
    "org": null
+  },
+  {
+   "id": "account-made",
+   "part": "start",
+   "title": "How an account is made",
+   "summary": "Four paths lead to a mailbox: an individual invited by User management, an individual filled in by User management, an organisation person invited by their administrator, and an organisation person filled in by the administrator. In every path the mailbox exists only after Submit, the Terms are emailed, the first mail is the Welcome mail, and nobody under 18 is accepted.",
+   "steps": [
+    "Invited: the invitation email has one link that works once, for 7 days. The registration page asks for what is still missing and checks the username live.",
+    "Filled in by an administrator: they type everything, including the password, and give it by hand. At first sign-in nothing opens until the Terms are accepted, and a new password is asked for.",
+    "Submit creates the mailbox. The Terms go to the personal email address, and the Welcome mail is the first mail in the new Inbox.",
+    "Individuals choose their own username; an organisation's administrator chooses it, and it cannot be changed later."
+   ],
+   "tip": "Your date of birth is asked once, to be sure you are 18 or over. It is kept with your account and never shown on your mail.",
+   "show": null,
+   "related": [
+    "sign-in",
+    "terms",
+    "your-data",
+    "switch-accounts"
+   ],
+   "keywords": "register registration invite invitation join username under 18 date of birth terms welcome",
+   "release": "rc.22",
+   "org": null,
+   "figure": {
+    "src": "/help/account-flows.svg",
+    "caption": "How an account is made: four paths, and what changes later."
+   }
+  },
+  {
+   "id": "terms",
+   "part": "security",
+   "title": "Accept the Terms of Use",
+   "summary": "Every account accepts Anjal's Terms of Use and Disclaimer once: on the registration page, or at first sign-in when an administrator filled in the account.",
+   "steps": [
+    "Read the Terms and the Disclaimer; both are linked at the foot of every sign-in page, and always at /terms and /disclaimer.",
+    "Tick both boxes and press Continue. Until then nothing in the mailbox opens.",
+    "A copy of the Terms is emailed to your personal address the moment your account is made, so you have them in writing."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "account-made",
+    "sign-in"
+   ],
+   "keywords": "terms of use disclaimer legal accept agreement",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "switch-accounts",
+   "part": "security",
+   "title": "Sign in to more than one account",
+   "summary": "Up to five accounts can be signed in together in one browser, and the account menu switches between them without typing a password again.",
+   "steps": [
+    "Open the account menu (your initials at the foot of the rail) and choose Add another account.",
+    "Sign in to the other account as usual. Both now appear in the menu; the one with the tick is open.",
+    "Choose a name in the menu to switch. Sign out of this account leaves the others signed in; Sign out of all signs out every one."
+   ],
+   "tip": "On a shared computer, use Sign out of all.",
+   "show": {
+    "path": "/dashboard/today",
+    "at": ".rail-account",
+    "line": "Your account menu: switch, add another, sign out."
+   },
+   "related": [
+    "sign-out",
+    "sign-in"
+   ],
+   "keywords": "switch account several accounts multiple add another sign out of all",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "name-on-mails",
+   "part": "writing",
+   "title": "Change the name on your mails",
+   "summary": "The name beside your address on every mail you send. In an organisation it is your first and last name; an administrator may allow nicknames.",
+   "steps": [
+    "Open Settings, Profile.",
+    "Type the name under Name on mails and press Save.",
+    "If your organisation has not allowed nicknames, the box is fixed to your first and last name."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/profile",
+    "at": ".setmain",
+    "line": "Name on mails is here."
+   },
+   "related": [
+    "account-made"
+   ],
+   "keywords": "display name nickname from name sender name profile phone",
+   "release": "rc.22",
+   "org": "Your organisation decides whether nicknames are allowed."
+  },
+  {
+   "id": "forward",
+   "part": "folders",
+   "title": "Forward mail to another address",
+   "summary": "A rule can send a copy of matching mail to any address; the original always stays in your mailbox. A rule can also be run over mail you already have.",
+   "steps": [
+    "Open Settings, Rules, and press Add rule.",
+    "Say what the rule matches, then fill in Forward a copy to.",
+    "Press Save. Tick Apply to older mail to forward what already matches, up to 200 messages."
+   ],
+   "tip": "Forwarded mail carries Resent headers and the Anjal forwarding mark, and is never forwarded on more than three times.",
+   "show": {
+    "path": "/settings/rules",
+    "at": ".setmain",
+    "line": "Forward a copy to is in every rule."
+   },
+   "related": [
+    "rules"
+   ],
+   "keywords": "forwarding forward copy redirect auto-forward",
+   "release": "rc.22",
+   "org": "An organisation's administrator decides whether mail may be forwarded outside the organisation."
+  },
+  {
+   "id": "away",
+   "part": "writing",
+   "title": "Set an out-of-office reply",
+   "summary": "While you are away, everyone who writes to you gets one reply, once, with your subject and text. Automatic mail and mailing lists are never answered.",
+   "steps": [
+    "Open Settings, Away, and tick Send an away reply.",
+    "Choose from when and until when, who gets it (everyone, your organisation, or your contacts), and write the subject and the text.",
+    "Press Save. A bar above the Inbox shows the reply is on, with Turn off beside it."
+   ],
+   "tip": "The reply stops on its own on the Until day.",
+   "show": {
+    "path": "/settings/away",
+    "at": ".setmain",
+    "line": "Away reply is here."
+   },
+   "related": [
+    "forward",
+    "send-later"
+   ],
+   "keywords": "out of office vacation holiday auto reply autoreply away message leave",
+   "release": "rc.22",
+   "org": "Your organisation may limit away replies to people inside it."
+  },
+  {
+   "id": "snooze",
+   "part": "reading",
+   "title": "Snooze a message",
+   "summary": "Snooze puts a message out of sight until a time you choose, then brings it back to the top of the Inbox, marked Back.",
+   "steps": [
+    "Open the message, or tick it in the list, and press Snooze.",
+    "Choose Later today, Tomorrow, This weekend, Next week, or pick a date and time.",
+    "Snoozed mail waits in the Snoozed folder, shown in the rail while it has anything in it. Unsnooze brings a message back at once."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "flag",
+    "send-later"
+   ],
+   "keywords": "snooze remind later postpone hide until tomorrow",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "block",
+   "part": "folders",
+   "title": "Block a sender",
+   "summary": "Blocked senders' mail is dropped on arrival, silently: nothing reaches any folder, and the sender is not told.",
+   "steps": [
+    "Open a message from the sender and press Block sender.",
+    "Settings, Senders, Blocked lists everyone you have blocked, with how many messages were dropped, and Unblock.",
+    "To keep a sender's mail but out of the way, use Always to Junk instead."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/senders",
+    "at": ".setmain",
+    "line": "Blocked senders are listed here."
+   },
+   "related": [
+    "junk",
+    "rules"
+   ],
+   "keywords": "block blocked sender discard silent drop spam unwanted",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "unsubscribe",
+   "part": "reading",
+   "title": "Unsubscribe from a mailing list",
+   "summary": "When a message comes from a list that says how to leave it, an Unsubscribe button appears on the message. Anjal sends the request for you.",
+   "steps": [
+    "Open the message and press Unsubscribe.",
+    "Anjal sends the list's unsubscribe mail, or presses its one-click link, and marks the message Unsubscribed.",
+    "Mail that still arrives after a week can be blocked instead."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "block",
+    "junk"
+   ],
+   "keywords": "unsubscribe mailing list newsletter leave list-unsubscribe",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "your-data",
+   "part": "security",
+   "title": "Download or delete your data",
+   "summary": "Everything in your account can be downloaded as one file, and you can ask for the account to be deleted (the DPDP Act gives you both rights).",
+   "steps": [
+    "Open Settings, Your data, and press Prepare a download. The file is ready within a few minutes and can be downloaded for 7 days.",
+    "The file holds every message as .eml, your contacts, rules, profile and activity, with a README that explains the layout.",
+    "To delete the account, press Ask to delete and type your address. Your administrator confirms it; the address is never reissued, and evidence is kept for its legal period, then erased."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/data",
+    "at": ".setmain",
+    "line": "Prepare a download and Ask to delete are here."
+   },
+   "related": [
+    "account-made",
+    "originals"
+   ],
+   "keywords": "export download data delete account dpdp privacy portability gdpr erase",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "notifications",
+   "part": "reading",
+   "title": "Get desktop notifications",
+   "summary": "Anjal can show a notification on your desktop when new mail arrives, while a tab is open.",
+   "steps": [
+    "Open Settings, Mail, and tick Desktop notifications.",
+    "Allow notifications when the browser asks.",
+    "Choose whether every message, or only mail from your contacts, is announced."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/mail",
+    "at": ".setmain",
+    "line": "Desktop notifications is here."
+   },
+   "related": [
+    "open-on"
+   ],
+   "keywords": "notification notify alert desktop popup new mail sound",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "sections",
+   "part": "reading",
+   "title": "Split the Inbox into sections",
+   "summary": "Sections put boxes above the Inbox, each a saved search (Unread, Flagged, From the MD...), so what matters is in view without opening folders. Off unless you turn it on.",
+   "steps": [
+    "Open Settings, Appearance, and tick Show sections above my Inbox. Unread and Flagged are the first two sections.",
+    "Add a section: a name, a search such as from:lab@sgh.in or is:unread newer:7d, and how many rows it shows.",
+    "Each section shows its rows with an all link to the full search. Everything else follows below."
+   ],
+   "tip": "Searches understand is:unread, is:flagged, from:, has:attachment, newer:7d and plain words.",
+   "show": {
+    "path": "/settings/appearance",
+    "at": ".setmain",
+    "line": "Inbox sections is here."
+   },
+   "related": [
+    "search",
+    "theme"
+   ],
+   "keywords": "sections gmail tabs priority inbox split boxes saved search",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "files-search",
+   "part": "contacts",
+   "title": "Find a message by its files",
+   "summary": "Search results show each message's attachments as tags and highlight the words that matched, so the right message is clear at a glance.",
+   "steps": [
+    "Type what you remember in the search box - a word, a sender, or a file name.",
+    "Each result shows the matched words highlighted and the files on it as tags.",
+    "Press a file tag to open the message at that file."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "search",
+    "attach"
+   ],
+   "keywords": "search attachment file name highlight tag find pdf",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "patient-warning",
+   "part": "patient",
+   "title": "The patient-information warning",
+   "summary": "When a message to someone outside your organisation looks like it carries patient information, Anjal asks you to check before it goes. A warning, never a block: you decide.",
+   "steps": [
+    "Write the message as usual and press Send.",
+    "If the subject, text or a file name looks like a record number, a diagnosis or a report, a yellow notice names what was found and the outside address.",
+    "Press Send anyway, or change the message. The Referral template under Hospital and clinic is written for sending a referral safely."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "templates",
+    "outside"
+   ],
+   "keywords": "patient confidential hipaa dpdp record number mrn uhid referral warning outside",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "aliases",
+   "part": "admin",
+   "title": "Add extra addresses and group addresses",
+   "summary": "An extra address (alias) delivers to one person and may be sent from. A group address reaches several people at once, and can be limited to mail from inside the organisation.",
+   "steps": [
+    "Open Organisation, Addresses.",
+    "Add an extra address: the address, the person it delivers to, and whether they may send from it.",
+    "Add a group address: the address, its members (up to 200) and whether only the organisation may write to it. Members receive each message in their own Inbox."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/addresses",
+    "at": ".setmain",
+    "line": "Extra addresses and group addresses are here."
+   },
+   "related": [
+    "invite",
+    "domain"
+   ],
+   "keywords": "alias extra address group distribution list team address",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "virus",
+   "part": "admin",
+   "title": "Virus scanning and held mail",
+   "summary": "With ClamAV running, every file on incoming mail is scanned. Programs and scripts are refused, an infected file is removed and the message says so, disk images go to Junk; while the scanner is down, mail with files is held and scanned again every five minutes.",
+   "steps": [
+    "The Anjal console, Virus scanning, shows the scanner's version, the counts, and every message held.",
+    "A held message is delivered on its own once the scanner answers. Scan again tries now; Release delivers it without a scan - the operator's decision.",
+    "The operator is reminded every thirty minutes while anything is held."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-messages",
+    "junk"
+   ],
+   "keywords": "virus clamav malware scan attachment quarantine held infected antivirus",
+   "release": "rc.22",
+   "org": "Set ANJAL_CLAMAV on the server to turn scanning on."
+  },
+  {
+   "id": "signin-design",
+   "part": "admin",
+   "title": "Choose the sign-in page design",
+   "summary": "An organisation picks one of ten designs for its sign-in page, with its colour, logo, a background picture, a welcome line and a help line. Only the frame changes; the form itself is always Anjal's.",
+   "steps": [
+    "Open Organisation, Branding.",
+    "Choose a design, then your colour, logo, picture (designs 1, 5 and 7), welcome text and help line.",
+    "Press Save, then open the sign-in page in a private window to see it as your people do."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/branding",
+    "at": ".setmain",
+    "line": "Sign-in page design is here."
+   },
+   "related": [
+    "setup",
+    "domain"
+   ],
+   "keywords": "sign-in page design branding colour logo background welcome help line theme",
+   "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "user-management",
+   "part": "admin",
+   "title": "Add people to the individuals' service",
+   "summary": "The usermanagement account on anjalmail.com makes accounts for individuals: by invitation, where the person fills in their own details, or by filling in everything by hand.",
+   "steps": [
+    "Sign in as usermanagement and open User management, People.",
+    "Invite: first name, last name and personal email. The person chooses their username, password and details on the registration page.",
+    "Fill in everything: every field, the username checked live, and a password to give by hand. The Terms go to their personal email."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "account-made",
+    "invite"
+   ],
+   "keywords": "usermanagement individuals anjalmail.com add person invite fill in",
+   "release": "rc.22",
+   "org": null
   }
  ]
 }

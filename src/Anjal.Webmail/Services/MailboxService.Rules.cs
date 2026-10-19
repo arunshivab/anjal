@@ -14,7 +14,7 @@ public sealed partial class MailboxService
 {
     /// <summary>The standard folders, which cannot be created, removed or used as a person's own.</summary>
     public static readonly IReadOnlySet<string> StandardFolders = new HashSet<string>(
-        new[] { FolderRow.Inbox, ScheduledFolder, "Outbox", "Drafts", "Sent", "Archive", MailboxSink.JunkFolder, "Trash" },
+        new[] { FolderRow.Inbox, ScheduledFolder, "Outbox", SnoozedFolder, AttachmentPolicy.QuarantineFolder, "Drafts", "Sent", "Archive", MailboxSink.JunkFolder, "Trash" },
         StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The person's rules, in the order they run.</summary>
@@ -49,9 +49,20 @@ public sealed partial class MailboxService
         {
             return "Choose Archive, Trash or one of your own folders.";
         }
-        if (move.Length == 0 && !rule.MarkRead && !rule.Flag)
+        // rc.22 (item 29, owner 18 Oct 2026): forwarding is only by rule; individuals may forward
+        // anywhere; an organisation's people outside it only when its administrator allows; a copy
+        // always stays.
+        string forward = rule.ForwardTo.Trim().ToLowerInvariant();
+        if (forward.Length > 0)
         {
-            return "Choose what the rule does: move, mark read, or flag.";
+            if (await this.ForwardProblemAsync(mailboxId, forward, ct).ConfigureAwait(false) is string bad)
+            {
+                return bad;
+            }
+        }
+        if (move.Length == 0 && !rule.MarkRead && !rule.Flag && forward.Length == 0)
+        {
+            return "Choose what the rule does: move, mark read, flag, or forward a copy.";
         }
         if (move.Length > 0)
         {
@@ -66,6 +77,7 @@ public sealed partial class MailboxService
             MoveTo = move,
             MarkRead = rule.MarkRead,
             Flag = rule.Flag,
+            ForwardTo = forward,
         };
         List<MailRule> all = (await this.ListRulesAsync(mailboxId, ct).ConfigureAwait(false)).ToList();
         int index = all.FindIndex(r => r.Id == clean.Id);
@@ -174,7 +186,7 @@ public sealed partial class MailboxService
                     HasUnsubscribe = false,
                     FromOutside = at < 0 || !domains.Contains(fromAddress[(at + 1)..], StringComparer.OrdinalIgnoreCase),
                 };
-                var single = new MailRule { Name = rule.Name, Enabled = true, Conditions = rule.Conditions, MoveTo = rule.MoveTo, MarkRead = rule.MarkRead, Flag = rule.Flag };
+                var single = new MailRule { Name = rule.Name, Enabled = true, Conditions = rule.Conditions, MoveTo = rule.MoveTo, MarkRead = rule.MarkRead, Flag = rule.Flag, ForwardTo = rule.ForwardTo };
                 if (MailRules.Evaluate(new[] { single }, subject, groups) is not null)
                 {
                     matched.Add(m);
@@ -187,11 +199,19 @@ public sealed partial class MailboxService
         }
         if (apply)
         {
+            // rc.22 (item 29): a rule can also be applied to older mail - forwarded copies too, at most 200 at a time.
+            string forward = rule.ForwardTo.Trim().ToLowerInvariant();
+            int forwarded = 0;
             foreach (MessageRow m in matched)
             {
                 if (rule.MarkRead || rule.Flag)
                 {
                     await this.SetFlagsAsync(mailboxId, m.Id, rule.MarkRead || m.Seen, rule.Flag || m.Flagged, m.Answered, ct).ConfigureAwait(false);
+                }
+                if (forward.Length > 0 && forwarded < 200 && await this.ForwardProblemAsync(mailboxId, forward, ct).ConfigureAwait(false) is null
+                    && await this.ForwardOlderAsync(mailboxId, m.Id, forward, ct).ConfigureAwait(false))
+                {
+                    forwarded++;
                 }
                 if (rule.MoveTo.Trim().Length > 0)
                 {
@@ -206,6 +226,53 @@ public sealed partial class MailboxService
             .Take(3)
             .ToList();
         return new RuleTrial(matched.Count, bySender);
+    }
+
+    /// <summary>
+    /// What is wrong with a forwarding address for this person (rc.22, item 29): not an address, the
+    /// mailbox itself, or outside the organisation when its administrator has not allowed that. Null when fine.
+    /// </summary>
+    /// <param name="mailboxId">The person.</param>
+    /// <param name="address">The address, lower case.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The problem, or null.</returns>
+    public async Task<string?> ForwardProblemAsync(Guid mailboxId, string address, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        if (!MailboxSink.TrySplitAddress(address, out string local, out string domain) || !Anjal.Spam.SenderRules.IsValidPattern(local + "@" + domain))
+        {
+            return "Give the address a copy is forwarded to, such as name@example.com.";
+        }
+        MailboxRow? me = await this.store.GetMailboxByIdAsync(mailboxId, ct).ConfigureAwait(false);
+        if (me is null)
+        {
+            return "That mailbox was not found.";
+        }
+        if (string.Equals(local + "@" + domain, me.Address, StringComparison.OrdinalIgnoreCase))
+        {
+            return "That is this mailbox itself.";
+        }
+        IReadOnlyList<string> domains = await this.OrganisationDomainsAsync(mailboxId, ct).ConfigureAwait(false);
+        bool outside = !domains.Contains(domain, StringComparer.OrdinalIgnoreCase);
+        if (outside && !await this.IsIndividualsTenantAsync(me.TenantId, ct).ConfigureAwait(false)
+            && !(await this.MailPolicyOfAsync(me.TenantId, ct).ConfigureAwait(false)).ForwardingOutside)
+        {
+            return $"{local}@{domain} is outside your organisation, and your administrator has not allowed forwarding outside it. Forwarding inside is always allowed.";
+        }
+        return null;
+    }
+
+    /// <summary>Whether an address is outside the person's organisation (for the forwarding notice).</summary>
+    /// <param name="mailboxId">The person.</param>
+    /// <param name="address">The address.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when outside.</returns>
+    public async Task<bool> IsOutsideAsync(Guid mailboxId, string address, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        int at = address.LastIndexOf('@');
+        IReadOnlyList<string> domains = await this.OrganisationDomainsAsync(mailboxId, ct).ConfigureAwait(false);
+        return at < 0 || !domains.Contains(address[(at + 1)..], StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Create one of the person's own folders. Returns a message, or null on success.</summary>
@@ -269,4 +336,51 @@ public sealed partial class MailboxService
         MoveTo = "DMARC reports",
         MarkRead = true,
     };
+
+    /// <summary>Forward a copy of a message already in the mailbox (rc.22, item 29), through the same path delivery uses.</summary>
+    private async Task<bool> ForwardOlderAsync(Guid mailboxId, Guid messageId, string target, CancellationToken ct)
+    {
+        (MessageRow Row, FolderRow Folder, byte[] Raw)? found = await this.ReadRawAsync(mailboxId, messageId, ct).ConfigureAwait(false);
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
+        if (found is null || context is null)
+        {
+            return false;
+        }
+        MimeMessage parsed;
+        try
+        {
+            parsed = MimeParser.Parse(found.Value.Raw);
+        }
+        catch (MimeParseException)
+        {
+            return false;
+        }
+        if (MailboxSink.IsAutomaticMail(parsed.Headers) || parsed.Headers.GetAll(MailboxSink.ForwardedHeader).Count >= MailboxSink.MaxForwardHops)
+        {
+            return false;
+        }
+        MailboxRow mailbox = context.Value.Mailbox;
+        string now = DateTimeOffset.UtcNow.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", System.Globalization.CultureInfo.InvariantCulture);
+        string head = "Resent-From: <" + mailbox.Address + ">\r\nResent-To: <" + target + ">\r\nResent-Date: " + now + "\r\n"
+            + "Resent-Message-ID: <" + Guid.NewGuid().ToString("N") + "@" + mailbox.Domain + ">\r\n" + MailboxSink.ForwardedHeader + ": " + mailbox.Address + "\r\n";
+        byte[] headBytes = System.Text.Encoding.ASCII.GetBytes(head);
+        byte[] body = MailboxSink.WithReturnPath(found.Value.Raw, string.Empty);
+        int nl = Array.IndexOf(body, (byte)'\n');
+        byte[] rest = nl < 0 ? body : body[(nl + 1)..];
+        var copy = new byte[headBytes.Length + rest.Length];
+        headBytes.CopyTo(copy, 0);
+        rest.CopyTo(copy, headBytes.Length);
+        var sink = new MailboxSink(this.store, this.maildir);
+        if (await sink.ResolveAsync(target, ct).ConfigureAwait(false) is not null)
+        {
+            await sink.DeliverAsync(new Anjal.Smtp.DeliveryContext { EnvelopeFrom = mailbox.Address, EnvelopeTo = new[] { target }, RawBytes = copy, AuthenticatedUser = mailbox.Address }, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            DateTimeOffset at = DateTimeOffset.UtcNow;
+            await this.messageStore.EnqueueOutboundAsync(new OutboundMessage { EnvelopeFrom = mailbox.Address, EnvelopeTo = target, RawBytes = copy, CreatedAt = at, NextAttemptAt = at, GiveUpAt = at + OutboundMessage.DefaultGiveUp }, ct).ConfigureAwait(false);
+        }
+        await this.messageStore.AppendAuditAsync(new AuditEvent { Actor = mailbox.Address, Action = MailboxSink.ForwardAudit, Subject = target, Detail = Clip(parsed.Subject, 120) }, ct).ConfigureAwait(false);
+        return true;
+    }
 }

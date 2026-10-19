@@ -10,6 +10,23 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.22** (19 October 2026) - Accounts, and the mail that goes with them. Individuals get an
+account on **anjalmail.com** through the usermanagement console (invited, or filled in by hand);
+organisations add people through their administrator (invited with the username chosen by the
+administrator, or filled in with the password). In every path the mailbox exists only after
+Submit, the Terms of Use are emailed, the first mail is the Welcome mail, and nobody under 18 is
+accepted (Help > How an account is made, with the flow chart). Up to five accounts signed in
+together, switched from the account menu. Ten sign-in page designs with the organisation's colour,
+picture, welcome line and help line. Forwarding by rule (a copy; older mail too), out-of-office
+replies, snooze, blocking that drops silently, extra addresses and group addresses, the
+patient-information warning in Compose with a Referral template, Unsubscribe on list mail and
+`List-Unsubscribe` on application mail, desktop notifications, search highlighting with file tags,
+Inbox sections (an option, off by default), and your data: download everything, ask to delete
+(DPDP). Virus scanning with ClamAV: programs refused, infected files removed, disk images to Junk,
+mail held while the scanner is down and scanned again every five minutes. New settings
+`ANJAL_CLAMAV` and `ANJAL_SHARED_DOMAIN`; `ANJAL_POSTMASTER` is now read by the webmail too, for
+held-mail reminders. Run `schema.sql` once (sender rules gain the `discard` action).
+
 **v1.0.0-rc.21.1** (18 October 2026) - DEF-117: the content of sent mail no longer stays in the
 queue for ever. Once delivery has ended and the organisation's Outbox keep-days (Organisation >
 Retention, 1 to 30 days, default 7) have passed, only the header block is kept: Sending systems
@@ -822,6 +839,8 @@ Every `ANJAL_*` setting the code reads is described in this README; a test holds
 | `ANJAL_ALLOW_PLAINTEXT_KEYS` | Both | false | `true` (case-insensitive) or anything else | When ANJAL_KEK is unset and the store is PostgreSQL, DKIM private keys are refused (API returns 409 `kek_required`; Webmail says it cannot make keys). `true` allows storing them unencrypted anyway. Has no effect when ANJAL_KEK is set or the store is in-memory. |
 | `ANJAL_API_ALLOW_NO_AUTH` | Server | false | `true` or anything else | Lets the admin API start with no ANJAL_API_TOKEN. Without it, a missing token stops the server (exit 1). Meant for local development only. Only checked when ANJAL_API_PORT > 0. |
 | `ANJAL_API_ALLOW_PUBLIC` | Server | false | `true` or anything else | Lets ANJAL_API_BIND be a non-loopback address. Without it, a non-loopback bind stops the server (exit 1), because the API is plain HTTP. Only checked when ANJAL_API_PORT > 0. |
+| `ANJAL_CLAMAV` | Server and Webmail | Unset: no scanning; files are delivered as they come | `host:port` (for example `127.0.0.1:3310`) or the path of clamd's Unix socket (`/var/run/clamav/clamd.ctl`), trimmed | rc.22 (item 39): the ClamAV daemon that scans every file on incoming mail (zINSTREAM). Programs and scripts are refused at SMTP (550), an infected file is removed and the subject says so, disk images go to Junk; while clamd does not answer, mail with files is held in the Quarantine folder and scanned again every five minutes, with the operator reminded every thirty. |
+| `ANJAL_SHARED_DOMAIN` | Webmail | Unset: no automatic subdomains are made | A domain name, trimmed, lower case (`anjalmail.com` in production) | rc.22: Anjal's shared domain - the individuals' tenant is made on it, and every organisation created afterwards gets an automatic subdomain of it (`<slug>.<shared domain>`) beside its own domain. The DNS for it (MX, SPF, DKIM, a wildcard for the subdomains) is the operator's. |
 | `ANJAL_BACKUP_SCRATCH` | Webmail | `/var/lib/anjal/backup` (also when set to empty) | Folder path | Folder where backup copies wait before they are sent off. Webmail only measures its size for the operator capacity view; backup.sh is what actually writes there. |
 | `ANJAL_BACKUP_RETRY_WAITS` | Backup | `120 240 480 960` (set to empty: no new tries) | Seconds, separated by spaces | How long backup.sh waits before each new try after a failed run (D-88): by default 2, 4, 8 and 16 minutes, about 30 minutes in all. When the last try fails, a `failed` line is added to the status file. "Not configured" is never tried again. |
 | `ANJAL_BACKUP_STATUS` | Both | `/var/lib/anjal/backup-status` (but set to empty, it is used as "" and so reads as missing) | File path. Expected contents: a line `ok <timestamp>`, and a line `failed <timestamp> ...` when a run failed since | Status file written by backup.sh. Webmail reads it for the "Last good backup" health tile: over 26 h shows warn; over 48 h, missing, or a run failed after its 30 minutes of tries (D-88) shows bad at once, and the operators are mailed within 15 minutes. |
@@ -837,7 +856,7 @@ Every `ANJAL_*` setting the code reads is described in this README; a test holds
 | `ANJAL_MTA_STS_MODE` | Webmail | off in MtaStsPolicy: no policy is served. Inconsistency: the operator health tile treats unset as `testing` and shows … | `off`, `testing`, `enforce`, `none` (trimmed, case-insensitive in MtaStsPolicy). Any other value means off, with a log note | Mode of the MTA-STS policy (RFC 8461) served at `https://mta-sts.<domain>/.well-known/mta-sts.txt`. |
 | `ANJAL_MTA_STS_MX` | Webmail | ANJAL_HOSTNAME | Comma-separated MX host names, trimmed | `mx:` lines in the served MTA-STS policy. |
 | `ANJAL_OPERATORS` | Webmail | Empty, so nobody is an operator | Comma-separated email addresses, trimmed, compared case-insensitively | People allowed to open the Anjal operator console (`/ops`). They manage the service, not anyone's mail. The service summary mail is also sent to each of them. |
-| `ANJAL_POSTMASTER` | Server | Unset: `postmaster@` and `abuse@` at the server's own host name go to `postmaster@<parent domain of ANJAL_HOSTNAME>`, … | Email address (trimmed; empty or whitespace is treated as unset) | The operator's mailbox for `postmaster@` and `abuse@` at the server's own host name. It is ignored (resolves to nothing) if it points at a role address on that same host, to avoid a loop. |
+| `ANJAL_POSTMASTER` | Both | Unset: `postmaster@` and `abuse@` at the server's own host name go to `postmaster@<parent domain of ANJAL_HOSTNAME>`, … | Email address (trimmed; empty or whitespace is treated as unset) | The operator's mailbox for `postmaster@` and `abuse@` at the server's own host name. It is ignored (resolves to nothing) if it points at a role address on that same host, to avoid a loop. From rc.22 the webmail reads it too: the address reminded every thirty minutes while mail is held because the virus scanner is down. |
 | `ANJAL_PWNED_FILE` | Both | `/var/lib/anjal/pwned-passwords.bin` on Linux, otherwise `%LOCALAPPDATA%/Anjal/pwned-passwords.bin`. Empty also gives … | File path | The leaked-password list file. Server downloads and refreshes it. Both processes check passwords against it and pick up a replaced file within about a minute. |
 | `ANJAL_PWNED_MIN_COUNT` | Server | 3 | Integer ≥ 1. A value < 1 or unparsable gives 3 | When building the downloaded list, a password is kept only if it appears in at least this many leaks. |
 | `ANJAL_PWNED_MODE` | Both | `both` | `both`, `download` (nothing is sent out when a password is set), `online`, `off`. Trimmed, case-insensitive; unknown values mean `both` | Which leaked-password checks run: the local downloaded list, the online HIBP k-anonymity range check, both, or neither. |

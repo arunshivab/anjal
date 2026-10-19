@@ -87,6 +87,7 @@ else
                 @foreach (MessageRow m in group)
                 {
                     <MessageListRow M="m" L="L" Clock="clock" FolderName="@FolderName(m)" FolderLabel="@L.Folder(FolderName(m))" Threshold="threshold" Trusted="trusted"
+                                    Highlight="@HighlightWords" Files="@(files.TryGetValue(m.Id, out IReadOnlyList<string>? names) ? names : null)"
                                     Category="@(m.CategoryId is Guid cid ? categories.FirstOrDefault(c => c.Row.Id == cid) : null)" Who="@Sender(m)"
                                     OpenLink="@OpenLink(m)" IsOpen="@(m.Id == OpenId)" Selectable="true" BackLink="@PageLink(pageIndex)"
                                     QuickUrl="/folder/INBOX/bulk" />
@@ -320,5 +321,12 @@ else
             Day(AfterText, 0), Day(BeforeText, 1), Attach == "1", pageIndex, pageSize, ScoreFilter is int sc ? Math.Clamp(sc, 0, MailFigures.TopScore) : null,
             new SearchNarrowing(CategoryFilter, CategoryText == "none", Sort == "size",
                 RescuedDays is int days ? (await Mail.RescuedSinceAsync(mailboxId.Value, DateTimeOffset.UtcNow.AddDays(-days))).Select(r => r.Id).ToHashSet() : null, order));
+        // rc.22 (item 47): the files on this page's results, named - a page at most, read once.
+        files = items is null ? new Dictionary<Guid, IReadOnlyList<string>>() : await Mail.AttachmentNamesForAsync(mailboxId.Value, items.Where(m => m.HasAttachments).Select(m => m.Id).ToList());
     }
+
+    private Dictionary<Guid, IReadOnlyList<string>> files = new();
+
+    // rc.22 (item 47): the words typed, without operators, for highlighting.
+    private string HighlightWords => string.Join(" ", (Q ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => !w.Contains(':', StringComparison.Ordinal)));
 }
