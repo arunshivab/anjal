@@ -10,6 +10,16 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.22.2** (20 October 2026) - Tests for what rc.22 had only been looked at in a browser
+(owner, 20 Oct: "have you added to the tests?"): the desktop-notification feed and setting,
+Unsubscribe (mailto and one-click), the `List-Unsubscribe` header on application mail, search
+highlighting, the sign-in page's design fields, a forwarding rule applied to older mail, Turn off
+for the away reply, the operator's held-mail notice, the help page's flow chart, and the real
+clamd protocol (run where a clamd socket exists; `ANJAL_TEST_CLAMAV` names another). Three
+defects they found, fixed: search highlighting showed `<mark>` as text; `/help/account-flows.svg`
+answered with the help page instead of the picture; ClamAV 1.5 disables VERSION by default, so the
+console would have shown a working scanner as down (PING now stands in).
+
 **v1.0.0-rc.22.1** (19 October 2026) - The Compose warning for mail going outside the organisation
 now also names personal information (an Aadhaar or PAN number, a phone number, bank details, pay,
 a password), and an organisation can ask everyone to check before any mail with files goes

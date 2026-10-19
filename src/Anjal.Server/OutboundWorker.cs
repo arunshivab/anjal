@@ -206,6 +206,19 @@ public sealed class OutboundWorker
             else
             {
                 Anjal.Dkim.DkimKey? key = await this.dkimResolver.ResolveAsync(senderDomain, ct).ConfigureAwait(false);
+                if (key is null && IsForwardedCopy(bytesToSend) && EnvelopeDomain(m.EnvelopeFrom) is string forwarder && forwarder != senderDomain)
+                {
+                    // rc.22.2 (found by a test): a copy forwarded by rule keeps the original From
+                    // (the outside sender's domain, for which this server has no key). It is signed
+                    // with the forwarding mailbox's domain instead - the envelope sender - so the
+                    // copy goes out signed; the original sender's own signature stays on it too.
+                    key = await this.dkimResolver.ResolveAsync(forwarder, ct).ConfigureAwait(false);
+                    if (key is not null)
+                    {
+                        this.log?.Invoke($"DKIM: {m.Id} is a forwarded copy from {senderDomain}; signed as {forwarder}");
+                        senderDomain = forwarder;
+                    }
+                }
                 if (key is null)
                 {
                     if (this.requireDkim)
@@ -363,6 +376,27 @@ public sealed class OutboundWorker
             this.log?.Invoke($"could not file bounce notice for {m.Id}: {ex.GetType().Name}: {ex.Message}");
         }
 #pragma warning restore CA1031
+    }
+
+    /// <summary>A copy a mailbox rule forwarded (rc.22): it carries Anjal's forwarding mark and Resent-From.</summary>
+    private static bool IsForwardedCopy(byte[] rawBytes)
+    {
+        int headEnd = System.Array.IndexOf(rawBytes, (byte)'\n');
+        string head = System.Text.Encoding.ASCII.GetString(rawBytes, 0, System.Math.Min(rawBytes.Length, 4096));
+        int blank = head.IndexOf("\r\n\r\n", System.StringComparison.Ordinal);
+        if (blank >= 0)
+        {
+            head = head[..blank];
+        }
+        return headEnd > 0 && head.Contains("\n" + Anjal.Mailbox.MailboxSink.ForwardedHeader + ":", System.StringComparison.OrdinalIgnoreCase)
+            || head.StartsWith(Anjal.Mailbox.MailboxSink.ForwardedHeader + ":", System.StringComparison.OrdinalIgnoreCase)
+            || head.StartsWith("Resent-From:", System.StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? EnvelopeDomain(string envelopeFrom)
+    {
+        int at = envelopeFrom.LastIndexOf('@');
+        return at < 0 || at == envelopeFrom.Length - 1 ? null : envelopeFrom[(at + 1)..].Trim().ToLowerInvariant();
     }
 
     /// <summary>

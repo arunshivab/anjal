@@ -1646,6 +1646,13 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.21.1 to rc.22, rc.22.1 and rc.22.2** (accounts and sign-up; the mail that goes with them): the
+usual steps (backup first), `schema.sql` once (sender rules gain `discard`), then **section 13j** for
+what is new on the server side - ClamAV (`ANJAL_CLAMAV`, `ANJAL_POSTMASTER` in both env files) and
+anjalmail.com (`ANJAL_SHARED_DOMAIN` and its DNS). Both are optional until you turn them on; the
+start-up log says `Virus scanning: off (ANJAL_CLAMAV not set)` meanwhile. Done on the first server
+20 Oct 2026 (rc.22.1 straight from rc.21, one install).
+
 **rc.21 to rc.21.1** (DEF-117, Outbox content): the usual steps (backup first), and run `schema.sql`
 once: it adds `outbound_messages.finished_at` and `body_removed_at` and fills `finished_at` for mail
 already delivered. Within an hour of the restart, the content of mail delivered more than the

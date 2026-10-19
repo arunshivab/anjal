@@ -124,4 +124,28 @@ public sealed class SubmissionSinkTests : IDisposable
         await this.sink.DeliverAsync(anonymous);
         Assert.Empty(await this.QueuedAsync());
     }
+
+    [Fact]
+    public async Task AnApplicationsMail_GetsAListUnsubscribeHeader_UnlessItWroteItsOwn_AndAPersonsMailDoesNot()
+    {
+        // rc.22 (item 51), tested in rc.22.2: mail an application sends offers a way out.
+        await this.SeedAsync();
+        Assert.Equal(DeliveryOutcome.Accepted, (await this.sink.DeliverAsync(Submitted("app-lipi", "patient@gmail.example"))).Outcome);
+        OutboundMessage app = Assert.Single(await this.QueuedAsync());
+        string raw = System.Text.Encoding.ASCII.GetString(app.RawBytes);
+        Assert.Contains("List-Unsubscribe: <mailto:unsubscribe@qa.test?subject=unsubscribe>\r\n", raw, StringComparison.Ordinal);
+        Assert.Equal(1, raw.Split("List-Unsubscribe:").Length - 1);
+
+        DeliveryContext own = Submitted("app-lipi", "patient@gmail.example");
+        own = own.WithRawBytes(System.Text.Encoding.ASCII.GetBytes("List-Unsubscribe: <https://lipi.example/leave>\r\n" + System.Text.Encoding.ASCII.GetString(own.RawBytes)));
+        Assert.Equal(DeliveryOutcome.Accepted, (await this.sink.DeliverAsync(own)).Outcome);
+        OutboundMessage kept = Assert.Single(await this.QueuedAsync());
+        string kept2 = System.Text.Encoding.ASCII.GetString(kept.RawBytes);
+        Assert.Contains("List-Unsubscribe: <https://lipi.example/leave>", kept2, StringComparison.Ordinal);
+        Assert.DoesNotContain("unsubscribe@qa.test", kept2, StringComparison.Ordinal);
+
+        Assert.Equal(DeliveryOutcome.Accepted, (await this.sink.DeliverAsync(Submitted("arun@qa.test", "doctor@hospital.example"))).Outcome);
+        OutboundMessage person = Assert.Single(await this.QueuedAsync());
+        Assert.DoesNotContain("List-Unsubscribe", System.Text.Encoding.ASCII.GetString(person.RawBytes), StringComparison.Ordinal);
+    }
 }

@@ -576,6 +576,9 @@ public static class Program
         app.MapGet("/{file:regex(^(tokens\\.css|app\\.css|app\\.js|sw\\.js|offline\\.js)$)}", (string file, HttpContext http) => Asset(file, http));
         app.MapGet("/fonts/{file}", (string file, HttpContext http) => Asset("fonts/" + file, http));
         app.MapGet("/logos/{file}", (string file, HttpContext http) => Asset("logos/" + file, http));
+        // rc.22.2: the help guide's pictures (the account flow chart). Found by a test: without this
+        // the help page's /help/{ArticleId} route answered the picture's address with HTML.
+        app.MapGet("/help/{file:regex(^[a-z0-9-]+\\.svg$)}", (string file, HttpContext http) => Asset("help/" + file, http));
 
         ContactEndpoints.Map(app);
         TodayEndpoints.Map(app);
