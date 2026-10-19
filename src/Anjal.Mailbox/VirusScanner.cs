@@ -102,7 +102,14 @@ public sealed class ClamdScanner : IVirusScanner
         {
             string answer = await this.TalkAsync("zVERSION\0", null, ct).ConfigureAwait(false);
             string line = answer.Trim('\0', '\r', '\n', ' ');
-            return line.Length > 0 ? line : null;
+            // rc.22.2 (found with a real clamd 1.5): EnableVersionCommand is off by default, so the
+            // daemon answers "COMMAND UNAVAILABLE" while scanning perfectly well; PING then says it is up.
+            if (line.Length == 0 || line.Contains("UNAVAILABLE", StringComparison.OrdinalIgnoreCase))
+            {
+                string pong = (await this.TalkAsync("zPING\0", null, ct).ConfigureAwait(false)).Trim('\0', '\r', '\n', ' ');
+                return pong == "PONG" ? "ClamAV (version not disclosed; EnableVersionCommand is off)" : null;
+            }
+            return line;
         }
 #pragma warning disable CA1031 // Not answering is the answer.
         catch (Exception) when (!ct.IsCancellationRequested)

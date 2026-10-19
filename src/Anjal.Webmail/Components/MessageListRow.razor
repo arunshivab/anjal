@@ -37,7 +37,7 @@
                 @* rc.22: "Snoozed" when it came back from snooze; "Virus removed" when a file was taken out. *@
                 <span class="pill @(Mark == "Virus removed" ? "pill-bad" : "pill-info") rowmark">@L[Mark]</span>
             }
-            <a class="subj" href="@OpenLink" data-open>@(string.IsNullOrWhiteSpace(M.Subject) ? L["(no subject)"] : Highlighted(M.Subject))</a>
+            <a class="subj" href="@OpenLink" data-open>@if (string.IsNullOrWhiteSpace(M.Subject)) { @L["(no subject)"] } else { @Highlighted(M.Subject) }</a>
             @if (ShowFlag)
             {
                 <button type="submit" class="fav @(M.Flagged ? "on" : "")"
