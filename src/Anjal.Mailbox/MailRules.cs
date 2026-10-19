@@ -43,6 +43,12 @@ public sealed class MailRule
 
     /// <summary>Flag it on arrival.</summary>
     public bool Flag { get; set; }
+
+    /// <summary>
+    /// Send a copy on to this address (rc.22, item 29, owner 18 Oct 2026): forwarding is only by
+    /// rule, and the original always stays in the mailbox. Empty for no forwarding.
+    /// </summary>
+    public string ForwardTo { get; set; } = string.Empty;
 }
 
 /// <summary>What a rule decided for one message.</summary>
@@ -50,7 +56,8 @@ public sealed class MailRule
 /// <param name="MoveTo">The folder, or empty.</param>
 /// <param name="MarkRead">Mark it read.</param>
 /// <param name="Flag">Flag it.</param>
-public sealed record RuleOutcome(MailRule Rule, string MoveTo, bool MarkRead, bool Flag);
+/// <param name="ForwardTo">The address a copy goes to, or empty (rc.22).</param>
+public sealed record RuleOutcome(MailRule Rule, string MoveTo, bool MarkRead, bool Flag, string ForwardTo = "");
 
 /// <summary>The facts about an arriving message that rules can test.</summary>
 public sealed class RuleSubject
@@ -176,7 +183,7 @@ public static class MailRules
             }
             if (rule.Conditions.All(c => Holds(c, message, groups)))
             {
-                return new RuleOutcome(rule, rule.MoveTo.Trim(), rule.MarkRead, rule.Flag);
+                return new RuleOutcome(rule, rule.MoveTo.Trim(), rule.MarkRead, rule.Flag, rule.ForwardTo.Trim().ToLowerInvariant());
             }
         }
         return null;

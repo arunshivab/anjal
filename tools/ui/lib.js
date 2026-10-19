@@ -29,7 +29,8 @@ const MID = [1536, 730];
 
 // Links never followed while looking for screens: they sign out, download a file, or show a
 // message's raw source.
-const SKIP = /^\/(auth\/|sign-out|signed-out)|\/raw\b|raw=|download|export|\/attachment\/|\.(css|js|png|svg|ico|woff2?)(\?|$)/;
+// rc.22: "Add another account" links to /sign-in?add=1, which would sign in again for ever.
+const SKIP = /^\/(auth\/|sign-out|signed-out|sign-in(\?|\/|$))|\/raw\b|raw=|download|export|\/attachment\/|\.(css|js|png|svg|ico|woff2?)(\?|$)/;
 
 // Screens on which the page closed or crashed during a check (see open).
 const lost = [];

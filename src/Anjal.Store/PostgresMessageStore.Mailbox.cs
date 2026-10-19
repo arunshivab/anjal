@@ -585,7 +585,7 @@ RETURNING " + SenderRuleColumns + ";";
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("tenant_id", rule.TenantId);
         cmd.Parameters.AddWithValue("pattern", rule.Pattern.Trim());
-        cmd.Parameters.AddWithValue("action", rule.Action == SenderRuleAction.Block ? "block" : "allow");
+        cmd.Parameters.AddWithValue("action", ActionWord(rule.Action));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -674,7 +674,7 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("mailbox_id", mailboxId);
         cmd.Parameters.AddWithValue("pattern", pattern.Trim());
-        cmd.Parameters.AddWithValue("action", action == SenderRuleAction.Block ? "block" : "allow");
+        cmd.Parameters.AddWithValue("action", ActionWord(action));
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
         return ReadMailboxSenderRule(reader);
@@ -707,12 +707,24 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0;
     }
 
+    private static string ActionWord(SenderRuleAction action) => action switch
+    {
+        SenderRuleAction.Block => "block",
+        SenderRuleAction.Discard => "discard",
+        _ => "allow",
+    };
+
+    private static SenderRuleAction ActionOf(string word) =>
+        string.Equals(word, "block", System.StringComparison.OrdinalIgnoreCase) ? SenderRuleAction.Block
+        : string.Equals(word, "discard", System.StringComparison.OrdinalIgnoreCase) ? SenderRuleAction.Discard
+        : SenderRuleAction.Allow;
+
     private static SenderRuleRow ReadMailboxSenderRule(NpgsqlDataReader r) => new()
     {
         Id = r.GetGuid(0),
         MailboxId = r.GetGuid(1),
         Pattern = r.GetString(2),
-        Action = string.Equals(r.GetString(3), "block", System.StringComparison.OrdinalIgnoreCase) ? SenderRuleAction.Block : SenderRuleAction.Allow,
+        Action = ActionOf(r.GetString(3)),
         CreatedAt = r.GetFieldValue<System.DateTimeOffset>(4),
     };
 
@@ -721,7 +733,7 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         Id = r.GetGuid(0),
         TenantId = r.GetGuid(1),
         Pattern = r.GetString(2),
-        Action = string.Equals(r.GetString(3), "block", System.StringComparison.OrdinalIgnoreCase) ? SenderRuleAction.Block : SenderRuleAction.Allow,
+        Action = ActionOf(r.GetString(3)),
         CreatedAt = r.GetFieldValue<System.DateTimeOffset>(4),
     };
 

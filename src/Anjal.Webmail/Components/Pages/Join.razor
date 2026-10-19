@@ -1,0 +1,106 @@
+@page "/join/{Token}"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+<PageTitle>@L["Register your mail"] — Anjal</PageTitle>
+
+@* rc.22 (item 5, mockups 04 and 05): the registration page from an invitation link. Nothing is
+   created until Submit; an individual chooses their username (checked live) and gives their phone
+   and date of birth; an organisation's person sees the username the administrator chose. The Terms
+   and the Disclaimer are accepted here; the Terms are mailed to the personal address too. *@
+<AuthFrame L="L" Org="org">
+    @if (found is null)
+    {
+        <h1 class="authtitle">@L["This invitation cannot be used"]</h1>
+        <p class="authlead">@L["It has expired, or it has already been used. Invitations work for 7 days and once only. Ask for a new one."]</p>
+        <p class="authnote"><a class="authlink" href="/sign-in">@L["Go to sign in"]</a></p>
+    }
+    else
+    {
+        <h1 class="authtitle">@L["Register your mail"]</h1>
+        <p class="authlead">@(found.Invitation.Individual
+            ? L["You were invited by {name}. Fill in your details; the mailbox is made when you press Submit."].Replace("{name}", InvitedBy, StringComparison.Ordinal)
+            : L["{name} invited you to {organisation} mail. Your address will be {address}."].Replace("{name}", InvitedBy, StringComparison.Ordinal).Replace("{organisation}", found.Organisation, StringComparison.Ordinal).Replace("{address}", found.Invitation.Address, StringComparison.Ordinal))</p>
+        @if (error is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+        }
+        <form method="post" action="/auth/join" class="authfields" data-pwform data-join>
+            <AntiforgeryToken />
+            <input type="hidden" name="token" value="@Token" data-invite />
+            <div class="authtwo">
+                <div>
+                    <label class="authlbl" for="first">@L["First name"]</label>
+                    <div class="authinpwrap"><input class="authinp-in" id="first" name="first" value="@(First ?? found.Invitation.FirstName)" maxlength="60" required autocomplete="given-name" disabled="@(!found.Invitation.Individual)" data-join-first /></div>
+                </div>
+                <div>
+                    <label class="authlbl" for="last">@L["Last name"]</label>
+                    <div class="authinpwrap"><input class="authinp-in" id="last" name="last" value="@(Last ?? found.Invitation.LastName)" maxlength="60" required autocomplete="family-name" disabled="@(!found.Invitation.Individual)" data-join-last /></div>
+                </div>
+            </div>
+            <label class="authlbl" for="phone">@(found.Invitation.Individual ? L["Phone"] : L["Phone (optional)"])</label>
+            <div class="authinpwrap"><input class="authinp-in" id="phone" name="phone" type="tel" value="@(Phone ?? found.Invitation.Phone)" maxlength="30" autocomplete="tel" placeholder="+91 " required="@found.Invitation.Individual" /></div>
+            <p class="authhint">@L["Recorded now; verified by code in a later release."]</p>
+            <label class="authlbl" for="dob">@(found.Invitation.Individual ? L["Date of birth"] : L["Date of birth (optional)"])</label>
+            <div class="authinpwrap"><input class="authinp-in" id="dob" name="dob" type="date" value="@(Dob ?? (found.Invitation.DateOfBirth is DateOnly d ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : string.Empty))" max="@DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-18).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)" required="@found.Invitation.Individual" /></div>
+            <p class="authhint">@L["You must be 18 or over."]</p>
+            <label class="authlbl" for="local">@L["Username"]</label>
+            <div class="authinpwrap">
+                <input class="authinp-in" id="local" name="local" value="@(Local ?? found.Invitation.Local)" maxlength="64" autocomplete="username" autocapitalize="none" spellcheck="false" required disabled="@(!found.Invitation.Individual)" data-usercheck data-usercheck-token="@Token" />
+                <span class="authsuffix" data-suffix>@@@found.Invitation.Domain</span>
+            </div>
+            @if (found.Invitation.Individual)
+            {
+                <p class="authhint">@L["Checked as you leave the box. Letters, digits, dots; 3 to 32 characters."]</p>
+                <div class="avail" data-avail hidden></div>
+            }
+            else
+            {
+                <p class="authhint">@L["Chosen by your administrator; it cannot be changed here."]</p>
+            }
+            <label class="authlbl" for="password">@L["Password"]</label>
+            <div class="authinpwrap"><input class="authinp-in" id="password" name="password" type="password" autocomplete="new-password" required data-pwinput /></div>
+            <PasswordRules L="L" For="password" MinLength="minLength" />
+            <label class="checkline"><input type="checkbox" name="terms" value="1" required /> <span>@L["I accept the"] <a class="authlink" href="/terms" target="_blank" rel="noopener">@L["Terms of Service"]</a></span></label>
+            <label class="checkline"><input type="checkbox" name="disclaimer" value="1" required /> <span>@L["I have read the"] <a class="authlink" href="/disclaimer" target="_blank" rel="noopener">@L["Disclaimer"]</a></span></label>
+            <button type="submit" class="authbtn">@L["Submit and create my mailbox"]</button>
+        </form>
+        <p class="authnote">@L["The link works once, until {date}."].Replace("{date}", ZonedClock.Default.Date(found.Invitation.Expires), StringComparison.Ordinal)</p>
+    }
+</AuthFrame>
+
+@code {
+    /// <summary>The invitation's token.</summary>
+    [Parameter] public string Token { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
+    [SupplyParameterFromQuery(Name = "first")] private string? First { get; set; }
+    [SupplyParameterFromQuery(Name = "last")] private string? Last { get; set; }
+    [SupplyParameterFromQuery(Name = "phone")] private string? Phone { get; set; }
+    [SupplyParameterFromQuery(Name = "dob")] private string? Dob { get; set; }
+    [SupplyParameterFromQuery(Name = "local")] private string? Local { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private PendingView? found;
+    private int minLength = Anjal.Smtp.PasswordPolicy.AloneLength;
+    private string? error;
+
+    private string InvitedBy => found is null || found.Invitation.InvitedBy.Length == 0 ? L["your administrator"] : found.Invitation.InvitedBy;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        found = await Mail.FindPendingAsync(Token);
+        if (found is not null)
+        {
+            minLength = (await Mail.SignInPolicyOfAsync(found.Tenant.Id)).LengthFor(false);
+        }
+        error = AuthEndpoints.ReadNote(Protection, E);
+    }
+}

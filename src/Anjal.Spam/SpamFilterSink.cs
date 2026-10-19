@@ -196,8 +196,11 @@ public static class SenderRules
         return exact ?? domain;
     }
 
+    // rc.22: discard (silent) beats block (Junk) beats allow.
     private static SenderRuleAction Merge(SenderRuleAction? current, SenderRuleAction next) =>
-        current == SenderRuleAction.Block || next == SenderRuleAction.Block ? SenderRuleAction.Block : SenderRuleAction.Allow;
+        current == SenderRuleAction.Discard || next == SenderRuleAction.Discard ? SenderRuleAction.Discard
+        : current == SenderRuleAction.Block || next == SenderRuleAction.Block ? SenderRuleAction.Block
+        : SenderRuleAction.Allow;
 }
 
 /// <summary>

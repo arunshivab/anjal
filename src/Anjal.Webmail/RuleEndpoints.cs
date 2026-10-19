@@ -55,6 +55,7 @@ internal static class RuleEndpoints
                 MoveTo = moveTo,
                 MarkRead = form["markRead"] == "1",
                 Flag = form["flag"] == "1",
+                ForwardTo = form["forwardTo"].ToString(),
             };
             string? error = await svc.SaveRuleAsync(mailboxId.Value, rule, ct).ConfigureAwait(false);
             if (error is not null)

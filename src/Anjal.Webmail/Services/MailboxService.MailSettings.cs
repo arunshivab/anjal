@@ -44,6 +44,12 @@ public sealed class MailSettings
     /// <summary>"Your habits" on the person's dashboard (rc.15, item 58): on unless they turn it off; seen only by them.</summary>
     public bool Habits { get; set; } = true;
 
+    /// <summary>rc.22 (item 35): the browser's desktop pop-up for new mail, even when the tab is in the background; off until turned on.</summary>
+    public bool DesktopNotify { get; set; }
+
+    /// <summary>rc.22 (item 35): which new mail pops up - "inbox" (every new mail in the Inbox) or "contacts" (only from saved contacts).</summary>
+    public string NotifyScope { get; set; } = "inbox";
+
     /// <summary>Where Anjal opens after signing in (rc.16, design review 8): "today" (the default) or "inbox".</summary>
     public string OpenOn { get; set; } = "today";
 
@@ -120,6 +126,44 @@ public sealed partial class MailboxService
     /// <param name="on">On or off.</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>A task.</returns>
+    /// <summary>rc.22 (item 35): desktop notifications on or off, and their scope.</summary>
+    /// <param name="mailboxId">The person.</param>
+    /// <param name="on">Whether to show them.</param>
+    /// <param name="scope">"inbox" or "contacts".</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public async Task SetDesktopNotifyAsync(Guid mailboxId, bool on, string scope, CancellationToken ct = default)
+    {
+        MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);
+        s.DesktopNotify = on;
+        s.NotifyScope = scope == "contacts" ? "contacts" : "inbox";
+        await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>The newest message in the Inbox, for the desktop pop-up (rc.22, item 35): who, the subject, and whether the sender is a saved contact.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The message, or null when the Inbox is empty.</returns>
+    public async Task<(Guid Id, string From, string Subject, bool Contact)?> LatestForNotifyAsync(Guid mailboxId, CancellationToken ct = default)
+    {
+        FolderRow? inbox = await this.GetFolderAsync(mailboxId, FolderRow.Inbox, ct).ConfigureAwait(false);
+        if (inbox is null)
+        {
+            return null;
+        }
+        IReadOnlyList<MessageRow> newest = await this.store.ListMessagesAsync(mailboxId, inbox.Id, 1, 0, ct).ConfigureAwait(false);
+        if (newest.Count == 0)
+        {
+            return null;
+        }
+        MessageRow m = newest[0];
+        string address = Anjal.Spam.SpamScorer.FirstAddress(m.FromHeader);
+        IReadOnlyList<Anjal.Mime.MailAddress> parsed = Anjal.Mime.AddressParser.Parse(Anjal.Mime.EncodedWordDecoder.Decode(m.FromHeader));
+        string who = parsed.Count > 0 && parsed[0].DisplayName.Length > 0 ? parsed[0].DisplayName : address.Length > 0 ? address : m.EnvelopeFrom;
+        bool contact = address.Length > 0 && await this.FindContactAsync(mailboxId, address, ct).ConfigureAwait(false) is not null;
+        return (m.Id, who, m.Subject, contact);
+    }
+
     public async Task SetHabitsAsync(Guid mailboxId, bool on, CancellationToken ct = default)
     {
         MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);

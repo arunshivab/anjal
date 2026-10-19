@@ -271,9 +271,9 @@ public sealed partial class MailboxService
 
     /// <summary>
     /// What the organisation asks of a person before anything else (rc.14):
-    /// "password" when their password must be changed (reset by an
-    /// administrator, or shorter than the rules now ask), "twostep" when
-    /// two-step sign-in is required and not set up; null otherwise. Passwords
+    /// "terms" when the Terms of Service wait to be accepted (rc.22), "password" when their
+    /// password must be changed (reset by an administrator, or shorter than the rules now ask),
+    /// "twostep" when two-step sign-in is required and not set up; null otherwise. Passwords
     /// no longer expire (owner, 10 Oct 2026, P3).
     /// </summary>
     /// <param name="personId">The person.</param>
@@ -285,6 +285,11 @@ public sealed partial class MailboxService
         if (context is null)
         {
             return null;
+        }
+        // rc.22 (item 5): the Terms come before everything, for accounts made since rc.22.
+        if (await this.TermsWaitingAsync(personId, ct).ConfigureAwait(false))
+        {
+            return "terms";
         }
         SignInPolicy policy = await this.SignInPolicyOfAsync(context.Value.Tenant.Id, ct).ConfigureAwait(false);
         SecurityDocument security = await this.GetSecurityAsync(personId, ct).ConfigureAwait(false);
@@ -485,8 +490,8 @@ public sealed partial class MailboxService
     }
 
     /// <summary>
-    /// People from a list (CSV with a name and an address column, and
-    /// optionally a personal address and a role): each is invited. Returns
+    /// People from a list (CSV with a name (first and last) and an address column, and
+    /// optionally a personal address and a role): each is invited (rc.22: to the registration page). Returns
     /// one line per row: the address and its invitation token, or why not.
     /// </summary>
     /// <param name="tenant">The organisation.</param>
@@ -517,8 +522,11 @@ public sealed partial class MailboxService
             {
                 continue;
             }
-            (string? error, string? token) = await this.InviteAsync(tenant, Cell(nameCol), address, Cell(personalCol),
-                Cell(roleCol).StartsWith("admin", StringComparison.OrdinalIgnoreCase), invitedBy, baseUrl, ct).ConfigureAwait(false);
+            // rc.22: an invitation to the registration page; nothing is made until Submit.
+            string[] names = Cell(nameCol).Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            Anjal.Mailbox.MailboxSink.TrySplitAddress(address, out string local, out string domain);
+            (string? error, string? token) = await this.InvitePendingAsync(tenant, names.Length > 0 ? names[0] : string.Empty, names.Length > 1 ? names[1] : string.Empty, local, domain, Cell(personalCol),
+                string.Empty, null, Cell(roleCol).StartsWith("admin", StringComparison.OrdinalIgnoreCase), invitedBy, baseUrl, ct).ConfigureAwait(false);
             results.Add((address, token, error));
         }
         return results;

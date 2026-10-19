@@ -235,16 +235,24 @@ public sealed class Rc14OrganisationTests : IDisposable
         Assert.NotNull((await this.svc.CreateOrganisationAsync("Again", "exampleclinic.in", "A", "a@exampleclinic.in", string.Empty, "trial", "Operator", "https://x")).Error);
         Assert.NotNull((await this.svc.CreateOrganisationAsync("Wrong", "wrong.example", "A", "a@elsewhere.example", string.Empty, "trial", "Operator", "https://x")).Error);
 
+        // rc.22: the administrator is invited to the registration page; nothing exists until they Submit.
         OrgSummary summary = (await this.svc.ListOrganisationsAsync()).Single(o => o.Tenant.Id == clinic.Id);
         Assert.Equal("setting-up", summary.Status);
+        Assert.Equal(0, summary.People);
+        Assert.Empty(summary.Admins);
+        Assert.Empty(summary.DkimMissing);
+        Assert.Null(await this.store.GetMailboxAsync("admin", "exampleclinic.in"));
+        (string? joinError, MailboxRow? made) = await this.svc.RegisterAsync(token, string.Empty, string.Empty, string.Empty, null, string.Empty, "orange-harbour-velvet-lantern-42", true, true, "https://mail.anjal.co.in");
+        Assert.Null(joinError);
+        Assert.Equal("admin@exampleclinic.in", made!.Address);
+        summary = (await this.svc.ListOrganisationsAsync()).Single(o => o.Tenant.Id == clinic.Id);
         Assert.Equal(1, summary.People);
         Assert.Equal("admin@exampleclinic.in", Assert.Single(summary.Admins));
-        Assert.Empty(summary.DkimMissing);
 
         Assert.NotNull(await this.svc.SaveOpsRecordAsync(clinic.Id, new OpsRecord { PeopleLimit = 0 }));
         Assert.Null(await this.svc.SaveOpsRecordAsync(clinic.Id, new OpsRecord { Status = "active", PeopleLimit = 40 }));
 
-        Guid admin = (await this.svc.FindInvitationAsync(token))!.Value.Mailbox.Id;
+        Guid admin = made.Id;
         Assert.NotNull(await this.svc.GetContextAsync(admin));
         await this.svc.SetSuspendedAsync(clinic.Id, suspended: true);
         Assert.Null(await this.svc.GetContextAsync(admin));

@@ -54,10 +54,33 @@ else
                 <p class="readcat"><span class="chip slot-@shown.Row.Slot"><i></i>@shown.Row.Name</span></p>
             }
 
+                @if (unsubscribe is not null)
+                {
+                    @* rc.22 (item 51, mockup 25): a newsletter offers a way out (List-Unsubscribe); one press tells the sender to stop. *@
+                    <div class="notice n-info readnotice">
+                        <LipiIcon Name="email" Size="16" />
+                        <span>@(Unsubscribed is not null ? L["The sender has been told to stop."] : L["A newsletter."])
+                        @if (Unsubscribed is null && unsubscribe.Value.Mailto.Length > 0)
+                        {
+                            <form method="post" action="/message/@Id/unsubscribe" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="back" value="@Back" />
+                                <button type="submit" class="btn btn-s btn-sm" data-needs-server><b>@L["Unsubscribe"]</b></button>
+                            </form>
+                            <text>@L["tells the sender to stop, the way the mail itself offers."]</text>
+                        }
+                        else if (Unsubscribed is null && unsubscribe.Value.Link.Length > 0)
+                        {
+                            <a class="btn btn-s btn-sm" href="@unsubscribe.Value.Link" target="_blank" rel="noopener noreferrer"><b>@L["Unsubscribe"]</b></a>
+                            <text>@L["opens the sender's own page for it."]</text>
+                        }
+                        <a class="authlink" href="/settings/rules?rule=new&from=@Uri.EscapeDataString(SenderAddress)&folder=Newsletters">@L["File all of these in Newsletters"]</a></span>
+                    </div>
+                }
             @if (Blocked is not null)
             {
                 <div class="notice n-ok readnotice"><LipiIcon Name="check" Size="16" />
-                    <span>@L["Future mail from {address} goes to Junk. This message stays here."].Replace("{address}", Blocked, StringComparison.Ordinal)</span></div>
+                    <span>@L["{address} is blocked: their mail is discarded silently from now on and they are not told. This message stays here. Unblock under Settings, Junk and senders."].Replace("{address}", Blocked, StringComparison.Ordinal)</span></div>
             }
             @if (MailboxService.ShowsUnencryptedWarning(view.Row, trusted))
             {
@@ -474,6 +497,40 @@ else
                         <button type="submit" class="eb" data-needs-server>@L["Not junk"]</button>
                     </form>
                 }
+                @if (view.Folder.Name is not ("Sent" or "Drafts" or "Trash" or "Outbox") && view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder)
+                {
+                    @* rc.22 (item 31, mockup 15): snooze - hide it until a time, then back on top of the Inbox. *@
+                    <details class="emore esnooze">
+                        <summary class="eb" title="@L["Snooze"]"><LipiIcon Name="clock" Size="15" /><span>@(view.Folder.Name == MailboxService.SnoozedFolder ? L["Snoozed"] : L["Snooze"])</span></summary>
+                        <div class="emenu" role="menu">
+                            <p class="pm-head">@L["Snooze until"]</p>
+                            @foreach ((string preset, string word) in SnoozeWords)
+                            {
+                                DateTimeOffset? at = MailboxService.SnoozeTime(clock, DateTimeOffset.UtcNow, preset);
+                                <form method="post" action="/message/@Id/snooze" class="inline">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="until" value="@preset" />
+                                    <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                                    <button type="submit" role="menuitem" data-needs-server><span>@L[word]</span><span class="pm-when">@(at is DateTimeOffset t ? clock.ListDay(t, DateTimeOffset.UtcNow) + " " + clock.Time(t) : string.Empty)</span></button>
+                                </form>
+                            }
+                            <form method="post" action="/message/@Id/snooze" class="inline pm-pick">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
+                                <label class="pm-pick-lbl">@L["Pick a date and time"]<input type="datetime-local" name="until" class="inp" required /></label>
+                                <button type="submit" class="btn btn-s btn-sm" data-needs-server>@L["Snooze"]</button>
+                            </form>
+                            @if (view.Folder.Name == MailboxService.SnoozedFolder)
+                            {
+                                <form method="post" action="/message/@Id/unsnooze" class="inline">
+                                    <AntiforgeryToken />
+                                    <button type="submit" role="menuitem" data-needs-server><LipiIcon Name="undo" Size="14" />@L["Bring it back now"]</button>
+                                </form>
+                            }
+                            <p class="pm-head pm-foot">@L["It comes back to the top of your Inbox, marked Snoozed, at that time."]</p>
+                        </div>
+                    </details>
+                }
                 <a class="eb" href="/message/@Id/print" target="_blank" rel="noopener" title="@L["Print"]"><LipiIcon Name="print" Size="15" /><span>@L["Print"]</span></a>
                 <details class="emore">
                     <summary class="eb" title="@L["More"]"><LipiIcon Name="more-horizontal" Size="15" /><span>@L["More"]</span></summary>
@@ -512,9 +569,10 @@ else
                         <a role="menuitem" href="/message/@Id/print" target="_blank" rel="noopener"><LipiIcon Name="print" Size="14" />@L["Print"]</a>
                         @if (view.Folder.Name != "Sent" && view.Folder.Name != "Drafts")
                         {
+                            @* rc.22 (item 32, option (b)): Block is silent discard; Report junk is for spam. *@
                             <form method="post" action="/message/@Id/block" class="inline">
                                 <AntiforgeryToken />
-                                <button type="submit" role="menuitem" data-needs-server><LipiIcon Name="minus-circle" Size="14" />@L["Block sender"]</button>
+                                <button type="submit" role="menuitem" data-needs-server title="@L["Their mail is discarded silently from now on: it never appears in any folder, and they are not told."]"><LipiIcon Name="minus-circle" Size="14" />@L["Block sender"]</button>
                             </form>
                         }
                         @if (view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder && view.Folder.Name != "Trash" && view.Folder.Name != "Sent")
@@ -699,6 +757,12 @@ else
 
     /// <summary>UX-06: the attachment shown in the letter area, by index.</summary>
     [Parameter] public int? Preview { get; set; }
+
+    /// <summary>rc.22 (item 51): set after Unsubscribe was pressed, to say so.</summary>
+    [Parameter] public string? Unsubscribed { get; set; }
+
+    private static readonly (string Preset, string Word)[] SnoozeWords = { ("today", "Later today"), ("tomorrow", "Tomorrow"), ("weekend", "This weekend"), ("week", "Next week") };
+    private (string Mailto, string Link)? unsubscribe;
 
     private AttachmentView? Previewed => Preview is int i && view is not null ? view.Attachments.FirstOrDefault(a => a.Index == i) : null;
 
@@ -987,6 +1051,7 @@ else
             recipients = Recipients.Of(view.To, view.Cc, me, orgDomains);
             (laterTomorrow, laterMonday) = MailboxService.SendLaterChoices(clock, DateTimeOffset.UtcNow);
             conversation = await Mail.ConversationOfAsync(mailboxId.Value, view.Row);
+            unsubscribe = view.Folder.Name is "Sent" or "Drafts" ? null : await Mail.UnsubscribeOfAsync(mailboxId.Value, Id);
             if (SenderAddress.Length > 0)
             {
                 // DES-11 F6: the contact book is the person's own, also in a shared mailbox - read and saved the same.

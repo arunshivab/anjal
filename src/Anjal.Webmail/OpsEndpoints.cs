@@ -17,15 +17,16 @@ internal static class OpsEndpoints
     internal static void Map(WebApplication app)
     {
         app.MapPost("/ops/orgs/new", async (HttpContext http, [FromForm] string? name, [FromForm] string? domain, [FromForm] string? adminName, [FromForm] string? adminLocal,
-            [FromForm] string? personal, [FromForm] string? status, MailboxService svc, SessionRegistry sessions, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+            [FromForm] string? personal, [FromForm] string? status, [FromForm] string? kind, MailboxService svc, SessionRegistry sessions, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
         {
             if (await OperatorAsync(http, svc, ct).ConfigureAwait(false) is not { } me)
             {
                 return Results.NotFound();
             }
             string d = (domain ?? string.Empty).Trim().ToLowerInvariant();
+            // rc.22 (item 7): the individuals tenant - people with their own address on anjalmail.com; its administrator is User management.
             (string? error, TenantRow? tenant, string? token) = await svc.CreateOrganisationAsync(name ?? string.Empty, d, adminName ?? string.Empty, (adminLocal ?? string.Empty).Trim() + "@" + d,
-                personal ?? string.Empty, status ?? "setting-up", me.DisplayName.Length > 0 ? me.DisplayName : me.Address, OrgEndpoints.BaseUrl(http), ct).ConfigureAwait(false);
+                personal ?? string.Empty, status ?? "setting-up", me.DisplayName.Length > 0 ? me.DisplayName : me.Address, OrgEndpoints.BaseUrl(http), kind == "individuals", ct).ConfigureAwait(false);
             if (tenant is null)
             {
                 return Results.Redirect("/ops/orgs?new=1&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error ?? "The organisation could not be added.")));
@@ -33,7 +34,7 @@ internal static class OpsEndpoints
             await audit.RecordAsync(me.Address, "ops.org.added", tenant.Slug, Client(http), d).ConfigureAwait(false);
             if (token is not null)
             {
-                sessions.Reveal(SessionRegistry.SessionOf(http.User) ?? string.Empty, new[] { (adminLocal ?? string.Empty).Trim().ToLowerInvariant() + "@" + d + "|" + OrgEndpoints.BaseUrl(http) + "/invite/" + token });
+                sessions.Reveal(SessionRegistry.SessionOf(http.User) ?? string.Empty, new[] { (adminLocal ?? string.Empty).Trim().ToLowerInvariant() + "@" + d + "|" + OrgEndpoints.BaseUrl(http) + "/join/" + token });
             }
             return Results.Redirect("/ops/orgs?sel=" + tenant.Id + (token is not null ? "&links=1" : string.Empty) + (error is not null ? "&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)) : string.Empty));
         }).RequireAuthorization();
@@ -106,6 +107,23 @@ internal static class OpsEndpoints
             }
             await audit.RecordAsync(me.Address, "ops.org.messaged", org.Tenant.Slug, Client(http), subj).ConfigureAwait(false);
             return Results.Redirect("/ops/orgs?sel=" + id + "&saved=message");
+        }).RequireAuthorization();
+
+        // rc.22 (item 39): held mail - scan again, or release by hand.
+        app.MapPost("/ops/virus/release", async (HttpContext http, [FromForm] Guid mailbox, [FromForm] Guid id, [FromForm] string? scan, MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await OperatorAsync(http, svc, ct).ConfigureAwait(false) is not { } me)
+            {
+                return Results.NotFound();
+            }
+            HeldMessage? held = (await svc.HeldMessagesAsync(ct).ConfigureAwait(false)).FirstOrDefault(h => h.Mailbox.Id == mailbox && h.Row.Id == id);
+            if (held is null)
+            {
+                return Results.Redirect("/ops/virus");
+            }
+            string? outcome = await svc.ReleaseHeldAsync(held, scanAgain: scan != "0", ct).ConfigureAwait(false);
+            await audit.RecordAsync(me.Address, scan == "0" ? "ops.virus.released" : "ops.virus.rescanned", held.Mailbox.Address, Client(http), outcome ?? "delivered").ConfigureAwait(false);
+            return Results.Redirect(outcome is null ? "/ops/virus?saved=released" : outcome == "held" ? "/ops/virus?saved=stillheld" : "/ops/virus?e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, outcome)));
         }).RequireAuthorization();
 
         app.MapPost("/ops/health/summary", async (HttpContext http, MailboxService svc, IMaildirStore maildir, AuditTrail audit, CancellationToken ct) =>

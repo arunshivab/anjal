@@ -355,6 +355,7 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
         DateTimeOffset lastEmptied = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(55);
         // DES-11 F4: the operators' summary and alerts, checked every 15 minutes, the first time two minutes after start.
         DateTimeOffset lastOperatorMail = DateTimeOffset.UtcNow - TimeSpan.FromMinutes(13);
+        DateTimeOffset lastRescan = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
             DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -362,6 +363,12 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
             try
             {
                 await this.mail.SendDueAsync(now, rescan, stoppingToken).ConfigureAwait(false);
+                // rc.22 (item 31): snoozed mail comes back at its time.
+                int woken = await this.mail.WakeSnoozedAsync(now, stoppingToken).ConfigureAwait(false);
+                if (woken > 0)
+                {
+                    Console.WriteLine($"[snooze] {woken} message(s) back in the Inbox at their time.");
+                }
                 if (rescan)
                 {
                     lastScan = now;
@@ -375,6 +382,16 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
                         Console.WriteLine($"[operators] {mails} summary or alert mail(s) sent.");
                     }
                 }
+                if (now - lastRescan > TimeSpan.FromMinutes(5))
+                {
+                    lastRescan = now;
+                    // rc.22 (item 39): held mail scanned again; the operator reminded every 30 minutes while it waits.
+                    int released = await this.mail.RescanHeldAsync(now, stoppingToken).ConfigureAwait(false);
+                    if (released > 0)
+                    {
+                        Console.WriteLine($"[virus] {released} held message(s) scanned and delivered.");
+                    }
+                }
                 if (now - lastEmptied > TimeSpan.FromHours(1))
                 {
                     lastEmptied = now;
@@ -382,6 +399,18 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
                     if (emptied > 0)
                     {
                         Console.WriteLine($"[emptying] {emptied} message(s) deleted from Trash and Junk after their time.");
+                    }
+                    // rc.22 (item 30): away replies whose Until has passed turn themselves off.
+                    int awayEnded = await this.mail.EndAwayRepliesAsync(now, stoppingToken).ConfigureAwait(false);
+                    if (awayEnded > 0)
+                    {
+                        Console.WriteLine($"[away] {awayEnded} away repl(ies) ended at their Until time.");
+                    }
+                    // rc.22 (item 40): data downloads older than seven days go.
+                    int exportsGone = MailboxService.ClearOldExports(this.maildirRoot, now);
+                    if (exportsGone > 0)
+                    {
+                        Console.WriteLine($"[exports] {exportsGone} data download(s) removed after their seven days.");
                     }
                     // rc.21.1 (DEF-117): delivered mail's content leaves the queue after the organisation's keep-days.
                     int cleared = await this.mail.ClearOldOutboxAsync(now, stoppingToken).ConfigureAwait(false);

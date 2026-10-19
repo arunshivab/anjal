@@ -2,6 +2,7 @@
 @inject MailboxService Mail
 @inject NavigationManager Nav
 @inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 
 @if (AuthPage)
 {
@@ -71,6 +72,11 @@ else
                     {
                         @foreach (FolderView f in folders)
                         {
+                            @if (f.Name == MailboxService.SnoozedFolder && f.Count == 0 && !IsCurrent(f.Name))
+                            {
+                                @* rc.22 (item 31): Snoozed shows only while something sleeps in it. *@
+                                continue;
+                            }
                             <a class="rail-item @(IsCurrent(f.Name) ? "on" : "")" href="/folder/@Uri.EscapeDataString(f.Name)" title="@L.Folder(f.Name)" aria-current="@(IsCurrent(f.Name) ? "page" : null)">
                                 <LipiIcon Name="@IconFor(f.Name)" Size="18" />
                                 <span class="rl">@L.Folder(f.Name)</span>
@@ -137,6 +143,24 @@ else
                             {
                                 <a class="pmi st-last" role="menuitem" href="/settings/security" title="@L["Your sign-in before this one, from {device}. Not you? Open Security to sign other devices out."].Replace("{device}", lastSignIn.Device, StringComparison.Ordinal)"><LipiIcon Name="clock" Size="15" />@LastSignInText</a>
                             }
+                            @* rc.22 (item 33, mockup 10): the other accounts signed in on this browser, and switching. *@
+                            @if (!Shared && otherAccounts.Count > 0)
+                            {
+                                <p class="pm-head">@L["Switch to"]</p>
+                                @foreach ((MailboxRow other, long unread) in otherAccounts)
+                                {
+                                    <form method="post" action="/auth/switch" class="inline acct-switch">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="to" value="@other.Id" />
+                                        <input type="hidden" name="back" value="/folder/INBOX" />
+                                        <button type="submit" class="pmi" role="menuitem" title="@other.Address"><span class="initials acct-initials" aria-hidden="true">@InitialsOf(other)</span><span class="acct-addr">@other.Address</span>@if (unread > 0) {<span class="pill pill-info acct-unread">@(unread == 1 ? L["1 new"] : L["{n} new"].Replace("{n}", unread.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</span>}</button>
+                                    </form>
+                                }
+                            }
+                            @if (!Shared && otherAccounts.Count < AuthEndpoints.MaxAccounts)
+                            {
+                                <a class="pmi" role="menuitem" href="/sign-in?add=1"><LipiIcon Name="plus" Size="15" />@L["Add another account"]</a>
+                            }
                             <span class="acct-date"><LipiIcon Name="calendar" Size="15" />@clock.Full(now)</span>
                             @if (Shared)
                             {
@@ -144,8 +168,16 @@ else
                             }
                             <form method="post" action="/sign-out" class="inline signout">
                                 <AntiforgeryToken />
-                                <button type="submit" class="st-signout" role="menuitem"><LipiIcon Name="log-out" Size="15" />@L["Sign out"]</button>
+                                <button type="submit" class="st-signout" role="menuitem"><LipiIcon Name="log-out" Size="15" />@(otherAccounts.Count > 0 ? L["Sign out of this account"] : L["Sign out"])</button>
                             </form>
+                            @if (!Shared && otherAccounts.Count > 0)
+                            {
+                                <form method="post" action="/sign-out" class="inline signout">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="all" value="1" />
+                                    <button type="submit" class="st-signout" role="menuitem"><LipiIcon Name="log-out" Size="15" />@(otherAccounts.Count == 1 ? L["Sign out of both"] : L["Sign out of all {n}"].Replace("{n}", (otherAccounts.Count + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</button>
+                                </form>
+                            }
                         </div>
                     </details>
                 </nav>
@@ -365,7 +397,7 @@ else
                     <button type="button" class="btn btn-danger-q btn-sm" data-approve="refuse">@L["No"]</button>
                 </div>
             </template>
-            <footer class="statusbar" data-statusbar data-me="@mailbox?.Id" data-shared="@(Shared ? "1" : "0")" data-tz="@clock.ZoneId" data-hours="@clock.Hours" data-sound="@((person?.NewMailSound ?? true) ? "1" : "0")" data-idle-limit="@((int)SessionRegistry.IdleLimit(Shared).TotalSeconds)"
+            <footer class="statusbar" data-statusbar data-me="@mailbox?.Id" data-shared="@(Shared ? "1" : "0")" data-tz="@clock.ZoneId" data-hours="@clock.Hours" data-sound="@((person?.NewMailSound ?? true) ? "1" : "0")" data-notify="@(notifyScope)" data-idle-limit="@((int)SessionRegistry.IdleLimit(Shared).TotalSeconds)"
                     data-word-updated="@L["Updated {time}"]" data-word-offline="@L["Offline: showing mail as of {time}"]"
                     data-word-needs-server="@L["Needs a connection. Try again when you are back online."]"
                     data-word-new="@L["{n} new messages just arrived."]">
@@ -465,7 +497,8 @@ else
     private string PathNow => "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0];
 
     // DES-11 S4: "Confirm it is you" stands alone like the sign-in pages.
-    private bool AuthPage => PathNow is "/sign-in" or "/login" or "/signed-out" or "/settings/security/confirm" || PathNow.StartsWith("/sign-in/", StringComparison.Ordinal) || PathNow.StartsWith("/invite/", StringComparison.Ordinal);
+    private bool AuthPage => PathNow is "/sign-in" or "/login" or "/signed-out" or "/settings/security/confirm" or "/terms" or "/terms/accept" or "/disclaimer"
+        || PathNow.StartsWith("/sign-in/", StringComparison.Ordinal) || PathNow.StartsWith("/invite/", StringComparison.Ordinal) || PathNow.StartsWith("/join/", StringComparison.Ordinal);
 
     private bool OnTwoStepSetup => PathNow.StartsWith("/settings/security/two-step", StringComparison.Ordinal);
 
@@ -560,6 +593,7 @@ else
         "Trash" => "trash",
         "Archive" => "archive",
         "Scheduled" => "scheduled",
+        "Snoozed" => "clock",
         "Outbox" => "referral-out",
         FolderRow.Inbox => "email",
         _ => "folder",
@@ -606,6 +640,12 @@ else
             signInDemand = await Mail.SignInDemandCachedAsync(me);
             isOperator = Operators.Is(person?.Address);
             offlineMail = (await Mail.OfflineMailAsync(me, shared)).On;
+            MailSettings ms = await Mail.GetMailSettingsAsync(me);
+            notifyScope = ms.DesktopNotify && !shared ? ms.NotifyScope : string.Empty;
+            if (!shared && Http.HttpContext is { } ctx)
+            {
+                otherAccounts = await Mail.OtherAccountsAsync(AuthEndpoints.ReadAccounts(ctx).Where(a => a.Mailbox != me).Select(a => a.Mailbox).ToList());
+            }
             if (WebmailAuthService.ActingOf(state.User) is Guid open && sharedBoxes.FirstOrDefault(b => b.Box.Id == open) is { Box: not null } found)
             {
                 acting = found.Box;
@@ -615,6 +655,15 @@ else
     }
 
     private int outboxCount;
+    private IReadOnlyList<(MailboxRow Mailbox, long Unread)> otherAccounts = Array.Empty<(MailboxRow, long)>();
+    private string notifyScope = string.Empty;
+
+    private static string InitialsOf(MailboxRow m)
+    {
+        string name = m.DisplayName.Trim().Length > 0 ? m.DisplayName.Trim() : m.LocalPart;
+        string[] parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? (char.ToUpperInvariant(parts[0][0]).ToString() + char.ToUpperInvariant(parts[^1][0])) : name.Length > 0 ? char.ToUpperInvariant(name[0]).ToString() : "?";
+    }
 
     private bool OnOutbox => Nav.Uri.Contains("/outbox", StringComparison.OrdinalIgnoreCase);
 

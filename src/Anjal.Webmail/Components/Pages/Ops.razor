@@ -237,6 +237,71 @@ else
             </section>
             break;
 
+        case "virus":
+            @* rc.22 (item 39, mockup 23): ClamAV on this server; the decisions of 2 Oct 2026. *@
+            <section class="formcard orgcard">
+                <header class="orghead"><h2>@L["Virus scanning"]</h2></header>
+                <p class="hint orglead">@L["Every attachment on mail from outside is scanned by ClamAV on this server before delivery. Nothing leaves the server."]</p>
+                <div class="setgrid">
+                    <div class="setfield">
+                        <span class="setlbl">@L["Scanner"]</span>
+                        @if (Mail.Scanner is null)
+                        {
+                            <span class="pill pill-mute">@L["Off"]</span><span class="hint">@L["ANJAL_CLAMAV is not set. Programs and scripts are still refused and disk images sent to Junk, by their names; nothing is scanned and nothing is held."]</span>
+                        }
+                        else if (scannerVersion is null)
+                        {
+                            <span class="pill pill-bad">@L["Not answering"]</span><span class="hint">@L["Mail with files is held in quarantine until it answers. Check clamd: systemctl status clamav-daemon."]</span>
+                        }
+                        else
+                        {
+                            <span class="pill pill-info">@L["Running"]</span><span class="hint">@scannerVersion@(virusStats.LastSeen is DateTimeOffset seen ? " · " + L["last answered {time}"].Replace("{time}", clock.Full(seen), StringComparison.Ordinal) : string.Empty)</span>
+                        }
+                    </div>
+                    <div class="setfield">
+                        <span class="setlbl">@L["When the scanner is down"]</span>
+                        <p class="hint">@L["Mail with files is held in quarantine; the operator is mailed at once and every 30 minutes; each recipient sees in the Inbox that a mail is held. Held mail is scanned again every five minutes."]</p>
+                    </div>
+                </div>
+                <h3 class="sethead">@L["Since {date}"].Replace("{date}", clock.Date(virusStats.Since), StringComparison.Ordinal)</h3>
+                <table class="orgtable">
+                    <tbody>
+                        <tr><td>@L["Files scanned"]</td><td>@virusStats.Scanned.ToString("N0", Inv)</td></tr>
+                        <tr><td>@L["Viruses removed (mail delivered without the file)"]</td><td>@virusStats.Removed.ToString("N0", Inv)</td></tr>
+                        <tr><td>@L["Programs and scripts refused (.exe, .js, .bat …)"]</td><td>@virusStats.Refused.ToString("N0", Inv)</td></tr>
+                        <tr><td>@L["Disk images sent to Junk (.iso, .img)"]</td><td>@virusStats.Junked.ToString("N0", Inv)</td></tr>
+                        <tr><td>@L["Mails held while the scanner was down"]</td><td>@virusStats.Held.ToString("N0", Inv)</td></tr>
+                    </tbody>
+                </table>
+                <h3 class="sethead">@L["Held now"]</h3>
+                @if (heldMail.Count == 0)
+                {
+                    <p class="orgempty">@L["Nothing is held."]</p>
+                }
+                else
+                {
+                    <table class="orgtable">
+                        <thead><tr><th>@L["Received"]</th><th>@L["From"]</th><th>@L["To"]</th><th>@L["Files"]</th><th></th></tr></thead>
+                        <tbody>
+                        @foreach (HeldMessage h in heldMail)
+                        {
+                            <tr>
+                                <td>@clock.Full(h.Row.ReceivedAt)</td>
+                                <td>@h.Row.EnvelopeFrom</td>
+                                <td>@h.Mailbox.Address</td>
+                                <td>@string.Join(", ", h.Files)</td>
+                                <td>
+                                    <form method="post" action="/ops/virus/release" class="inline"><AntiforgeryToken /><input type="hidden" name="mailbox" value="@h.Mailbox.Id" /><input type="hidden" name="id" value="@h.Row.Id" /><input type="hidden" name="scan" value="1" /><button type="submit" class="btn btn-s btn-sm">@L["Scan again"]</button></form>
+                                    <form method="post" action="/ops/virus/release" class="inline"><AntiforgeryToken /><input type="hidden" name="mailbox" value="@h.Mailbox.Id" /><input type="hidden" name="id" value="@h.Row.Id" /><input type="hidden" name="scan" value="0" /><button type="submit" class="btn btn-q btn-sm" title="@L["Delivered as it is, without a scan - your decision."]">@L["Release"]</button></form>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </section>
+            break;
+
         case "health":
             <section class="formcard orgcard">
                 <header class="orghead">
@@ -287,7 +352,10 @@ else
                     <input id="apersonal" class="inp" name="personal" type="email" maxlength="200" />
                     <label class="setlbl" for="ostatus">@L["Status"]</label>
                     <select id="ostatus" class="setsel" name="status"><option value="setting-up">@L["Setting up"]</option><option value="trial">@L["Trial"]</option><option value="active">@L["Active"]</option></select>
-                    <p class="hint">@L["The domain is added at once, with a DKIM key; the administrator then publishes its records from their console."]</p>
+                    <label class="setlbl" for="okind">@L["Kind"]</label>
+                    <select id="okind" class="setsel" name="kind"><option value="organisation">@L["Organisation"]</option><option value="individuals">@L["Individuals"]</option></select>
+                    <p class="hint">@L["Individuals: people with their own address on the shared domain; the administrator is User management."]</p>
+                    <p class="hint">@L["The domain is added at once, with a DKIM key; the administrator then publishes its records from their console. The administrator is invited to the registration page; nothing is made until they press Submit."]</p>
                     <div class="setactions"><button type="submit" class="btn btn-p">@L["Add"]</button><a class="btn btn-s" href="/ops/orgs">@L["Cancel"]</a></div>
                 </form>
             }
@@ -381,6 +449,12 @@ else
             <div class="asidecard"><span class="asidebody"><b>@L["A mailbox's fullness"]</b> @L["shows to its owner in the status bar, and in red when it is full. Operators are not told."]</span></div>
             break;
 
+        case "virus":
+            <h2 class="asidehead">@L["Virus scanning"]</h2>
+            <p class="asidetext">@L["Decisions of 2 Oct 2026, built in rc.22. The rules are the same for every organisation; the recipient notice is always on."]</p>
+            <p class="asidetext">@L["Set ANJAL_CLAMAV in the mail server's and the webmail's settings to clamd's socket, for example 127.0.0.1:3310 or /run/clamav/clamd.ctl."]</p>
+            break;
+
         case "health":
             <h2 class="asidehead">@L["Reports and alerts"]</h2>
             <h3 class="asidetitle">@L["Summary"]</h3>
@@ -424,6 +498,7 @@ else
         ("orgs", "Organisations", "department-master"),
         ("limits", "Platform limits", "security"),
         ("health", "Service health", "server-stack"),
+        ("virus", "Virus scanning", "shield"),
         ("transactional", "Transactional", "referral-out"),
     };
 
@@ -449,6 +524,9 @@ else
     private OrgSummary? sel;
     private IReadOnlyList<HealthTile> tiles = Array.Empty<HealthTile>();
     private IReadOnlyList<(DateTimeOffset Hour, long Count)> hours = Array.Empty<(DateTimeOffset, long)>();
+    private string? scannerVersion;
+    private Anjal.Mailbox.VirusStats virusStats = new();
+    private IReadOnlyList<HeldMessage> heldMail = Array.Empty<HeldMessage>();
     private string healthWord = "All systems normal";
 
     private string Current => Sections.Any(s => s.Key == Section) ? Section! : "overview";
@@ -485,6 +563,7 @@ else
         "orgs" => orgs.Count == 1 ? L["1 organisation"] : L["{n} organisations"].Replace("{n}", orgs.Count.ToString(Inv), StringComparison.Ordinal),
         "limits" => L["The outer limits for everyone"],
         "health" => L[healthWord],
+        "virus" => Mail.Scanner is null ? L["Off: ANJAL_CLAMAV not set"] : scannerVersion is null ? L["Scanner not answering"] : heldMail.Count == 0 ? L["ClamAV running, nothing held"] : L["{n} held"].Replace("{n}", heldMail.Count.ToString(Inv), StringComparison.Ordinal),
         "transactional" => L["What applications send"],
         _ => string.Empty,
     };
@@ -496,6 +575,8 @@ else
         "resume" => L["Resumed. They can sign in again."],
         "message" => L["Sent to the administrator."],
         "summary" => L["The summary was sent to the operators."],
+        "released" => L["Delivered to the person's mailbox."],
+        "stillheld" => L["The scanner is still not answering; the message stays held."],
         "drill" => L["Restore drill recorded."],
         "drill-date" => L["Choose the day the drill was done."],
         "self" => L["You cannot suspend your own organisation."],
@@ -771,6 +852,11 @@ else
         {
             DateTimeOffset nowT = DateTimeOffset.UtcNow;
             trans = await Mail.TransactionalAsync(MailboxService.AtLocal(clock, clock.Local(nowT).Date), nowT);
+        }
+        if (Current == "virus")
+        {
+            (scannerVersion, virusStats) = await Mail.ScannerStateAsync();
+            heldMail = await Mail.HeldMessagesAsync();
         }
         if (Current == "health")
         {

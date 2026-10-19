@@ -178,9 +178,13 @@ public sealed class TenantsHandler
         {
             action = SenderRuleAction.Block;
         }
+        else if (string.Equals(req.Action, "discard", System.StringComparison.OrdinalIgnoreCase))
+        {
+            action = SenderRuleAction.Discard;
+        }
         else
         {
-            await ctx.WriteErrorAsync(400, "invalid_request", "action must be allow or block.").ConfigureAwait(false);
+            await ctx.WriteErrorAsync(400, "invalid_request", "action must be allow, block or discard.").ConfigureAwait(false);
             return;
         }
 
@@ -394,7 +398,7 @@ public sealed class TenantsHandler
     {
         Id = r.Id,
         Pattern = r.Pattern,
-        Action = r.Action == SenderRuleAction.Block ? "block" : "allow",
+        Action = r.Action switch { SenderRuleAction.Block => "block", SenderRuleAction.Discard => "discard", _ => "allow" },
         CreatedAt = r.CreatedAt,
     };
 

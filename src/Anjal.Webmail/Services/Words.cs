@@ -217,7 +217,7 @@ public sealed class Lexicon
         return folder switch
         {
             "INBOX" => this["Inbox"],
-            "Sent" or "Drafts" or "Junk" or "Trash" or "Archive" or "Scheduled" or "Outbox" => this[folder],
+            "Sent" or "Drafts" or "Junk" or "Trash" or "Archive" or "Scheduled" or "Outbox" or "Snoozed" => this[folder],
             _ => folder,
         };
     }

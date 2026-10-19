@@ -1,12 +1,13 @@
 @page "/message/{Id:guid}"
 @attribute [Authorize]
 
-<MessageReader Id="Id" Images="@Images" Blocked="@Blocked" Preview="@PreviewIndex" ShowBack="true" ReturnTo="@SafeReturn" />
+<MessageReader Id="Id" Images="@Images" Blocked="@Blocked" Unsubscribed="@Unsubscribed" Preview="@PreviewIndex" ShowBack="true" ReturnTo="@SafeReturn" />
 
 @code {
     [Parameter] public Guid Id { get; set; }
     [SupplyParameterFromQuery(Name = "images")] private string? Images { get; set; }
     [SupplyParameterFromQuery(Name = "blocked")] private string? Blocked { get; set; }
+    [SupplyParameterFromQuery(Name = "unsubscribed")] private string? Unsubscribed { get; set; }
     [SupplyParameterFromQuery(Name = "preview")] private string? PreviewText { get; set; }
 
     [SupplyParameterFromQuery(Name = "back")] private string? BackText { get; set; }

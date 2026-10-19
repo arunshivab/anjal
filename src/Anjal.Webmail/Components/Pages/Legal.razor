@@ -1,0 +1,41 @@
+@page "/terms"
+@page "/disclaimer"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+
+<PageTitle>@Title — Anjal</PageTitle>
+
+@* rc.22 (item 6): the Terms of Service and the Disclaimer, as sent in the Terms email and linked
+   from the registration page. A draft until the owner has it vetted. *@
+<article class="legal">
+    <p class="legalkicker">Anjal · <span>@L["draft for legal review"]</span> · @LegalText.Version</p>
+    <h1>@Title</h1>
+    @foreach (LegalSection s in Sections)
+    {
+        <section>
+            <h2>@s.Heading</h2>
+            @foreach (string p in s.Paragraphs)
+            {
+                <p>@p</p>
+            }
+        </section>
+    }
+    <p class="legalfoot">
+        <a class="authlink" href="@(IsTerms ? "/disclaimer" : "/terms")">@(IsTerms ? L["Disclaimer"] : L["Terms of Service"])</a> · <a class="authlink" href="/sign-in">@L["Sign in"]</a>
+    </p>
+</article>
+
+@code {
+    private Lexicon L = new("en", new Dictionary<string, string>());
+
+    private bool IsTerms => (Http.HttpContext?.Request.Path.Value ?? "/terms").StartsWith("/terms", StringComparison.Ordinal);
+    private string Title => IsTerms ? L["Terms of Service"] : L["Disclaimer"];
+    private IReadOnlyList<LegalSection> Sections => IsTerms ? LegalText.Terms : LegalText.Disclaimer;
+
+    protected override void OnInitialized()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+    }
+}

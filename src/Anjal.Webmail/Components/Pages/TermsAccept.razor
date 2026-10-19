@@ -1,0 +1,83 @@
+@page "/terms/accept"
+@layout MainLayout
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+<PageTitle>@L["Before you start"] — Anjal</PageTitle>
+
+@* rc.22 (item 5, mockup 07): the Terms accepted at the first sign-in, for an account an
+   administrator filled in. Nothing opens until both boxes are ticked. *@
+<AuthFrame L="L" Org="org">
+    <h1 class="authtitle">@L["Before you start"]</h1>
+    @if (waiting)
+    {
+        <p class="authlead">@L["Your mailbox was created for you. Please read and accept the Terms of Service; a copy was sent to your personal email."]</p>
+        @if (error is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+        }
+        <div class="legalbox" tabindex="0">
+            <b>@L["Anjal Terms of Service"]</b> <span class="authhint">(@L["draft for legal review"], @LegalText.Version)</span>
+            @foreach (LegalSection s in LegalText.Terms)
+            {
+                <h3>@s.Heading</h3>
+                @foreach (string p in s.Paragraphs)
+                {
+                    <p>@p</p>
+                }
+            }
+            @foreach (LegalSection s in LegalText.Disclaimer)
+            {
+                <h3>@s.Heading</h3>
+                @foreach (string p in s.Paragraphs)
+                {
+                    <p>@p</p>
+                }
+            }
+        </div>
+        <form method="post" action="/auth/terms" class="authfields">
+            <AntiforgeryToken />
+            <label class="checkline"><input type="checkbox" name="terms" value="1" required /> <span>@L["I accept the Terms of Service"]</span></label>
+            <label class="checkline"><input type="checkbox" name="disclaimer" value="1" required /> <span>@L["I have read the Disclaimer"]</span></label>
+            <button type="submit" class="authbtn">@L["Accept and open my mail"]</button>
+        </form>
+        <p class="authnote">@L["Signed in as {address}"].Replace("{address}", address, StringComparison.Ordinal) · <a class="authlink" href="/terms" target="_blank" rel="noopener">@L["Open the Terms in a new tab"]</a></p>
+        <form method="post" action="/sign-out" class="inline"><AntiforgeryToken /><button type="submit" class="authlink linkbtn">@L["Sign out"]</button></form>
+    }
+    else
+    {
+        <p class="authlead">@L["Nothing waits for you here: the Terms are accepted."]</p>
+        <p class="authnote"><a class="authlink" href="/folder/INBOX">@L["Open your mail"]</a></p>
+    }
+</AuthFrame>
+
+@code {
+    [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private bool waiting;
+    private string address = string.Empty;
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        error = AuthEndpoints.ReadNote(Protection, E);
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        address = user.Identity?.Name ?? string.Empty;
+        if (WebmailAuthService.PersonIdOf(user) is Guid person)
+        {
+            waiting = await Mail.TermsWaitingAsync(person);
+        }
+    }
+}

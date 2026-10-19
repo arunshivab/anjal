@@ -161,12 +161,18 @@ public static class Program
         // postmaster@ and abuse@ (v1.0.0-rc.8): each tenant's designated mailbox;
         // at this server's own name, the operator (ANJAL_POSTMASTER).
         string? operatorPostmaster = System.Environment.GetEnvironmentVariable("ANJAL_POSTMASTER");
+        // rc.22 (item 39): ClamAV on this server scans every file on mail from outside (ANJAL_CLAMAV).
+        Anjal.Mailbox.ClamdScanner? scanner = Anjal.Mailbox.ClamdScanner.FromSetting(System.Environment.GetEnvironmentVariable(Anjal.Mailbox.ClamdScanner.Setting));
         var mailboxSink = new Anjal.Mailbox.MailboxSink(mailboxStore, maildir, Log)
         {
             ServerHostName = hostname,
             OperatorPostmaster = string.IsNullOrWhiteSpace(operatorPostmaster) ? null : operatorPostmaster.Trim(),
+            Scanner = scanner,
         };
         Log(mailboxSink.DescribeServerRoleAddresses());
+        Log(scanner is null
+            ? "Virus scanning: off (ANJAL_CLAMAV not set). Programs and scripts are still refused and disk images sent to Junk by name."
+            : $"Virus scanning: ClamAV at {System.Environment.GetEnvironmentVariable(Anjal.Mailbox.ClamdScanner.Setting)}; mail with files is held in quarantine while the scanner is down.");
 
         // v1.0.0-rc.8: the evidence store (ANJAL-DES-01) - the original of every
         // message as received or sent, fingerprinted, with a daily manifest chain.

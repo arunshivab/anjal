@@ -61,6 +61,13 @@ public enum SenderRuleAction
 
     /// <summary>Always deliver to Junk regardless of score.</summary>
     Block = 1,
+
+    /// <summary>
+    /// Discard silently (rc.22, item 32, owner 18 Oct 2026, option (b)): the mail never appears in
+    /// any folder the person sees and the sender is not told. The as-received evidence copy is
+    /// still kept under the evidence rule.
+    /// </summary>
+    Discard = 2,
 }
 
 /// <summary>

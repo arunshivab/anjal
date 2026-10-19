@@ -12,7 +12,11 @@
    organisation's domain shown after it; Forgot password; and "This computer is"
    the person's own or shared, which decides how long the sign-in lasts. *@
 <AuthFrame L="L" Org="org">
-    <h1 class="authtitle">@L["Sign in to your mail"]</h1>
+    <h1 class="authtitle">@(Adding ? L["Add another account"] : L["Sign in to your mail"])</h1>
+    @if (Adding)
+    {
+        <p class="authlead">@L["The account you are signed in to stays signed in; the initials menu switches between them."]</p>
+    }
 
     @if (Error is not null)
     {
@@ -51,6 +55,10 @@
 
     <form method="post" action="/auth/login" class="authfields" data-signin>
         <AntiforgeryToken />
+        @if (Adding)
+        {
+            <input type="hidden" name="add" value="1" />
+        }
         <label class="authlbl" for="address">@(org is null ? L["Address"] : L["User name"])</label>
         <div class="authinpwrap @(Error is not null ? "bad" : "")">
             <input class="authinp-in" id="address" name="address" type="text" value="@User"
@@ -101,11 +109,13 @@
     [SupplyParameterFromQuery] private string? Reset { get; set; }
     [SupplyParameterFromQuery(Name = "u")] private string? User { get; set; }
     [SupplyParameterFromQuery(Name = "shared")] private string? Shared { get; set; }
+    [SupplyParameterFromQuery(Name = "add")] private string? Add { get; set; }
 
     private Lexicon L = new("en", new Dictionary<string, string>());
     private OrganisationIdentity? org;
 
     private bool SharedChosen => Shared == "1";
+    private bool Adding => Add == "1";
 
     protected override async Task OnInitializedAsync()
     {

@@ -37,7 +37,7 @@ public static class TemplateCatalogue
     /// <summary>The groups, in the order shown.</summary>
     public static readonly IReadOnlyList<string> Groups = new[]
     {
-        "Work: people and HR", "Work: meetings and projects", "Work: customers and suppliers", "School and children",
+        "Work: people and HR", "Work: meetings and projects", "Work: customers and suppliers", "Hospital and clinic", "School and children",
         "Bank and money", "Complaints about services", "Government and official", "Greetings", "Invitations",
     };
 
@@ -148,7 +148,19 @@ public static class TemplateCatalogue
         Add(g, "cust/thanks", "Thank you to a customer", "Thank you, {Name}",
             "Dear {Name},\n\nThank you for choosing {Organisation} for {Work}. It was a pleasure working with you.\n\nIf there is anything more we can do, please write to us at any time.\n\nWith thanks,\n{Your name}");
 
+        // rc.22 (item 50, design review 6l): the referral letter, with its patient-information warning in Compose.
         g = Groups[3];
+        Add(g, "hospital/referral", "Referral letter", "Referral: {Patient name}, {Age}/{Sex}, {Diagnosis}",
+            "Dear Dr {Name},\n\nI am referring {Patient name}, {Age} years, {Sex}, for {Purpose}.\n\nPresenting complaint: {Complaint}\nFindings: {Findings}\nInvestigations so far: {Investigations}\nTreatment given: {Treatment}\nProvisional diagnosis: {Diagnosis}\n\nReason for referral: {Reason}\n\nThe patient has been told about this referral and has consented to their details being shared with you. Reports are attached.\n\nPlease let me know your opinion and plan; I remain available on {Your phone}.\n\nWith regards,\n{Your name}\n{Your qualification}, {Your department}\n{Organisation}");
+        Add(g, "hospital/appointment", "Appointment confirmation", "Your appointment on {Date} at {Time}",
+            "Dear {Patient name},\n\nYour appointment with {Doctor} is confirmed for {Date} at {Time}, at {Place}.\n\nPlease bring your earlier reports and prescriptions, and arrive fifteen minutes early for registration.\n\nTo change the appointment, reply to this mail or call {Phone}.\n\nWith regards,\n{Your name}\n{Organisation}");
+        Add(g, "hospital/report-ready", "Report ready", "Your report is ready: {Test}",
+            "Dear {Patient name},\n\nYour {Test} report is ready. It is attached to this mail; please keep it safely and bring it to your next visit.\n\nIf anything in it needs explaining, your doctor, {Doctor}, will go through it with you.\n\nWith regards,\n{Your name}\n{Organisation}");
+        Add(g, "hospital/discharge-cover", "Discharge summary cover note", "Discharge summary: {Patient name}, admitted {Admission date}",
+            "Dear Dr {Name},\n\n{Patient name} ({Age}/{Sex}) was admitted on {Admission date} and discharged on {Discharge date} under {Treating doctor}. The discharge summary is attached.\n\nDiagnosis: {Diagnosis}\nTreatment: {Treatment}\nAdvice on discharge: {Advice}\nFollow-up: {Follow-up}\n\nThe patient has consented to this being shared with you. Please contact us on {Your phone} for anything further.\n\nWith regards,\n{Your name}\n{Organisation}");
+        Add(g, "hospital/second-opinion", "Second opinion request", "Second opinion requested: {Diagnosis}",
+            "Dear Dr {Name},\n\nI would value your opinion on a patient of mine, {Patient name}, {Age} years, {Sex}, with {Diagnosis}.\n\nHistory: {History}\nInvestigations: {Investigations}\nWhat I am considering: {Plan}\n\nThe question I would like your view on: {Question}\n\nThe patient has consented to their details being shared. Reports are attached.\n\nWith regards,\n{Your name}\n{Your qualification}, {Organisation}");
+        g = Groups[4];
         Add(g, "school/leave", "Leave letter for my child", "Leave for {Child's name}, class {Class}",
             "Dear {Name},\n\nMy child {Child's name} of class {Class} will not be able to attend school from {From date} to {To date} because of {Reason}.\n\nPlease grant leave for these days. We will make sure the work missed is completed.\n\nThank you,\n{Your name}");
         Add(g, "school/meet-teacher", "Request to meet the class teacher", "Request to meet about {Child's name}",
@@ -162,7 +174,7 @@ public static class TemplateCatalogue
         Add(g, "school/illness", "Informing the school of an illness", "{Child's name} is unwell",
             "Dear {Name},\n\n{Child's name} of class {Class} is unwell with {Illness} and will stay home until {Return date}, on the doctor's advice.\n\nWe will share the medical certificate when they return.\n\nThank you,\n{Your name}");
 
-        g = Groups[4];
+        g = Groups[5];
         Add(g, "bank/open-account", "Application for opening an account (form attached)", "Application to open a {Account type} account",
             "Dear Sir or Madam,\n\nPlease find attached my completed application form to open a {Account type} account at your {Branch} branch, with copies of my identity and address documents.\n\nPlease let me know if anything else is needed.\n\nYours faithfully,\n{Your name}\n{Your phone}");
         Add(g, "bank/address-change", "Change of address (form attached)", "Change of address for account ending {Last digits}",
@@ -178,7 +190,7 @@ public static class TemplateCatalogue
         Add(g, "bank/dispute", "Disputed transaction", "Disputed transaction of {Amount} on {Date}",
             "Dear Sir or Madam,\n\nI do not recognise a transaction of {Amount} on {Date} on my account ending {Last digits}, described as {Description}.\n\nPlease investigate and reverse it. I did not authorise it.\n\nYours faithfully,\n{Your name}\n{Your phone}");
 
-        g = Groups[5];
+        g = Groups[6];
         Add(g, "complain/isp", "Internet service provider", "No internet since {Date}: account {Account number}",
             "Dear Sir or Madam,\n\nMy internet connection (account {Account number}) has not worked since {Date}. I have restarted the equipment and the problem continues.\n\nPlease send a technician and tell me when to expect them.\n\nRegards,\n{Your name}\n{Your phone}");
         Add(g, "complain/mobile", "Mobile phone operator", "Problem with my mobile number {Number}",
@@ -194,7 +206,7 @@ public static class TemplateCatalogue
         Add(g, "complain/society", "Housing society", "{Problem} in {Building}",
             "Dear {Name},\n\nI would like to bring to the committee's notice that {Problem} in {Building}, since {Date}.\n\nPlease take it up at the earliest.\n\nRegards,\n{Your name}\nFlat {Flat number}");
 
-        g = Groups[6];
+        g = Groups[7];
         Add(g, "gov/rti", "RTI application (attached)", "Application under the RTI Act, 2005",
             "Dear Public Information Officer,\n\nPlease find attached my application under the Right to Information Act, 2005, seeking information on {Subject}. The fee of {Fee} is paid by {How paid}.\n\nYours faithfully,\n{Your name}\n{Your address}");
         Add(g, "gov/certificate", "Certificate application (attached)", "Application for a {Certificate}",
@@ -206,7 +218,7 @@ public static class TemplateCatalogue
         Add(g, "gov/follow-up", "Follow-up on a pending application", "Status of my application {Application number}",
             "Dear Sir or Madam,\n\nI applied for {What} on {Date} (application {Application number}) and have not heard back. Could you please tell me its status?\n\nYours faithfully,\n{Your name}");
 
-        g = Groups[7];
+        g = Groups[8];
         Add(g, "greet/festival", "Festival wishes", "Happy {Festival}, {Name}",
             "Dear {Name},\n\nWishing you and your family a very happy {Festival}. {Festival line}\n\nWarm regards,\n{Your name}", "Kolam");
         Add(g, "greet/birthday", "Birthday", "Happy birthday, {Name}!",
@@ -226,7 +238,7 @@ public static class TemplateCatalogue
         Add(g, "greet/thank-you", "Thank you", "Thank you, {Name}",
             "Dear {Name},\n\nThank you so much for {What}. It meant a great deal.\n\nWith thanks,\n{Your name}");
 
-        g = Groups[8];
+        g = Groups[9];
         Add(g, "invite/event", "Event invitation", "You are invited: {Event} on {Date}",
             "Dear {Name},\n\nYou are invited to {Event}.\n\nDate: {Date}\nTime: {Time}\nPlace: {Place}\n\nPlease reply by {Reply by} to let us know if you can come.\n\nWarm regards,\n{Your name}");
         Add(g, "invite/wedding", "Wedding invitation", "Wedding of {Couple}",

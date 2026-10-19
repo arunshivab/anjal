@@ -32,7 +32,12 @@
             {
                 <span class="unenc" data-unencrypted role="img" title="@L["Arrived unencrypted: anyone on the network path could have read it"]" aria-label="@L["Arrived unencrypted"]"><LipiIcon Name="unlock" Size="13" /></span>
             }
-            <a class="subj" href="@OpenLink" data-open>@(string.IsNullOrWhiteSpace(M.Subject) ? L["(no subject)"] : M.Subject)</a>
+            @if (Mark is not null)
+            {
+                @* rc.22: "Snoozed" when it came back from snooze; "Virus removed" when a file was taken out. *@
+                <span class="pill @(Mark == "Virus removed" ? "pill-bad" : "pill-info") rowmark">@L[Mark]</span>
+            }
+            <a class="subj" href="@OpenLink" data-open>@(string.IsNullOrWhiteSpace(M.Subject) ? L["(no subject)"] : Highlighted(M.Subject))</a>
             @if (ShowFlag)
             {
                 <button type="submit" class="fav @(M.Flagged ? "on" : "")"
@@ -57,8 +62,8 @@
         }
         else if (M.Preview.Length > 0 || M.HasAttachments || Category is not null)
         {
-            @* 4.4: the quiet third line - the preview, then the clip and the category after it. *@
-            <div class="mline3"><span class="mprev">@System.Text.RegularExpressions.Regex.Replace(M.Preview, @"\s+", " ").Trim()</span>@if (M.HasAttachments) { <span class="mclip" data-attachment role="img" title="@L["Has attachments"]" aria-label="@L["Has attachments"]"><LipiIcon Name="attachment" Size="13" /></span> }@if (Category is not null) { <span class="chip slot-@Category.Row.Slot"><i></i>@Category.Row.Name</span> }</div>
+            @* 4.4: the quiet third line - the preview, then the clip and the category after it. rc.22 (item 47): file tags when given. *@
+            <div class="mline3"><span class="mprev">@Highlighted(System.Text.RegularExpressions.Regex.Replace(M.Preview, @"\s+", " ").Trim())</span>@if (M.HasAttachments) { <span class="mclip" data-attachment role="img" title="@L["Has attachments"]" aria-label="@L["Has attachments"]"><LipiIcon Name="attachment" Size="13" /></span> }@if (Files is not null) { foreach (string f in Files.Take(3)) { <span class="chip filechip"><LipiIcon Name="attachment" Size="11" />@f</span> } }@if (Category is not null) { <span class="chip slot-@Category.Row.Slot"><i></i>@Category.Row.Name</span> }</div>
         }
     </div>
     @* rc.12 (D-116): the row's own actions, shown on hover or keyboard focus.
@@ -143,4 +148,32 @@
 
     /// <summary>The page to come back to after flagging.</summary>
     [Parameter] public string BackLink { get; set; } = string.Empty;
+
+    /// <summary>rc.22: a mark before the subject - "Snoozed" or "Virus removed" - or null.</summary>
+    [Parameter] public string? Mark { get; set; }
+
+    /// <summary>rc.22 (item 47): the attachments' file names, shown as tags instead of the paperclip; null for the paperclip alone.</summary>
+    [Parameter] public IReadOnlyList<string>? Files { get; set; }
+
+    /// <summary>rc.22 (item 47): the words searched for, marked in the subject and preview; null for none.</summary>
+    [Parameter] public string? Highlight { get; set; }
+
+    private MarkupString Highlighted(string text)
+    {
+        string encoded = System.Net.WebUtility.HtmlEncode(text);
+        if (string.IsNullOrWhiteSpace(Highlight))
+        {
+            return new MarkupString(encoded);
+        }
+        foreach (string word in Highlight.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Where(w => w.Length > 1 && !w.Contains(':', StringComparison.Ordinal)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            string w = System.Net.WebUtility.HtmlEncode(word.Trim('"'));
+            if (w.Length == 0)
+            {
+                continue;
+            }
+            encoded = System.Text.RegularExpressions.Regex.Replace(encoded, System.Text.RegularExpressions.Regex.Escape(w), m => "<mark>" + m.Value + "</mark>", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+        }
+        return new MarkupString(encoded);
+    }
 }

@@ -1944,6 +1944,69 @@ To withdraw: set the mode to `none` for at least one max_age before removing
 the TXT record and the policy; removing them abruptly leaves senders holding a
 cached policy. anjalmail.com needs none - it receives no mail (null MX).
 
+## 13j. rc.22: accounts, anjalmail.com and ClamAV
+
+Three things to do once, after installing rc.22 (section 13d), in this order.
+
+**1. The schema.** Sender rules gain the `discard` action (Block a sender now
+drops mail silently). `schema.sql` is written to be run again safely:
+
+```
+vm$ sudo -u postgres psql -d anjal -f /opt/anjal/tools/sql/schema.sql
+```
+
+**2. ClamAV** (item 39). Install the daemon and its signature updater; the
+first signature download takes a few minutes and `clamd` does not answer
+until it has finished.
+
+```
+vm$ sudo apt install -y clamav-daemon clamav-freshclam
+vm$ sudo systemctl enable --now clamav-freshclam clamav-daemon
+vm$ sudo usermod -aG clamav anjal                       # the socket is group clamav, mode 660
+vm$ sudo systemctl status clamav-daemon --no-pager | head -5
+vm$ echo zPING | sudo -u anjal nc -U /var/run/clamav/clamd.ctl   # answers PONG once ready
+```
+
+Then in **both** `/etc/anjal/server.env` and `/etc/anjal/webmail.env`:
+
+```
+ANJAL_CLAMAV=/var/run/clamav/clamd.ctl
+ANJAL_POSTMASTER=arun@anjal.co.in
+```
+
+and restart both services. The start-up log of each says `virus scanning:
+clamd at /var/run/clamav/clamd.ctl` (or `off`). The console's **Virus
+scanning** page shows the daemon's version, the counts, and anything held.
+While `clamd` is down, mail with files is held, scanned again every five
+minutes, and `ANJAL_POSTMASTER` is reminded every thirty; nothing is lost.
+The EICAR test file (eicar.org) is the safe way to see a removal.
+
+**3. anjalmail.com** - the domain individuals' addresses are made on, and the
+parent of every organisation's automatic subdomain (`sgh.anjalmail.com`).
+It needs the same DNS as any receiving domain, plus a wildcard for the
+subdomains:
+
+| Record | Name | Value |
+|---|---|---|
+| MX | `anjalmail.com` | `10 mail.anjal.co.in` (this server) |
+| MX | `*.anjalmail.com` | `10 mail.anjal.co.in` |
+| TXT | `anjalmail.com` | `v=spf1 ip4:<this server's IP> -all` (replaces the lockdown `v=spf1 -all`) |
+| TXT | `*.anjalmail.com` | `v=spf1 ip4:<this server's IP> -all` |
+| TXT | `default._domainkey.anjalmail.com` | the DKIM key the console makes for the domain (section 8) |
+| TXT | `_dmarc.anjalmail.com` | `v=DMARC1; p=reject; adkim=s; aspf=s; sp=reject; rua=mailto:postmaster@anjal.co.in` |
+| A | `mail.anjalmail.com` | this server's IP (the webmail for individuals; add it to the ACME names) |
+
+In the console, **Organisations > New** with the kind **Individuals** makes
+the individuals' tenant on `anjalmail.com` and invites its first
+`usermanagement` administrator by email. That account - and only that
+account - adds individuals (User management > People). Organisations made
+after rc.22 get `<slug>.anjalmail.com` automatically beside any domain of
+their own; the wildcard MX above receives for it, and the organisation's
+DKIM key signs for it.
+
+`ANJAL_SHARED_DOMAIN=anjalmail.com` in `webmail.env` is what turns the automatic
+subdomains on; unset, organisations get only the domains they bring.
+
 ## 14. When something is wrong
 
 | Symptom | Look at | Likely cause |

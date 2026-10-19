@@ -431,8 +431,9 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         string token = await this.TokenFromAsync($"message/{m.Id}");
         HttpResponseMessage blocked = await this.PostFormAsync($"message/{m.Id}/block", token);
         Assert.Equal($"/message/{m.Id}?blocked=meera%40partner.example", blocked.Headers.Location!.ToString());
-        Assert.Contains("Future mail from meera@partner.example goes to Junk.", await this.client.GetStringAsync($"message/{m.Id}?blocked=meera%40partner.example"), System.StringComparison.Ordinal);
-        Assert.Contains(await this.store.ListMailboxSenderRulesAsync(this.mailbox.Id), r => r.Pattern == "meera@partner.example" && r.Action == SenderRuleAction.Block);
+        // rc.22 (item 32, owner 18 Oct 2026): blocking discards silently, separate from Junk.
+        Assert.Contains("meera@partner.example is blocked: their mail is discarded silently", await this.client.GetStringAsync($"message/{m.Id}?blocked=meera%40partner.example"), System.StringComparison.Ordinal);
+        Assert.Contains(await this.store.ListMailboxSenderRulesAsync(this.mailbox.Id), r => r.Pattern == "meera@partner.example" && r.Action == SenderRuleAction.Discard);
         FolderRow inbox = Assert.Single(await this.store.ListFoldersAsync(this.mailbox.Id), f => f.Name == FolderRow.Inbox);
         Assert.Equal(inbox.Id, (await this.store.GetMessageByIdAsync(m.Id))!.FolderId);
 

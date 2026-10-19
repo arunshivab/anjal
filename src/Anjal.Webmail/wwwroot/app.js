@@ -2494,9 +2494,26 @@
       }
       if (state.newest > known) {
         arrived(lastUnread === null ? 1 : state.unread - lastUnread);
+        if (leader && !fromLeader) { popUp(); }
         known = state.newest;
       }
       lastUnread = state.unread;
+    }
+
+    // rc.22 (item 35): the desktop pop-up for new mail, from the tab that listens, when the person
+    // turned it on and the browser allowed it. "contacts" pops up only mail from saved contacts.
+    function popUp() {
+      var scope = bar.getAttribute("data-notify") || "";
+      if (!scope || !("Notification" in window) || Notification.permission !== "granted" || document.visibilityState === "visible" && document.hasFocus()) { return; }
+      fetch("/api/latest", { cache: "no-store", headers: { "X-Requested-With": "anjal" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (m) {
+          if (!m || !m.id) { return; }
+          if (scope === "contacts" && !m.contact) { return; }
+          var n = new Notification(m.from || "Anjal", { body: m.subject || "", tag: "anjal-" + m.id, icon: "/logos/anjal-favicon.svg" });
+          n.onclick = function () { window.focus(); window.location.href = "/message/" + m.id; n.close(); };
+        })
+        .catch(function () { /* nothing to show */ });
     }
     function share(state) { if (channel && state) { channel.postMessage(state); } }
 
@@ -3016,6 +3033,104 @@
       timer = window.setTimeout(check, 250);
     });
     if (input.value) { check(); }
+  });
+  });
+
+  // rc.22 (item 35): turning the desktop pop-up on asks the browser once for permission, and says how it stands.
+  page(function notifyPermission() {
+  $$("[data-notify-form]").forEach(function (form) {
+    var toggle = $("[data-notify-toggle]", form);
+    var state = $("[data-notify-state]", form);
+    if (!toggle) { return; }
+    function say() {
+      if (!state) { return; }
+      if (!("Notification" in window)) { state.textContent = W("This browser cannot show desktop notifications."); state.hidden = false; return; }
+      if (toggle.checked && Notification.permission === "denied") { state.textContent = W("Your browser has blocked notifications for Anjal. Allow them in the browser's site settings."); state.hidden = false; return; }
+      if (toggle.checked && Notification.permission === "default") { state.textContent = W("Your browser will ask for permission."); state.hidden = false; return; }
+      state.hidden = true;
+    }
+    toggle.addEventListener("change", function () {
+      if (toggle.checked && "Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission().then(say);
+      }
+      say();
+    });
+    say();
+  });
+  });
+
+  // rc.22 (item 5): the username checked as the box is left - on the registration page (with its
+  // token) and in the console's Add a person forms. Taken: a few free ones are offered as buttons.
+  page(function usernameCheck() {
+  $$("[data-usercheck]").forEach(function (input) {
+    var form = input.closest("form");
+    var box = form ? $("[data-avail]", form) : null;
+    if (!form || !box) { return; }
+    var asked = 0;
+    function say(cls, text, suggestions) {
+      box.hidden = false;
+      box.className = "avail avail-" + cls;
+      box.textContent = "";
+      var span = document.createElement("span");
+      span.textContent = text;
+      box.appendChild(span);
+      (suggestions || []).forEach(function (sug) {
+        var b = document.createElement("a");
+        b.href = "#";
+        b.setAttribute("role", "button");
+        b.className = "btn btn-q btn-sm";
+        b.textContent = sug;
+        b.addEventListener("click", function (ev) { ev.preventDefault(); input.value = sug; check(); });
+        box.appendChild(b);
+      });
+    }
+    function check() {
+      var local = input.value.trim();
+      if (!local) { box.hidden = true; return; }
+      var q = new URLSearchParams();
+      q.set("local", local);
+      var domain = $("[data-usercheck-domain]", form);
+      q.set("domain", domain ? domain.value : (input.getAttribute("data-usercheck-domain-fixed") || ""));
+      var token = input.getAttribute("data-usercheck-token");
+      if (token) { q.set("token", token); }
+      var first = $("[data-join-first]", form);
+      var last = $("[data-join-last]", form);
+      if (first) { q.set("first", first.value); }
+      if (last) { q.set("last", last.value); }
+      say("checking", W("Checking…"));
+      var mine = ++asked;
+      fetch("/auth/username?" + q.toString(), { headers: { "X-Requested-With": "anjal" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (r) {
+          if (!r || mine !== asked) { return; }
+          if (r.ok) { say("ok", W("{address} is free").replace("{address}", r.address)); }
+          else if (r.problem) { say("bad", r.problem); }
+          else { say("taken", W("{address} is taken. Free right now:").replace("{address}", r.address), r.suggestions); }
+        })
+        .catch(function () { box.hidden = true; });
+    }
+    input.addEventListener("blur", check);
+    input.addEventListener("change", check);
+    if (input.value) { check(); }
+  });
+  });
+
+  // rc.22: Generate a first password in the Fill in everything form - four words and a number, so it can be read out.
+  page(function generatePassword() {
+  $$("[data-genpw]").forEach(function (btn) {
+    var form = btn.closest("form");
+    var target = form ? $("[data-genpw-target]", form) : null;
+    if (!target) { return; }
+    var words = ["lotus", "garden", "river", "temple", "mango", "silver", "monsoon", "harbour", "cotton", "marble", "cinnamon", "lantern", "meadow", "copper", "saffron", "orchid", "pepper", "sandal", "quartz", "velvet", "willow", "zephyr", "candle", "falcon", "island", "jasmine", "kernel", "nectar", "oasis", "pebble"];
+    btn.addEventListener("click", function () {
+      var out = [];
+      var buf = new Uint32Array(5);
+      window.crypto.getRandomValues(buf);
+      for (var i = 0; i < 4; i++) { out.push(words[buf[i] % words.length]); }
+      out.push(String(10 + (buf[4] % 90)));
+      target.value = out.join("-");
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    });
   });
   });
 
