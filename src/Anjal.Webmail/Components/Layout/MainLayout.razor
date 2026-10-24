@@ -246,6 +246,11 @@ else
                     {
                         <a class="pfolder" href="/org"><LipiIcon Name="department-master" Size="18" /><span>@L["Organisation"]</span></a>
                     }
+                    @* DEF-149a (rc.23): the operator reaches the Anjal console from a phone too. *@
+                    @if (isOperator)
+                    {
+                        <a class="pfolder" href="/ops"><LipiIcon Name="monitoring" Size="18" /><span>@L["Anjal console"]</span></a>
+                    }
                     <div class="pstatus">
                         <span class="lite" data-connectivity data-online="@L["Connected"]" data-offline="@L["Offline"]"><i></i><span class="slot" data-slot-a="@L["Connected"]" data-slot-b="@L["Offline"]">@L["Connected"]</span></span>
                         @if (mailbox is not null)

@@ -270,6 +270,10 @@
                 {
                     <p class="hint">@L["First name + last name, as {organisation} requires. Its administrator can allow nicknames under Organisation, Mail rules."].Replace("{organisation}", tenantName, StringComparison.Ordinal)</p>
                 }
+                @if (namesMissing)
+                {
+                    <p class="hint">@L["Your first and last name have not been recorded yet; until they are, your mails carry the name above. Ask your administrator to record them under Organisation, People."]</p>
+                }
             </form>
             <p class="hint"><a class="authlink" href="/settings/security">@L["Recovery email and password are under Security."]</a></p>
         </section>
@@ -304,7 +308,8 @@
             </div>
             <div class="setrow">
                 <label class="setlbl" for="atext">@L["Message"]</label>
-                <textarea class="inp" id="atext" name="text" rows="6" maxlength="4000" required>@away.Text</textarea>
+                @* DEF-155 (rc.23): needed only when the reply is on - the server says so then; off, it saves blank. *@
+                <textarea class="inp" id="atext" name="text" rows="6" maxlength="4000">@away.Text</textarea>
             </div>
             <div class="setgrid">
                 <div class="setfield">
@@ -436,6 +441,8 @@
                         <label class="segopt"><input type="radio" name="scope" value="contacts" checked="@(mailSettings.NotifyScope == "contacts")" data-autosubmit /><span>@L["From my contacts"]</span></label>
                     </div>
                     <p class="hint" data-notify-state hidden></p>
+                    @* DEF-160 (rc.23): a test, so the person sees at once whether the browser and the computer let notifications through. *@
+                    <div class="setactions"><button type="button" class="btn btn-s btn-sm" data-notify-test title="@L["Shows one notification now, to check that your browser and computer let them through."]">@L["Show a test notification"]</button></div>
                     <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
                 </form>
                 <form method="post" action="/settings/sound" class="setfield">
@@ -589,6 +596,8 @@
                 <PasswordRules L="L" For="next" Failed="failedRules" MinLength="pwLength" History="policy.PasswordHistory" Note="@L["Your organisation's rules are checked as you type."]" />
                 <div class="setactions"><button type="submit" class="btn btn-p btn-sm">@L["Change password"]</button></div>
                 <p class="hint">@L["Changing it signs out your other devices; this one stays signed in."]</p>
+                @* DEF-145, D-175 (rc.23): both throttles, as the code applies them. *@
+                <p class="hint">@L["Wrong passwords: after 5 from one network, that network waits 15 minutes; after 10 in a row from anywhere, signing in with the password is paused for 30 minutes. Forgot password still works."]</p>
             </form>
 
             <div class="setblock">
@@ -1000,7 +1009,8 @@
                 <h2 class="asidehead">@L["What your organisation allows"]</h2>
                 <p class="asideline"><b>@L["Trash"]</b>: @L["you choose, {min} to {max} days."].Replace("{min}", MailboxService.MinTrashDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{max}", trashRule.Longest.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
                 <p class="asideline"><b>@L["Junk"]</b>: @L["emptied after {n} days for everyone."].Replace("{n}", trashRule.JunkDays.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
-                <p class="asideline"><b>@L["Attachments"]</b>: @L["up to 18 MB per message."]</p>
+                @* DEF-120 (rc.23): 18 MB of files is what fits in the 25 MB message most mail servers accept, once encoded for sending. *@
+                <p class="asideline"><b>@L["Attachments"]</b>: @L["up to 18 MB of files per message (25 MB once encoded for sending, the most other mail servers accept)."]</p>
                 <p class="asideline"><b>@L["Storage"]</b>: @(quota > 0 ? L["{quota}; you use {used}."].Replace("{quota}", Layout.MainLayout.Size(quota), StringComparison.Ordinal).Replace("{used}", Layout.MainLayout.Size(used), StringComparison.Ordinal) : L["no limit; you use {used}."].Replace("{used}", Layout.MainLayout.Size(used), StringComparison.Ordinal))</p>
                 @if (quota > 0)
                 {
@@ -1058,7 +1068,9 @@
             {
                 <h2 class="asidehead">@L["Your sender rules"]</h2>
                 <div class="asidecard"><span>@L["Always to Junk"]</span><b>@senderRules.Count(r => r.Action == SenderRuleAction.Block)</b></div>
-                <div class="asidecard"><span>@L["Never to Junk"]</span><b>@senderRules.Count(r => r.Action != SenderRuleAction.Block)</b></div>
+                @* DEF-153 (rc.23): blocked senders (discarded) are their own list, not "never to Junk". *@
+                <div class="asidecard"><span>@L["Never to Junk"]</span><b>@senderRules.Count(r => r.Action == SenderRuleAction.Allow)</b></div>
+                <div class="asidecard"><span>@L["Blocked"]</span><b>@senderRules.Count(r => r.Action == SenderRuleAction.Discard)</b></div>
                 <div class="asidecard"><span>@L["Filed in a category automatically"]</span><b>@rules.Count</b></div>
                 <p class="asidetext">@L["These rules affect your mailbox only."]</p>
             }
@@ -1149,6 +1161,7 @@
     private PersonProfile profile = new();
     private bool individual;
     private bool nicknames = true;
+    private bool namesMissing;
     private IReadOnlyDictionary<string, int> discards = new Dictionary<string, int>();
     private InboxSections sections = new();
     private ExportState? export;
@@ -1340,7 +1353,9 @@
             {
                 profile = await Mail.ProfileOfAsync(mailboxId.Value);
                 individual = await Mail.IsIndividualAsync(mailboxId.Value);
-                nicknames = await Mail.NicknamesAllowedAsync(mailboxId.Value) || profile.FullName.Length == 0;
+                // DEF-130 (rc.23): no nicknames means none - also for a person whose first and last name were never recorded.
+                nicknames = await Mail.NicknamesAllowedAsync(mailboxId.Value);
+                namesMissing = !nicknames && profile.FullName.Length == 0;
             }
             if (Current == "appearance")
             {

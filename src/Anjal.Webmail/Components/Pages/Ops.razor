@@ -247,7 +247,7 @@ else
                         <span class="setlbl">@L["Scanner"]</span>
                         @if (Mail.Scanner is null)
                         {
-                            <span class="pill pill-mute">@L["Off"]</span><span class="hint">@L["ANJAL_CLAMAV is not set. Programs and scripts are still refused and disk images sent to Junk, by their names; nothing is scanned and nothing is held."]</span>
+                            <span class="pill pill-mute">@L["Off"]</span><span class="hint">@L["ClamAV is not set up on this server. Programs and scripts are still refused and disk images sent to Junk, by their names; nothing is scanned and nothing is held. Setting it up is in the runbook, section 13j."]</span>
                         }
                         else if (scannerVersion is null)
                         {
@@ -515,6 +515,8 @@ else
     [SupplyParameterFromQuery(Name = "f")] private string? FilterText { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
+    [CascadingParameter] private HttpContext? Http { get; set; }
+
     private Lexicon L = new("en", new Dictionary<string, string>());
     private ZonedClock clock = ZonedClock.Default;
     private MailboxRow? me;
@@ -544,7 +546,7 @@ else
     {
         ("Password length", L["At least 15, or 12 with two-step"]),
         ("Earlier passwords", L["Not checked; an organisation may refuse the last 3 or 5"]),
-        ("Wrong passwords", L["10 in a row pause password sign-in for 30 minutes"]),
+        ("Wrong passwords", L["5 from one network wait 15 minutes; 10 in a row from anywhere pause password sign-in for 30 minutes"]),   // DEF-145, D-175 (rc.23): both throttles named
         ("Idle sign-out, shared computer", L["At most {n} minutes"].Replace("{n}", SignInPolicy.AnjalSharedIdleMinutes.ToString(Inv), StringComparison.Ordinal)),
         ("Idle sign-out, own device", L["At most {n} hours"].Replace("{n}", SignInPolicy.AnjalOwnIdleHours.ToString(Inv), StringComparison.Ordinal)),
         ("Stay signed in", L["At most {n} days"].Replace("{n}", SignInPolicy.AnjalStayDays.ToString(Inv), StringComparison.Ordinal)),
@@ -563,7 +565,8 @@ else
         "orgs" => orgs.Count == 1 ? L["1 organisation"] : L["{n} organisations"].Replace("{n}", orgs.Count.ToString(Inv), StringComparison.Ordinal),
         "limits" => L["The outer limits for everyone"],
         "health" => L[healthWord],
-        "virus" => Mail.Scanner is null ? L["Off: ANJAL_CLAMAV not set"] : scannerVersion is null ? L["Scanner not answering"] : heldMail.Count == 0 ? L["ClamAV running, nothing held"] : L["{n} held"].Replace("{n}", heldMail.Count.ToString(Inv), StringComparison.Ordinal),
+        // DEF-151 (rc.23): words for a person, not the setting's name.
+        "virus" => Mail.Scanner is null ? L["Off: ClamAV not set up"] : scannerVersion is null ? L["Scanner not answering"] : heldMail.Count == 0 ? L["ClamAV running, nothing held"] : L["{n} held"].Replace("{n}", heldMail.Count.ToString(Inv), StringComparison.Ordinal),
         "transactional" => L["What applications send"],
         _ => string.Empty,
     };
@@ -820,6 +823,16 @@ else
         ready = false;
         await this.LoadAsync();
         ready = true;
+        if (me is null && Http is not null)
+        {
+            // DEF-124 (rc.23): a refused console answers 403, set as the headers go out.
+            HttpContext http = Http;
+            http.Response.OnStarting(() =>
+            {
+                http.Response.StatusCode = StatusCodes.Status403Forbidden;
+                return Task.CompletedTask;
+            });
+        }
     }
 
     // Everything the page shows, loaded before it is drawn: the page is

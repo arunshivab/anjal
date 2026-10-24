@@ -1,0 +1,37 @@
+@page "/not-found"
+@attribute [AllowAnonymous]
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+
+<PageTitle>@L["Page not found"] — Anjal</PageTitle>
+
+@* rc.23 (item 89, D-186; DEF-150): an address that is not a page of Anjal answers 404 with this
+   page in Anjal's look, instead of an empty white page. Reached by re-running the request here
+   (Program.cs), so the address in the browser stays the one that was asked for. *@
+<div class="emptystate notfound">
+    <h1>@L["This page is not in Anjal"]</h1>
+    <p>@L["The address may be mistyped, or the page may have moved."]</p>
+    @if (signedIn)
+    {
+        <a class="btn btn-p" href="/">@L["Go to Today"]</a>
+    }
+    else
+    {
+        <a class="btn btn-p" href="/sign-in">@L["Sign in"]</a>
+    }
+    <a class="btn btn-s" href="/help">@L["Help"]</a>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private bool signedIn;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        System.Security.Claims.ClaimsPrincipal? user = AuthState is null ? null : (await AuthState).User;
+        signedIn = user?.Identity?.IsAuthenticated == true;
+        L = signedIn && user is not null ? Words.For(WebmailAuthService.LanguageOf(user, Words)) : AuthWords.For(Http.HttpContext, Words);
+    }
+}

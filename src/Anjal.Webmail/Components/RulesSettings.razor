@@ -87,7 +87,7 @@
 }
 @if (Part != "main" && (Selected is not null || IsNew))
 {
-        MailRule r = Selected ?? new MailRule();
+        MailRule r = Draft ?? Selected ?? new MailRule();
         <aside class="formcard rulesedit" aria-label="@L["Selected rule"]">
             <span class="elabel">@(IsNew ? L["New rule"] : L["Selected rule"])</span>
             <form method="post" action="/settings/rules/save">
@@ -139,19 +139,23 @@
                 <label class="checkline"><input type="checkbox" name="enabled" value="1" checked="@r.Enabled" /><span>@L["Rule is on"]</span></label>
                 @if (trial is not null)
                 {
-                    <div class="rtrial">
-                        <b>@L["Tried on the last 30 days"]</b>
+                    @* D-176 (rc.23, DEF-137): a true dry run - nothing was saved, moved or sent. *@
+                    <div class="rtrial" data-rule-trial>
+                        <b>@L["Tried on the last 30 days: nothing was saved, moved or sent"]</b>
                         <span>@TrialText</span>
                     </div>
                 }
-                @if (trial is { Matches: > 0 })
-                {
-                    <label class="checkline"><input type="checkbox" name="applyExisting" value="1" /><span>@L["Also apply to the {n} existing messages"].Replace("{n}", MailboxService.Count(trial.Matches), StringComparison.Ordinal)</span></label>
-                }
                 <div class="cbtns">
                     <button type="submit" class="btn btn-p" data-needs-server>@L["Save rule"]</button>
-                    <button type="submit" class="btn btn-s" name="trial" value="1" data-needs-server>@L["Try on the last 30 days"]</button>
+                    <button type="submit" class="btn btn-s" name="trial" value="1" formnovalidate data-needs-server>@L["Try on the last 30 days"]</button>
                 </div>
+                @if (trial is { Matches: > 0 })
+                {
+                    <div class="rapply">
+                        <label class="checkline"><input type="checkbox" name="applyConfirm" value="1" /><span>@ApplyConfirmText(r.ForwardTo)</span></label>
+                        <button type="submit" class="btn btn-danger-q" name="applyNow" value="1" data-needs-server>@L["Save and apply to older mail now"]</button>
+                    </div>
+                }
             </form>
             @if (Selected is not null)
             {
@@ -171,6 +175,7 @@
     [SupplyParameterFromQuery(Name = "notice")] private string? NoticeText { get; set; }
     [SupplyParameterFromQuery(Name = "problem")] private string? Problem { get; set; }
     [SupplyParameterFromQuery(Name = "trial")] private string? TrialFlag { get; set; }
+    [SupplyParameterFromQuery(Name = "n")] private string? N { get; set; }
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private static readonly (string Key, string Word)[] Fields =
@@ -191,16 +196,27 @@
 
     private bool IsNew => RuleText == "new";
     private MailRule? Selected => Guid.TryParse(RuleText, out Guid id) ? rules.FirstOrDefault(r => r.Id == id) : null;
+
+    // D-176 (rc.23): the rule as typed, kept unsaved while it is tried.
+    private MailRule? Draft => TrialFlag == "1" && draft is not null && (Selected?.Id == draft.Id || (IsNew && !rules.Any(x => x.Id == draft.Id))) ? draft : null;
+    private MailRule? draft;
     private string? Notice => NoticeText switch
     {
         "saved" => L["Rule saved."],
         "deleted" => L["Rule deleted."],
         "folder" => L["Folder created."],
         "folderremoved" => L["Folder removed."],
+        "applied" => L["Rule saved, and applied to {n} older messages."].Replace("{n}", N ?? "0", StringComparison.Ordinal),
         _ => null,
     };
 
     private bool forwardingOutside;
+
+    /// <summary>The words beside the box that must be ticked before a rule acts on older mail (D-176).</summary>
+    private string ApplyConfirmText(string forwardTo) => trial is null ? string.Empty
+        : (forwardTo.Length > 0
+            ? L["I understand this saves the rule and acts on {n} older messages now, and sends a copy of each to {address}."].Replace("{address}", forwardTo, StringComparison.Ordinal)
+            : L["I understand this saves the rule and acts on {n} older messages now."]).Replace("{n}", MailboxService.Count(trial.Matches), StringComparison.Ordinal);
 
     private string TrialText => trial is null ? string.Empty
         : trial.Matches == 0 ? L["It would not have moved any message."]
@@ -254,9 +270,13 @@
         rules = await Mail.ListRulesAsync(mailboxId.Value);
         forwardingOutside = await Mail.IsIndividualAsync(mailboxId.Value) || (await Mail.MailPolicyOfAsync((await Mail.TenantOfAsync(mailboxId.Value)) ?? Guid.Empty)).ForwardingOutside;
         own = (await Mail.ListFoldersAsync(mailboxId.Value)).Where(f => !MailboxService.StandardFolders.Contains(f.Name)).ToList();
-        if (Selected is MailRule s && TrialFlag == "1")
+        if (TrialFlag == "1")
         {
-            trial = await Mail.TryRuleAsync(mailboxId.Value, s, apply: false);
+            draft = await Mail.RuleDraftAsync(mailboxId.Value);
+            if ((Draft ?? Selected) is MailRule tried)
+            {
+                trial = await Mail.TryRuleAsync(mailboxId.Value, tried, apply: false);
+            }
         }
     }
 }

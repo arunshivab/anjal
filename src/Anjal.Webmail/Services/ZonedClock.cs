@@ -271,6 +271,27 @@ public sealed class ZonedClock
         return local.Date == today.AddDays(-1) ? this.Name("Yesterday") : this.List(at, now);
     }
 
+    /// <summary>
+    /// The day of a time still to come (DEF-152, rc.23): Today, Tomorrow, the weekday within the
+    /// coming week, otherwise the date. The snooze menu's labels said "Today" for every preset.
+    /// </summary>
+    /// <param name="at">The moment, now or later.</param>
+    /// <param name="now">Now.</param>
+    /// <returns>For example Today, Tomorrow, Sat or 2 Nov 2026.</returns>
+    public string AheadDay(DateTimeOffset at, DateTimeOffset now)
+    {
+        DateTime day = this.Local(at).Date;
+        DateTime today = this.Local(now).Date;
+        int ahead = (day - today).Days;
+        return ahead switch
+        {
+            <= 0 => this.Name("Today"),
+            1 => this.Name("Tomorrow"),
+            < 7 => this.Name(this.Local(at).ToString("ddd", En)),
+            _ => this.Date(at),
+        };
+    }
+
     // A day's or month's name in the person's language.
     private string Name(string english) => this.names is null ? english : this.names[english];
 

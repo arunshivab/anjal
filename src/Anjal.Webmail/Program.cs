@@ -360,6 +360,29 @@ public static class Program
             }
             await next(http).ConfigureAwait(false);
         });
+        // rc.23 (item 89, D-186; DEF-150): a page that does not exist answers 404 with a page in
+        // Anjal's look - before routing, so the request re-run at /not-found is routed again. Only
+        // for a browser asking for a page: the API and the scripts' own requests keep their bare 404.
+        app.UseWhen(
+            http => HttpMethods.IsGet(http.Request.Method)
+                && !http.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase)
+                && http.Request.Headers.Accept.ToString().Contains("text/html", StringComparison.OrdinalIgnoreCase),
+            branch => branch.UseStatusCodePagesWithReExecute("/not-found"));
+        app.Use(async (http, next) =>
+        {
+            // The page is drawn as an ordinary page and the 404 put back as the headers go out:
+            // a page drawn under a 404 is discarded by Blazor and sent empty.
+            if (http.Response.StatusCode == StatusCodes.Status404NotFound && http.Request.Path.Equals("/not-found", StringComparison.Ordinal))
+            {
+                http.Response.StatusCode = StatusCodes.Status200OK;
+                http.Response.OnStarting(() =>
+                {
+                    http.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return Task.CompletedTask;
+                });
+            }
+            await next(http).ConfigureAwait(false);
+        });
         app.UseRouting();
 
         // Any unhandled fault - a database outage, most likely - gets a page
@@ -480,6 +503,7 @@ public static class Program
             await next().ConfigureAwait(false);
         });
 
+
         app.UseAuthentication();
 
         // rc.13: "leaves nothing behind" - no page of a signed-in mailbox is kept
@@ -579,6 +603,11 @@ public static class Program
         // rc.22.2: the help guide's pictures (the account flow chart). Found by a test: without this
         // the help page's /help/{ArticleId} route answered the picture's address with HTML.
         app.MapGet("/help/{file:regex(^[a-z0-9-]+\\.svg$)}", (string file, HttpContext http) => Asset("help/" + file, http));
+
+        // rc.23 (item 89, D-186): search engines keep out of the mail; the help guide may be found.
+        app.MapGet("/robots.txt", () => Results.Text(RobotsTxt, "text/plain; charset=utf-8"));
+        // DEF-125 (rc.23): where to report a security problem (RFC 9116).
+        app.MapGet("/.well-known/security.txt", (HostInfo host) => Results.Text(SecurityTxt(host.Name, DateTimeOffset.UtcNow), "text/plain; charset=utf-8"));
 
         ContactEndpoints.Map(app);
         TodayEndpoints.Map(app);
@@ -1630,7 +1659,9 @@ public static class Program
                 return Results.Redirect("/sign-in");
             }
             await svc.SetWelcomeDoneAsync(mailboxId.Value, ct).ConfigureAwait(false);
-            return Results.Redirect(string.Equals(tour, "1", StringComparison.Ordinal) ? "/dashboard/today#tour" : LocalPath.Safe(back));   // rc.16 [6j]: the tour starts on Today
+            // DEF-132 (rc.23): the address carries ?tour=1 as well as #tour - the page script sends this
+            // form itself and a followed redirect loses the #part, so the tour never started.
+            return Results.Redirect(string.Equals(tour, "1", StringComparison.Ordinal) ? "/dashboard/today?tour=1#tour" : LocalPath.Safe(back));   // rc.16 [6j]: the tour starts on Today
         }).RequireAuthorization();
 
         // rc.13 (board SetMail): how long Send waits for Undo, and when Trash is emptied.
@@ -2036,6 +2067,33 @@ public static class Program
         }
         note = "QUIC is not available on this system (Linux needs libmsquic from packages.microsoft.com and IPv6 enabled - DEPLOY.md section 1d)";
         return false;
+    }
+
+    /// <summary>rc.23 (item 89, D-186): the mail stays out of search engines; only the help guide may be listed.</summary>
+    public const string RobotsTxt = "User-agent: *\nAllow: /help\nDisallow: /\n";
+
+    /// <summary>
+    /// DEF-125 (rc.23): the security.txt of RFC 9116 - the contact is abuse@ of the server's own
+    /// domain (always answered, rc.8), and the file expires a year from today so it is never stale.
+    /// </summary>
+    /// <param name="hostName">The server's host name, such as mail.anjal.co.in.</param>
+    /// <param name="now">Now.</param>
+    /// <returns>The file's text.</returns>
+    public static string SecurityTxt(string hostName, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(hostName);
+        return SecurityTxtFor(hostName, now);
+    }
+
+    private static string SecurityTxtFor(string hostName, DateTimeOffset now)
+    {
+        string host = hostName.Trim().TrimEnd('.').ToLowerInvariant();
+        int dot = host.IndexOf('.', StringComparison.Ordinal);
+        string domain = host.StartsWith("mail.", StringComparison.Ordinal) && dot > 0 ? host[(dot + 1)..] : host;
+        return "Contact: mailto:abuse@" + domain + "\n"
+            + "Expires: " + now.UtcDateTime.AddYears(1).ToString("yyyy-MM-dd'T'00:00:00'Z'", CultureInfo.InvariantCulture) + "\n"
+            + "Preferred-Languages: en\n"
+            + "Canonical: https://" + host + "/.well-known/security.txt\n";
     }
 
     private static IResult Asset(string relativePath, HttpContext http)

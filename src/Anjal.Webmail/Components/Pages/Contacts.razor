@@ -26,7 +26,8 @@
                 <span class="lh-grow"></span>
                 @if (!OrgTab)
                 {
-                <a class="iconbtn" href="@(Groups ? "/contacts?tab=groups&new=1" : "/contacts?new=1")" title="@(Groups ? L["New group"] : L["New contact"])" aria-label="@(Groups ? L["New group"] : L["New contact"])"><LipiIcon Name="plus" Size="17" /></a>
+                @* DEF-144 (rc.23): the add button says what it adds. *@
+                <a class="btn btn-s btn-sm" href="@(Groups ? "/contacts?tab=groups&new=1" : "/contacts?new=1")" title="@(Groups ? L["Make a new group of people to write to together."] : L["Save a new person to your contacts."])"><LipiIcon Name="plus" Size="15" />@(Groups ? L["New group"] : L["Add person"])</a>
                 }
             </div>
             @* rc.16, design review [6h]: People, Groups and the Organisation's own directory, as tabs. *@
@@ -115,9 +116,11 @@
                             <input type="hidden" name="id" value="@(OpenGroup?.Id.ToString() ?? string.Empty)" />
                             <h1 class="lsubj">@(OpenGroup is null ? L["New group"] : g.Name)</h1>
                             <label class="cfl">@L["Name"]<input class="railinp" name="name" value="@g.Name" required /></label>
-                            <label class="cfl">@L["People (one address a line, or separated by commas)"]
-                                <textarea class="railinp cmembers" name="members" rows="10">@string.Join("\n", g.Addresses)</textarea>
+                            @* DEF-142 (rc.23): a saved contact's name offers their address as it is typed, and a name is understood on saving. *@
+                            <label class="cfl">@L["People (a name or an address a line, or separated by commas)"]
+                                <textarea class="railinp cmembers" name="members" rows="10" data-group-members>@string.Join("\n", g.Addresses)</textarea>
                             </label>
+                            <div class="gsuggest" data-group-suggest role="listbox" aria-label="@L["Saved contacts"]" hidden></div>
                             <div class="cbtns">
                                 <button type="submit" class="btn btn-p" data-needs-server>@L["Save group"]</button>
                                 @if (OpenGroup is not null)
@@ -222,7 +225,8 @@
                                 <summary class="btn btn-s">@L["Import (vCard, CSV)"]</summary>
                                 <form method="post" action="/contacts/import" enctype="multipart/form-data" class="pmenu-body">
                                     <AntiforgeryToken />
-                                    <input type="file" name="file" accept=".csv,.vcf,text/csv,text/vcard" required aria-label="@L["File to import"]" />
+                                    @* DEF-143 (rc.23): Anjal's own button for choosing the file, with the chosen name beside it. *@
+                                    <span class="filepick"><label class="btn btn-s btn-sm filebtn" title="@L["Choose the CSV or vCard file to import."]"><LipiIcon Name="upload" Size="15" />@L["Choose file"]<input type="file" name="file" accept=".csv,.vcf,text/csv,text/vcard" required aria-label="@L["File to import"]" data-filename-for="importname" /></label><span class="filename" id="importname">@L["No file chosen"]</span></span>
                                     <p class="pm-note">@L["A CSV with a header row (first name, last name, address, organisation, phone), or vCards. Addresses already saved only gain details they lacked."]</p>
                                     <button type="submit" class="btn btn-p btn-sm" data-needs-server>@L["Import"]</button>
                                 </form>

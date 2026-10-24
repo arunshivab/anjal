@@ -206,7 +206,9 @@ public sealed class Rc14ConsoleFlowTests : IAsyncLifetime, IDisposable
             Environment.SetEnvironmentVariable("ANJAL_OPERATORS", null);
             HttpClient admin = this.Client();
             await SignInAsync(admin, "arun", "correct horse battery");
-            Assert.Contains("Only an operator of this Anjal service can open this.", await admin.GetStringAsync("ops"), StringComparison.Ordinal);
+            HttpResponseMessage refused = await admin.GetAsync("ops");
+            Assert.Equal(HttpStatusCode.Forbidden, refused.StatusCode);   // DEF-124 (rc.23)
+            Assert.Contains("Only an operator of this Anjal service can open this.", await refused.Content.ReadAsStringAsync(), StringComparison.Ordinal);
             string token = Token(await admin.GetStringAsync("settings"));
             Assert.Equal(HttpStatusCode.NotFound, (await Post(admin, "ops/health/summary", token)).StatusCode);
 

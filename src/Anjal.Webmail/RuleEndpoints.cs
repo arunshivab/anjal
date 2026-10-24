@@ -57,16 +57,33 @@ internal static class RuleEndpoints
                 Flag = form["flag"] == "1",
                 ForwardTo = form["forwardTo"].ToString(),
             };
+            string here = existing == Guid.Empty ? "new" : existing.ToString();
+            // D-176 (rc.23, DEF-137): Try saves nothing and does nothing - it keeps the rule as typed and
+            // lists what it would match in the last 30 days.
+            if (form["trial"] == "1")
+            {
+                await svc.KeepRuleDraftAsync(mailboxId.Value, rule, ct).ConfigureAwait(false);
+                return Results.Redirect($"/settings/rules?rule={here}&trial=1");
+            }
+            // The real action on older mail is its own button, and the person ticks that they know it is real.
+            bool applyNow = form["applyNow"] == "1";
+            if (applyNow && form["applyConfirm"] != "1")
+            {
+                await svc.KeepRuleDraftAsync(mailboxId.Value, rule, ct).ConfigureAwait(false);
+                return Results.Redirect($"/settings/rules?rule={here}&trial=1&problem={Uri.EscapeDataString("Tick the box to confirm that older mail is acted on now. Nothing was done.")}");
+            }
             string? error = await svc.SaveRuleAsync(mailboxId.Value, rule, ct).ConfigureAwait(false);
             if (error is not null)
             {
-                return Results.Redirect($"/settings/rules?rule={(existing == Guid.Empty ? "new" : existing.ToString())}&problem={Uri.EscapeDataString(error)}");
+                return Results.Redirect($"/settings/rules?rule={here}&problem={Uri.EscapeDataString(error)}");
             }
-            if (form["applyExisting"] == "1")
+            await svc.ForgetRuleDraftAsync(mailboxId.Value, ct).ConfigureAwait(false);
+            if (applyNow)
             {
-                await svc.TryRuleAsync(mailboxId.Value, rule, apply: true, ct).ConfigureAwait(false);
+                RuleTrial done = await svc.TryRuleAsync(mailboxId.Value, rule, apply: true, ct).ConfigureAwait(false);
+                return Results.Redirect($"/settings/rules?rule={rule.Id}&notice=applied&n={done.Matches.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
             }
-            return Results.Redirect($"/settings/rules?rule={rule.Id}&notice=saved" + (form["trial"] == "1" ? "&trial=1" : string.Empty));
+            return Results.Redirect($"/settings/rules?rule={rule.Id}&notice=saved");
         }).RequireAuthorization();
 
         app.MapPost("/settings/rules/{id:guid}/delete", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>

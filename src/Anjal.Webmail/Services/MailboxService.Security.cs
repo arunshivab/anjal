@@ -937,6 +937,9 @@ public sealed partial class MailboxService
                 EnvelopeFrom = string.Empty,
                 EnvelopeTo = new[] { to },
                 RawBytes = raw,
+                // DEF-118 (rc.23): Anjal's own mail never crossed a network, so it is recorded as
+                // mail from this server - not as "arrived without encryption".
+                AuthenticatedUser = "anjal",
                 AnjalSecurityMail = security,
             }, ct).ConfigureAwait(false);
             return delivered.Outcome == Anjal.Smtp.DeliveryOutcome.Accepted ? null : "The code could not be delivered. Ask your administrator.";

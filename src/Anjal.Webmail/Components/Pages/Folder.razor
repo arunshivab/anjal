@@ -1,6 +1,7 @@
 @page "/folder/{FolderName}"
 @attribute [Authorize]
 @inject MailboxService Mail
+@inject NavigationManager Nav
 @inject Words Words
 
 <PageTitle>@(Writing ? L["New message"] : FolderLabel) — Anjal</PageTitle>
@@ -596,6 +597,11 @@ else
             "Archive" => ("archive", L["Nothing archived."], L["Archive keeps mail you are done with, out of the Inbox but never lost. Press e on a message."], null, null),
             "Junk" => ("security", L["No junk."], L["Mail that looks unwanted comes here first, and empties itself after its time."], null, null),
             "Trash" => ("trash", L["Trash is empty."], L["Deleted mail waits here for a while before it goes for good."], null, null),
+            // DEF-167 (rc.23): every system folder says what it is for.
+            MailboxService.ScheduledFolder => ("clock", L["Nothing scheduled."], L["Messages you schedule to send later wait here until their time. Schedule one from Compose."], L["Write a message"], "/compose"),
+            MailboxService.SnoozedFolder => ("clock", L["Nothing snoozed."], L["Mail you snooze waits here and comes back to the Inbox at the time you chose."], null, null),
+            Anjal.Mailbox.AttachmentPolicy.QuarantineFolder => ("security", L["Nothing held."], L["Mail held for a virus check waits here until it is checked."], null, null),
+            MailboxService.DmarcFolder => ("security", L["No DMARC reports."], L["Reports from other mail servers about mail sent as your domain are filed here."], null, null),
             _ => ("folder", L["This folder is empty."], L["Move messages here, or make a rule that files them for you."], L["Folders and rules"], "/settings/rules"),
         };
     }
@@ -686,6 +692,14 @@ else
         folder = await Mail.GetFolderAsync(mailboxId.Value, Name);
         if (folder is null)
         {
+            // DEF-149e (rc.23): /folder/DRAFTS is Drafts - a folder named in another case goes to its own address.
+            string? proper = MailboxService.DefaultFolders.FirstOrDefault(n => string.Equals(n, Name, StringComparison.OrdinalIgnoreCase))
+                ?? (await Mail.ListFoldersAsync(mailboxId.Value)).Select(f => f.Name).FirstOrDefault(n => string.Equals(n, Name, StringComparison.OrdinalIgnoreCase));
+            if (proper is not null && !string.Equals(proper, Name, StringComparison.Ordinal))
+            {
+                Nav.NavigateTo("/folder/" + Uri.EscapeDataString(proper) + (Http?.Request.QueryString.Value ?? string.Empty));
+                return;
+            }
             // A folder that does not exist is a 404, so links to it are not
             // mistaken for healthy ones (DEF-018). A system folder a new
             // mailbox has not used yet is simply empty, not missing.

@@ -73,6 +73,8 @@
     try { fn(); } catch (err) { if (window.console && window.console.error) { window.console.error(err); } }
   }
   function page(fn) { PAGE.push(fn); runSafely(fn); }
+  // The tab's own icon (the mark with the letter of the language shown): used for notifications.
+  function anjalIcon() { var l = document.querySelector("link[rel='icon']"); return l ? l.href : "/logos/anjal-favicon-latn.svg"; }
 
   var swapper = (function () {
     var able = !!(window.fetch && window.DOMParser && window.history && window.history.pushState && window.FormData);
@@ -362,6 +364,14 @@
     var row = a.matches(".mlist a[data-open]") ? a.closest(".mrow") : null;
     if (row && row.getAttribute("data-message") && !/^\/draft\//.test(a.getAttribute("href") || "")) { return; }
     var raw = a.getAttribute("href") || "";
+    // DEF-146 (rc.23): every page has <base href="/">, so a bare #part (the phone's "N checks" strip,
+    // the sheets' Close, Skip to content, the help's "On this page") would go to the home page,
+    // Today. It stays on this page instead, as the link means.
+    if (raw.length > 1 && raw.charAt(0) === "#") {
+      e.preventDefault();
+      if (window.location.hash !== raw) { window.location.hash = raw.slice(1); }
+      return;
+    }
     if (raw.charAt(0) === "#" || /^(mailto|tel|javascript):/i.test(raw)) { return; }
     var url;
     try { url = new URL(a.href, window.location.href); } catch (x) { return; }
@@ -1841,7 +1851,14 @@
     scope.on(document, "keydown", function (e) {
       if (running && e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(); }
     }, true);
-    if (window.location.hash === "#tour") { start(); }
+    // DEF-132 (rc.23): "Show me around" is a form the page sends itself, and the followed redirect
+    // drops the #part, so ?tour=1 also starts it (and is taken out of the address).
+    var askedTour = /[?&]tour=1(&|$)/.test(window.location.search);
+    if (askedTour && window.history && window.history.replaceState) {
+      var clean = window.location.pathname + window.location.search.replace(/([?&])tour=1(&|$)/, "$1").replace(/[?&]$/, "");
+      window.history.replaceState(window.history.state, "", clean + "#tour");
+    }
+    if (askedTour || window.location.hash === "#tour") { start(); }
     scope.on(window, "hashchange", function () { if (window.location.hash === "#tour") { start(); } });
   });
 
@@ -2510,7 +2527,8 @@
         .then(function (m) {
           if (!m || !m.id) { return; }
           if (scope === "contacts" && !m.contact) { return; }
-          var n = new Notification(m.from || "Anjal", { body: m.subject || "", tag: "anjal-" + m.id, icon: "/logos/anjal-favicon.svg" });
+          // rc.23: the icon is the tab's own, with the letter of the language shown.
+          var n = new Notification(m.from || "Anjal", { body: m.subject || "", tag: "anjal-" + m.id, icon: anjalIcon() });
           n.onclick = function () { window.focus(); window.location.href = "/message/" + m.id; n.close(); };
         })
         .catch(function () { /* nothing to show */ });
@@ -2820,6 +2838,16 @@
           notice.hidden = false;
           notice.scrollIntoView({ block: "nearest" });
         }
+        return;
+      }
+      // DEF-140 (rc.23): files of any size show a moving bar while they go up; it goes with the page.
+      var bar = $("[data-uploadbar]", input.form);
+      if (bar && total > 0) {
+        var mb = total / (1024 * 1024);
+        var size = mb >= 1 ? mb.toFixed(1) + " MB" : Math.max(1, Math.round(total / 1024)) + " KB";
+        var text = $("[data-uploadbar-text]", bar);
+        if (text) { text.textContent = W("Sending {size} of files… keep this page open.").replace("{size}", size); }
+        bar.hidden = false;
       }
     });
   });
@@ -2885,6 +2913,9 @@
       parts.push(ed ? ed.innerHTML : (area ? area.value : ""));
       var files = form.querySelector("input[type='file'][name='attachments']");
       parts.push(files && files.files ? String(files.files.length) : "0");
+      // DEF-149b (rc.23): an address typed but not yet made a chip counts too - on a phone the
+      // close button left without asking while autosave had already kept a draft.
+      $$("[data-recips] input:not([type='hidden'])", form).forEach(function (i) { parts.push(i.value.trim()); });
       return parts.join("\u0001");
     }
     var start = snapshot();
@@ -3055,6 +3086,21 @@
       }
       say();
     });
+    // DEF-160 (rc.23): one notification now - if none appears, the browser or the computer is holding them back.
+    var test = $("[data-notify-test]", form);
+    if (test) {
+      test.addEventListener("click", function () {
+        if (!("Notification" in window)) { say(); return; }
+        function show() {
+          if (Notification.permission !== "granted") { say(); if (state && Notification.permission === "denied") { state.hidden = false; } return; }
+          try {
+            new Notification("Anjal", { body: W("Notifications from Anjal will look like this. If none appeared, check that Focus Assist or Do Not Disturb is off on this computer."), icon: anjalIcon(), tag: "anjal-test" });
+          } catch (err) { /* this browser shows notifications only from a service worker */ }
+          if (state) { state.textContent = W("A test notification was sent. If none appeared, check that Focus Assist or Do Not Disturb is off on this computer."); state.hidden = false; }
+        }
+        if (Notification.permission === "default") { Notification.requestPermission().then(show); } else { show(); }
+      });
+    }
     say();
   });
   });
@@ -3113,6 +3159,112 @@
     input.addEventListener("change", check);
     if (input.value) { check(); }
   });
+  });
+
+  // DEF-166 (rc.23): the first time Compose opens on this browser, one line says where the addresses go.
+  page(function composeFirst() {
+    var line = $("[data-compose-first]");
+    if (!line) { return; }
+    var KEY = "anjal:compose-first-seen";
+    var seen = false;
+    try { seen = window.localStorage.getItem(KEY) === "1"; } catch (err) { seen = true; }
+    if (seen) { return; }
+    line.hidden = false;
+    var ok = $("[data-compose-first-ok]", line);
+    if (ok) {
+      ok.addEventListener("click", function () {
+        line.hidden = true;
+        try { window.localStorage.setItem(KEY, "1"); } catch (err) { /* shown again next time */ }
+      });
+    }
+  });
+
+  // DEF-143 (rc.23): a themed Choose file button shows the chosen file's name beside it.
+  page(function chosenFileNames() {
+    $$("input[type='file'][data-filename-for]").forEach(function (input) {
+      var label = document.getElementById(input.getAttribute("data-filename-for"));
+      if (!label) { return; }
+      var none = label.textContent;
+      input.addEventListener("change", function () {
+        var names = Array.prototype.map.call(input.files || [], function (f) { return f.name; });
+        label.textContent = names.length ? names.join(", ") : none;
+      });
+    });
+  });
+
+  // DEF-142 (rc.23): in a group's People box, a saved contact's name offers their address.
+  page(function groupPeople() {
+    $$("textarea[data-group-members]").forEach(function (box) {
+      var form = box.closest("form");
+      var list = form ? $("[data-group-suggest]", form) : null;
+      if (!list) { return; }
+      var seq = 0;
+      var timer = null;
+      function token() { var m = /[^\n,;]*$/.exec(box.value.slice(0, box.selectionStart)); return m ? m[0] : ""; }
+      function close() { list.hidden = true; list.textContent = ""; }
+      function pick(address) {
+        var end = box.selectionStart;
+        var t = token();
+        var lead = (/^\s*/.exec(t) || [""])[0];
+        var start = end - t.length + lead.length;
+        var rest = box.value.slice(end).replace(/^[^\n,;]*/, "");
+        box.value = box.value.slice(0, start) + address + "\n" + rest.replace(/^\n/, "");
+        var at = start + address.length + 1;
+        box.setSelectionRange(at, at);
+        box.focus();
+        close();
+      }
+      box.addEventListener("input", function () {
+        var q = token().trim();
+        if (q.length < 2 || q.indexOf("@") >= 0) { close(); return; }
+        if (timer) { window.clearTimeout(timer); }
+        timer = window.setTimeout(function () {
+          var mine = ++seq;
+          fetch("/api/contacts?q=" + encodeURIComponent(q), { headers: { "X-Requested-With": "anjal" } })
+            .then(function (r) { return r.ok ? r.json() : []; })
+            .catch(function () { return []; })
+            .then(function (found) {
+              if (mine !== seq) { return; }
+              list.textContent = "";
+              (found || []).slice(0, 6).forEach(function (c) {
+                var b = document.createElement("div");
+                b.tabIndex = -1;
+                b.className = "gsug";
+                b.setAttribute("role", "option");
+                b.textContent = (c.name ? c.name + " " : "") + "<" + c.address + ">";
+                b.title = W("Add {address} to the group").replace("{address}", c.address);
+                b.addEventListener("mousedown", function (e) { e.preventDefault(); pick(c.address); });
+                b.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(c.address); } });
+                list.appendChild(b);
+              });
+              list.hidden = !list.children.length;
+            });
+        }, 140);
+      });
+      box.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { close(); }
+        else if (e.key === "ArrowDown" && !list.hidden && list.firstChild) { e.preventDefault(); list.firstChild.focus(); }
+      });
+      list.addEventListener("keydown", function (e) {
+        var at = document.activeElement;
+        if (e.key === "ArrowDown" && at && at.nextSibling) { e.preventDefault(); at.nextSibling.focus(); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); if (at && at.previousSibling) { at.previousSibling.focus(); } else { box.focus(); } }
+        else if (e.key === "Escape") { close(); box.focus(); }
+      });
+      form.addEventListener("focusout", function () { window.setTimeout(function () { if (!form.contains(document.activeElement) || document.activeElement === box) { return; } if (!list.contains(document.activeElement)) { close(); } }, 0); });
+    });
+  });
+
+  // DEF-126 (rc.23): a date of birth too recent says the rule in words, not the browser's
+  // "Value must be 19-10-2008 or earlier".
+  page(function adultDates() {
+    $$("input[data-adult]").forEach(function (input) {
+      var words = input.getAttribute("data-adult");
+      input.addEventListener("invalid", function () {
+        if (input.validity.rangeOverflow || (input.validity.customError && input.validationMessage === words)) { input.setCustomValidity(words); }
+      });
+      input.addEventListener("input", function () { input.setCustomValidity(""); });
+    });
   });
 
   // rc.22: Generate a first password in the Fill in everything form - four words and a number, so it can be read out.

@@ -46,7 +46,9 @@ internal static class AuthEndpoints
         {
             string client = ClientOf(http);
             // rc.22 (item 33): "Add another account" keeps the account signed in now; switching is in the initials menu.
-            if (add == "1" && device != "shared")
+            // DEF-138 (rc.23): so does any sign-in on a browser that is already signed in - an account
+            // is added, never silently replaced, whichever page the form came from.
+            if ((add == "1" || http.User.Identity?.IsAuthenticated == true) && device != "shared")
             {
                 await KeepCurrentAccountAsync(http).ConfigureAwait(false);
             }

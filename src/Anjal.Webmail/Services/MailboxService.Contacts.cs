@@ -436,7 +436,33 @@ public sealed partial class MailboxService
         {
             return "Give the group a name.";
         }
-        var members = group.Addresses
+        // DEF-142 (rc.23): a saved contact's name stands for their address ("Ramesh" or "Ramesh Kumar").
+        // A name that matches nobody, or more than one person, is said rather than dropped.
+        IReadOnlyList<Contact> saved = group.Addresses.Any(a => !a.Contains('@', StringComparison.Ordinal))
+            ? await this.ListContactsAsync(mailboxId, ct).ConfigureAwait(false)
+            : Array.Empty<Contact>();
+        var typed = new List<string>();
+        foreach (string entry in group.Addresses)
+        {
+            string e = entry.Trim();
+            if (e.Length == 0 || e.Contains('@', StringComparison.Ordinal))
+            {
+                typed.Add(e);
+                continue;
+            }
+            List<Contact> named = saved.Where(c => string.Equals(c.DisplayName, e, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (named.Count == 0)
+            {
+                named = saved.Where(c => string.Equals(c.FirstName, e, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+            if (named.Count != 1)
+            {
+                return (named.Count == 0 ? "No saved contact is called {name}. Type the address, or save them as a contact first." : "More than one contact is called {name}. Type the address instead.")
+                    .Replace("{name}", e, StringComparison.Ordinal);
+            }
+            typed.Add(named[0].Address);
+        }
+        var members = typed
             .SelectMany(a => AddressParser.Parse(a))
             .Select(a => a.Address)
             .Distinct(StringComparer.OrdinalIgnoreCase)
