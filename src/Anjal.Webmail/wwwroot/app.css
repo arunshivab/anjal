@@ -2072,7 +2072,7 @@ textarea.railinp { resize: vertical; }
 .codelist code { font-family: var(--font-mono); font-size: 16px; letter-spacing: 0.08em; }
 .helplinks { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 16px; }
 /* Beside the card. */
-.setaside { padding: 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.setaside { padding: 16px; overflow-y: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 10px; }
 .asidehead { margin: 4px 0 4px; font-size: 13px; font-weight: 700; color: var(--ink-muted); }
 .asidecard { display: flex; flex-direction: column; gap: 3px; padding: 11px 14px; border-radius: 12px; background: var(--surface-100); border: 1px solid var(--line); font-size: 14px; line-height: 1.45; }
 .asidecard > span { font-size: 13px; color: var(--ink-muted); }
@@ -4191,6 +4191,9 @@ html[data-zoom="80"] { --z: 0.8; zoom: 0.8; }
 .legalfoot { margin-top: 30px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; }
 .linkbtn.authlink { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; }
 .asideseg { margin: 0 0 14px; }
+/* rc.23 (CI screen check "align"): a side-panel confirm takes the panel's width, and the panel keeps room for its scroll bar
+   (.setaside, scrollbar-gutter), so a button keeps its size and place when its confirm opens. */
+.asideconfirm { display: block; width: 100%; }
 .asideconfirm > summary { list-style: none; display: inline-flex; cursor: pointer; }
 .asideconfirm > summary::-webkit-details-marker { display: none; }
 .asideconfirm[open] > summary { margin-bottom: 8px; }

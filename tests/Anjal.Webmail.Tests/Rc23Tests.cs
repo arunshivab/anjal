@@ -521,6 +521,10 @@ public sealed class Rc23Tests : IAsyncLifetime, IDisposable
         await SignInAsync(admin, "arun@sgh.in");
         string page = await admin.GetStringAsync("org/apps?sel=" + appId);
         Assert.Contains("asidebtn\">Retire this application</summary>", page, StringComparison.Ordinal);
+        // The confirm box takes the panel's width, so the button does not move when it opens (CI screen check).
+        string css = await admin.GetStringAsync("app.css");
+        Assert.Contains(".asideconfirm { display: block; width: 100%; }", css, StringComparison.Ordinal);
+        Assert.Contains(".setaside { padding: 16px; overflow-y: auto; scrollbar-gutter: stable;", css, StringComparison.Ordinal);
         Assert.DoesNotContain("asidebtn\">Remove from the list</summary>", page, StringComparison.Ordinal);   // it still has a key
         Assert.Equal("This application still has keys. Retire it first, so its keys stop working.", await this.svc.RemoveAppAsync(this.sgh, appId!));
         HttpResponseMessage res = await Post(admin, "org/apps/" + appId + "/retire", Token(page), ("value", "QA Test App"));

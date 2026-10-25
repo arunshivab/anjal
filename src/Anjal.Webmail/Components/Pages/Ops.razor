@@ -476,7 +476,7 @@ else
                 <label class="setlbl" for="dresult">@L["Result"]</label>
                 <select id="dresult" class="setsel" name="result"><option value="passed">@L["Everything came back"]</option><option value="failed">@L["Something failed"]</option></select>
                 <label class="setlbl" for="dnote">@L["Note"]</label>
-                <input id="dnote" class="inp" name="note" maxlength="300" placeholder="@L["What was restored, or what failed"]" />
+                <textarea id="dnote" class="inp" name="note" rows="2" maxlength="300" placeholder="@L["What was restored, or what failed"]"></textarea>
                 <button type="submit" class="btn btn-s asidebtn">@L["Record the drill"]</button>
             </form>
             break;
