@@ -24,6 +24,7 @@ else if (Docked)
         @if (Patient is not null) { <input type="hidden" name="patientOk" value="1" /> }
             <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
         <input type="hidden" name="inReplyTo" value="@inReplyTo" />
+        <input type="hidden" name="references" value="@references" />
         <input type="hidden" name="back" value="@Back" />
         <input type="hidden" name="next" value="" data-next />
         <input type="hidden" name="undo" value="" data-undo />
@@ -106,6 +107,7 @@ else
         @if (Patient is not null) { <input type="hidden" name="patientOk" value="1" /> }
             <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
         <input type="hidden" name="inReplyTo" value="@inReplyTo" />
+        <input type="hidden" name="references" value="@references" />
         <input type="hidden" name="back" value="@Back" />
         <input type="hidden" name="next" value="" data-next />
         <input type="hidden" name="undo" value="" data-undo />
@@ -373,6 +375,8 @@ else
     [SupplyParameterFromQuery(Name = "replyall")] private string? ReplyAllText { get; set; }
     [SupplyParameterFromQuery(Name = "forward")] private string? ForwardText { get; set; }
     [SupplyParameterFromQuery(Name = "forwardatt")] private string? ForwardAttText { get; set; }
+    // rc.24 (brief 10f): "Reply to both" - the other reply to the same mail; its people join the answer.
+    [SupplyParameterFromQuery(Name = "also")] private string? AlsoText { get; set; }
     private Guid? ForwardAtt => ReplyKind is not null ? null : ParseId(ForwardAttText);
     private Guid? Reply => ReplyKind is not null ? (ReplyKind == "reply" ? ReplyId : null) : ParseId(ReplyText);
     private Guid? ReplyAll => ReplyKind is not null ? (ReplyKind == "replyall" ? ReplyId : null) : ParseId(ReplyAllText);
@@ -403,6 +407,7 @@ else
     private string body = string.Empty;
     private string bodyHtml = string.Empty;
     private string inReplyTo = string.Empty;
+    private string references = string.Empty;
     private bool full;
     private int mergeLimit = MailboxService.DefaultDailyMergeLimit;
     private bool mayMerge;
@@ -439,6 +444,7 @@ else
         body = BodyQuery ?? string.Empty;
         bodyHtml = string.Empty;
         inReplyTo = string.Empty;
+        references = string.Empty;
         carrySource = null;
         carried = System.Array.Empty<AttachmentView>();
 
@@ -487,6 +493,7 @@ else
                 body = loaded.Body;
                 bodyHtml = loaded.BodyHtml;
                 inReplyTo = loaded.InReplyTo;
+                references = loaded.References;
                 carrySource = draft;
                 carried = await Mail.ListAttachmentsAsync(mailboxId.Value, draft) ?? System.Array.Empty<AttachmentView>();
             }
@@ -532,6 +539,12 @@ else
                     subject = prefill.Subject;
                     (body, bodyHtml) = await Mail.StartBodyAsync(mailboxId.Value, prefill.Body);
                     inReplyTo = prefill.InReplyTo;
+                    references = prefill.References;
+                    if (Forward is null && ParseId(AlsoText) is Guid also && also != source.Value
+                        && await Mail.PrefillAsync(mailboxId.Value, also, MailboxService.PrefillKind.ReplyAll) is ComposePrefill other)
+                    {
+                        cc = MailboxService.MergeAddresses(to, cc, other.To + (other.Cc.Length > 0 ? ", " + other.Cc : string.Empty));
+                    }
                 }
                 if (Forward is Guid original)
                 {

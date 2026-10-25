@@ -104,6 +104,8 @@ public sealed class Des11FixesTests : IAsyncLifetime, IDisposable
     {
         Environment.SetEnvironmentVariable("ANJAL_OPERATORS", "arun@anjal.co.in");
         MailboxService svc = this.app.Services.GetRequiredService<MailboxService>();
+        // rc.24 (D-177): one mail at a time is now the operator's choice; the default is the daily digest (Rc24Tests).
+        await svc.SetAlertModeAsync(MailboxService.AlertEach);
         DateTimeOffset monday = new(2026, 10, 12, 9, 30, 0, TimeSpan.FromHours(5.5));
         Assert.Equal(DayOfWeek.Monday, monday.DayOfWeek);
 
@@ -169,8 +171,9 @@ public sealed class Des11FixesTests : IAsyncLifetime, IDisposable
         var old = new OpsAlertState { LastSummaryDay = "2026-10-12" };
         old.Open["No restore drill recorded"] = new OpenAlert { Text = "No restore drill recorded - Record each drill on the Service health page", First = tuesday.AddHours(-2), LastSent = tuesday.AddHours(-2) };
         await this.store.SetServiceRecordAsync(MailboxService.OpsAlertsKind, System.Text.Json.JsonSerializer.Serialize(old));
-        Assert.Equal(0, await svc.OperatorMailAsync(this.root, tuesday));
-        Assert.DoesNotContain(this.Subjects(), s => s.StartsWith("Anjal ", StringComparison.Ordinal));
+        await svc.OperatorMailAsync(this.root, tuesday);
+        // No alert and no "resolved" for what was taken over (rc.24: the day's digest may go, D-177).
+        Assert.DoesNotContain(this.Subjects(), s => s.StartsWith("Anjal alert", StringComparison.Ordinal) || s.StartsWith("Anjal resolved", StringComparison.Ordinal));
     }
 
     [Fact]

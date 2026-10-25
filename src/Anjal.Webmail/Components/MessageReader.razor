@@ -54,6 +54,63 @@ else
             {
                 <p class="readcat"><span class="chip slot-@shown.Row.Slot"><i></i>@shown.Row.Name</span></p>
             }
+            @* rc.24 (item 68, brief 10a and 10f): the conversation around the open mail - the earlier mails folded
+               into rows above it, the later ones below, each with its letter; who answered whom from the headers only. *@
+            @if (thread is not null && OpenMail is ThreadMail om)
+            {
+                <div class="cvhead" data-thread>
+                    <span class="tcount">@L["{n} mails"].Replace("{n}", MailboxService.Count(thread.Mails.Count), StringComparison.Ordinal) · @L["{n} people"].Replace("{n}", MailboxService.Count(thread.People.Count), StringComparison.Ordinal)</span>
+                    @if (thread.Branches)
+                    {
+                        <span class="tswitch" role="group" aria-label="@L["Order"]">
+                            <a class="@(TreeMode ? null : "on")" href="@SwitchHref(false)" aria-current="@(TreeMode ? null : "true")">@L["Time order"]</a>
+                            <a class="@(TreeMode ? "on" : null)" href="@SwitchHref(true)" aria-current="@(TreeMode ? "true" : null)">@L["Reply tree"]</a>
+                        </span>
+                    }
+                </div>
+                @if (Before.Count > 0)
+                {
+                    <ol class="trows tbefore" aria-label="@L["Earlier mails"]">
+                        @if (Ordered.Count > ThreadFoldAbove && Before.Count > 3)
+                        {
+                            @Row(Before[0])
+                            <li class="tearlier">
+                                <details>
+                                    <summary>@L["Show {n} earlier mails"].Replace("{n}", MailboxService.Count(Before.Count - 3), StringComparison.Ordinal)</summary>
+                                    <ol class="trows">
+                                        @foreach (ThreadMail m in Before.Skip(1).Take(Before.Count - 3))
+                                        {
+                                            @Row(m)
+                                        }
+                                    </ol>
+                                </details>
+                            </li>
+                            @Row(Before[^2])
+                            @Row(Before[^1])
+                        }
+                        else
+                        {
+                            @foreach (ThreadMail m in Before)
+                            {
+                                @Row(m)
+                            }
+                        }
+                    </ol>
+                }
+                <p class="topenhead @(om.MainLine ? null : "branch") @(om.LinkUnknown ? "unk" : null)" style="@IndentStyle(om)">
+                    <span class="cvl">@om.Letter</span>
+                    <b>@(om.IsOwn ? L["You"] : om.From)</b>
+                    <span class="tmeta">@clock.List(om.At, DateTimeOffset.UtcNow)</span>
+                    @if (NoteOf(om) is string openNote)
+                    {
+                        <span class="tnote">@openNote</span>
+                    }
+                    @if (TagOf(om) is string openTag)
+                    {
+                        <span class="ttag">@openTag</span>
+                    }
+                </p>
+            }
 
                 @if (unsubscribe is not null)
                 {
@@ -92,6 +149,44 @@ else
                         <AntiforgeryToken />
                         <button type="submit" class="linkbtn" data-needs-server>@L["Trust this sender"]</button>
                     </form>
+                </div>
+            }
+            @* rc.24 (items 93 and 94, D-196 and D-197): the whole mail flagged by ClamAV, links switched off or
+               needing care, and files Anjal delivered with a warning. *@
+            @if (view.MailWarning is string flagged)
+            {
+                <div class="notice n-err readnotice" data-mail-warning>
+                    <LipiIcon Name="warning" Size="16" />
+                    <span><b>@L["Anjal's virus scanner flagged this mail as dangerous."]</b> @L["Its links are switched off. Do not open its files, and do not answer it with passwords or personal details."] <i class="sig">(@flagged)</i></span>
+                </div>
+            }
+            else if (view.Links.Count(l => l.Verdict == LinkVerdict.Bad) is int off and > 0)
+            {
+                <div class="notice n-err readnotice" data-links-off>
+                    <LipiIcon Name="warning" Size="16" />
+                    <span><b>@(off == 1 ? L["Anjal switched off 1 link to a known dangerous address."] : L["Anjal switched off {n} links to known dangerous addresses."].Replace("{n}", MailboxService.Count(off), StringComparison.Ordinal))</b> @L["The words stay; the link does not work."]</span>
+                </div>
+            }
+            @if (view.MailWarning is null && view.Links.Where(l => l.Verdict == LinkVerdict.Suspicious).ToList() is { Count: > 0 } careful)
+            {
+                <div class="notice n-warn readnotice" data-links-care>
+                    <LipiIcon Name="info" Size="16" />
+                    <span><b>@(careful.Count == 1 ? L["1 link in this mail needs care."] : L["{n} links in this mail need care."].Replace("{n}", MailboxService.Count(careful.Count), StringComparison.Ordinal))</b>
+                        @foreach (LinkFinding f in careful.Take(3))
+                        {
+                            <text> @LinkChecker.Fill(f, L[f.Reason])</text>
+                        }
+                        <text> @L["Each is outlined; point at it to see where it really goes."]</text></span>
+                </div>
+            }
+            @foreach ((int index, Anjal.Mailbox.FileRisk risk) in view.FileRisks)
+            {
+                string riskName = view.Attachments.FirstOrDefault(a => a.Index == index)?.FileName ?? string.Empty;
+                <div class="notice n-warn readnotice" data-file-risk="@(risk == Anjal.Mailbox.FileRisk.Encrypted ? "encrypted" : "macros")">
+                    <LipiIcon Name="warning" Size="16" />
+                    <span>@(risk == Anjal.Mailbox.FileRisk.Encrypted
+                        ? L["{file} is locked with a password: Anjal's virus scanner cannot look inside it. Open it only if you expected it from this sender."].Replace("{file}", riskName, StringComparison.Ordinal)
+                        : L["{file} contains macros, small programs that run when it is opened. Open it only if you expected it, and do not switch macros on."].Replace("{file}", riskName, StringComparison.Ordinal))</span>
                 </div>
             }
             @if (view.HasBlockedImages)
@@ -136,9 +231,18 @@ else
             }
             else
             {
-                <div class="lbody">
+                <div class="lbody @(thread is not null ? "topen" : null)">
                     <iframe class="bodyframe" sandbox="" referrerpolicy="no-referrer" title="@L["Message body"]" srcdoc="@Srcdoc"></iframe>
                 </div>
+            }
+            @if (thread is not null && After.Count > 0)
+            {
+                <ol class="trows tafter" aria-label="@L["Later mails"]">
+                    @foreach (ThreadMail m in After)
+                    {
+                        @Row(m)
+                    }
+                </ol>
             }
             @* Item 18 (owner, 27 Sep; 7 Oct): "when the mail is opened and closed... at that time show windows
                with first name last name email... and save to contacts". The window waits here and opens when
@@ -188,11 +292,28 @@ else
             @if (!IsScheduled && QuickReply is null)
             {
                 <div class="letterend">
-                    <a class="eb eb-p" href="@ReplyLink("reply")"><LipiIcon Name="undo" Size="15" />@L["Reply"]</a>
+                    @if (BranchOther is ThreadMail other && OpenMail is ThreadMail answered && thread?.Get(answered.ParentId ?? Guid.Empty) is ThreadMail both)
+                    {
+                        @* rc.24 (brief 10f): the conversation split here - say so before replying. *@
+                        <details class="pmenu replycheck branchcheck">
+                            <summary class="eb eb-p" title="@ReplyTip"><LipiIcon Name="undo" Size="15" />@ReplyWord</summary>
+                            <div class="pmenu-body pmenu-up">
+                                <p class="pm-note"><b>@L["{other} also replied to {mail}."].Replace("{other}", other.Letter + " (" + other.From + ")", StringComparison.Ordinal).Replace("{mail}", both.Letter, StringComparison.Ordinal)</b>
+                                    <span>@L["A reply to this mail alone does not reach them."]</span></p>
+                                <a class="btn btn-p btn-sm" href="@(ReplyLink("replyall") + "&also=" + other.Id)" title="@L["One answer to both: the people on the other reply are added."]">@L["Reply to both"]</a>
+                                <a class="btn btn-s btn-sm" href="@ThreadLink(other)" title="@L["Open the other reply before answering."]">@L["Read {letter} first"].Replace("{letter}", other.Letter, StringComparison.Ordinal)</a>
+                                <a class="btn btn-s btn-sm" href="@ReplyLink("reply")" title="@L["Answer the sender only."]">@L["Reply to this one only"]</a>
+                            </div>
+                        </details>
+                    }
+                    else
+                    {
+                        <a class="eb eb-p" href="@ReplyLink("reply")" title="@ReplyTip"><LipiIcon Name="undo" Size="15" />@ReplyWord</a>
+                    }
                     @if (ReplyAllNeedsCheck)
                     {
                         <details class="pmenu replycheck">
-                            <summary class="eb">@ReplyAllWord</summary>
+                            <summary class="eb" title="@L["Answer the sender and everyone else it went to."]">@ReplyAllWord</summary>
                             <div class="pmenu-body pmenu-up">
                                 <p class="pm-note"><b>@L["Reply to all {n} people?"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)</b>
                                     @if (ReplyAllOutside > 0)
@@ -207,7 +328,7 @@ else
                     }
                     else
                     {
-                        <a class="eb" href="@ReplyLink("replyall")" data-replyall>@ReplyAllWord</a>
+                        <a class="eb" href="@ReplyLink("replyall")" data-replyall title="@L["Answer the sender and everyone else it went to."]">@ReplyAllWord</a>
                     }
                     <a class="eb" href="@ReplyLink("forward")"><LipiIcon Name="redo" Size="15" />@L["Forward"]</a>
                 </div>
@@ -218,7 +339,7 @@ else
                 {
                     @* Item 53 on the phone too: ask first, "Reply to the sender only" first. *@
                     <details class="pmenu replycheck">
-                        <summary class="eb">@ReplyAllWord</summary>
+                        <summary class="eb" title="@L["Answer the sender and everyone else it went to."]">@ReplyAllWord</summary>
                         <div class="pmenu-body pmenu-up">
                             <p class="pm-note"><b>@L["Reply to all {n} people?"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)</b>
                                 @if (ReplyAllOutside > 0)
@@ -233,7 +354,7 @@ else
                 }
                 else
                 {
-                    <a class="eb" href="/compose?replyall=@Id">@ReplyAllWord</a>
+                    <a class="eb" href="/compose?replyall=@Id" title="@L["Answer the sender and everyone else it went to."]">@ReplyAllWord</a>
                 }
                 <a class="eb" href="/compose?forward=@Id"><LipiIcon Name="redo" Size="15" />@L["Forward"]</a>
             </div>
@@ -362,8 +483,79 @@ else
                 }
             </section>
 
-            @* UX-04: the conversation - replies grouped, across folders. *@
-            @if (conversation.Count > 1)
+            @* rc.24 (brief 10a, 10f): the envelope follows the open mail - who it answers, who else answered
+               that, who answered it - then the conversation's people and all its files. *@
+            @if (thread is not null && OpenMail is ThreadMail cur)
+            {
+                @if (thread.Get(cur.ParentId ?? Guid.Empty) is ThreadMail parentMail || thread.RepliesTo(cur.Id).Count > 0 || cur.LinkUnknown)
+                {
+                    <section class="ecard etree" aria-label="@L["Replies"]">
+                        @if (thread.Get(cur.ParentId ?? Guid.Empty) is ThreadMail inReply)
+                        {
+                            <span class="elabel">@L["In reply to"]</span>
+                            <a class="tlink" href="@ThreadLink(inReply)"><span class="cvl">@inReply.Letter</span>@RefOf(inReply)</a>
+                            @if (thread.AlsoReplied(cur.Id).Count > 0)
+                            {
+                                <span class="elabel">@L["Also replied to the same mail"]</span>
+                                @foreach (ThreadMail sib in thread.AlsoReplied(cur.Id))
+                                {
+                                    <a class="tlink" href="@ThreadLink(sib)"><span class="cvl">@sib.Letter</span>@RefOf(sib)
+                                        @if (!sib.IsOwn && !thread.YouReplied(sib.Id))
+                                        {
+                                            <i class="tnoreply">@L["you haven't replied"]</i>
+                                        }
+                                    </a>
+                                }
+                            }
+                        }
+                        else if (cur.LinkUnknown)
+                        {
+                            <span class="elabel">@L["In reply to"]</span>
+                            <span class="enote">@L["reply link unknown: placed by its time"]</span>
+                        }
+                        @if (thread.RepliesTo(cur.Id).Count > 0)
+                        {
+                            <span class="elabel">@L["Replies to this mail"]</span>
+                            @foreach (ThreadMail rep in thread.RepliesTo(cur.Id))
+                            {
+                                <a class="tlink" href="@ThreadLink(rep)"><span class="cvl">@rep.Letter</span>@RefOf(rep)</a>
+                            }
+                        }
+                    </section>
+                }
+                <section class="ecard econv">
+                    <details class="econvd" open>
+                        <summary><span class="elabel">@L["This conversation"]</span>
+                            <span><u>@L["{n} mails"].Replace("{n}", MailboxService.Count(thread.Mails.Count), StringComparison.Ordinal)</u>, @L["from {date}"].Replace("{date}", clock.Date(thread.Mails[0].At), StringComparison.Ordinal)</span></summary>
+                        <ul class="tpeople">
+                            @foreach (ThreadPerson who in thread.People)
+                            {
+                                <li title="@who.Address"><b>@(who.IsYou ? L["You"] : who.Name)</b>
+                                    <span>@(who.Mails == 0 ? L["on the mails, wrote none"] : who.Mails == 1 ? L["1 mail"] : L["{n} mails"].Replace("{n}", MailboxService.Count(who.Mails), StringComparison.Ordinal))@if (who.JoinedAt > 1) { <text> · @L["joined at {letter}"].Replace("{letter}", MailboxService.LetterOf(who.JoinedAt - 1), StringComparison.Ordinal)</text> }</span></li>
+                            }
+                        </ul>
+                    </details>
+                </section>
+                @if (thread.Files.Count > 0)
+                {
+                    <section class="ecard tfiles">
+                        <details class="econvd">
+                            <summary><span class="elabel">@L["All files in this conversation"]</span>
+                                <span><u>@MailboxService.Count(thread.Files.Count)</u></span></summary>
+                            <ul class="tfilelist">
+                                @foreach (ThreadFile file in thread.Files)
+                                {
+                                    (string ftag, string fkind) = FileTag.Of(file.Name, file.ContentType);
+                                    <li><a href="/message/@file.MessageId/attachment/@file.Index"><span class="ftag ftag-@fkind" aria-hidden="true">@ftag</span>
+                                        <span class="fn">@file.Name</span>
+                                        <span class="tfrom">@(file.From.Length == 0 ? L["You"] : file.From) · @(thread.Get(file.MessageId)?.Letter)</span></a></li>
+                                }
+                            </ul>
+                        </details>
+                    </section>
+                }
+            }
+            else if (conversation.Count > 1)
             {
                 <section class="ecard econv">
                     <details class="econvd">
@@ -407,6 +599,10 @@ else
                                     <span class="fn">@a.FileName</span>
                                     <span class="mt">@MainLayout.Size(a.SizeBytes)</span>
                                 </a>
+                            }
+                            @if (view.FileRisks.TryGetValue(a.Index, out Anjal.Mailbox.FileRisk fileRisk))
+                            {
+                                <span class="frisk" title="@(fileRisk == Anjal.Mailbox.FileRisk.Encrypted ? L["Locked with a password: not scanned inside."] : L["Contains macros."])">@(fileRisk == Anjal.Mailbox.FileRisk.Encrypted ? L["locked"] : L["macros"])</span>
                             }
                             <a class="dlic" href="/message/@Id/attachment/@a.Index" title="@L["Download"]" aria-label="@L["Download"] @a.FileName"><LipiIcon Name="download" Size="15" /></a>
                         </div>
@@ -780,6 +976,137 @@ else
     private string ConversationLink(ConversationItem c) =>
         DockBase is not null && c.Folder.Length > 0 ? $"/folder/{Uri.EscapeDataString(c.Folder)}?open={c.Id}" : $"/message/{c.Id}";
 
+    // rc.24 (item 68): the conversation, threaded; null when it is one mail or grouping is off.
+    private ThreadView? thread;
+
+    /// <summary>Brief 10a: above this many mails, the middle of the earlier ones folds into "Show N earlier mails".</summary>
+    private const int ThreadFoldAbove = 8;
+
+    /// <summary>Brief 10f: the reply tree indents no deeper than this.</summary>
+    private const int ThreadMaxIndent = 4;
+
+    private bool TreeMode => thread is not null && thread.Branches && string.Equals(Http?.Request.Query["tree"].ToString(), "1", StringComparison.Ordinal);
+
+    private ThreadMail? OpenMail => thread?.Get(Id);
+
+    private IReadOnlyList<ThreadMail> Ordered => thread is null ? Array.Empty<ThreadMail>() : TreeMode ? thread.TreeOrder() : thread.Mails;
+
+    private int OpenAt => Ordered.ToList().FindIndex(m => m.Id == Id);
+
+    private IReadOnlyList<ThreadMail> Before => OpenAt <= 0 ? Array.Empty<ThreadMail>() : Ordered.Take(OpenAt).ToList();
+
+    private IReadOnlyList<ThreadMail> After => OpenAt < 0 ? Array.Empty<ThreadMail>() : Ordered.Skip(OpenAt + 1).ToList();
+
+    private string ThreadLink(ThreadMail m) =>
+        (DockBase is not null && m.Folder.Length > 0 ? $"/folder/{Uri.EscapeDataString(m.Folder)}?open={m.Id}" : $"/message/{m.Id}")
+        + (TreeMode ? (DockBase is not null && m.Folder.Length > 0 ? "&tree=1" : "?tree=1") : string.Empty);
+
+    /// <summary>This page with the order switched (10f "Reply tree").</summary>
+    private string SwitchHref(bool tree)
+    {
+        string path = Http?.Request.Path.Value ?? $"/message/{Id}";
+        var parts = new List<string>();
+        if (Http is not null)
+        {
+            foreach (KeyValuePair<string, Microsoft.Extensions.Primitives.StringValues> q in Http.Request.Query)
+            {
+                if (q.Key != "tree")
+                {
+                    parts.AddRange(q.Value.Select(v => Uri.EscapeDataString(q.Key) + "=" + Uri.EscapeDataString(v ?? string.Empty)));
+                }
+            }
+        }
+        if (tree)
+        {
+            parts.Add("tree=1");
+        }
+        return parts.Count == 0 ? path : path + "?" + string.Join("&", parts);
+    }
+
+    private string RefOf(ThreadMail m) => (m.IsOwn ? L["You"] : m.From) + " · " + clock.ListDay(m.At, DateTimeOffset.UtcNow);
+
+    /// <summary>10f: "↳ replying to B (you, Tue), not to C" - only in time order, and only when the mail does not answer the one above it.</summary>
+    private string? NoteOf(ThreadMail m)
+    {
+        if (thread is null)
+        {
+            return null;
+        }
+        if (m.LinkUnknown)
+        {
+            return L["reply link unknown"];
+        }
+        if (TreeMode || m.ParentId is not Guid p || thread.Get(p) is not ThreadMail parentMail)
+        {
+            return null;
+        }
+        int at = thread.Mails.ToList().FindIndex(x => x.Id == m.Id);
+        ThreadMail? above = at > 0 ? thread.Mails[at - 1] : null;
+        if (above is null || above.Id == p)
+        {
+            return null;
+        }
+        string to = MailboxService.ThreadRef(parentMail, clock, L["you"], DateTimeOffset.UtcNow);
+        return "↳ " + L["replying to {mail}, not to {other}"].Replace("{mail}", to, StringComparison.Ordinal).Replace("{other}", above.Letter, StringComparison.Ordinal);
+    }
+
+    /// <summary>10f: "2 replies: C, D" on a mail answered more than once.</summary>
+    private string? TagOf(ThreadMail m)
+    {
+        IReadOnlyList<ThreadMail> replies = thread?.RepliesTo(m.Id) ?? Array.Empty<ThreadMail>();
+        return replies.Count < 2 ? null
+            : L["{n} replies: {letters}"].Replace("{n}", MailboxService.Count(replies.Count), StringComparison.Ordinal)
+                .Replace("{letters}", string.Join(", ", replies.Select(r => r.Letter)), StringComparison.Ordinal);
+    }
+
+    private string? IndentStyle(ThreadMail m) =>
+        TreeMode ? "--d:" + Math.Min(m.Depth, ThreadMaxIndent).ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+
+    /// <summary>10f branch warning: another person's reply to the same mail that the person has not answered.</summary>
+    private ThreadMail? BranchOther =>
+        thread is not null && OpenMail is ThreadMail om && !om.IsOwn
+            ? thread.AlsoReplied(om.Id).FirstOrDefault(s => !s.IsOwn && !thread.YouReplied(s.Id))
+            : null;
+
+    private string ReplyTip => L["Answer the sender only."];
+
+    /// <summary>10a: in a conversation, Reply names who it goes to.</summary>
+    private string ReplyWord => thread is not null && SenderAddress.Length > 0 && !IsOwn
+        ? L["Reply to {name}"].Replace("{name}", SenderName, StringComparison.Ordinal)
+        : L["Reply"];
+
+    private static string InitialOf(string name)
+    {
+        string who = name.Trim().TrimStart('"', '\'', '<');
+        return who.Length == 0 ? "?" : System.Globalization.StringInfo.GetNextTextElement(who, 0).ToUpperInvariant();
+    }
+
+    /// <summary>One folded row (10a): letter, initial, name, the replying-to note or the first line, files, time.</summary>
+    private RenderFragment Row(ThreadMail m) => @<li class="trow @(m.MainLine ? null : "branch") @(m.LinkUnknown ? "unk" : null) @(m.Seen ? null : "unread")" style="@IndentStyle(m)">
+        <a href="@ThreadLink(m)">
+            <span class="cvl">@m.Letter</span>
+            <span class="tav" aria-hidden="true">@InitialOf(m.From)</span>
+            <b class="tname">@(m.IsOwn ? L["You"] : m.From)</b>
+            @if (NoteOf(m) is string note)
+            {
+                <span class="tnote">@note</span>
+            }
+            else
+            {
+                <span class="tprev">@m.Preview</span>
+            }
+            @if (TagOf(m) is string tag)
+            {
+                <span class="ttag">@tag</span>
+            }
+            @if (m.Files)
+            {
+                <span class="tclip" role="img" title="@L["Has attachments"]" aria-label="@L["Has attachments"]"><LipiIcon Name="attachment" Size="13" /></span>
+            }
+            <span class="tmeta">@clock.List(m.At, DateTimeOffset.UtcNow)</span>
+        </a>
+    </li>;
+
     private DateTimeOffset laterTomorrow;
     private DateTimeOffset laterMonday;
     private bool senderSaved;
@@ -818,7 +1145,9 @@ else
     /// <summary>Item 53: ask first when more than 5 would receive it, or anyone outside.</summary>
     private bool ReplyAllNeedsCheck => ReplyAllCount > Recipients.ShownInFull || (ReplyAllOutside > 0 && ReplyAllCount > 1);
 
-    private string ReplyAllWord => ReplyAllCount > 1
+    private string ReplyAllWord => thread is not null && ReplyAllCount > 1
+        ? L["Reply to all {n}"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)
+        : ReplyAllCount > 1
         ? L["Reply all ({n})"].Replace("{n}", MailboxService.Count(ReplyAllCount), StringComparison.Ordinal)
         : L["Reply all"];
 
@@ -1010,8 +1339,29 @@ else
         "<meta http-equiv=\"Content-Security-Policy\" content=\"" + FrameCsp + "\">" +
         "<style>" + FontFaces + "body{font-family:'LiPi Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:14px;line-height:1.65;" +
         "margin:20px 28px 28px;max-width:72ch;color:#1d2928;background:#fff;word-wrap:break-word}p{margin:0 0 .9em}img{max-width:100%}" +
-        "pre{white-space:pre-wrap;font-family:inherit;margin:0}a{color:#0b5d8f}</style></head><body>" +
-        (view?.BodyHtml ?? string.Empty) + "</body></html>";
+        "pre{white-space:pre-wrap;font-family:inherit;margin:0}a{color:#0b5d8f}" +
+        // rc.24 (item 94): a link switched off, and one that needs care.
+        ".anjal-off{color:#8a1c1c;text-decoration:line-through;cursor:not-allowed}a[data-anjal-warn]{outline:2px dashed #b45309;outline-offset:2px;border-radius:2px}</style></head><body>" +
+        TranslatedBody + "</body></html>";
+
+    // rc.24 (item 94): the tips on links that were switched off or need care, in the reader's language.
+    private string TranslatedBody
+    {
+        get
+        {
+            string body = view?.BodyHtml ?? string.Empty;
+            foreach (LinkFinding f in view?.Links.DistinctBy(f => LinkChecker.Fill(f)) ?? Enumerable.Empty<LinkFinding>())
+            {
+                string english = HtmlSanitizer.Escape(LinkChecker.Fill(f));
+                string own = HtmlSanitizer.Escape(LinkChecker.Fill(f, L[f.Reason]));
+                if (english != own)
+                {
+                    body = body.Replace("title=\"" + english + "\"", "title=\"" + own + "\"", StringComparison.Ordinal);
+                }
+            }
+            return body;
+        }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -1059,7 +1409,17 @@ else
             orgDomains = await Mail.OrganisationDomainsAsync(mailboxId.Value);
             recipients = Recipients.Of(opened.To, opened.Cc, me, orgDomains);
             (laterTomorrow, laterMonday) = MailboxService.SendLaterChoices(clock, DateTimeOffset.UtcNow);
-            conversation = await Mail.ConversationOfAsync(mailboxId.Value, opened.Row);
+            IReadOnlyList<ConversationItem> trail = await Mail.ConversationOfAsync(mailboxId.Value, opened.Row);
+            conversation = trail;
+            // rc.24 (item 68): with Group by conversation on (the default), the reader shows the conversation threaded.
+            ThreadView? threaded = null;
+            if (trail.Count > 1 && opened.Folder.Name is not ("Drafts" or MailboxService.ScheduledFolder)
+                && (await Mail.GetMailSettingsAsync(WebmailAuthService.PersonIdOf((await AuthState).User) ?? mailboxId.Value)).GroupByConversation)
+            {
+                ThreadView t = await Mail.ThreadOfAsync(mailboxId.Value, opened.Row);
+                threaded = t.Mails.Count > 1 && t.Get(Id) is not null ? t : null;
+            }
+            thread = threaded;
             unsubscribe = opened.Folder.Name is "Sent" or "Drafts" ? null : await Mail.UnsubscribeOfAsync(mailboxId.Value, Id);
             if (SenderAddress.Length > 0)
             {

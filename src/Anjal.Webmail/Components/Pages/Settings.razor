@@ -402,6 +402,16 @@
                     </div>
                     <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
                 </form>
+                @* rc.24 (item 68, brief 10a): conversations. *@
+                <form method="post" action="/settings/conversations" class="setfield">
+                    <AntiforgeryToken />
+                    <span class="setlbl" id="conv-lbl" title="@L["Group by conversation"]: @L["one row for each conversation in the list, and the conversation around the open mail."]">@L["Conversations"]</span>
+                    <div class="seg" role="radiogroup" aria-labelledby="conv-lbl">
+                        <label class="segopt"><input type="radio" name="group" value="group" checked="@mailSettings.GroupByConversation" data-autosubmit /><span>@L["Grouped"]</span></label>
+                        <label class="segopt"><input type="radio" name="group" value="each" checked="@(!mailSettings.GroupByConversation)" data-autosubmit /><span>@L["One by one"]</span></label>
+                    </div>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
                 <form method="post" action="/settings/pagesize" class="setfield">
                     <AntiforgeryToken />
                     <input type="hidden" name="back" value="/settings/mail?saved=mail" />
@@ -665,6 +675,23 @@
                     <button type="submit" class="btn btn-s btn-sm">@L["Save"]</button>
                 </div>
             </form>
+            @if (security.RecoveryAddress.Length > 0)
+            {
+                @* rc.24 (item 90): whether the recovery address is proved, and the link to prove it. *@
+                <form method="post" action="/settings/recovery/send" class="setblock setinline" data-recovery-state="@(security.RecoveryConfirmed ? "confirmed" : "unconfirmed")">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="back" value="security" />
+                    @if (security.RecoveryConfirmed)
+                    {
+                        <p class="hint"><LipiIcon Name="check" Size="14" /> @L["Confirmed {date}."].Replace("{date}", security.RecoveryConfirmedAt is DateTimeOffset at ? clock.Date(at) : string.Empty, StringComparison.Ordinal)</p>
+                    }
+                    else
+                    {
+                        <p class="hint">@L["Not confirmed yet: open the link Anjal mails to it."]</p>
+                        <button type="submit" class="btn btn-s btn-sm" data-needs-server>@L["Send the link"]</button>
+                    }
+                </form>
+            }
 
             <div class="setblock">
                 <h3 class="sethead">@L["Signed-in devices"]</h3>
@@ -1296,7 +1323,8 @@
         "offline" => L["Offline list is on. Set an offline code below on each device that should keep it."],
         "offlineoff" => L["Offline list is off. The copy kept on this device is being removed; on your other devices, the next time you open Anjal there."],
         "password" => L["Your password is changed. You are signed out everywhere else, and every trusted device will ask for the second step once more."],
-        "recovery" => L["Recovery address saved."],
+        "recovery" => L["Recovery address saved. Open the link Anjal mailed to it to confirm it."],
+        "recovery-sent" => L["The link was sent. Open it to confirm the address."],
         "twostep" => L["Two-step sign-in is on."],
         "authenticatoroff" => L["The authenticator app is turned off."],
         "passkey" => L["Passkey added. You can use it at the second step of signing in."],

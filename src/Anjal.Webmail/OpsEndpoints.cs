@@ -143,6 +143,19 @@ internal static class OpsEndpoints
             return Results.Redirect("/ops/health?saved=summary");
         }).RequireAuthorization().AddEndpointFilter(Program.RequireAntiforgery);
 
+        // rc.24 (item 86, D-177): alert mails as one daily digest (the default) or every alert as it happens.
+        app.MapPost("/ops/alerts", async (HttpContext http, [FromForm] string? mode, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
+        {
+            if (await OperatorAsync(http, svc, ct).ConfigureAwait(false) is not { } me)
+            {
+                return Results.NotFound();
+            }
+            string chosen = mode == MailboxService.AlertEach ? MailboxService.AlertEach : MailboxService.AlertDigest;
+            await svc.SetAlertModeAsync(chosen, ct).ConfigureAwait(false);
+            await audit.RecordAsync(me.Address, "ops.alerts.mode", chosen, Client(http)).ConfigureAwait(false);
+            return Results.Redirect("/ops/health?saved=alerts");
+        }).RequireAuthorization().AddEndpointFilter(Program.RequireAntiforgery);
+
         // rc.15 (item 61; owner, 7 Oct 2026): a restore drill is recorded here; the next is due six months after the last that passed.
         app.MapPost("/ops/drill", async (HttpContext http, [FromForm] string? date, [FromForm] string? result, [FromForm] string? note, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
         {

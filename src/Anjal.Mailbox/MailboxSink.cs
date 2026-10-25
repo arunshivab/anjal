@@ -458,6 +458,32 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             Anjal.Smtp.Counters.Increment("anjal_virus_removed_total");
         }
 
+        // rc.24 (item 94, owner 25 Oct 2026: "scan the whole mail, including links"): the whole message -
+        // its text and HTML as well as what is left of its files - goes to ClamAV once more, whose phishing
+        // checks and signatures read links. A hit is delivered with a clear warning and its links switched
+        // off in the reader (X-Anjal-Mail-Warning). The header is Anjal's alone: one arriving from outside
+        // is removed first.
+        if (ctx.AuthenticatedUser is null)
+        {
+            string? mailWarning = null;
+            if (this.Scanner is not null && files.Verdict != FileVerdict.Held)
+            {
+                ScanResult whole = await this.Scanner.ScanAsync(raw, ct).ConfigureAwait(false);
+                if (whole.Verdict == ScanVerdict.Infected)
+                {
+                    mailWarning = whole.Name.Length > 0 ? whole.Name : "dangerous content";
+                    this.log?.Invoke($"Mailbox: the whole mail was flagged ({mailWarning}); delivered with a warning, links off");
+                    Anjal.Smtp.Counters.Increment("anjal_mail_warned_total");
+                }
+            }
+            byte[] marked = AttachmentPolicy.MarkWholeMail(raw, mailWarning);
+            if (!ReferenceEquals(marked, raw))
+            {
+                raw = marked;
+                parsed = this.ParseQuietly(raw);
+            }
+        }
+
         int spamScore = Anjal.Spam.SpamHeaders.ScoreOf(parsed);
 
         // Decision 1B: the spam filter scores only mail from outside (no

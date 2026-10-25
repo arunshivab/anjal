@@ -56,6 +56,33 @@ public sealed class SecurityDocument
     /// <summary>Where reset codes go; empty when none.</summary>
     public string RecoveryAddress { get; set; } = string.Empty;
 
+    /// <summary>rc.24 (item 90): the recovery address that was proved by its mailed link; empty when none.</summary>
+    public string RecoveryConfirmedAddress { get; set; } = string.Empty;
+
+    /// <summary>When the recovery address was proved.</summary>
+    public DateTimeOffset? RecoveryConfirmedAt { get; set; }
+
+    /// <summary>The link waiting to prove the recovery address: SHA-256 of its secret, hex; empty when none.</summary>
+    public string RecoveryCheckHash { get; set; } = string.Empty;
+
+    /// <summary>The address the waiting link was sent to.</summary>
+    public string RecoveryCheckAddress { get; set; } = string.Empty;
+
+    /// <summary>When the waiting link stops working.</summary>
+    public DateTimeOffset? RecoveryCheckExpires { get; set; }
+
+    /// <summary>When the link was last sent, so it is not sent over and over.</summary>
+    public DateTimeOffset? RecoveryCheckSentAt { get; set; }
+
+    /// <summary>When an individual was first asked to prove their recovery address at sign-in.</summary>
+    public DateTimeOffset? RecoveryAskedAt { get; set; }
+
+    /// <summary>Until when "Later" holds the question back.</summary>
+    public DateTimeOffset? RecoveryLaterUntil { get; set; }
+
+    /// <summary>True when the recovery address in use is the one proved.</summary>
+    public bool RecoveryConfirmed => this.RecoveryAddress.Length > 0 && string.Equals(this.RecoveryAddress, this.RecoveryConfirmedAddress, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>The authenticator secret, encrypted; empty when the app is not set up.</summary>
     public string TotpSecret { get; set; } = string.Empty;
 
@@ -887,6 +914,9 @@ public sealed partial class MailboxService
     public Task<string?> SendSystemMailAsync(MailboxRow mailbox, string to, string subject, string text, CancellationToken ct = default) =>
         this.SystemMailAsync(mailbox, to, subject, text, false, ct);
 
+    /// <summary>The category Anjal's own mail is filed under in the mailbox it reaches (rc.24, item 86, D-177).</summary>
+    public const string FromAnjalCategory = "From Anjal";
+
     /// <summary>A security mail from the server (DES-11 S2-S5): as <see cref="SendSystemMailAsync"/>, marked so that it is delivered even to a full mailbox (DES-11 D2).</summary>
     /// <param name="mailbox">The mailbox it concerns.</param>
     /// <param name="to">The address.</param>
@@ -897,7 +927,11 @@ public sealed partial class MailboxService
     public Task<string?> SendSecurityMailAsync(MailboxRow mailbox, string to, string subject, string text, CancellationToken ct = default) =>
         this.SystemMailAsync(mailbox, to, subject, text, true, ct);
 
-    private async Task<string?> SystemMailAsync(MailboxRow mailbox, string to, string subject, string text, bool security, CancellationToken ct)
+    private async Task<string?> SystemMailAsync(MailboxRow mailbox, string to, string subject, string text, bool security, CancellationToken ct) =>
+        (await this.SystemMailCoreAsync(mailbox, to, subject, text, security, ct).ConfigureAwait(false)).Error;
+
+    // The mail, and where it landed when it was delivered on this server (mailbox, message).
+    private async Task<(string? Error, Guid? MailboxId, Guid? MessageId)> SystemMailCoreAsync(MailboxRow mailbox, string to, string subject, string text, bool security, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(mailbox);
         ArgumentNullException.ThrowIfNull(to);
@@ -910,7 +944,8 @@ public sealed partial class MailboxService
         sb.Append("To: <").Append(to).Append(">\r\n");
         sb.Append("Subject: ").Append(EncodeHeaderText(subject)).Append("\r\n");
         sb.Append("Date: ").Append(FormatDate(now)).Append("\r\n");
-        sb.Append("Message-ID: <").Append(Guid.NewGuid().ToString("N")).Append('@').Append(mailbox.Domain).Append(">\r\n");
+        string messageId = Guid.NewGuid().ToString("N") + "@" + mailbox.Domain;
+        sb.Append("Message-ID: <").Append(messageId).Append(">\r\n");
         sb.Append("Auto-Submitted: auto-generated\r\n");
         if (security)
         {
@@ -930,7 +965,7 @@ public sealed partial class MailboxService
         sb.Append("--").Append(boundary).Append("--\r\n");
         byte[] raw = Encoding.UTF8.GetBytes(sb.ToString());
         var sink = new Anjal.Mailbox.MailboxSink(this.store, this.maildir);
-        if (await sink.ResolveAsync(to, ct).ConfigureAwait(false) is not null)
+        if (await sink.ResolveAsync(to, ct).ConfigureAwait(false) is { } target)
         {
             Anjal.Smtp.DeliveryResult delivered = await sink.DeliverAsync(new Anjal.Smtp.DeliveryContext
             {
@@ -942,7 +977,12 @@ public sealed partial class MailboxService
                 AuthenticatedUser = "anjal",
                 AnjalSecurityMail = security,
             }, ct).ConfigureAwait(false);
-            return delivered.Outcome == Anjal.Smtp.DeliveryOutcome.Accepted ? null : "The code could not be delivered. Ask your administrator.";
+            if (delivered.Outcome != Anjal.Smtp.DeliveryOutcome.Accepted)
+            {
+                return ("The code could not be delivered. Ask your administrator.", null, null);
+            }
+            Guid? landed = await this.FileFromAnjalAsync(target.Mailbox.Id, messageId, ct).ConfigureAwait(false);
+            return (null, target.Mailbox.Id, landed);
         }
         await this.messageStore.EnqueueOutboundAsync(new OutboundMessage
         {
@@ -953,7 +993,31 @@ public sealed partial class MailboxService
             NextAttemptAt = now,
             GiveUpAt = now + TimeSpan.FromHours(1),
         }, ct).ConfigureAwait(false);
-        return null;
+        return (null, null, null);
+    }
+
+    // rc.24 (item 86, D-177): Anjal's own mail carries the "From Anjal" category, made for the mailbox
+    // when it has none; returns the delivered message.
+    private async Task<Guid?> FileFromAnjalAsync(Guid mailboxId, string messageId, CancellationToken ct)
+    {
+        MessageRow? row = (await this.store.ListMessagesAsync(mailboxId, null, 50, 0, ct).ConfigureAwait(false))
+            .FirstOrDefault(m => string.Equals(m.MessageId.Trim('<', '>', ' '), messageId, StringComparison.OrdinalIgnoreCase));
+        if (row is null)
+        {
+            return null;
+        }
+        CategoryView? category = (await this.ListCategoriesAsync(mailboxId, ct).ConfigureAwait(false))
+            .FirstOrDefault(c => string.Equals(c.Row.Name, FromAnjalCategory, StringComparison.OrdinalIgnoreCase));
+        if (category is null && await this.AddCategoryAsync(mailboxId, FromAnjalCategory, ct).ConfigureAwait(false) is null)
+        {
+            category = (await this.ListCategoriesAsync(mailboxId, ct).ConfigureAwait(false))
+                .FirstOrDefault(c => string.Equals(c.Row.Name, FromAnjalCategory, StringComparison.OrdinalIgnoreCase));
+        }
+        if (category is not null && row.CategoryId is null)
+        {
+            await this.store.SetMessageCategoryAsync(mailboxId, row.Id, category.Row.Id, ct).ConfigureAwait(false);
+        }
+        return row.Id;
     }
 
     /// <summary>SHA-256 of text, lower-case hex.</summary>

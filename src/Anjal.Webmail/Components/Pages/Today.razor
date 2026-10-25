@@ -120,6 +120,17 @@ else
                             <button type="submit" class="linkbtn" data-needs-server><LipiIcon Name="check" Size="15" />@L["Mark all read"]</button>
                         </form>
                     </div>
+                    @if (view.Woken.Count > 0)
+                    {
+                        @* rc.24 (DEF-159): mail back from snooze has its own labelled section, above the rest. *@
+                        <p class="tdgroup tdwoken"><LipiIcon Name="clock" Size="14" /><b>@L["Back from snooze"] · @view.Woken.Count</b><span>@L["mail you set aside, now due"]</span></p>
+                        <ul class="tdrows">
+                            @foreach (TodayRow r in view.Woken)
+                            {
+                                <TodayRowView R="r" L="L" Clock="clock" Href="@OpenLink(r.Message.Id)" Back="DoneBack" />
+                            }
+                        </ul>
+                    }
                     @if (view.NeedsYou.Count > 0)
                     {
                         <p class="tdgroup"><LipiIcon Name="star" Size="14" /><b>@L["Needs you"] · @view.NeedsYou.Count</b><span>@L["answers to your mail, people you write with, mail addressed to you"]</span></p>
@@ -139,6 +150,19 @@ else
                                 <TodayRowView R="r" L="L" Clock="clock" Href="@OpenLink(r.Message.Id)" Back="DoneBack" />
                             }
                         </ul>
+                    }
+                    @if (view.FromAnjal.Count > 0)
+                    {
+                        @* rc.24 (item 86, D-177): Anjal's own mail - alerts, notices - folded into its own section. *@
+                        <details class="tdlists tdanjal">
+                            <summary><LipiIcon Name="info" Size="15" /><b>@L[MailboxService.FromAnjalCategory] · @view.FromAnjal.Count</b><span class="tdlistnames">(@string.Join(", ", view.FromAnjal.Select(l => l.Message.Subject).Take(2)))</span><span class="lh-grow"></span><span class="linkbtn tdshow" title="@L["Show the mail in this group."]">@L["Show"]</span></summary>
+                            <ul class="tdrows">
+                                @foreach (TodayRow r in view.FromAnjal)
+                                {
+                                    <TodayRowView R="r" L="L" Clock="clock" Href="@OpenLink(r.Message.Id)" Back="DoneBack" />
+                                }
+                            </ul>
+                        </details>
                     }
                     @if (view.Lists.Count > 0)
                     {
@@ -276,7 +300,7 @@ else
     private IReadOnlyList<TodayRow> Ordered => view?.InOrder.ToList() ?? new List<TodayRow>();
 
     private IEnumerable<(string, IReadOnlyList<TodayRow>)> Groups => view is null ? Array.Empty<(string, IReadOnlyList<TodayRow>)>()
-        : new[] { (L["Needs you"], view.NeedsYou), (L["Everything else"], view.Rest), (L["Lists and notifications"], view.Lists) };
+        : new[] { (L["Back from snooze"], view.Woken), (L["Needs you"], view.NeedsYou), (L["Everything else"], view.Rest), (L[MailboxService.FromAnjalCategory], view.FromAnjal), (L["Lists and notifications"], view.Lists) };
 
     private int Position(Guid id) => Math.Max(0, Ordered.ToList().FindIndex(r => r.Message.Id == id));
 

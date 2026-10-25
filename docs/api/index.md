@@ -139,6 +139,8 @@
 - [Anjal.Mailbox.EvidenceVault](Anjal.Mailbox/EvidenceVault.md)
 - [Anjal.Mailbox.EvidenceWorker](Anjal.Mailbox/EvidenceWorker.md)
 - [Anjal.Mailbox.FileJudgement](Anjal.Mailbox/FileJudgement.md)
+- [Anjal.Mailbox.FileRisk](Anjal.Mailbox/FileRisk.md)
+- [Anjal.Mailbox.FileRisks](Anjal.Mailbox/FileRisks.md)
 - [Anjal.Mailbox.FileVerdict](Anjal.Mailbox/FileVerdict.md)
 - [Anjal.Mailbox.GroupEntry](Anjal.Mailbox/GroupEntry.md)
 - [Anjal.Mailbox.IMaildirStore](Anjal.Mailbox/IMaildirStore.md)

@@ -13,6 +13,31 @@ public sealed class OpsAlertState
 
     /// <summary>Each open alert by its key, with when it was last mailed.</summary>
     public Dictionary<string, OpenAlert> Open { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// rc.24 (item 86, D-177): "digest" (the default) - one mail a day at 09:00 with what is open and
+    /// what cleared, and a new problem marked bad at once; or "each" - every alert as it happens, as before.
+    /// </summary>
+    public string Mode { get; set; } = MailboxService.AlertDigest;
+
+    /// <summary>The day (yyyy-MM-dd, Anjal's own time zone) the last daily digest went.</summary>
+    public string LastDigestDay { get; set; } = string.Empty;
+
+    /// <summary>What cleared since the last digest, in English, with when.</summary>
+    public List<ResolvedAlert> Resolved { get; set; } = new();
+
+    /// <summary>The last alert or digest mail in each operator's mailbox (mailbox, message): the next one replaces it (one updating item).</summary>
+    public Dictionary<string, Guid[]> LastItem { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>An alert that cleared, waiting for the daily digest (rc.24).</summary>
+public sealed class ResolvedAlert
+{
+    /// <summary>The alert in English, as last seen.</summary>
+    public string Text { get; set; } = string.Empty;
+
+    /// <summary>When it cleared.</summary>
+    public DateTimeOffset At { get; set; }
 }
 
 /// <summary>One alert the operators have been told about and that is not yet resolved.</summary>
@@ -46,6 +71,33 @@ public sealed partial class MailboxService
 
     /// <summary>The service record kind that keeps <see cref="OpsAlertState"/>.</summary>
     public const string OpsAlertsKind = "ops-alerts";
+
+    /// <summary>Alert mails as one daily digest (rc.24, D-177; the default).</summary>
+    public const string AlertDigest = "digest";
+
+    /// <summary>Alert mails one by one, as they happen (the operator's choice).</summary>
+    public const string AlertEach = "each";
+
+    /// <summary>The hour (Anjal's own time zone) the daily digest goes.</summary>
+    public const int DigestHour = 9;
+
+    /// <summary>How the operators get alert mails: <see cref="AlertDigest"/> or <see cref="AlertEach"/>.</summary>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The mode.</returns>
+    public async Task<string> AlertModeAsync(CancellationToken ct = default) =>
+        (await this.ServiceRecordAsync<OpsAlertState>(OpsAlertsKind, ct).ConfigureAwait(false))?.Mode == AlertEach ? AlertEach : AlertDigest;
+
+    /// <summary>Choose how the operators get alert mails (rc.24, D-177: the operator may still choose every alert).</summary>
+    /// <param name="mode"><see cref="AlertDigest"/> or <see cref="AlertEach"/>.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public async Task SetAlertModeAsync(string mode, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(mode);
+        OpsAlertState state = await this.ServiceRecordAsync<OpsAlertState>(OpsAlertsKind, ct).ConfigureAwait(false) ?? new OpsAlertState();
+        state.Mode = mode == AlertEach ? AlertEach : AlertDigest;
+        await this.messageStore.SetServiceRecordAsync(OpsAlertsKind, JsonSerializer.Serialize(state), ct).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// The Anjal console's "Needs attention" list: every tile that is not well, suspended
@@ -186,24 +238,37 @@ public sealed partial class MailboxService
                 }
             }
         }
+        bool digest = state.Mode != AlertEach;
         var raise = new List<string>();
         foreach ((string key, (string text, string level)) in current)
         {
             if (!state.Open.TryGetValue(key, out OpenAlert? open))
             {
                 state.Open[key] = new OpenAlert { Text = text, First = now, LastSent = now, Level = level };
-                raise.Add(text);
+                // rc.24 (D-177): in the digest, only a new problem marked bad is mailed at once.
+                if (!digest || level == "bad")
+                {
+                    raise.Add(text);
+                }
             }
-            else if (now - open.LastSent >= AlertRepeat || (level == "bad" && open.Level != "bad"))
+            else if (!digest && (now - open.LastSent >= AlertRepeat || (level == "bad" && open.Level != "bad")))
             {
                 open.LastSent = now;
                 open.Text = text;
                 open.Level = level;
                 raise.Add(text + " (still, since " + clock.Time(open.First) + " " + clock.Date(open.First) + ")");
             }
+            else if (digest && level == "bad" && open.Level != "bad")
+            {
+                open.LastSent = now;
+                open.Text = text;
+                open.Level = level;
+                raise.Add(text + " (worse, since " + clock.Time(open.First) + " " + clock.Date(open.First) + ")");
+            }
             else
             {
                 open.Text = text;
+                open.Level = level;
             }
         }
         var cleared = state.Open.Where(kv => !current.ContainsKey(kv.Key)).ToList();
@@ -211,27 +276,93 @@ public sealed partial class MailboxService
         foreach (KeyValuePair<string, OpenAlert> c in cleared)
         {
             state.Open.Remove(c.Key);
+            if (digest)
+            {
+                state.Resolved.Add(new ResolvedAlert { Text = c.Value.Text, At = now });
+            }
         }
         if (raise.Count > 0)
         {
             string text = AlertText("Anjal needs attention:", raise, "Open the Anjal console's overview to act on each.");
             foreach (string op in operators)
             {
-                await this.SendSystemMailAsync(from, op, raise.Count == 1 ? "Anjal alert: " + raise[0] : "Anjal alert: " + raise.Count.ToString(CultureInfo.InvariantCulture) + " things need attention", text, ct).ConfigureAwait(false);
+                await this.OperatorItemAsync(state, from, op, raise.Count == 1 ? "Anjal alert: " + raise[0] : "Anjal alert: " + raise.Count.ToString(CultureInfo.InvariantCulture) + " things need attention", text, ct).ConfigureAwait(false);
                 sent++;
             }
         }
-        if (cleared.Count > 0)
+        if (!digest && cleared.Count > 0)
         {
             string text = AlertText("Resolved:", cleared.Select(c => c.Value.Text).ToList(), "Nothing more is needed for these.");
             foreach (string op in operators)
             {
-                await this.SendSystemMailAsync(from, op, cleared.Count == 1 ? "Anjal resolved: " + cleared[0].Value.Text : "Anjal resolved: " + cleared.Count.ToString(CultureInfo.InvariantCulture) + " alerts", text, ct).ConfigureAwait(false);
+                await this.OperatorItemAsync(state, from, op, cleared.Count == 1 ? "Anjal resolved: " + cleared[0].Value.Text : "Anjal resolved: " + cleared.Count.ToString(CultureInfo.InvariantCulture) + " alerts", text, ct).ConfigureAwait(false);
                 sent++;
             }
         }
+        // The daily digest: once a day from 09:00, when anything is open or cleared since the last one.
+        if (digest && local.Hour >= DigestHour && state.LastDigestDay != day && (state.Open.Count > 0 || state.Resolved.Count > 0))
+        {
+            string text = DigestText(state, clock);
+            foreach (string op in operators)
+            {
+                await this.OperatorItemAsync(state, from, op, "Anjal daily digest, " + clock.Date(now) + ": " + (state.Open.Count == 0 ? "all clear" : state.Open.Count == 1 ? "1 thing needs attention" : state.Open.Count.ToString(CultureInfo.InvariantCulture) + " things need attention"), text, ct).ConfigureAwait(false);
+                sent++;
+            }
+            state.LastDigestDay = day;
+            state.Resolved.Clear();
+        }
         await this.messageStore.SetServiceRecordAsync(OpsAlertsKind, JsonSerializer.Serialize(state), ct).ConfigureAwait(false);
         return sent;
+    }
+
+    // The digest's words: what is open, with since when, then what cleared since the last digest.
+    private static string DigestText(OpsAlertState state, ZonedClock clock)
+    {
+        var sb = new StringBuilder();
+        if (state.Open.Count == 0)
+        {
+            sb.Append("Nothing needs attention now.\r\n");
+        }
+        else
+        {
+            sb.Append("Needs attention:\r\n\r\n");
+            foreach (OpenAlert a in state.Open.Values.OrderBy(a => a.Level == "bad" ? 0 : 1).ThenBy(a => a.First))
+            {
+                sb.Append("- ").Append(a.Text).Append(" (since ").Append(clock.Time(a.First)).Append(' ').Append(clock.Date(a.First)).Append(")\r\n");
+            }
+        }
+        if (state.Resolved.Count > 0)
+        {
+            sb.Append("\r\nResolved since the last digest:\r\n\r\n");
+            foreach (ResolvedAlert r in state.Resolved)
+            {
+                sb.Append("- ").Append(r.Text).Append(" (").Append(clock.Time(r.At)).Append(' ').Append(clock.Date(r.At)).Append(")\r\n");
+            }
+        }
+        sb.Append("\r\nOpen the Anjal console's overview to act on each. This digest replaces the last one; ")
+            .Append("a new problem marked bad is mailed at once. To get every alert as it happens, choose so on the Service health page.\r\n\r\n")
+            .Append("Operators manage the service, never anyone's mail.\r\n");
+        return sb.ToString();
+    }
+
+    // rc.24 (D-177, "one updating item"): an alert or digest mail replaces the last one in that operator's
+    // mailbox - the old one goes to Trash if it is still in the Inbox, so one current item stays.
+    private async Task OperatorItemAsync(OpsAlertState state, MailboxRow from, string op, string subject, string text, CancellationToken ct)
+    {
+        (string? _, Guid? mailboxId, Guid? messageId) = await this.SystemMailCoreAsync(from, op, subject, text, false, ct).ConfigureAwait(false);
+        if (state.LastItem.TryGetValue(op, out Guid[]? last) && last.Length == 2)
+        {
+            if (await this.GetOwnedRowAsync(last[0], last[1], ct).ConfigureAwait(false) is MessageRow previous
+                && await this.FolderByIdAsync(last[0], previous.FolderId, ct).ConfigureAwait(false) is { Name: FolderRow.Inbox })
+            {
+                await this.MoveAsync(last[0], last[1], "Trash", ct).ConfigureAwait(false);
+            }
+            state.LastItem.Remove(op);
+        }
+        if (mailboxId is Guid box && messageId is Guid message)
+        {
+            state.LastItem[op] = new[] { box, message };
+        }
     }
 
     /// <summary>Anjal's own clock (ANJAL_TIMEZONE, as for the dates Anjal writes into mail).</summary>

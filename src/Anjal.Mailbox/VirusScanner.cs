@@ -217,6 +217,66 @@ public static class AttachmentPolicy
     /// <summary>The header on a held message: why.</summary>
     public const string HeldHeader = "X-Anjal-Held";
 
+    /// <summary>rc.24 (item 94): the header on a message ClamAV flagged as a whole: the signature's name.</summary>
+    public const string MailWarningHeader = "X-Anjal-Mail-Warning";
+
+    /// <summary>
+    /// The message with any <see cref="MailWarningHeader"/> it arrived with removed, and Anjal's own
+    /// added at the top when <paramref name="warning"/> is set (rc.24, item 94). The same array comes
+    /// back when there is nothing to change, so a message is rewritten only when it must be.
+    /// </summary>
+    /// <param name="raw">The message.</param>
+    /// <param name="warning">The signature's name, or null.</param>
+    /// <returns>The message.</returns>
+    public static byte[] MarkWholeMail(byte[] raw, string? warning)
+    {
+        System.ArgumentNullException.ThrowIfNull(raw);
+        int end = HeaderBlockEnd(raw);
+        string head = Encoding.Latin1.GetString(raw, 0, end);
+        string prefix = MailWarningHeader + ":";
+        bool present = head.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || head.Contains("\n" + prefix, StringComparison.OrdinalIgnoreCase);
+        if (!present && warning is null)
+        {
+            return raw;
+        }
+        var kept = new StringBuilder(head.Length);
+        bool dropping = false;
+        foreach (string line in head.Split('\n'))
+        {
+            bool continuation = line.Length > 0 && (line[0] == ' ' || line[0] == '\t');
+            if (!continuation)
+            {
+                dropping = line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+            }
+            if (!dropping)
+            {
+                kept.Append(line).Append('\n');
+            }
+        }
+        string cleaned = kept.ToString();
+        // Split gives one piece more than there were newlines: the last newline added is not the message's.
+        cleaned = cleaned.Length > 0 ? cleaned[..^1] : cleaned;
+        string top = warning is null ? string.Empty : MailWarningHeader + ": " + Ascii(warning) + "\r\n";
+        byte[] headBytes = Encoding.Latin1.GetBytes(top + cleaned);
+        byte[] result = new byte[headBytes.Length + raw.Length - end];
+        headBytes.CopyTo(result, 0);
+        System.Array.Copy(raw, end, result, headBytes.Length, raw.Length - end);
+        return result;
+    }
+
+    // Where the header block ends: just after the newline that ends the last header line.
+    private static int HeaderBlockEnd(byte[] raw)
+    {
+        for (int i = 0; i + 1 < raw.Length; i++)
+        {
+            if (raw[i] == '\n' && (raw[i + 1] == '\n' || (raw[i + 1] == '\r' && i + 2 < raw.Length && raw[i + 2] == '\n')))
+            {
+                return i + 1;
+            }
+        }
+        return raw.Length;
+    }
+
     private static readonly string[] Programs =
     {
         ".exe", ".com", ".bat", ".cmd", ".msi", ".msp", ".scr", ".pif", ".cpl", ".dll", ".sys", ".drv",

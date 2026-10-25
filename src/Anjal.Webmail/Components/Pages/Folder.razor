@@ -357,9 +357,9 @@ else
                         }
                         @foreach (MessageRow m in group)
                         {
-                            <MessageListRow M="m" L="L" Clock="clock" FolderName="@Name" Threshold="threshold" Trusted="trusted" Sends="@SendsLabel(m)" Conversation="@conversationOf(m)"
+                            <MessageListRow M="m" L="L" Clock="clock" FolderName="@Name" Threshold="threshold" Trusted="trusted" Sends="@SendsLabel(m)" Conversation="@(grouping?.Count(m) ?? 1)"
                                             Mark="@MarkOf(m)" Category="@(m.CategoryId is Guid cid ? Lookup(cid) : null)" Who="@(IsOutgoing ? Recipient(m) : Sender(m))"
-                                            Outgoing="IsOutgoing" Selectable="true" ShowFlag="ShowFlag" OpenLink="@OpenLink(m)" BackLink="@BackLink" IsOpen="@(m.Id == OpenId)"
+                                            Outgoing="IsOutgoing" Selectable="true" ShowFlag="ShowFlag" OpenLink="@OpenLink(m)" BackLink="@BackLink" IsOpen="@RowOpen(m)"
                                             QuickUrl="@($"/folder/{Uri.EscapeDataString(Name)}/bulk")" />
                         }
                     </section>
@@ -473,7 +473,7 @@ else
     private Anjal.Mailbox.AwayReply? awayOn;
     private int heldCount;
     private bool OfferDmarcRule;
-    private Func<MessageRow, int> conversationOf = _ => 1;
+    private ConversationGrouping? grouping;
 
     /// <summary>In Scheduled, each row says when it goes (the board ListScheduled).</summary>
     private string? SendsLabel(MessageRow m) =>
@@ -622,8 +622,13 @@ else
     /// <summary>Drafts open in compose; otherwise as the layout says (item 45): beside the list, alone, or on their own page.</summary>
     private string OpenLink(MessageRow m) =>
         Name == "Drafts" ? $"/draft/{m.Id}"
-        : viewLayout == "list" ? $"/message/{m.Id}"
-        : OpenHere(m.Id);
+        : viewLayout == "list" ? $"/message/{OpensAt(m)}"
+        : OpenHere(OpensAt(m));
+
+    // rc.24 (item 68, brief 10a): a grouped row opens its conversation at the newest unread mail.
+    private Guid OpensAt(MessageRow m) => grouping is not null ? grouping.OpensAt(m) : m.Id;
+
+    private bool RowOpen(MessageRow m) => grouping is not null ? grouping.Holds(m, OpenId) : m.Id == OpenId;
 
     /// <summary>
     /// Sent and Drafts are about who a message went to; the list shows the
@@ -733,6 +738,12 @@ else
         mailboxFull = context?.Mailbox is MailboxRow owner && (await Mail.StorageStateAsync(owner)).Full;
         sort = await Mail.SortForAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value, Name);
         (items, total) = await Mail.ListSortedAsync(mailboxId.Value, folder.Id, Show, sort, IsOutgoing, pageIndex, pageSize);
+        // rc.24 (item 68, brief 10a): with "Group by conversation" (the default) each conversation is
+        // listed once, at its newest mail in this folder. Not for Drafts, Scheduled or the Outbox.
+        grouping = Name is not ("Drafts" or "Outbox" or MailboxService.ScheduledFolder)
+            && (await Mail.GetMailSettingsAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value)).GroupByConversation
+            ? await Mail.ConversationGroupingAsync(mailboxId.Value, folder.Name)
+            : null;
         // rc.15: a page past the end (an old link, or fewer messages now) shows the last page.
         if (items.Count == 0 && total > 0 && pageIndex > 0)
         {
@@ -749,6 +760,10 @@ else
                 items = wokenRows.Concat(items.Where(m => !wokenIds.Contains(m.Id))).ToList();
             }
         }
+        if (grouping is not null)
+        {
+            items = items.Where(grouping.Leads).ToList();
+        }
         // The reader marks the open message read after the list has loaded; show it read here too.
         bool openedNow = false;
         if (OpenId is Guid shownId && items.FirstOrDefault(m => m.Id == shownId) is MessageRow opened && !opened.Seen)
@@ -763,7 +778,6 @@ else
         }
         categories = await Mail.ListCategoriesAsync(mailboxId.Value);
         trusted = await Mail.TrustedSendersAsync(mailboxId.Value);
-        conversationOf = await Mail.ConversationCountsAsync(mailboxId.Value);
         OfferDmarcRule = Name == FolderRow.Inbox && !Writing
             && items.Any(m => m.Subject.TrimStart().StartsWith("Report domain:", StringComparison.OrdinalIgnoreCase))
             && !(await Mail.ListRulesAsync(mailboxId.Value)).Any(r => r.MoveTo == MailboxService.DmarcRule().MoveTo);

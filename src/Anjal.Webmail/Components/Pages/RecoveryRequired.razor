@@ -1,0 +1,87 @@
+@page "/settings/recovery"
+@layout MainLayout
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+<PageTitle>@L["Your recovery address"] — Anjal</PageTitle>
+
+@* rc.24 (item 90, D-198; owner, 25 Oct 2026: no SMS anywhere): an individual proves a recovery
+   address - a personal address of their own - by a link mailed to it, before their mail opens. *@
+<AuthFrame L="L" Org="org">
+    <h1 class="authtitle">@L["Your recovery address"]</h1>
+    @if (security.RecoveryConfirmed)
+    {
+        <p class="authlead">@L["Confirmed: a forgotten password is reset with a code sent to {address}."].Replace("{address}", security.RecoveryAddress, StringComparison.Ordinal)</p>
+        <p class="authnote"><a class="authlink" href="/">@L["Open your mail"]</a></p>
+    }
+    else
+    {
+        <p class="authlead">@L["Your account needs a personal address you can always read. A forgotten password is reset with a code sent there; Anjal does not use text messages."]</p>
+        @if (error is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+        }
+        @if (WaitingLink)
+        {
+            <div class="note n-ok" role="status" data-recovery-sent><LipiIcon Name="email" Size="16" /><span>@L["A link was sent to {address}. Open it to continue; it works for 24 hours."].Replace("{address}", security.RecoveryCheckAddress, StringComparison.Ordinal)</span></div>
+        }
+        <form method="post" action="/settings/recovery/send" class="authfields">
+            <AntiforgeryToken />
+            <label class="authlbl" for="recovery">@L["Recovery address"]</label>
+            <div class="authinpwrap"><input class="authinp-in" id="recovery" name="recovery" type="email" required value="@security.RecoveryAddress" autocomplete="email" placeholder="@L["A personal address"]" /></div>
+            <label class="authlbl" for="password">@L["Your password (only to change the address)"]</label>
+            <div class="authinpwrap"><input class="authinp-in" id="password" name="password" type="password" autocomplete="current-password" /></div>
+            <button type="submit" class="authbtn" data-needs-server>@(WaitingLink ? L["Send the link again"] : L["Send the link"])</button>
+        </form>
+        @if (laterAllowed)
+        {
+            <form method="post" action="/settings/recovery/later" class="inline">
+                <AntiforgeryToken />
+                <button type="submit" class="authlink linkbtn" data-needs-server>@L["Later"]</button>
+            </form>
+            <p class="authnote">@L["You can choose Later for seven days; after that the address is needed before your mail opens."]</p>
+        }
+        else
+        {
+            <p class="authnote">@L["The address is needed before your mail opens."]</p>
+        }
+        <p class="authnote">@L["Signed in as {address}"].Replace("{address}", address, StringComparison.Ordinal)</p>
+        <form method="post" action="/sign-out" class="inline"><AntiforgeryToken /><button type="submit" class="authlink linkbtn">@L["Sign out"]</button></form>
+    }
+</AuthFrame>
+
+@code {
+    [SupplyParameterFromQuery(Name = "e")] private string? E { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private SecurityDocument security = new();
+    private bool laterAllowed;
+    private string address = string.Empty;
+    private string? error;
+
+    private bool WaitingLink => security.RecoveryCheckHash.Length > 0 && security.RecoveryCheckExpires is DateTimeOffset until && until > DateTimeOffset.UtcNow
+        && string.Equals(security.RecoveryCheckAddress, security.RecoveryAddress, StringComparison.OrdinalIgnoreCase);
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        error = AuthEndpoints.ReadNote(Protection, E);
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        address = user.Identity?.Name ?? string.Empty;
+        if (WebmailAuthService.PersonIdOf(user) is Guid person)
+        {
+            security = await Mail.GetSecurityAsync(person);
+            laterAllowed = MailboxService.RecoveryLaterAllowed(security, DateTimeOffset.UtcNow);
+        }
+    }
+}

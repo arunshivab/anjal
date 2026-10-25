@@ -745,6 +745,11 @@ internal static class AuthEndpoints
                 http.Response.Redirect("/settings/security?change=1");
                 return;
             }
+            if (demand == "recovery" && !path.StartsWith("/settings/recovery", StringComparison.Ordinal))
+            {
+                http.Response.Redirect("/settings/recovery?required=1");
+                return;
+            }
             if (demand == "twostep" && !path.StartsWith("/settings/security", StringComparison.Ordinal))
             {
                 http.Response.Redirect("/settings/security/two-step?required=1");
@@ -766,7 +771,7 @@ internal static class AuthEndpoints
         path.StartsWith("/auth/", StringComparison.Ordinal) || path == "/sign-out" || path == "/signed-out"
         || path.StartsWith("/sign-in", StringComparison.Ordinal) || path.StartsWith("/invite/", StringComparison.Ordinal)
         || path.StartsWith("/join/", StringComparison.Ordinal) || path == "/terms" || path == "/disclaimer"
-        || path == "/settings/welcome" || path == "/settings/rail";
+        || path == "/settings/welcome" || path == "/settings/rail" || path.StartsWith("/recovery/", StringComparison.Ordinal);
 
     /// <summary>The signed-out page for a sign-out at this moment.</summary>
     /// <param name="idle">True when it was for being idle.</param>
@@ -1014,8 +1019,53 @@ internal static class AuthEndpoints
                 await svc.SecurityMailAsync(mailboxId.Value, "Your recovery address was changed", "The recovery address of " + who + " was changed. Reset codes now go to the new address.",
                     ClientOf(http), http.Request.Headers.UserAgent.ToString(), Array.Empty<string>(), ct).ConfigureAwait(false);
             }
+            if (error is null && (await svc.GetSecurityAsync(mailboxId.Value, ct).ConfigureAwait(false)) is { RecoveryAddress.Length: > 0, RecoveryConfirmed: false })
+            {
+                // rc.24 (item 90): a new recovery address is proved by a link mailed to it.
+                await svc.SendRecoveryCheckAsync(mailboxId.Value, null, null, OriginOf(http), ct).ConfigureAwait(false);
+            }
             return Results.Redirect(error is null ? "/settings/security?saved=recovery" : "/settings/security?e=" + Uri.EscapeDataString(Note(dp, error)));
         }).RequireAuthorization();
+
+        // rc.24 (item 90, D-198): send the link that proves the recovery address; from the sign-in step or Settings.
+        app.MapPost("/settings/recovery/send", async (HttpContext http, [FromForm] string? recovery, [FromForm] string? password, [FromForm] string? back,
+            MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.SendRecoveryCheckAsync(mailboxId.Value, recovery, password, OriginOf(http), ct).ConfigureAwait(false);
+            string who = http.User.Identity?.Name ?? string.Empty;
+            if (error is null)
+            {
+                await audit.RecordAsync(who, "webmail.recovery.link", who, ClientOf(http)).ConfigureAwait(false);
+            }
+            string page = back == "security" ? "/settings/security" : "/settings/recovery";
+            return Results.Redirect(error is null ? page + (back == "security" ? "?saved=recovery-sent" : "?sent=1") : page + "?e=" + Uri.EscapeDataString(Note(dp, error)));
+        }).RequireAuthorization().AddEndpointFilter(Program.RequireAntiforgery);
+
+        app.MapPost("/settings/recovery/later", async (HttpContext http, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            return Results.Redirect(await svc.RecoveryLaterAsync(mailboxId.Value, ct).ConfigureAwait(false) ? "/" : "/settings/recovery");
+        }).RequireAuthorization().AddEndpointFilter(Program.RequireAntiforgery);
+
+        // The link in the mail opens a page with one button (a page view writes nothing; owner, 11 Oct 2026).
+        app.MapPost("/auth/recovery/confirm", async ([FromForm] string? m, [FromForm] string? t, MailboxService svc, AuditTrail audit, HttpContext http, CancellationToken ct) =>
+        {
+            bool done = Guid.TryParseExact(m ?? string.Empty, "N", out Guid id) && await svc.ConfirmRecoveryAsync(id, t, ct).ConfigureAwait(false);
+            if (done)
+            {
+                await audit.RecordAsync(id.ToString("N"), "webmail.recovery.confirmed", "recovery address", ClientOf(http)).ConfigureAwait(false);
+            }
+            return Results.Redirect(done ? "/recovery/confirm?done=1" : "/recovery/confirm?bad=1");
+        }).AddEndpointFilter(Program.RequireAntiforgery);
 
         // Owner, 11 Oct 2026 (CodeQL cs/user-controlled-bypass): a setup starts only from
         // this button, never from opening the page, so a page view writes nothing.

@@ -29,6 +29,19 @@ Placeholders used throughout - substitute your real values everywhere:
 | `$TOKEN` | the admin API token, read once per session with `TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env \| cut -d= -f2-)` and cleared with `unset TOKEN`. Never type or paste it: that puts it on screen and in shell history |
 | `1.0.0-rc.2` | the release being deployed; always a tag, never an untagged build |
 
+### Named addresses (rc.24)
+
+Every address that a setting or a DNS record names, decided once and written here first. A test
+(`Rc24Tests.NamedAddresses_EveryCopyInTheRepository_MatchesTheTable`) fails when any file in the
+repository gives one of these another address. A changed address is changed in this table and in every
+copy in the same change; on the server, a set prints the current value before it writes the new one.
+
+| Setting or record | Address | Decided |
+|---|---|---|
+| `ANJAL_POSTMASTER` (server.env and webmail.env) | `ops@anjal.co.in` | 1 Oct 2026; set on the first server 25 Oct 2026 (D-201) |
+| `ANJAL_ACME_EMAIL` (server.env and webmail.env) | `ops@anjal.co.in` | 1 Oct 2026 |
+| DMARC `rua=` (anjal.co.in and anjalmail.com) | `ops@anjal.co.in` | live on anjal.co.in, read 25 Oct 2026 (`dig +short TXT _dmarc.anjal.co.in`) |
+
 ---
 
 ## 0. Before ordering the VM
@@ -836,7 +849,7 @@ Now relax the lockdown you set up months ago. At GoDaddy:
 |---|---|---|---|
 | TXT | `@` | `v=spf1 -all` | `v=spf1 mx ip4:203.0.113.10 -all` (add `ip6:2001:db8::10` if you published AAAA) |
 | TXT | `default._domainkey` | (none) | the `v=DKIM1; k=rsa; p=...` value from section 8 |
-| TXT | `_dmarc` | `...rua=mailto:arunshiva_b@yahoo.com;` | same record with `rua=mailto:arun@anjal.co.in` |
+| TXT | `_dmarc` | `...rua=mailto:arunshiva_b@yahoo.com;` | same record with `rua=mailto:ops@anjal.co.in` |
 
 Keep `p=reject` and strict alignment in DMARC - Anjal signs with the
 same domain it sends from, so alignment passes.
@@ -1646,10 +1659,24 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.23 to rc.24** (threads, Anjal's own alerts, the whole mail and its links, the recovery
+address): the usual steps only (backup first). No schema change, and no setting has to change.
+Two new settings are optional and off until set: `ANJAL_LINK_BLOCKLIST` and `ANJAL_LINK_DNSBL`
+(webmail.env; README, Further settings), for when a paid list of dangerous links is bought. After
+the restart: the operators' alert mails come as one digest at 09:00 India time (a new problem marked
+bad still at once; Service health, Alert mails, to choose every alert); individuals on
+anjalmail.com are asked to prove their recovery address at their next sign-in (Later is allowed for
+seven days). The deploy-smoke check now runs `anjal-firewall.sh generate`; nothing changes on the
+server for it.
+
 **rc.22.2 to rc.23** (the TST-15 fixes): the usual steps only (backup first). No schema change, no
 setting to change. After the restart, check `https://mail.anjal.co.in/robots.txt`,
 `/.well-known/security.txt` and `/help` signed out (all three answer 200), and a made-up page such
-as `/nowhere` (the "This page is not in Anjal" page, status 404).
+as `/nowhere` (the "This page is not in Anjal" page, status 404); `curl` must send
+`-H 'Accept: text/html'` for that page, or it gets the plain 404 meant for programs. Done on the first
+server 25 Oct 2026 15:50. The same day ClamAV was installed (section 13j) and the outbound firewall
+generated again with the rc.23 script, so the `clamav` account may fetch signatures (DNS and HTTPS);
+`ANJAL_POSTMASTER` was set to `ops@anjal.co.in` in both env files.
 
 **rc.21.1 to rc.22, rc.22.1 and rc.22.2** (accounts and sign-up; the mail that goes with them): the
 usual steps (backup first), `schema.sql` once (sender rules gain `discard`), then **section 13j** for
@@ -2012,7 +2039,8 @@ subdomains:
 | TXT | `anjalmail.com` | `v=spf1 ip4:<this server's IP> -all` (replaces the lockdown `v=spf1 -all`) |
 | TXT | `*.anjalmail.com` | `v=spf1 ip4:<this server's IP> -all` |
 | TXT | `default._domainkey.anjalmail.com` | the DKIM key the console makes for the domain (section 8) |
-| TXT | `_dmarc.anjalmail.com` | `v=DMARC1; p=reject; adkim=s; aspf=s; sp=reject; rua=mailto:postmaster@anjal.co.in` |
+| TXT | `_dmarc.anjalmail.com` | `v=DMARC1; p=reject; adkim=s; aspf=s; sp=reject; rua=mailto:ops@anjal.co.in` |
+| TXT | `anjalmail.com._report._dmarc.anjal.co.in` (in anjal.co.in's DNS) | `v=DMARC1` - lets anjal.co.in receive anjalmail.com's reports (RFC 7489 section 7.1; without it the reports are not sent) |
 | A | `mail.anjalmail.com` | this server's IP (the webmail for individuals; add it to the ACME names) |
 
 In the console, **Organisations > New** with the kind **Individuals** makes

@@ -20,6 +20,9 @@ public sealed partial class MailboxService
     /// <summary>The scanner, or null when scanning is off (ANJAL_CLAMAV not set).</summary>
     public IVirusScanner? Scanner { get; init; }
 
+    /// <summary>rc.24 (item 94): what looks at every link when a mail is shown.</summary>
+    public LinkChecker Links { get; init; } = new(null, null);
+
     /// <summary>The operator's address for held-mail reminders (ANJAL_POSTMASTER), or empty.</summary>
     public string OperatorAddress { get; init; } = string.Empty;
 

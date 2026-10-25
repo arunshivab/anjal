@@ -10,6 +10,27 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.24** (26 October 2026) - Threads, Anjal's own mail out of the way, and safer mail.
+Conversations: replies now carry the whole References chain, and the reader shows a conversation
+around the open mail - earlier and later mails folded into rows with letters A, B, C, who answered
+whom from the reply headers only ("replying to B, not to C", "2 replies: C, D", a margin line that
+forks), a Reply tree view, "Show N earlier mails", and an envelope that follows the open mail (In
+reply to, Also replied, Replies to this mail, This conversation, All files in this conversation);
+before replying where the conversation split, Reply to both, Read first or Reply to this one only.
+Settings, Mail, Conversations turns grouping off. Anjal's own alerts come as one daily digest at
+09:00 that replaces the last (a new problem marked bad still at once; the operator may choose every
+alert), Anjal's mail is filed under "From Anjal" with its own section on Today, and mail back from
+snooze has its own section. Every mail from outside is also scanned whole by ClamAV, text and
+links included; a flagged mail arrives with a warning and its links switched off. Links are looked
+at when a mail is shown: a link on the operator's list of known dangerous addresses is switched
+off, and a suspicious one (words naming another site, a shortener, a bare number, look-alike
+letters, a download) is outlined with a warning. Locked archives and files with macros are
+delivered with a warning. Individuals on anjalmail.com must prove a recovery address by a mailed
+link (no text messages anywhere). The Domains page no longer offers Remove for the server's own
+domain or a domain in use, and says why; the console's side list tells the scanner's state on
+every page; DEPLOY.md opens with the named-address table, held by a test; deploy-smoke runs the
+firewall script.
+
 **v1.0.0-rc.23** (24 October 2026) - The fixes from the 21-23 October test report (TST-15), each
 with a test. Help is public (anyone can read it before signing in) and the registration mail links
 to it; `/robots.txt` lets search engines see only Help, and `/.well-known/security.txt` names the
@@ -872,6 +893,8 @@ Every `ANJAL_*` setting the code reads is described in this README; a test holds
 | `ANJAL_API_ALLOW_NO_AUTH` | Server | false | `true` or anything else | Lets the admin API start with no ANJAL_API_TOKEN. Without it, a missing token stops the server (exit 1). Meant for local development only. Only checked when ANJAL_API_PORT > 0. |
 | `ANJAL_API_ALLOW_PUBLIC` | Server | false | `true` or anything else | Lets ANJAL_API_BIND be a non-loopback address. Without it, a non-loopback bind stops the server (exit 1), because the API is plain HTTP. Only checked when ANJAL_API_PORT > 0. |
 | `ANJAL_CLAMAV` | Server and Webmail | Unset: no scanning; files are delivered as they come | `host:port` (for example `127.0.0.1:3310`) or the path of clamd's Unix socket (`/var/run/clamav/clamd.ctl`), trimmed | rc.22 (item 39): the ClamAV daemon that scans every file on incoming mail (zINSTREAM). Programs and scripts are refused at SMTP (550), an infected file is removed and the subject says so, disk images go to Junk; while clamd does not answer, mail with files is held in the Quarantine folder and scanned again every five minutes, with the operator reminded every thirty. |
+| `ANJAL_LINK_BLOCKLIST` | Webmail | Unset: off | Path of a text file: one host name (`bad.example`, which also covers its subdomains) or one address beginning `http://` or `https://` per line; `#` starts a comment. Read again within a minute of changing | rc.24 (item 94): the operator's list of known dangerous links. A link in a mail that goes there is switched off when the mail is shown, with a warning; the words stay. Off by default: the free lists do not allow use in a paid service (abuse.ch URLhaus, Spamhaus, SURBL, URIBL; checked 25 Oct 2026). |
+| `ANJAL_LINK_DNSBL` | Webmail | Unset: off | A DNS list zone for domain names, trimmed (for example a paid Spamhaus DQS zone) | rc.24 (item 94): each link's host name is looked up as `<host>.<zone>`; an answer in 127.0.0.0/8 (not 127.255.255.x) switches the link off. Only the domain name leaves the server; answers are kept for an hour; no answer within 1.5 seconds counts as not listed. |
 | `ANJAL_SHARED_DOMAIN` | Webmail | Unset: no automatic subdomains are made | A domain name, trimmed, lower case (`anjalmail.com` in production) | rc.22: Anjal's shared domain - the individuals' tenant is made on it, and every organisation created afterwards gets an automatic subdomain of it (`<slug>.<shared domain>`) beside its own domain. The DNS for it (MX, SPF, DKIM, a wildcard for the subdomains) is the operator's. |
 | `ANJAL_BACKUP_SCRATCH` | Webmail | `/var/lib/anjal/backup` (also when set to empty) | Folder path | Folder where backup copies wait before they are sent off. Webmail only measures its size for the operator capacity view; backup.sh is what actually writes there. |
 | `ANJAL_BACKUP_RETRY_WAITS` | Backup | `120 240 480 960` (set to empty: no new tries) | Seconds, separated by spaces | How long backup.sh waits before each new try after a failed run (D-88): by default 2, 4, 8 and 16 minutes, about 30 minutes in all. When the last try fails, a `failed` line is added to the status file. "Not configured" is never tried again. |

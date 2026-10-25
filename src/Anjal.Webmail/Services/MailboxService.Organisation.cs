@@ -297,6 +297,11 @@ public sealed partial class MailboxService
         {
             return "password";
         }
+        // rc.24 (item 90): an individual proves a recovery address before their mail opens.
+        if (await this.RecoveryWaitingAsync(personId, ct).ConfigureAwait(false))
+        {
+            return "recovery";
+        }
         bool required = await this.TwoStepRequiredAsync(policy, personId, ct).ConfigureAwait(false);
         return required && !security.TwoStepOn ? "twostep" : null;
     }

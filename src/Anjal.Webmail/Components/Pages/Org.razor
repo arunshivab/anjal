@@ -1099,6 +1099,13 @@ else
                     <button type="submit" class="btn btn-s asidebtn" title="@L["Stop waiting for this domain's proof. Nothing was ever received for it."]">@L["Cancel this domain"]</button>
                 </form>
             }
+            else if (SelDomain is not null && domains.Any(d => d.Domain == SelDomain) && domainUse is { Removable: false } held)
+            {
+                @* DEF-168 (rc.24): no Remove for the server's own domain or a domain still in use - the reason instead. *@
+                <div class="asidecard" data-domain-kept><span class="asidebody"><b>@L["This domain cannot be removed."]</b>
+                    @(held.ServerDomain ? L[MailboxService.ServerDomainWords]
+                        : L[MailboxService.InUseWords].Replace("{boxes}", MailboxService.Count(held.Mailboxes), StringComparison.Ordinal).Replace("{addresses}", MailboxService.Count(held.Addresses), StringComparison.Ordinal))</span></div>
+            }
             else if (SelDomain is not null && domains.Any(d => d.Domain == SelDomain))
             {
                 <details class="confirm asideconfirm">
@@ -1526,6 +1533,7 @@ else
     private SignInPolicy policy = new();
     private int adminsWithoutKey;
     private IReadOnlyList<TenantDomainRow> domains = Array.Empty<TenantDomainRow>();
+    private DomainUse? domainUse;
     private Dictionary<string, string> pending = new();
     private IReadOnlyList<DnsRecordCheck> records = Array.Empty<DnsRecordCheck>();
     private IReadOnlyList<(MailboxRow Mailbox, SharedMailbox Info, long Unread)> shared = Array.Empty<(MailboxRow, SharedMailbox, long)>();
@@ -1749,6 +1757,7 @@ else
         revealed = Links == "1" || KeyShown == "1" ? Sessions.TakeReveal(sid) : null;
         counts = await Mail.OrgCountsAsync(tenant);
         domains = await Mail.TenantDomainsAsync(tenant.Id);
+        domainUse = SelDomain is string chosen && domains.Any(d => d.Domain == chosen) ? await Mail.DomainUseAsync(tenant, chosen) : null;
         people = await Mail.ListPeopleAsync(tenant, Sessions);
         everyone = people.Select(p => p.Mailbox).ToList();
         individuals = await Mail.IsIndividualsTenantAsync(tenant.Id);
