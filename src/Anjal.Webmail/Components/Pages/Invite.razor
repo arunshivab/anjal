@@ -42,7 +42,7 @@
             <div class="authinpwrap"><input class="authinp-in" id="recovery" name="recovery" type="email" autocomplete="email" placeholder="@L["A personal address, for a forgotten password"]" /></div>
             <button type="submit" class="authbtn">@L["Continue"]</button>
         </form>
-        <p class="authnote">@L["This invitation from {name} expires on {date}."].Replace("{name}", found.Value.Invitation.InvitedBy.Length > 0 ? found.Value.Invitation.InvitedBy : L["your administrator"], StringComparison.Ordinal).Replace("{date}", ZonedClock.Default.Date(found.Value.Invitation.Expires), StringComparison.Ordinal)</p>
+        <p class="authnote">@L["This invitation from {name} expires on {date}."].Replace("{name}", found.Value.Invitation.InvitedBy.Length > 0 ? found.Value.Invitation.InvitedBy : L["your administrator"], StringComparison.Ordinal).Replace("{date}", MailboxService.InvitationExpiry(found.Value.Invitation.Expires, L), StringComparison.Ordinal)</p>
     }
 </AuthFrame>
 

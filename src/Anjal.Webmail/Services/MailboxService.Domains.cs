@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Security.Cryptography;
+using Anjal.Mailbox;
 using Anjal.Store;
 
 namespace Anjal.Webmail.Services;
@@ -65,6 +67,44 @@ public sealed partial class MailboxService
                 }, ct).ConfigureAwait(false);
             }
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Remove one of an organisation's proved domains (DEF-122, rc.23). Refused while anything still
+    /// lives at the domain - a mailbox, a shared mailbox, an application's mailbox, an alias or a
+    /// group address - and for the domain this server itself answers to. Its DKIM key goes with it.
+    /// Mail already kept is untouched. Returns the reason it cannot be removed, or null.
+    /// </summary>
+    /// <param name="tenant">The organisation.</param>
+    /// <param name="domain">The domain.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The reason it was refused, or null when it was removed.</returns>
+    public async Task<string?> RemoveTenantDomainAsync(TenantRow tenant, string domain, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenant);
+        ArgumentNullException.ThrowIfNull(domain);
+        string d = domain.Trim().TrimEnd('.').ToLowerInvariant();
+        if (await this.store.GetTenantDomainAsync(d, ct).ConfigureAwait(false) is not TenantDomainRow row || row.TenantId != tenant.Id)
+        {
+            return "That domain is not this organisation's.";
+        }
+        if (string.Equals(d, this.hostName, StringComparison.OrdinalIgnoreCase) || this.hostName.EndsWith("." + d, StringComparison.OrdinalIgnoreCase))
+        {
+            return "This server answers to that domain, so it cannot be removed here.";
+        }
+        int boxes = (await this.store.ListMailboxesAsync(tenant.Id, ct).ConfigureAwait(false)).Count(m => string.Equals(m.Domain, d, StringComparison.OrdinalIgnoreCase));
+        AddressBook book = await this.AddressBookAsync(tenant.Id, ct).ConfigureAwait(false);
+        int addresses = book.Aliases.Count(x => x.Address.EndsWith("@" + d, StringComparison.OrdinalIgnoreCase))
+            + book.Groups.Count(x => x.Address.EndsWith("@" + d, StringComparison.OrdinalIgnoreCase));
+        if (boxes > 0 || addresses > 0)
+        {
+            return "Still in use: {boxes} mailbox(es) and {addresses} other address(es) at this domain. Remove or move them first."
+                .Replace("{boxes}", boxes.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("{addresses}", addresses.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+        }
+        await this.store.DeleteTenantDomainAsync(d, ct).ConfigureAwait(false);
+        await this.messageStore.DeleteDkimKeyAsync(d, ct).ConfigureAwait(false);
         return null;
     }
 

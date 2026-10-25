@@ -23,7 +23,8 @@
             }
             @if (Conversation > 1)
             {
-                <span class="ccount" title="@L["{n} messages in this conversation"].Replace("{n}", MailboxService.Count(Conversation), StringComparison.Ordinal)">@Conversation</span>
+                @* DEF-158 (rc.23): an icon says what the number is, and a screen reader hears the whole phrase. *@
+                <span class="ccount" role="img" title="@L["{n} messages in this conversation"].Replace("{n}", MailboxService.Count(Conversation), StringComparison.Ordinal)" aria-label="@L["{n} messages in this conversation"].Replace("{n}", MailboxService.Count(Conversation), StringComparison.Ordinal)"><LipiIcon Name="comment" Size="11" /><span aria-hidden="true">@Conversation</span></span>
             }
             <time title="@Clock.Full(M.ReceivedAt)" datetime="@M.ReceivedAt.ToString("o", System.Globalization.CultureInfo.InvariantCulture)"><span class="tt">@Clock.Time(M.ReceivedAt)</span><small class="td">@Clock.ListDay(M.ReceivedAt, DateTimeOffset.UtcNow)</small></time>
         </div>
@@ -32,12 +33,12 @@
             {
                 <span class="unenc" data-unencrypted role="img" title="@L["Arrived unencrypted: anyone on the network path could have read it"]" aria-label="@L["Arrived unencrypted"]"><LipiIcon Name="unlock" Size="13" /></span>
             }
+            <a class="subj" href="@OpenLink" data-open>@if (string.IsNullOrWhiteSpace(M.Subject)) { @L["(no subject)"] } else { @Highlighted(M.Subject) }</a>
             @if (Mark is not null)
             {
-                @* rc.22: "Snoozed" when it came back from snooze; "Virus removed" when a file was taken out. *@
+                @* DEF-159 (rc.23): after the subject, so every subject starts in the same place. rc.22: "Snoozed" when it came back from snooze; "Virus removed" when a file was taken out. *@
                 <span class="pill @(Mark == "Virus removed" ? "pill-bad" : "pill-info") rowmark">@L[Mark]</span>
             }
-            <a class="subj" href="@OpenLink" data-open>@if (string.IsNullOrWhiteSpace(M.Subject)) { @L["(no subject)"] } else { @Highlighted(M.Subject) }</a>
             @if (ShowFlag)
             {
                 <button type="submit" class="fav @(M.Flagged ? "on" : "")"

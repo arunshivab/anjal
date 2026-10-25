@@ -149,7 +149,8 @@ else
                         }
                     </div>
                 </div>
-                <table class="orgtable">
+                @* DEF-149d (rc.23): on a phone the table scrolls sideways with the Person column kept in place. *@
+                <table class="orgtable peopletable">
                     @if (individuals)
                     {
                         <thead><tr><th>@L["Person"]</th><th>@L["Phone"]</th><th>@L["Born"]</th><th>@L["Status"]</th><th>@L["Joined"]</th></tr></thead>
@@ -207,7 +208,8 @@ else
                     <p class="orgempty">@L["No one matches."]</p>
                 }
                 <footer class="orgfoot">
-                    <span>@L["Showing {n} of {all}. Rows per page follow your own setting."].Replace("{n}", PeoplePage.Count.ToString(Inv), StringComparison.Ordinal).Replace("{all}", PeopleShown.Count.ToString(Inv), StringComparison.Ordinal)</span>
+                    @* DEF-123 (rc.23): people invited and not yet joined are counted too - they are rows of the table. *@
+                    <span>@L["Showing {n} of {all}. Rows per page follow your own setting."].Replace("{n}", (PeoplePage.Count + PendingShown.Count).ToString(Inv), StringComparison.Ordinal).Replace("{all}", (PeopleShown.Count + PendingShown.Count).ToString(Inv), StringComparison.Ordinal)</span>
                     <span class="pager orgpager"><PageSteps L="L" Index="PageNo - 1" Size="pageSize" Total="PeopleShown.Count" Link="@(i => PeopleLink(Filter, null, i + 1))" Previous="Previous" Next="Next" /></span>
                 </footer>
             </section>
@@ -426,6 +428,10 @@ else
                         @if (Check == "1")
                         {
                             @L["Checked live just now."] <a href="/org/domains?domain=@Uri.EscapeDataString(SelDomain)&check=1">@L["Check again"]</a>
+                        }
+                        else if (dailyCheckAt is DateTimeOffset at)
+                        {
+                            @L["Checked by the daily check, {date}."].Replace("{date}", clock.Full(at), StringComparison.Ordinal) <a href="/org/domains?domain=@Uri.EscapeDataString(SelDomain)&check=1">@L["Check now"]</a>
                         }
                         else
                         {
@@ -1084,6 +1090,28 @@ else
             {
                 <div class="asidecard warn"><span class="asidebody"><b>@L["No DKIM key yet."]</b> @L["Ask the Anjal operator to make one; until then mail you send may be refused."]</span></div>
             }
+            @* DEF-122 (rc.23): a domain can be cancelled while its proof is pending, and removed once nothing lives at it. *@
+            @if (SelDomain is not null && pending.ContainsKey(SelDomain))
+            {
+                <form method="post" action="/org/domains/remove" class="asideform">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="domain" value="@SelDomain" />
+                    <button type="submit" class="btn btn-s asidebtn" title="@L["Stop waiting for this domain's proof. Nothing was ever received for it."]">@L["Cancel this domain"]</button>
+                </form>
+            }
+            else if (SelDomain is not null && domains.Any(d => d.Domain == SelDomain))
+            {
+                <details class="confirm asideconfirm">
+                    <summary class="btn btn-danger-q asidebtn">@L["Remove this domain"]</summary>
+                    <form method="post" action="/org/domains/remove" class="asideform">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="domain" value="@SelDomain" />
+                        <p class="asidetext">@L["Mail is no longer received at {domain}, and its DKIM key is deleted. Mail already kept stays. Only a domain with no mailboxes or addresses left can be removed. Type the domain to confirm."].Replace("{domain}", SelDomain, StringComparison.Ordinal)</p>
+                        <input class="inp" name="value" placeholder="@SelDomain" required autocomplete="off" aria-label="@L["Domain"]" />
+                        <div class="setactions"><button type="submit" class="btn btn-danger">@L["Remove the domain"]</button></div>
+                    </form>
+                </details>
+            }
             break;
 
         case "shared":
@@ -1148,6 +1176,16 @@ else
                     <label class="mtoggle"><input type="checkbox" name="keep" value="1" checked="@s.Info.KeepSentCopy" data-autosubmit role="switch" /><span class="toggle" aria-hidden="true"><i></i></span><span>@L["Keep a copy of sent mail in this mailbox"]</span></label>
                     <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
                 </form>
+                @* DEF-135, DEF-163 (rc.23): a shared mailbox can be deleted; what happens to its mail is said first. *@
+                <details class="confirm asideconfirm">
+                    <summary class="btn btn-danger-q asidebtn">@L["Delete this shared mailbox"]</summary>
+                    <form method="post" action="/org/shared/@s.Mailbox.Id/delete" class="asideform">
+                        <AntiforgeryToken />
+                        <p class="asidetext">@L["Its people lose it at once, its mail and files are erased and cannot be brought back, and the address is never given out again. The evidence copies are kept for the organisation's retention period. Type the address to confirm."]</p>
+                        <input class="inp" name="value" placeholder="@s.Mailbox.Address" required autocomplete="off" aria-label="@L["Address"]" />
+                        <div class="setactions"><button type="submit" class="btn btn-danger">@L["Delete for good"]</button></div>
+                    </form>
+                </details>
             }
             else
             {
@@ -1250,14 +1288,25 @@ else
                 <p class="asidetext">@L["Sends as {address}, and only as it."].Replace("{address}", selApp.SendsAs, StringComparison.Ordinal) @(selApp.Receives.Length > 0 ? L["Receives: {what}."].Replace("{what}", selApp.Receives, StringComparison.Ordinal) : string.Empty)</p>
                 @if (revealed is { Count: > 0 } && revealed[0].Split('|') is [string user, string secret])
                 {
+                    @* DEF-157 (rc.23): the secret is the key, named so; the one-time block says it is shown once and how to use it. *@
                     <div class="asidecard keynew" role="status">
-                        <b>@L["The new key, shown once"]</b>
+                        <b>@L["Copy the new key now: it is shown once"]</b>
                         <dl class="keyvals">
                             <dt>@L["SMTP server"]</dt><dd><code>@Host.Name</code><span>@L["port 587, STARTTLS"]</span></dd>
                             <dt>@L["User name"]</dt><dd><code>@user</code><button type="button" class="iconbtn sqbtn" data-copy="@user" title="@L["Copy"]" aria-label="@L["Copy the user name"]"><LipiIcon Name="copy" Size="14" /></button></dd>
-                            <dt>@L["Password"]</dt><dd><code>@secret</code><button type="button" class="iconbtn sqbtn" data-copy="@secret" title="@L["Copy"]" aria-label="@L["Copy the password"]"><LipiIcon Name="copy" Size="14" /></button></dd>
+                            <dt>@L["Key"]</dt><dd><code>@secret</code><button type="button" class="iconbtn sqbtn" data-copy="@secret" title="@L["Copy"]" aria-label="@L["Copy the key"]"><LipiIcon Name="copy" Size="14" /></button></dd>
                         </dl>
+                        <span class="asidebody">@L["In the application's mail settings the user name goes in User name and the key in Password."]</span>
                     </div>
+                }
+                @if (selApp.Retired is DateTimeOffset retiredAt)
+                {
+                    <div class="asidecard warn"><b>@L["Retired {date}"].Replace("{date}", clock.Date(retiredAt), StringComparison.Ordinal)</b><span class="asidebody">@L["Its keys stopped working then and no new key can be made. What it sent stays in the records."]</span></div>
+                }
+                @if (selApp.Keys.Count > 0)
+                {
+                    <h3 class="asidetitle">@L["Keys in use"]</h3>
+                    <p class="asidetext">@L["Anjal keeps only a fingerprint of each key; the key itself cannot be shown again."]</p>
                 }
                 @foreach (AppKey k in selApp.Keys.OrderBy(k => k.EndsAt is null ? 0 : 1).ThenByDescending(k => k.Created))
                 {
@@ -1274,8 +1323,36 @@ else
                         </div>
                     </div>
                 }
-                <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/key"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn" title="@L["Make another key for this application; it is shown once."]"><LipiIcon Name="plus" Size="16" />@L["New key"]</button></form>
-                <p class="asidetext">@L["A new key is shown once, when it is made. Anjal keeps only a fingerprint of it."]</p>
+                @if (selApp.Retired is null)
+                {
+                    <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/key"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn" title="@L["Make another key for this application; it is shown once."]"><LipiIcon Name="plus" Size="16" />@L["New key"]</button></form>
+                    <p class="asidetext">@L["A new key is shown once, when it is made. Anjal keeps only a fingerprint of it."]</p>
+                }
+                @* DEF-162 (rc.23): an application can be retired, and one with no keys removed from the list. *@
+                @if (selApp.Keys.Count > 0 || selApp.Retired is null)
+                {
+                    <details class="confirm asideconfirm">
+                        <summary class="btn btn-danger-q asidebtn">@L["Retire this application"]</summary>
+                        <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/retire" class="asideform">
+                            <AntiforgeryToken />
+                            <p class="asidetext">@L["Every key stops working now and no new one can be made; it can no longer send. Its record and what it sent stay. Type its name to confirm."]</p>
+                            <input class="inp" name="value" placeholder="@selApp.Name" required autocomplete="off" aria-label="@L["Name"]" />
+                            <div class="setactions"><button type="submit" class="btn btn-danger">@L["Retire it"]</button></div>
+                        </form>
+                    </details>
+                }
+                @if (selApp.Keys.Count == 0)
+                {
+                    <details class="confirm asideconfirm">
+                        <summary class="btn btn-danger-q asidebtn">@L["Remove from the list"]</summary>
+                        <form method="post" action="/org/apps/@Uri.EscapeDataString(selApp.Id)/remove" class="asideform">
+                            <AntiforgeryToken />
+                            <p class="asidetext">@L["It goes from this list. What it sent stays in the sending records and as evidence. Type its name to confirm."]</p>
+                            <input class="inp" name="value" placeholder="@selApp.Name" required autocomplete="off" aria-label="@L["Name"]" />
+                            <div class="setactions"><button type="submit" class="btn btn-danger">@L["Remove it"]</button></div>
+                        </form>
+                    </details>
+                }
             }
             else
             {
@@ -1345,6 +1422,7 @@ else
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
 
     // rc.16, design review [6f]: Set up first, then grouped - People and access, Mail, Records, Insight, Brand.
+    // DEF-164 (rc.23): every icon is one the icon library has (forward and at-sign were not, and drew nothing).
     private static readonly (string Group, string Key, string Label, string Icon)[] Sections =
     {
         (string.Empty, "setup", "Set up", "checklist-onboard"),
@@ -1352,8 +1430,8 @@ else
         ("People and access", "signin", "Sign-in and sessions", "security"),
         ("People and access", "shared", "Shared mailboxes", "box"),
         ("Mail", "domains", "Domains", "world-route"),
-        ("Mail", "rules", "Mail rules", "forward"),
-        ("Mail", "addresses", "Addresses", "at-sign"),
+        ("Mail", "rules", "Mail rules", "sliders"),
+        ("Mail", "addresses", "Addresses", "email"),
         ("Mail", "sending", "Sending", "referral-out"),
         ("Mail", "apps", "Sending systems", "server-stack"),
         ("Records", "retention", "Retention", "clock"),
@@ -1370,6 +1448,7 @@ else
     private Dictionary<Guid, DateTimeOffset> deletions = new();
     private Dictionary<Guid, PersonProfile> profiles = new();
     private List<PendingInvitation> pendingPeople = new();
+    private DateTimeOffset? dailyCheckAt;
     private PendingInvitation? selPending;
     private Anjal.Mailbox.OrgMailPolicy mailPolicy = new();
     private Anjal.Mailbox.AddressBook addressBook = new();
@@ -1559,6 +1638,10 @@ else
         "hold" => L["Hold placed. Nothing is deleted from that mailbox until it is lifted."],
         "unhold" => L["Hold lifted. The retention rules apply to that mailbox again."],
         "proved" => L["Domain proved and added. Publish its records below."],
+        "domain-removed" => L["Domain removed. Nothing more is received at it; its records can be taken out of its DNS."],
+        "shared-removed" => L["Shared mailbox removed."],
+        "app-removed" => L["Application removed."],
+        "app-retired" => L["Application retired: its keys no longer work, and its record stays."],
         "template" => L["Template removed."],
         "retried" => L["It will be tried again within a minute."],
         "stopped" => L["Anjal stopped trying; the application is told it failed."],
@@ -1719,6 +1802,12 @@ else
                 if (SelDomain is string d && !pending.ContainsKey(d))
                 {
                     records = await Mail.DomainRecordsAsync(d, Check == "1" ? name => DnsLookup.TxtAsync(name, CancellationToken.None) : null);
+                    // DEF-121 (rc.23): without a live check, the page shows the daily check's findings and when it ran.
+                    if (Check != "1" && await Mail.DnsCheckOfAsync(tenant.Id) is DnsCheckRecord daily && daily.Domains.TryGetValue(d, out Dictionary<string, string>? seen))
+                    {
+                        dailyCheckAt = daily.At;
+                        records = records.Select(r => seen.TryGetValue(r.Kind, out string? st) && st != "unchecked" ? r with { Status = st } : r).ToList();
+                    }
                 }
                 break;
             case "sending":

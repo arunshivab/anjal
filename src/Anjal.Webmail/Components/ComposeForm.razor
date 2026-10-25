@@ -44,6 +44,8 @@ else if (Docked)
                 <div class="notice n-err readnotice"><LipiIcon Name="warning" Size="16" /><span><b>@L["Not sent."]</b> @L.Say(Error)</span></div>
             }
             <div class="notice n-err readnotice" data-client-error hidden></div>
+            @* DEF-140 (rc.23): while files go up, a moving bar says so - the page was otherwise still for seconds. *@
+            <div class="uploadbar" data-uploadbar role="status" aria-live="polite" hidden><span class="ub-track" aria-hidden="true"><i></i></span><span data-uploadbar-text></span></div>
             <div class="cdock-to" data-recips>
                 <label class="clabel" for="dto">@L["To"]</label>
                 <div class="rbox" data-rbox>
@@ -138,6 +140,8 @@ else
                 </div>
             }
             <div class="notice n-err readnotice" data-client-error hidden></div>
+            @* DEF-140 (rc.23): while files go up, a moving bar says so - the page was otherwise still for seconds. *@
+            <div class="uploadbar" data-uploadbar role="status" aria-live="polite" hidden><span class="ub-track" aria-hidden="true"><i></i></span><span data-uploadbar-text></span></div>
             @if (SavedFlag is not null && Error is null)
             {
                 <div class="notice n-ok readnotice">
@@ -166,6 +170,11 @@ else
             }
             @* rc.16, design review [6a]: the letter holds the subject, a formatting bar and the body -
                the same rule as reading; the envelope beside it does the addressing. *@
+            @* DEF-166 (rc.23): the first time, on a new message, a line says where the addresses go; the Subject looks like a box to type in. *@
+            @if (Reply is null && ReplyAll is null && Forward is null && ForwardAtt is null && DraftId is null)
+            {
+                <p class="cfirst" data-compose-first hidden><LipiIcon Name="info" Size="15" /><span>@L["The addresses go in the envelope on the right: To, Cc and Bcc. Write the subject and the letter here."]</span><button type="button" class="linkbtn" data-compose-first-ok title="@L["Hide this line; it will not show again."]">@L["Got it"]</button></p>
+            }
             <input class="csubject" name="subject" type="text" value="@subject" placeholder="@L["Subject"]" aria-label="@L["Subject"]" />
             <div class="ctools">
                 <FormatBar L="L" />

@@ -175,7 +175,10 @@ public sealed partial class Rc16Tests : IAsyncLifetime, IDisposable
         {
             Environment.SetEnvironmentVariable("ANJAL_OPERATORS", "someone-else@anjal.co.in");
             await this.SignInAsync();
-            string refused = await this.client.GetStringAsync(new Uri("dev/components", UriKind.Relative));
+            // DEF-124 (rc.23): the refusal answers 403, with the same words.
+            HttpResponseMessage answer = await this.client.GetAsync(new Uri("dev/components", UriKind.Relative));
+            Assert.Equal(System.Net.HttpStatusCode.Forbidden, answer.StatusCode);
+            string refused = await answer.Content.ReadAsStringAsync();
             Assert.Contains("Only an operator of this Anjal service can open this.", refused, StringComparison.Ordinal);
             Assert.DoesNotContain("class=\"devsheet\"", refused, StringComparison.Ordinal);
 

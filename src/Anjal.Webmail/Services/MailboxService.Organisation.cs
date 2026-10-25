@@ -853,7 +853,7 @@ public sealed partial class MailboxService
         ArgumentNullException.ThrowIfNull(tenant);
         List<OrgApp> apps = await this.AppsOfAsync(tenant.Id, ct).ConfigureAwait(false);
         OrgApp? app = apps.Find(x => x.Id == appId);
-        if (app is null)
+        if (app is null || app.Retired is not null)
         {
             return null;
         }
@@ -889,6 +889,60 @@ public sealed partial class MailboxService
         apps.Find(x => x.Id == appId)!.Keys.Remove(key);
         await this.WriteTenantDocumentAsync(tenant.Id, AppsKind, apps, ct).ConfigureAwait(false);
         return true;
+    }
+
+    /// <summary>
+    /// Retire an application (DEF-162, rc.23): every key stops working now and no new one can be
+    /// made; the application and what it sent stay on record. Returns whether it was found.
+    /// </summary>
+    /// <param name="tenant">The organisation.</param>
+    /// <param name="appId">The application.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Whether it was found.</returns>
+    public async Task<bool> RetireAppAsync(TenantRow tenant, string appId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenant);
+        List<OrgApp> apps = await this.AppsOfAsync(tenant.Id, ct).ConfigureAwait(false);
+        OrgApp? app = apps.Find(x => x.Id == appId);
+        if (app is null)
+        {
+            return false;
+        }
+        foreach (AppKey key in app.Keys)
+        {
+            await this.messageStore.DeleteSmtpUserAsync(key.Username, ct).ConfigureAwait(false);
+        }
+        app.Keys.Clear();
+        app.Retired ??= DateTimeOffset.UtcNow;
+        await this.WriteTenantDocumentAsync(tenant.Id, AppsKind, apps, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
+    /// Remove an application from the list (DEF-162, rc.23) - only one with no keys left (retired,
+    /// or every key revoked). What it sent stays in the sending records and the evidence store.
+    /// Returns the reason it was refused, or null.
+    /// </summary>
+    /// <param name="tenant">The organisation.</param>
+    /// <param name="appId">The application.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The reason, or null when it was removed.</returns>
+    public async Task<string?> RemoveAppAsync(TenantRow tenant, string appId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenant);
+        List<OrgApp> apps = await this.AppsOfAsync(tenant.Id, ct).ConfigureAwait(false);
+        OrgApp? app = apps.Find(x => x.Id == appId);
+        if (app is null)
+        {
+            return "That application is not this organisation's.";
+        }
+        if (app.Keys.Count > 0)
+        {
+            return "This application still has keys. Retire it first, so its keys stop working.";
+        }
+        apps.Remove(app);
+        await this.WriteTenantDocumentAsync(tenant.Id, AppsKind, apps, ct).ConfigureAwait(false);
+        return null;
     }
 
     /// <summary>Remove keys whose time has ended (after a rotation), in every organisation.</summary>
@@ -1012,7 +1066,8 @@ public sealed partial class MailboxService
             ("MX", "@", "MX", "10 " + this.hostName, found => found.Any(f => string.Equals(f.TrimEnd('.'), this.hostName, StringComparison.OrdinalIgnoreCase)) ? "pass" : found.Count == 0 ? "missing" : "different"),
             ("SPF", "@", "TXT", "v=spf1 mx -all", found => found.Any(f => f.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase) && (f.Contains(" mx", StringComparison.OrdinalIgnoreCase) || f.Contains(this.hostName, StringComparison.OrdinalIgnoreCase))) ? "pass" : found.Any(f => f.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase)) ? "different" : "missing"),
             ("DKIM", selector + "._domainkey", "TXT", dkimValue, found => found.Any(f => dkimValue.StartsWith("v=DKIM1", StringComparison.Ordinal) && f.Replace(" ", string.Empty, StringComparison.Ordinal).Contains(dkimValue.Split("p=")[1], StringComparison.Ordinal)) ? "pass" : found.Count == 0 ? "missing" : "different"),
-            ("DMARC", "_dmarc", "TXT", "v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@" + d, found => found.Any(f => f.StartsWith("v=DMARC1", StringComparison.OrdinalIgnoreCase)) ? "pass" : "missing"),
+            // DEF-121 (rc.23): the template at best practice - reject, strict alignment, subdomains too - as anjal.co.in publishes.
+            ("DMARC", "_dmarc", "TXT", "v=DMARC1; p=reject; adkim=s; aspf=s; sp=reject; rua=mailto:dmarc-reports@" + d, found => found.Any(f => f.StartsWith("v=DMARC1", StringComparison.OrdinalIgnoreCase)) ? "pass" : "missing"),
             ("MTA-STS", "_mta-sts", "TXT", "v=STSv1; id=" + DateTimeOffset.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + "01", found => found.Any(f => f.StartsWith("v=STSv1", StringComparison.OrdinalIgnoreCase)) ? (MtaStsPolicy.ConfiguredMode() == "enforce" ? "pass" : "testing") : "missing"),
             ("TLS reports", "_smtp._tls", "TXT", "v=TLSRPTv1; rua=mailto:tls-reports@" + d, found => found.Any(f => f.StartsWith("v=TLSRPTv1", StringComparison.OrdinalIgnoreCase)) ? "pass" : "missing"),
         };

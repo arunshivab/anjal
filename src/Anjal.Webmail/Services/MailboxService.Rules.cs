@@ -12,6 +12,9 @@ public sealed record RuleTrial(int Matches, IReadOnlyList<(string Sender, int Co
 /// <summary>Folders and rules (rc.12, items 24 and 31; the board SetRules).</summary>
 public sealed partial class MailboxService
 {
+    /// <summary>The kind of the document holding a rule being tried, unsaved (D-176, rc.23).</summary>
+    public const string RuleDraftKind = "ruledraft";
+
     /// <summary>The standard folders, which cannot be created, removed or used as a person's own.</summary>
     public static readonly IReadOnlySet<string> StandardFolders = new HashSet<string>(
         new[] { FolderRow.Inbox, ScheduledFolder, "Outbox", SnoozedFolder, AttachmentPolicy.QuarantineFolder, "Drafts", "Sent", "Archive", MailboxSink.JunkFolder, "Trash" },
@@ -22,6 +25,35 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public async Task<IReadOnlyList<MailRule>> ListRulesAsync(Guid mailboxId, CancellationToken ct = default) =>
         MailRules.Parse(await this.store.GetMailboxDocumentAsync(mailboxId, MailRules.Kind, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// Keep a rule being edited, unsaved, so that "Try on the last 30 days" can show what it would
+    /// match without saving it (D-176, DEF-137, rc.23: Try saved the rule, so a forwarding rule
+    /// started forwarding new mail the moment it was tried).
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="rule">The rule as typed.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public Task KeepRuleDraftAsync(Guid mailboxId, MailRule rule, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        return this.WriteDocumentAsync(mailboxId, RuleDraftKind, rule, ct);
+    }
+
+    /// <summary>The rule being tried, unsaved (D-176), or null.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The rule as typed, or null.</returns>
+    public Task<MailRule?> RuleDraftAsync(Guid mailboxId, CancellationToken ct = default) =>
+        this.ReadDocumentAsync<MailRule>(mailboxId, RuleDraftKind, ct);
+
+    /// <summary>Forget the rule being tried (it was saved, or another was chosen).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public Task ForgetRuleDraftAsync(Guid mailboxId, CancellationToken ct = default) =>
+        this.store.SetMailboxDocumentAsync(mailboxId, RuleDraftKind, "null", ct);
 
     /// <summary>Add or change a rule. Returns a message for the person, or null on success.</summary>
     /// <param name="mailboxId">The mailbox.</param>

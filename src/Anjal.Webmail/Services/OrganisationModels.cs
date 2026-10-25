@@ -305,6 +305,9 @@ public sealed class OrgApp
 
     /// <summary>When it was added.</summary>
     public DateTimeOffset Created { get; set; }
+
+    /// <summary>When it was retired (DEF-162, rc.23): its keys were revoked and no new one can be made; null while in use.</summary>
+    public DateTimeOffset? Retired { get; set; }
 }
 
 /// <summary>What the operator records for an organisation (rc.14, board OpsOrgs).</summary>

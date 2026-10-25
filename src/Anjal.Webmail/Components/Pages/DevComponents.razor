@@ -164,6 +164,8 @@ else
 
     [CascadingParameter] private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
 
+    [CascadingParameter] private HttpContext? Http { get; set; }
+
     private Lexicon L = new("en", new Dictionary<string, string>());
     private bool ready;
     private bool operatorHere;
@@ -177,5 +179,16 @@ else
             operatorHere = WebmailAuthService.PersonIdOf(user) is Guid person && await Mail.GetMailboxAnyAsync(person) is MailboxRow mine && Operators.Is(mine.Address);
         }
         ready = true;
+        if (!operatorHere && Http is not null)
+        {
+            // DEF-124 (rc.23): the refusal says so in its status too. Set as the headers go out:
+            // a status set during rendering makes Blazor send an empty body.
+            HttpContext http = Http;
+            http.Response.OnStarting(() =>
+            {
+                http.Response.StatusCode = http.User.Identity?.IsAuthenticated == true ? StatusCodes.Status403Forbidden : StatusCodes.Status401Unauthorized;
+                return Task.CompletedTask;
+            });
+        }
     }
 }

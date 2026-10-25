@@ -164,13 +164,16 @@
                             <td class="num @(f.Bounced > 0 ? "ssbad" : null)">@f.Bounced.ToString("N0", Inv)</td>
                             <td class="num">@f.Failed.ToString("N0", Inv)</td>
                             <td class="num">@Took(f.Usual)</td>
-                            <td><span class="@(f.Health == "Healthy" ? "ssok" : "sswarn")">@L[f.Health]</span></td>
+                            <td>@if (f.App.Retired is not null) { <span class="pill">@L["Retired"]</span> } else { <span class="@(f.Health == "Healthy" ? "ssok" : "sswarn")">@L[f.Health]</span> }</td>
                             <td>
+                                @if (f.App.Retired is null)
+                                {
                                 <form method="post" action="/org/sending/test" class="inline">
                                     <AntiforgeryToken />
                                     <input type="hidden" name="id" value="@f.App.Id" />
                                     <button type="submit" class="btn btn-s btn-sm" data-needs-server title="@L["Sends a short message from {address} to you"].Replace("{address}", f.App.SendsAs, StringComparison.Ordinal)">@L["Send a test"]</button>
                                 </form>
+                                }
                             </td>
                         </tr>
                     }
@@ -193,6 +196,8 @@
             break;
 
         case "webhooks":
+            @* D-171 (rc.23, DEF-119): webhooks are the operator's to set until the application API (SPEC-17, rc.25) lets an organisation set its own. *@
+            <div class="notice n-info orglead"><LipiIcon Name="info" Size="16" /><span>@L["Webhooks are set up by the Anjal operator for now. Your own webhook addresses, and HTTP keys for your applications, come with the application API."]</span></div>
             <p class="hint orglead">@L["Mail to an application's +tag addresses is posted to its webhook, signed, and tried again for 24 hours. A delivery that failed can be replayed once the webhook is back."]</p>
             @if (hooks.Count == 0)
             {

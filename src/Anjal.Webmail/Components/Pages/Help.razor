@@ -1,19 +1,22 @@
 @page "/help"
 @page "/help/part/{PartId}"
 @page "/help/{ArticleId}"
-@attribute [Authorize]
+@attribute [AllowAnonymous]
 @inject HelpGuide Guide
 @inject MailboxService Mail
 @inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 
 <PageTitle>@(article is null ? L["Help"] : article.Title) — Anjal</PageTitle>
 
 @* rc.18, design review section 11 [8a]-[8b] (owner, 11 Oct 2026): the help guide - one task an
    article, in the words on the screen; "Show me in Anjal" rings the real control; every "No" is
    counted for the weekly review. Lajna answers from these articles and cites them. *@
+@* rc.23 (D-172, item 89): the guide is readable without signing in - an invitation and the
+   registration page link to it. Show me, Did this help? and Lajna need an account and are left out. *@
 @if (article is HelpArticle a)
 {
-    <HelpShell L="L" PartId="@a.Part" ArticleId="@a.Id" Back="@("/help/" + a.Id)">
+    <HelpShell L="L" PartId="@a.Part" ArticleId="@a.Id" Back="@("/help/" + a.Id)" SignedIn="signedIn">
         <ChildContent>
             <article class="helpbody" aria-labelledby="h-title">
                 <p class="helpcrumb"><a href="/help">@L["Help"]</a> › <a href="/help/part/@a.Part">@L[Guide.Part(a.Part)?.Title ?? string.Empty]</a></p>
@@ -21,7 +24,7 @@
                 @* rc.20 (owner, 14 Oct 2026): no release label under the title. *@
                 <p class="helpmeta">@L["{n} min read"].Replace("{n}", a.Minutes.ToString(Inv), StringComparison.Ordinal) · @L["In English"]</p>
                 <p class="helplead">@a.Summary</p>
-                @if (a.Show is HelpShow show)
+                @if (signedIn && a.Show is HelpShow show)
                 {
                     <a class="btn btn-p helpshow" href="@ShowLink(show)" title="@L["Go there, and see the control ringed."]"><LipiIcon Name="eye" Size="16" />@L["Show me in Anjal"]</a>
                 }
@@ -48,6 +51,12 @@
                 {
                     <aside class="helporg"><LipiIcon Name="lock" Size="16" /><span><b>@L["Set by your organisation"]</b> @org</span></aside>
                 }
+                @if (!signedIn)
+                {
+                    <p class="helpsidetext"><a href="/sign-in">@L["Sign in"]</a> @L["to try this in Anjal or ask Lajna."]</p>
+                }
+                else
+                {
                 <section class="helpfeedback" aria-labelledby="h-help">
                     @if (Thanks is not null)
                     {
@@ -65,6 +74,7 @@
                     }
                     <a class="linkbtn helpask" title="@L["Ask Lajna a question about this article."]" href="#lajna" data-lajna-ask="@a.Title">@L["Ask Lajna about this"]</a>
                 </section>
+                }
             </article>
         </ChildContent>
         <Side>
@@ -91,7 +101,7 @@
 }
 else if (ArticleId is not null)
 {
-    <HelpShell L="L" Q="@Q">
+    <HelpShell L="L" Q="@Q" SignedIn="signedIn">
         <ChildContent>
             <div class="helpbody">
                 <h1>@L["Help"]</h1>
@@ -104,7 +114,7 @@ else if (ArticleId is not null)
 }
 else if (part is HelpPart hp)
 {
-    <HelpShell L="L" PartId="@hp.Id" Q="@Q" Back="@("/help/part/" + hp.Id)">
+    <HelpShell L="L" PartId="@hp.Id" Q="@Q" Back="@("/help/part/" + hp.Id)" SignedIn="signedIn">
         <ChildContent>
             <section class="helpbody" aria-labelledby="h-part">
                 <p class="helpcrumb"><a href="/help">@L["Help"]</a></p>
@@ -122,7 +132,7 @@ else if (part is HelpPart hp)
 }
 else
 {
-    <HelpShell L="L" Home="@string.IsNullOrWhiteSpace(Q)" Q="@Q">
+    <HelpShell L="L" Home="@string.IsNullOrWhiteSpace(Q)" Q="@Q" SignedIn="signedIn">
         <ChildContent>
             <div class="helpbody">
                 @if (!string.IsNullOrWhiteSpace(Q))
@@ -184,6 +194,7 @@ else
     private HelpPart? part;
     private IReadOnlyList<HelpArticle> found = Array.Empty<HelpArticle>();
     private IReadOnlyList<string> admins = Array.Empty<string>();
+    private bool signedIn;
 
     private IEnumerable<HelpArticle> Popular => PopularIds.Select(Guide.Get).OfType<HelpArticle>();
 
@@ -198,7 +209,14 @@ else
             <a href="/help/@f.Id">@f.Title</a>
         }
         <h2>@L["Still stuck?"]</h2>
-        <p class="helpsidetext">@L["Lajna answers questions about Anjal, finds your mail and writes drafts. Your administrator can help with anything else."]</p>
+        @if (signedIn)
+        {
+            <p class="helpsidetext">@L["Lajna answers questions about Anjal, finds your mail and writes drafts. Your administrator can help with anything else."]</p>
+        }
+        else
+        {
+            <p class="helpsidetext">@L["Your organisation's administrator can help with anything else."]</p>
+        }
         @foreach (string admin in admins)
         {
             <p class="helpadmin"><LipiIcon Name="user" Size="15" />@admin</p>
@@ -207,9 +225,14 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        if (AuthState is not null)
+        System.Security.Claims.ClaimsPrincipal? user = AuthState is null ? null : (await AuthState).User;
+        signedIn = user?.Identity?.IsAuthenticated == true;
+        if (!signedIn)
         {
-            System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+            L = AuthWords.For(Http.HttpContext, Words);
+        }
+        else if (user is not null)
+        {
             L = Words.For(WebmailAuthService.LanguageOf(user, Words));
             if (WebmailAuthService.PersonIdOf(user) is Guid me && ArticleId is null)
             {

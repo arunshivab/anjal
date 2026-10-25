@@ -10,6 +10,21 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.23** (24 October 2026) - The fixes from the 21-23 October test report (TST-15), each
+with a test. Help is public (anyone can read it before signing in) and the registration mail links
+to it; `/robots.txt` lets search engines see only Help, and `/.well-known/security.txt` names the
+abuse address; a page that does not exist shows "This page is not in Anjal" with a 404. Rules:
+Try is now a true dry run (nothing is saved), and applying a rule to older mail needs a ticked
+box. Organisation console: a domain can be cancelled or removed, a shared mailbox deleted, and an
+application retired or removed, each confirmed by typing its name; new keys say they are shown
+once. Phones and tablets: the envelope sheet opens from "N checks", a tablet reading a message
+gets the whole width, and a phone on its side gets the phone layout. Also: an upload bar while
+files are sent, group members by name, a "Show a test notification" button, the snooze labels
+by day, the sign-in page for a second account, invitation expiry in India time, the welcome tour
+on Today, the name lock when names were never recorded, and system mail no longer counted as
+the operator's own sending. The attachment limit stays 18 MB of files (25 MB once encoded); it
+is not a setting.
+
 **v1.0.0-rc.22.2** (20 October 2026) - Tests for what rc.22 had only been looked at in a browser
 (owner, 20 Oct: "have you added to the tests?"): the desktop-notification feed and setting,
 Unsubscribe (mailto and one-click), the `List-Unsubscribe` header on application mail, search

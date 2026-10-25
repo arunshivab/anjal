@@ -233,9 +233,12 @@ public sealed partial class MailboxService
             return "Give a name: it goes on every mail you send.";
         }
         PersonProfile profile = await this.ProfileOfAsync(mailboxId, ct).ConfigureAwait(false);
-        if (!await this.NicknamesAllowedAsync(mailboxId, ct).ConfigureAwait(false) && profile.FullName.Length > 0 && !string.Equals(wanted, profile.FullName, StringComparison.Ordinal))
+        if (!await this.NicknamesAllowedAsync(mailboxId, ct).ConfigureAwait(false) && !string.Equals(wanted, profile.FullName, StringComparison.Ordinal))
         {
-            return "Your organisation puts your first name and last name on your mails. Ask your administrator to change them.";
+            // DEF-130 (rc.23): also when the first and last name were never recorded - the administrator records them.
+            return profile.FullName.Length == 0
+                ? "Your organisation puts your first name and last name on your mails, and they have not been recorded yet. Ask your administrator to record them."
+                : "Your organisation puts your first name and last name on your mails. Ask your administrator to change them.";
         }
         return await this.SetDisplayNameAsync(mailboxId, wanted, ct).ConfigureAwait(false);
     }
@@ -851,6 +854,21 @@ public sealed partial class MailboxService
         return profile.TermsRequired && profile.TermsAcceptedAt is null;
     }
 
+    /// <summary>
+    /// When an invitation's link stops working, written the same way in the mail and on the page
+    /// (DEF-133, rc.23: the mail said the UTC date, the page the India date - a day apart near
+    /// midnight): date and time on Anjal's clock, with the zone named.
+    /// </summary>
+    /// <param name="expires">When the link expires.</param>
+    /// <param name="words">The reader's words, or null for English.</param>
+    /// <returns>For example "26 Oct 2026, 14:05 India time".</returns>
+    public static string InvitationExpiry(DateTimeOffset expires, Lexicon? words)
+    {
+        ZonedClock clock = ZonedClock.Default.In(words);
+        string zone = words is null ? "India time" : words["India time"];
+        return clock.Date(expires) + ", " + clock.Time(expires) + " " + zone;
+    }
+
     private async Task SendRegistrationMailAsync(TenantRow tenant, PendingInvitation inv, string token, string baseUrl, CancellationToken ct)
     {
         string org = tenant.DisplayName.Trim().Length > 0 ? tenant.DisplayName.Trim() : tenant.Slug;
@@ -860,7 +878,9 @@ public sealed partial class MailboxService
               + $"Fill in your details on the registration page - you choose your username and password there; the mailbox is made only when you press Submit:\r\n\r\n    {link}\r\n\r\n"
             : $"{inv.InvitedBy} has invited you to {org} mail. Your address will be {inv.Address}.\r\n\r\n"
               + $"Choose your password on the registration page; the mailbox is made only when you press Submit:\r\n\r\n    {link}\r\n\r\n";
-        text += $"The link works once, until {inv.Expires.UtcDateTime:d MMM yyyy} (UTC). Anjal accounts are for people aged 18 or over. If you were not expecting this, you can ignore this message.\r\n\r\n{org} mail";
+        text += $"The link works once, until {InvitationExpiry(inv.Expires, null)}. Anjal accounts are for people aged 18 or over. If you were not expecting this, you can ignore this message.\r\n\r\n";
+        // D-172 (rc.23, DEF-134): a real link to the help guide; the domain name above is not a website.
+        text += $"How Anjal works, and answers to common questions:\r\n\r\n    {baseUrl.TrimEnd('/')}/help\r\n\r\n{org} mail";
         var carrier = new MailboxRow { TenantId = tenant.Id, LocalPart = "no-reply", Domain = inv.Domain, DisplayName = "Anjal" };
         await this.SystemMailFromAsync(carrier, org, inv.Personal, inv.Individual ? "Register your Anjal mail address" : $"Your {org} mail address is ready", text, ct).ConfigureAwait(false);
     }
@@ -1052,6 +1072,38 @@ public sealed partial class MailboxService
         return null;
     }
 
+    /// <summary>
+    /// Delete a shared mailbox (DEF-135, DEF-163, rc.23): its people lose it, its address is never
+    /// given out again, and its mail is erased - the evidence copies stay for their retention, as
+    /// for a person's account. Refused under a legal hold. Returns the reason it was refused, or null.
+    /// </summary>
+    /// <param name="tenant">The organisation.</param>
+    /// <param name="sharedId">The shared mailbox.</param>
+    /// <param name="maildirRoot">Where the mail files are kept.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The reason, or null when it was deleted.</returns>
+    public async Task<string?> DeleteSharedMailboxAsync(TenantRow tenant, Guid sharedId, string maildirRoot, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenant);
+        ArgumentNullException.ThrowIfNull(maildirRoot);
+        Dictionary<Guid, SharedMailbox> shared = await this.SharedOfTenantAsync(tenant.Id, ct).ConfigureAwait(false);
+        if (!shared.ContainsKey(sharedId))
+        {
+            return "That is not one of this organisation's shared mailboxes.";
+        }
+        string? error = await this.DeleteAccountAsync(tenant, sharedId, maildirRoot, ct).ConfigureAwait(false);
+        if (error is not null && await this.store.GetMailboxByIdAsync(sharedId, ct).ConfigureAwait(false) is not null)
+        {
+            return error;
+        }
+        shared = await this.SharedOfTenantAsync(tenant.Id, ct).ConfigureAwait(false);
+        if (shared.Remove(sharedId))
+        {
+            await this.WriteTenantDocumentAsync(tenant.Id, SharedKind, shared, ct).ConfigureAwait(false);
+        }
+        return error;
+    }
+
     /// <summary>The other accounts signed in on a browser (rc.22, item 33), with their unread mail, for the initials menu.</summary>
     /// <param name="mailboxIds">Their mailboxes, from the browser's sealed cookie.</param>
     /// <param name="ct">Cancellation.</param>
@@ -1188,6 +1240,9 @@ public sealed partial class MailboxService
                 EnvelopeFrom = string.Empty,
                 EnvelopeTo = new[] { to },
                 RawBytes = raw,
+                // DEF-118 (rc.23): Anjal's own mail never crossed a network, so it is recorded as
+                // mail from this server - not as "arrived without encryption".
+                AuthenticatedUser = "anjal",
                 AnjalSecurityMail = true,
             }, ct).ConfigureAwait(false);
             return delivered.Outcome == Anjal.Smtp.DeliveryOutcome.Accepted ? null : "The mail could not be delivered.";

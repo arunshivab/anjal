@@ -27,7 +27,8 @@
             }
             <form method="get" action="/lajna" class="ljform" role="search">
                 <input type="hidden" name="page" value="@PageFrom" />
-                <input class="inp" name="q" value="@Q" maxlength="300" placeholder="@L["Ask Lajna"]" aria-label="@L["Ask Lajna"]" autofocus="@(answer is null)" />
+                @* DEF-127 (rc.23): once answered, the box is empty for the next question (the question stays above, with its answer). *@
+                <input class="inp" name="q" value="@(answer is null ? Q : null)" maxlength="300" placeholder="@L["Ask Lajna"]" aria-label="@L["Ask Lajna"]" autofocus />
                 <button type="submit" class="btn btn-p" title="@L["Send your question to Lajna."]">@L["Ask"]</button>
             </form>
             <p class="ljchips">

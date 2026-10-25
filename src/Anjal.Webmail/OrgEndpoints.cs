@@ -366,6 +366,35 @@ internal static class OrgEndpoints
             return Results.Redirect("/org/domains?domain=" + Uri.EscapeDataString(d) + "&check=1&saved=proved");
         }).RequireAuthorization();
 
+        // DEF-122 (rc.23): a domain still waiting for its proof is cancelled; a proved one is removed
+        // when nothing lives at it any more.
+        app.MapPost("/org/domains/remove", async (HttpContext http, [FromForm] string? domain, [FromForm] string? value, MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            string d = (domain ?? string.Empty).Trim().TrimEnd('.').ToLowerInvariant();
+            Dictionary<string, string> pending = await svc.ReadTenantDocumentAsync<Dictionary<string, string>>(a.Tenant.Id, PendingDomainsKind, ct).ConfigureAwait(false) ?? new Dictionary<string, string>();
+            if (pending.Remove(d))
+            {
+                await svc.WriteTenantDocumentAsync(a.Tenant.Id, PendingDomainsKind, pending, ct).ConfigureAwait(false);
+                await audit.RecordAsync(a.Me.Address, "org.domain.cancelled", d, Client(http)).ConfigureAwait(false);
+                return Results.Redirect("/org/domains?saved=domain-removed");
+            }
+            if (!string.Equals((value ?? string.Empty).Trim().TrimEnd('.'), d, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Redirect("/org/domains?domain=" + Uri.EscapeDataString(d) + "&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, "Type the domain exactly to remove it.")));
+            }
+            string? error = await svc.RemoveTenantDomainAsync(a.Tenant, d, ct).ConfigureAwait(false);
+            if (error is not null)
+            {
+                return Results.Redirect("/org/domains?domain=" + Uri.EscapeDataString(d) + "&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
+            }
+            await audit.RecordAsync(a.Me.Address, "org.domain.removed", d, Client(http)).ConfigureAwait(false);
+            return Results.Redirect("/org/domains?saved=domain-removed");
+        }).RequireAuthorization();
+
         app.MapGet("/org/domains/records.txt", async (HttpContext http, string? domain, MailboxService svc, CancellationToken ct) =>
         {
             if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
@@ -423,6 +452,31 @@ internal static class OrgEndpoints
             string box = (await svc.GetMailboxAnyAsync(id, ct).ConfigureAwait(false))?.Address ?? id.ToString();
             await audit.RecordAsync(a.Me.Address, "org.shared.rights", box + " - " + who, Client(http), right ?? "none").ConfigureAwait(false);
             return Results.Redirect("/org/shared?sel=" + id);
+        }).RequireAuthorization();
+
+        // DEF-135, DEF-163 (rc.23): a shared mailbox can be deleted, its address typed to confirm.
+        app.MapPost("/org/shared/{id:guid}/delete", async (HttpContext http, Guid id, [FromForm] string? value, MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            MailboxRow? box = await svc.GetMailboxAnyAsync(id, ct).ConfigureAwait(false);
+            if (box is null || box.TenantId != a.Tenant.Id)
+            {
+                return Results.NotFound();
+            }
+            if (!string.Equals((value ?? string.Empty).Trim(), box.Address, StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Redirect("/org/shared?sel=" + id + "&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, "Type the shared mailbox's address exactly to confirm.")));
+            }
+            string? error = await svc.DeleteSharedMailboxAsync(a.Tenant, id, OpsEndpoints.RootOf(http.RequestServices.GetRequiredService<Anjal.Mailbox.IMaildirStore>()), ct).ConfigureAwait(false);
+            if (error is not null)
+            {
+                return Results.Redirect("/org/shared?sel=" + id + "&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
+            }
+            await audit.RecordAsync(a.Me.Address, "org.shared.deleted", box.Address, Client(http)).ConfigureAwait(false);
+            return Results.Redirect("/org/shared?saved=shared-removed");
         }).RequireAuthorization();
 
         app.MapPost("/org/shared/{id:guid}/sending", async (HttpContext http, Guid id, [FromForm] string? mode, [FromForm] string? keep, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
@@ -548,6 +602,38 @@ internal static class OrgEndpoints
                 await audit.RecordAsync(a.Me.Address, "org.app.revoked", name, Client(http)).ConfigureAwait(false);
             }
             return Results.Redirect("/org/apps?sel=" + id);
+        }).RequireAuthorization();
+
+        // DEF-162 (rc.23): retire an application (its keys stop now; its record stays), or remove one
+        // with no keys left. Its name is typed to confirm either.
+        app.MapPost("/org/apps/{id}/{action:regex(^(retire|remove)$)}", async (HttpContext http, string id, string action, [FromForm] string? value, MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            OrgApp? found = (await svc.AppsOfAsync(a.Tenant.Id, ct).ConfigureAwait(false)).Find(x => x.Id == id);
+            if (found is null)
+            {
+                return Results.NotFound();
+            }
+            if (!string.Equals((value ?? string.Empty).Trim(), found.Name.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return Results.Redirect("/org/apps?sel=" + Uri.EscapeDataString(id) + "&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, "Type the application's name exactly to confirm.")));
+            }
+            if (action == "retire")
+            {
+                await svc.RetireAppAsync(a.Tenant, id, ct).ConfigureAwait(false);
+                await audit.RecordAsync(a.Me.Address, "org.app.retired", found.Name, Client(http)).ConfigureAwait(false);
+                return Results.Redirect("/org/apps?sel=" + Uri.EscapeDataString(id) + "&saved=app-retired");
+            }
+            string? error = await svc.RemoveAppAsync(a.Tenant, id, ct).ConfigureAwait(false);
+            if (error is not null)
+            {
+                return Results.Redirect("/org/apps?sel=" + Uri.EscapeDataString(id) + "&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
+            }
+            await audit.RecordAsync(a.Me.Address, "org.app.removed", found.Name, Client(http)).ConfigureAwait(false);
+            return Results.Redirect("/org/apps?saved=app-removed");
         }).RequireAuthorization();
 
         // ---- activity log ----

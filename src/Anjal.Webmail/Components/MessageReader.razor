@@ -33,7 +33,8 @@ else
             <a class="phoneback" href="/folder/@Uri.EscapeDataString(view.Folder.Name)"><LipiIcon Name="chevron-left" Size="16" />@L.Folder(view.Folder.Name)</a>
             @* rc.16, design review [6b]: the envelope strip - accent-soft, a small flap, the sender's
                initials; tapping it opens the full 2c envelope as a sheet. *@
-            <a class="phonesummary" href="#envelope">
+            @* DEF-146 (rc.23): the page's own address before #envelope - with <base href="/"> a bare #envelope went to Today. *@
+            <a class="phonesummary" href="@EnvelopeHref">
                 <svg class="pflap" viewBox="0 0 300 16" preserveAspectRatio="none" aria-hidden="true"><path d="M-4 0 L150 14 L304 0"></path></svg>
                 <span class="pav" aria-hidden="true">@PhoneInitial</span>
                 <span class="pmain"><b>@(string.IsNullOrWhiteSpace(view.From) ? view.Row.EnvelopeFrom : SenderName)</b>
@@ -511,7 +512,7 @@ else
                                     <AntiforgeryToken />
                                     <input type="hidden" name="until" value="@preset" />
                                     <input type="hidden" name="back" value="/folder/@Uri.EscapeDataString(view.Folder.Name)" />
-                                    <button type="submit" role="menuitem" data-needs-server><span>@L[word]</span><span class="pm-when">@(at is DateTimeOffset t ? clock.ListDay(t, DateTimeOffset.UtcNow) + " " + clock.Time(t) : string.Empty)</span></button>
+                                    <button type="submit" role="menuitem" data-needs-server><span>@L[word]</span><span class="pm-when">@(at is DateTimeOffset t ? clock.AheadDay(t, DateTimeOffset.UtcNow) + " " + clock.Time(t) : string.Empty)</span></button>
                                 </form>
                             }
                             <form method="post" action="/message/@Id/snooze" class="inline pm-pick">
@@ -909,6 +910,9 @@ else
     private ZonedClock clock = ZonedClock.Default;
     [CascadingParameter] private HttpContext? Http { get; set; }
 
+    // DEF-146 (rc.23): the strip opens the envelope on this page (with <base href="/">, a bare #envelope went to Today).
+    private string EnvelopeHref => (Http?.Request.Path.Value ?? string.Empty) + (Http?.Request.QueryString.Value ?? string.Empty) + "#envelope";
+
     [CascadingParameter] private Anjal.Webmail.Components.Layout.MainLayout? Layout { get; set; }
 
     private MessageView? view;
@@ -1011,9 +1015,9 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        view = null;
         if (AuthState is null)
         {
+            view = null;
             return;
         }
         clock = WebmailAuthService.ClockOf((await AuthState).User);
@@ -1021,15 +1025,20 @@ else
         Guid? mailboxId = WebmailAuthService.MailboxIdOf((await AuthState).User);
         if (mailboxId is null)
         {
+            view = null;
             return;
         }
-        view = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
+        // rc.23: a page that renders twice (Search, while its results load) sets these parameters again
+        // before this call is done (TST rc.23 screen check: a 500 on Search). The view is no longer cleared
+        // first, and this call works on its own copy, so neither call reads a view the other has cleared.
+        MessageView? opened = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
+        view = opened;
         // DEF-066: opening marked the message read; the left pane recounts now.
         if (Layout is not null)
         {
             await Layout.RefreshFoldersAsync(mailboxId.Value);
         }
-        if (view is null && Http is not null)
+        if (opened is null && Http is not null)
         {
             // The friendly page stays; the status says what happened (DEF-013).
             // Set as the headers go out: a 404 set during rendering makes
@@ -1043,15 +1052,15 @@ else
         }
         categories = await Mail.ListCategoriesAsync(mailboxId.Value);
         trusted = await Mail.TrustedSendersAsync(mailboxId.Value);
-        listed = view is null && await Mail.IsListedAsync(mailboxId.Value, Id);
-        if (view is not null)
+        listed = opened is null && await Mail.IsListedAsync(mailboxId.Value, Id);
+        if (opened is not null)
         {
             me = (await AuthState).User.Identity?.Name ?? string.Empty;
             orgDomains = await Mail.OrganisationDomainsAsync(mailboxId.Value);
-            recipients = Recipients.Of(view.To, view.Cc, me, orgDomains);
+            recipients = Recipients.Of(opened.To, opened.Cc, me, orgDomains);
             (laterTomorrow, laterMonday) = MailboxService.SendLaterChoices(clock, DateTimeOffset.UtcNow);
-            conversation = await Mail.ConversationOfAsync(mailboxId.Value, view.Row);
-            unsubscribe = view.Folder.Name is "Sent" or "Drafts" ? null : await Mail.UnsubscribeOfAsync(mailboxId.Value, Id);
+            conversation = await Mail.ConversationOfAsync(mailboxId.Value, opened.Row);
+            unsubscribe = opened.Folder.Name is "Sent" or "Drafts" ? null : await Mail.UnsubscribeOfAsync(mailboxId.Value, Id);
             if (SenderAddress.Length > 0)
             {
                 // DES-11 F6: the contact book is the person's own, also in a shared mailbox - read and saved the same.
@@ -1063,7 +1072,7 @@ else
                     || orgDomains.Contains(DomainOf(SenderAddress), StringComparer.OrdinalIgnoreCase);
                 // Item 18: with the setting on, a new sender is saved without asking.
                 if (!senderSaved && !senderDismissed && !IsOwn && cs.SaveNewSendersAutomatically
-                    && view.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder && view.Folder.Name != "Trash")
+                    && opened.Folder.Name != Anjal.Mailbox.MailboxSink.JunkFolder && opened.Folder.Name != "Trash")
                 {
                     senderSaved = await Mail.SaveContactAsync(book, new Contact { Address = SenderAddress, FirstName = FirstNameGuess, LastName = LastNameGuess }) is null;
                 }

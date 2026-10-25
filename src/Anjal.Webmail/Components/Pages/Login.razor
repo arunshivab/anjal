@@ -17,6 +17,11 @@
     {
         <p class="authlead">@L["The account you are signed in to stays signed in; the initials menu switches between them."]</p>
     }
+    else if (SignedInAs is not null)
+    {
+        @* DEF-138 (rc.23): this browser is already signed in. Signing in here adds the account; nothing is signed out. *@
+        <div class="note" data-already><LipiIcon Name="info" Size="16" /><span>@L["You are already signed in as {address}. Signing in here adds another account; nothing is signed out."].Replace("{address}", SignedInAs, StringComparison.Ordinal) <a href="/">@L["Go to your mail"]</a></span></div>
+    }
 
     @if (Error is not null)
     {
@@ -55,7 +60,7 @@
 
     <form method="post" action="/auth/login" class="authfields" data-signin>
         <AntiforgeryToken />
-        @if (Adding)
+        @if (Adding || SignedInAs is not null)
         {
             <input type="hidden" name="add" value="1" />
         }
@@ -116,6 +121,9 @@
 
     private bool SharedChosen => Shared == "1";
     private bool Adding => Add == "1";
+
+    // DEF-138 (rc.23): the account this browser is signed in to now, if any.
+    private string? SignedInAs => Http.HttpContext?.User.Identity?.IsAuthenticated == true ? Http.HttpContext.User.Identity.Name : null;
 
     protected override async Task OnInitializedAsync()
     {

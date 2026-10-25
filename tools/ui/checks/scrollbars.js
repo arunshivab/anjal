@@ -7,7 +7,10 @@ const L = require('../lib.js');
 
 function measure() {
   const out = [];
-  const shown = (e) => { const cs = getComputedStyle(e); return cs.visibility !== 'hidden' && cs.display !== 'none' && Number(cs.opacity) > 0.05; };
+  // rc.23: what is inside a closed <details> (other than its summary) is not drawn, though Chromium
+  // still gives it a size - a closed Send later menu was counted over the letter's scroll bar.
+  const folded = (e) => { const d = e.parentElement && e.parentElement.closest('details:not([open])'); return !!d && !e.closest('summary'); };
+  const shown = (e) => { const cs = getComputedStyle(e); return !folded(e) && cs.visibility !== 'hidden' && cs.display !== 'none' && Number(cs.opacity) > 0.05; };
   const name = (e) => (e.getAttribute('aria-label') || e.getAttribute('data-tip') || e.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 30);
   const cls = (e) => (e.className && e.className.baseVal !== undefined ? e.className.baseVal : (e.className || '').toString()).split(/\s+/).filter(Boolean).slice(0, 3).join('.') || e.tagName.toLowerCase();
   const scrollers = [...document.querySelectorAll('*')].filter((s) => {

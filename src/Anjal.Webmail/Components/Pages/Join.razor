@@ -46,7 +46,7 @@
             <div class="authinpwrap"><input class="authinp-in" id="phone" name="phone" type="tel" value="@(Phone ?? found.Invitation.Phone)" maxlength="30" autocomplete="tel" placeholder="+91 " required="@found.Invitation.Individual" /></div>
             <p class="authhint">@L["Recorded now; verified by code in a later release."]</p>
             <label class="authlbl" for="dob">@(found.Invitation.Individual ? L["Date of birth"] : L["Date of birth (optional)"])</label>
-            <div class="authinpwrap"><input class="authinp-in" id="dob" name="dob" type="date" value="@(Dob ?? (found.Invitation.DateOfBirth is DateOnly d ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : string.Empty))" max="@DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-18).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)" required="@found.Invitation.Individual" /></div>
+            <div class="authinpwrap"><input class="authinp-in" id="dob" name="dob" type="date" value="@(Dob ?? (found.Invitation.DateOfBirth is DateOnly d ? d.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) : string.Empty))" max="@DateOnly.FromDateTime(DateTime.UtcNow).AddYears(-18).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture)" required="@found.Invitation.Individual" data-adult="@L["Anjal accounts are for people aged 18 or over."]" /></div>
             <p class="authhint">@L["You must be 18 or over."]</p>
             <label class="authlbl" for="local">@L["Username"]</label>
             <div class="authinpwrap">
@@ -69,7 +69,9 @@
             <label class="checkline"><input type="checkbox" name="disclaimer" value="1" required /> <span>@L["I have read the"] <a class="authlink" href="/disclaimer" target="_blank" rel="noopener">@L["Disclaimer"]</a></span></label>
             <button type="submit" class="authbtn">@L["Submit and create my mailbox"]</button>
         </form>
-        <p class="authnote">@L["The link works once, until {date}."].Replace("{date}", ZonedClock.Default.Date(found.Invitation.Expires), StringComparison.Ordinal)</p>
+        <p class="authnote">@L["The link works once, until {date}."].Replace("{date}", MailboxService.InvitationExpiry(found.Invitation.Expires, L), StringComparison.Ordinal)</p>
+        @* D-172 (rc.23): help is in the guide here, not on a website. *@
+        <p class="authnote"><a class="authlink" href="/help" target="_blank" rel="noopener">@L["How Anjal works"]</a></p>
     }
 </AuthFrame>
 

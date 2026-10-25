@@ -604,7 +604,7 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
 
         string token = await this.TokenFromAsync("folder/INBOX");
         HttpResponseMessage around = await this.PostFormAsync("settings/welcome", token, ("tour", "1"));
-        Assert.Equal("/dashboard/today#tour", around.Headers.Location!.ToString());
+        Assert.Equal("/dashboard/today?tour=1#tour", around.Headers.Location!.ToString());   // DEF-132 (rc.23): ?tour=1 survives the script's followed redirect
         Assert.True((await this.store.GetMailboxByIdAsync(this.mailbox.Id))!.WelcomeDone);
         Assert.DoesNotContain("class=\"welcome\"", await this.client.GetStringAsync("folder/INBOX"), System.StringComparison.Ordinal);
         Assert.DoesNotContain("class=\"welcome\"", await this.client.GetStringAsync("settings/appearance"), System.StringComparison.Ordinal);
@@ -633,7 +633,7 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         Assert.Equal(2, Regex.Count(list, "data-connectivity"));
 
         string reading = await this.client.GetStringAsync($"message/{m.Id}");
-        Assert.Contains("class=\"phonesummary\" href=\"#envelope\"", reading, System.StringComparison.Ordinal);
+        Assert.Contains($"class=\"phonesummary\" href=\"/message/{m.Id}#envelope\"", reading, System.StringComparison.Ordinal);
         Assert.Contains("to you and 6 others, 2 outside.", reading, System.StringComparison.Ordinal);
         Assert.Contains("id=\"envelope\"", reading, System.StringComparison.Ordinal);
         Assert.Contains("Reply all (7)", reading, System.StringComparison.Ordinal);
