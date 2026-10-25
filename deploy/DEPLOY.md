@@ -1959,6 +1959,9 @@ cached policy. anjalmail.com needs none - it receives no mail (null MX).
 ## 13j. rc.22: accounts, anjalmail.com and ClamAV
 
 Three things to do once, after installing rc.22 (section 13d), in this order.
+With the outbound firewall (13f) in place, ClamAV's updater (`freshclam`, running as the `clamav`
+account) can fetch signatures only after the firewall is generated again (rc.23 script, found on
+the first server 25 Oct 2026: `HTTP GET failed`, clamd `start condition unmet`).
 
 **1. The schema.** Sender rules gain the `discard` action (Block a sender now
 drops mail silently). `schema.sql` is written to be run again safely:
@@ -1975,6 +1978,10 @@ until it has finished.
 vm$ sudo apt install -y clamav-daemon clamav-freshclam
 vm$ sudo systemctl enable --now clamav-freshclam clamav-daemon
 vm$ sudo usermod -aG clamav anjal                       # the socket is group clamav, mode 660
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh generate  # the outbound firewall (13f) now lets clamav fetch signatures
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh apply     # then a new SSH session and the webmail, then:
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh confirm
+vm$ sudo systemctl restart clamav-freshclam              # first download; clamd starts once daily.cvd is there
 vm$ sudo systemctl status clamav-daemon --no-pager | head -5
 vm$ echo zPING | sudo -u anjal nc -U /var/run/clamav/clamd.ctl   # answers PONG once ready
 ```
@@ -1983,7 +1990,7 @@ Then in **both** `/etc/anjal/server.env` and `/etc/anjal/webmail.env`:
 
 ```
 ANJAL_CLAMAV=/var/run/clamav/clamd.ctl
-ANJAL_POSTMASTER=arun@anjal.co.in
+ANJAL_POSTMASTER=ops@anjal.co.in
 ```
 
 and restart both services. The start-up log of each says `virus scanning:

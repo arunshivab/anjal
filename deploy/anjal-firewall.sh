@@ -27,11 +27,11 @@ command -v nft >/dev/null || die "nft not found (apt install nftables)"
 uid_of() { id -u "$1" 2>/dev/null || true; }
 
 generate() {
-    local anjal apt resolve timesync zabbix admin
+    local anjal apt resolve timesync zabbix clamav admin
     anjal=$(uid_of anjal); apt=$(uid_of _apt); resolve=$(uid_of systemd-resolve)
-    timesync=$(uid_of systemd-timesync); zabbix=$(uid_of zabbix); admin=$(uid_of "$ADMIN")
+    timesync=$(uid_of systemd-timesync); zabbix=$(uid_of zabbix); clamav=$(uid_of clamav); admin=$(uid_of "$ADMIN")
     [ -n "$anjal" ] || die "the anjal account does not exist - install Anjal first"
-    echo "anjal-firewall: accounts: anjal=$anjal root=0 _apt=${apt:-absent} systemd-resolve=${resolve:-absent} systemd-timesync=${timesync:-absent} zabbix=${zabbix:-absent} $ADMIN=${admin:-absent}"
+    echo "anjal-firewall: accounts: anjal=$anjal root=0 _apt=${apt:-absent} systemd-resolve=${resolve:-absent} systemd-timesync=${timesync:-absent} zabbix=${zabbix:-absent} clamav=${clamav:-absent} $ADMIN=${admin:-absent}"
 
     local tmp; tmp=$(mktemp)
     {
@@ -78,6 +78,9 @@ generate() {
     [ -n "$timesync" ] && echo "        meta skuid $timesync udp dport 123 accept                                        # systemd-timesync"
     [ -n "$zabbix" ] && echo "        meta skuid $zabbix meta l4proto { tcp, udp } th dport 53 accept                   # zabbix: DNS for E2E's server name"
     [ -n "$zabbix" ] && echo "        meta skuid $zabbix tcp dport 10051 accept                                      # zabbix agent (active checks)"
+    # rc.23 (item 57): freshclam runs as clamav and fetches the virus signatures over HTTPS.
+    [ -n "$clamav" ] && echo "        meta skuid $clamav meta l4proto { tcp, udp } th dport 53 accept                   # clamav: DNS for the signature mirror"
+    [ -n "$clamav" ] && echo "        meta skuid $clamav tcp dport 443 accept                                        # clamav: signature updates (freshclam)"
     if [ -n "$admin" ]; then
         echo "        meta skuid $admin meta l4proto { tcp, udp } th dport 53 accept                     # $ADMIN: DNS"
         echo "        meta skuid $admin tcp dport { 22, 80, 443 } accept                                # $ADMIN: ssh, downloads"
