@@ -602,6 +602,30 @@ public sealed class Rc24Tests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task HeldMail_IsNeverLetThroughUnscanned_WhenThisSideHasNoScanner()
+    {
+        // CI, PR #62 (26 Oct 2026): the webmail's five-minute pass "scanned again" with no scanner set,
+        // and so delivered held mail unscanned. Without a scanner it now stays held.
+        var sink = new MailboxSink(this.store, this.maildir) { Scanner = new DownScanner() };
+        DeliveryResult result = await sink.DeliverAsync(new DeliveryContext
+        {
+            EnvelopeFrom = "a@x.test",
+            EnvelopeTo = ArunOnly,
+            RawBytes = Encoding.UTF8.GetBytes("From: a@x.test\r\nSubject: Files\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n--b1\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\n\r\n%PDF\r\n--b1--\r\n"),
+        });
+        Assert.Equal(DeliveryOutcome.Accepted, result.Outcome);
+        var noScanner = new MailboxService(this.store, this.store, this.maildir, "anjal.localhost");
+        Assert.Equal(0, await noScanner.RescanHeldAsync(DateTimeOffset.UtcNow));
+        Assert.Equal(1, await noScanner.HeldCountAsync(this.arun.Id));
+        HeldMessage held = Assert.Single(await noScanner.HeldMessagesAsync(), h => h.Mailbox.Id == this.arun.Id);
+        Assert.Equal("held", await noScanner.ReleaseHeldAsync(held, scanAgain: true));
+        Assert.Equal(1, await noScanner.HeldCountAsync(this.arun.Id));
+        // The operator may still release it by hand, unscanned.
+        Assert.Null(await noScanner.ReleaseHeldAsync(held, scanAgain: false));
+        Assert.Equal(0, await noScanner.HeldCountAsync(this.arun.Id));
+    }
+
+    [Fact]
     public void NamedAddresses_EveryCopyInTheRepository_MatchesTheTable()
     {
         // Lessons of 25 Oct 2026 (the postmaster address): a decided address lives in one table at the top of
@@ -676,6 +700,15 @@ public sealed class Rc24Tests : IAsyncLifetime, IDisposable
         Match link = Regex.Match(Encoding.UTF8.GetString(mail.RawBytes), "/recovery/confirm\\?m=([0-9a-f]{32})&t=([A-Za-z0-9_-]+)");
         Assert.True(link.Success);
         return (link.Groups[1].Value, link.Groups[2].Value);
+    }
+
+    /// <summary>A scanner that never answers.</summary>
+    private sealed class DownScanner : Anjal.Mailbox.IVirusScanner
+    {
+        public Task<Anjal.Mailbox.ScanResult> ScanAsync(byte[] data, CancellationToken ct = default) =>
+            Task.FromResult(new Anjal.Mailbox.ScanResult(Anjal.Mailbox.ScanVerdict.Unavailable, "connection refused"));
+
+        public Task<string?> VersionAsync(CancellationToken ct = default) => Task.FromResult<string?>(null);
     }
 
     /// <summary>Flags only the whole message (it has a Subject line), never a single file.</summary>

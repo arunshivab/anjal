@@ -84,6 +84,12 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public async Task<int> RescanHeldAsync(DateTimeOffset now, CancellationToken ct = default)
     {
+        // rc.24 (found by CI on PR #62): with no scanner set here, "scanning again" would let held mail
+        // through unscanned - it stays held until the scanner answers or an operator releases it by hand.
+        if (this.Scanner is null)
+        {
+            return 0;
+        }
         IReadOnlyList<HeldMessage> held = await this.HeldMessagesAsync(ct).ConfigureAwait(false);
         if (held.Count == 0)
         {
@@ -136,6 +142,10 @@ public sealed partial class MailboxService
         if (raw is null)
         {
             return "The held message's file was not found.";
+        }
+        if (scanAgain && this.Scanner is null)
+        {
+            return "held";
         }
         if (scanAgain)
         {
