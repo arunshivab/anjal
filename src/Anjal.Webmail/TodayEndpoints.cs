@@ -37,6 +37,7 @@ internal static class TodayEndpoints
                 Subject = prefill.Subject,
                 Body = body.TrimEnd() + "\n" + start,
                 InReplyTo = prefill.InReplyTo,
+                References = prefill.References,
             };
             request.Sender = await svc.SenderForAsync(WebmailAuthService.PersonIdOf(http.User), mailboxId.Value, ct).ConfigureAwait(false);
             if (WebmailAuthService.PersonIdOf(http.User) is Guid writer)

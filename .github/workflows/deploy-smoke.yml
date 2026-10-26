@@ -486,6 +486,30 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8025/healthz >/dev/null 2>&1 && break; sleep 1; done
           curl -fsS http://127.0.0.1:8025/healthz | grep -q '"status"'
 
+      - name: The outbound firewall script writes rules nft accepts (rc.24, item 95)
+        run: |
+          set -euo pipefail
+          # Until rc.24 this job only copied anjal-firewall.sh; now the shipped script runs. It is not
+          # applied here (the runner's own network must stay as it is): generate checks its rules with
+          # nft -c, writes them and installs the units, and those are checked.
+          command -v nft >/dev/null || sudo apt-get install -y -qq nftables
+          # The clamav account, as on the first server (rc.23, item 57), so its lines are written too.
+          id -u clamav >/dev/null 2>&1 || sudo useradd --system --no-create-home --shell /usr/sbin/nologin clamav
+          out=$(sudo /opt/anjal/bin/anjal-firewall.sh generate 2>&1); echo "$out"
+          grep -q "rules written and checked: /etc/anjal/anjal-egress.nft" <<< "$out"
+          rules=$(sudo cat /etc/anjal/anjal-egress.nft)
+          anjal=$(id -u anjal); clamav=$(id -u clamav)
+          grep -q "tcp dport @smtp_ports meta skuid $anjal accept" <<< "$rules"
+          grep -q "tcp dport @smtp_ports reject with tcp reset" <<< "$rules"
+          grep -q "meta skuid $clamav tcp dport 443 accept" <<< "$rules"
+          sudo nft -c -f /etc/anjal/anjal-egress.nft
+          test -f /etc/systemd/system/anjal-egress.service
+          test -f /etc/systemd/system/anjal-portcheck.timer
+          test -x /usr/local/sbin/anjal-portcheck
+          # Nothing is active after generate.
+          if sudo nft list table inet anjal_egress >/dev/null 2>&1; then echo "::error::generate loaded the rules"; exit 1; fi
+          test "$(systemctl is-enabled anjal-egress 2>/dev/null || true)" != "enabled"
+
       - name: Service logs on failure
         if: failure()
         run: sudo journalctl -u anjal-server -u anjal-webmail -u anjal-backup -u postgresql --no-pager | tail -200

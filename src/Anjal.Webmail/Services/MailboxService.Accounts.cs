@@ -679,6 +679,8 @@ public sealed partial class MailboxService
         await this.WithdrawPendingAsync(found.Tenant.Id, inv.Id, ct).ConfigureAwait(false);
         if (profile.PersonalEmail.Length > 0)
         {
+            // rc.24 (item 90): the invitation reached this address and was opened from it - proof enough.
+            await this.MarkRecoveryProvedAsync(mailbox.Id, ct).ConfigureAwait(false);
             await this.SendTermsMailAsync(mailbox, profile, found.Organisation, inv.InvitedBy, baseUrl, ct).ConfigureAwait(false);
         }
         await this.SendWelcomeMailAsync(mailbox, profile, baseUrl, ct).ConfigureAwait(false);
@@ -790,6 +792,11 @@ public sealed partial class MailboxService
         }
         string org = tenant.DisplayName.Trim().Length > 0 ? tenant.DisplayName.Trim() : tenant.Slug;
         await this.SendTermsMailAsync(mailbox, profile, org, by, baseUrl, ct).ConfigureAwait(false);
+        if (individual)
+        {
+            // rc.24 (item 90): an individual's personal address is their recovery address; a link proves it.
+            await this.SendRecoveryCheckAsync(mailbox.Id, null, null, baseUrl, ct).ConfigureAwait(false);
+        }
         await this.SendWelcomeMailAsync(mailbox, profile, baseUrl, ct).ConfigureAwait(false);
         return (null, mailbox);
     }

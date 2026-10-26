@@ -26,6 +26,12 @@ public sealed class TodayView
     /// <summary>Mailing lists and notifications, folded into one line.</summary>
     public IReadOnlyList<TodayRow> Lists { get; init; } = Array.Empty<TodayRow>();
 
+    /// <summary>rc.24 (DEF-159): mail back from snooze in the last day, in its own section above the rest.</summary>
+    public IReadOnlyList<TodayRow> Woken { get; init; } = Array.Empty<TodayRow>();
+
+    /// <summary>rc.24 (item 86, D-177): Anjal's own mail - alerts, notices - in its own section, not among people.</summary>
+    public IReadOnlyList<TodayRow> FromAnjal { get; init; } = Array.Empty<TodayRow>();
+
     /// <summary>Every unread message in the Inbox, including those beyond the ones listed.</summary>
     public long Unread { get; init; }
 
@@ -38,8 +44,8 @@ public sealed class TodayView
     /// <summary>The person's usual reply time, when "Your habits" is on and there were replies.</summary>
     public TimeSpan? UsualReply { get; init; }
 
-    /// <summary>The rows in reading order: Needs you, then everything else, then the lists.</summary>
-    public IEnumerable<TodayRow> InOrder => this.NeedsYou.Concat(this.Rest).Concat(this.Lists);
+    /// <summary>The rows in reading order: back from snooze, Needs you, everything else, from Anjal, then the lists.</summary>
+    public IEnumerable<TodayRow> InOrder => this.Woken.Concat(this.NeedsYou).Concat(this.Rest).Concat(this.FromAnjal).Concat(this.Lists);
 }
 
 /// <summary>Today (rc.16, design review section 8, owner 11 Oct 2026).</summary>
@@ -103,11 +109,28 @@ public sealed partial class MailboxService
         var needs = new List<TodayRow>();
         var rest = new List<TodayRow>();
         var lists = new List<TodayRow>();
+        var woken = new List<TodayRow>();
+        var anjal = new List<TodayRow>();
+        IReadOnlySet<Guid> wokenIds = await this.WokenAsync(mailboxId, ct).ConfigureAwait(false);
+        Guid? fromAnjal = (await this.ListCategoriesAsync(mailboxId, ct).ConfigureAwait(false))
+            .FirstOrDefault(c => string.Equals(c.Row.Name, FromAnjalCategory, StringComparison.OrdinalIgnoreCase))?.Row.Id;
         foreach (MessageRow m in unread)
         {
             MailAddress? from = FirstAddress(m.FromHeader);
             string address = from?.Address ?? m.EnvelopeFrom;
             string who = from is { DisplayName.Length: > 0 } ? from.DisplayName : address;
+
+            // rc.24: back from snooze first; then Anjal's own mail in its own section (D-177).
+            if (wokenIds.Contains(m.Id))
+            {
+                woken.Add(new TodayRow(m, who, address, null, null, null, false));
+                continue;
+            }
+            if ((fromAnjal is Guid cat && m.CategoryId == cat) || (IsAnjalItself(address) && string.Equals(DomainOfAddress(address), context.Value.Mailbox.Domain, StringComparison.OrdinalIgnoreCase)))
+            {
+                anjal.Add(new TodayRow(m, who, address, null, null, null, false));
+                continue;
+            }
 
             if (await this.IsListOrNotificationAsync(context.Value.Tenant, context.Value.Mailbox, m, address, ct).ConfigureAwait(false))
             {
@@ -158,6 +181,8 @@ public sealed partial class MailboxService
             NeedsYou = needs,
             Rest = rest,
             Lists = lists,
+            Woken = woken,
+            FromAnjal = anjal,
             Unread = unreadCount,
             ArrivedSinceEvening = arrived,
             JunkSinceEvening = junk,
@@ -211,6 +236,12 @@ public sealed partial class MailboxService
             }
         }
         return false;
+    }
+
+    private static string DomainOfAddress(string address)
+    {
+        int at = address.LastIndexOf('@');
+        return at < 0 ? string.Empty : address[(at + 1)..];
     }
 
     // Anjal's own mails (alerts, sign-in notices) count as notifications, not as people.

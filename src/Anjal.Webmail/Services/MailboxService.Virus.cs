@@ -20,6 +20,9 @@ public sealed partial class MailboxService
     /// <summary>The scanner, or null when scanning is off (ANJAL_CLAMAV not set).</summary>
     public IVirusScanner? Scanner { get; init; }
 
+    /// <summary>rc.24 (item 94): what looks at every link when a mail is shown.</summary>
+    public LinkChecker Links { get; init; } = new(null, null);
+
     /// <summary>The operator's address for held-mail reminders (ANJAL_POSTMASTER), or empty.</summary>
     public string OperatorAddress { get; init; } = string.Empty;
 
@@ -81,6 +84,12 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public async Task<int> RescanHeldAsync(DateTimeOffset now, CancellationToken ct = default)
     {
+        // rc.24 (found by CI on PR #62): with no scanner set here, "scanning again" would let held mail
+        // through unscanned - it stays held until the scanner answers or an operator releases it by hand.
+        if (this.Scanner is null)
+        {
+            return 0;
+        }
         IReadOnlyList<HeldMessage> held = await this.HeldMessagesAsync(ct).ConfigureAwait(false);
         if (held.Count == 0)
         {
@@ -133,6 +142,10 @@ public sealed partial class MailboxService
         if (raw is null)
         {
             return "The held message's file was not found.";
+        }
+        if (scanAgain && this.Scanner is null)
+        {
+            return "held";
         }
         if (scanAgain)
         {

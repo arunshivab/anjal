@@ -95,6 +95,15 @@ public sealed class MessageView
 
     /// <summary>Attachments in order.</summary>
     public IReadOnlyList<AttachmentView> Attachments { get; init; } = Array.Empty<AttachmentView>();
+
+    /// <summary>rc.24 (item 93): the files delivered with a warning - encrypted archives, files with macros - by attachment index.</summary>
+    public IReadOnlyDictionary<int, Anjal.Mailbox.FileRisk> FileRisks { get; init; } = new Dictionary<int, Anjal.Mailbox.FileRisk>();
+
+    /// <summary>rc.24 (item 94): the links switched off or warned about.</summary>
+    public IReadOnlyList<LinkFinding> Links { get; init; } = Array.Empty<LinkFinding>();
+
+    /// <summary>rc.24 (item 94): what ClamAV flagged the whole mail as, on arrival; null when nothing.</summary>
+    public string? MailWarning { get; init; }
 }
 
 /// <summary>Input for composing a new message.</summary>
@@ -120,6 +129,9 @@ public sealed class ComposeRequest
 
     /// <summary>Message-ID of the message being replied to, for In-Reply-To and References.</summary>
     public string InReplyTo { get; set; } = string.Empty;
+
+    /// <summary>rc.24 (item 68): the References chain of the original plus its own id ("&lt;id&gt; &lt;id&gt;"); ids that are not well formed are dropped.</summary>
+    public string References { get; set; } = string.Empty;
 
     /// <summary>Subject.</summary>
     public string Subject { get; set; } = string.Empty;
@@ -401,15 +413,26 @@ public sealed partial class MailboxService
             isHtml = false;
         }
 
+        // rc.24 (item 94): every link looked at; all of them off when ClamAV flagged the whole mail.
+        string? mailWarning = parsed?.Headers.Get(Anjal.Mailbox.AttachmentPolicy.MailWarningHeader)?.Trim();
+        (bodyHtml, IReadOnlyList<LinkFinding> links) = await this.Links.ApplyAsync(bodyHtml, mailWarning is { Length: > 0 }, ct).ConfigureAwait(false);
+
         if (!row.Seen && markSeen)
         {
             row = await this.SetFlagsAsync(mailboxId, messageId, seen: true, row.Flagged, row.Answered, ct).ConfigureAwait(false) ?? row;
         }
 
         var views = new List<AttachmentView>(attachments.Count);
-        foreach ((MimePart _, AttachmentView v) in attachments)
+        var risks = new Dictionary<int, Anjal.Mailbox.FileRisk>();
+        foreach ((MimePart part, AttachmentView v) in attachments)
         {
             views.Add(v);
+            // rc.24 (item 93): encrypted archives and files with macros are delivered with a warning.
+            Anjal.Mailbox.FileRisk risk = Anjal.Mailbox.FileRisks.Inspect(v.FileName, part.Body);
+            if (risk != Anjal.Mailbox.FileRisk.None)
+            {
+                risks[v.Index] = risk;
+            }
         }
 
         return new MessageView
@@ -428,6 +451,9 @@ public sealed partial class MailboxService
             BodyShortened = shortened,
             Auth = parsed is null ? null : AuthVerdicts.FromHeaders(parsed.Headers),
             Attachments = views,
+            FileRisks = risks,
+            Links = links,
+            MailWarning = mailWarning is { Length: > 0 } ? mailWarning : null,
             Evidence = row.EvidenceId is Guid evidenceId && this.messageStore is IEvidenceStore evidenceStore
                 ? await evidenceStore.GetEvidenceAsync(evidenceId, ct).ConfigureAwait(false)
                 : null,
@@ -1010,7 +1036,15 @@ public sealed partial class MailboxService
         if (IsValidMessageId(inReplyTo))
         {
             msg.Headers.Add("In-Reply-To", "<" + inReplyTo + ">");
-            msg.Headers.Add("References", "<" + inReplyTo + ">");
+            // rc.24 (item 68): the whole chain, so every mail of the conversation can be placed by
+            // who answered whom; the replied-to id always comes last.
+            List<string> chain = MessageIds(request.References).Where(id => !string.Equals(id, inReplyTo, StringComparison.Ordinal)).ToList();
+            chain.Add(inReplyTo);
+            if (chain.Count > 20)
+            {
+                chain = chain.Skip(chain.Count - 20).ToList();
+            }
+            msg.Headers.Add("References", string.Join(" ", chain.Select(id => "<" + id + ">")));
         }
         msg.Subject = EncodeHeaderText(request.Subject.Trim());
         msg.Date = FormatDate(DateTimeOffset.UtcNow);

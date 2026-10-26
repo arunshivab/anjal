@@ -60,15 +60,19 @@ TINY_PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
 
 
 def messages(you, domain):
-    """The sample set: (key, from, to, cc, subject, text, html, attachments, days_ago, hour)."""
+    """The sample set: (from, to, cc, subject, text, html, attachments, days_ago, hour, reply).
+
+    reply is (n, how): the message answers sample n (1-based) - how is "irt" (In-Reply-To and References),
+    "refs" (References only) or None for no reply headers at all (rc.24, threads)."""
     p = {k: (n, a.format(d=domain)) for k, (n, a) in PEOPLE.items()}
     many = [("Colleague %d" % i, "colleague%d@%s" % (i, domain)) for i in range(1, 25)] + \
            [("Ward sister %d" % i, "ward%d@partner-hospital.example" % i) for i in range(1, 6)]
     me = [("Arun", you)]
     out = []
 
-    def add(frm, to, subject, text, cc=(), html=None, att=(), days=0, hour=9):
-        out.append((p[frm], to, list(cc), subject, text, html, list(att), days, hour))
+    def add(frm, to, subject, text, cc=(), html=None, att=(), days=0, hour=9, reply=None):
+        out.append((p[frm], to, list(cc), subject, text, html, list(att), days, hour, reply))
+        return len(out)
 
     add("quality", me + [p["ravi"]], "Agenda for Friday's review",
         "Dear colleagues,\n\nPlease find the updated agenda for Friday's quality review attached. Items 3 and 4 need decisions "
@@ -151,6 +155,20 @@ def messages(you, domain):
                   "<tr><td>Radiotherapy dosimeters</td><td>24 months</td></tr></table><p>Quality committee</p>")
     long_text += "Annex B: calibration intervals - infusion pumps 12 months; defibrillators 6 months; patient monitors 12 months; weighing scales 12 months; radiotherapy dosimeters 24 months.\n\nQuality committee"
     add("quality", me, "Equipment policy, revised: please read before Friday", long_text, html=long_html, days=0, hour=10)
+    # rc.24 (item 68, brief 10f): a conversation that splits. Meera writes A; Ravi answers A (B); the quality
+    # committee also answers A, naming it in References only (C); Meera answers B (D); Anil writes E with the
+    # same subject and no reply headers ("reply link unknown").
+    a = add("meera", me + [p["ravi"]], "Theatre list for Monday",
+            "Arun, Ravi,\n\nThe draft theatre list for Monday is attached. Two cases may need to move to Tuesday.\n\nMeera",
+            cc=[p["quality"]], att=[("Theatre-list-Monday.pdf", TINY_PDF, "application/pdf")], days=1, hour=9)
+    b = add("ravi", me + [p["meera"]], "Re: Theatre list for Monday",
+            "Meera,\n\nCase 4 can move to Tuesday; the anaesthetist is free then.\n\nRavi", days=1, hour=11, reply=(a, "irt"))
+    add("quality", me + [p["meera"]], "Re: Theatre list for Monday",
+        "Please keep case 4 on Monday: the audit samples it.\n\nQuality committee", days=1, hour=14, reply=(a, "refs"))
+    add("meera", me + [p["ravi"]], "Re: Theatre list for Monday",
+        "Thanks Ravi, moving case 4.\n\nMeera", days=0, hour=8, reply=(b, "irt"))
+    add("anil", me, "Re: Theatre list for Monday",
+        "Is there room for one more case on Monday afternoon?\n\nAnil", days=0, hour=11)
     # More ordinary mail across the ten days, so the list is long enough to scroll.
     for i in range(1, 31):
         who = ["meera", "ravi", "quality", "accounts", "it", "board", "training", "hr"][i % 8]
@@ -210,9 +228,9 @@ def main():
         return w if w <= now else now - timedelta(minutes=n)
 
     if args.backdate_only:
-        sent = [(n, when_for(n, days, hour)) for n, (_, _, _, _, _, _, _, days, hour) in enumerate(messages(args.address, domain), 1)]
+        sent = [(n, when_for(n, days, hour)) for n, (_, _, _, _, _, _, _, days, hour, _) in enumerate(messages(args.address, domain), 1)]
     with (smtplib.SMTP(host, int(port), timeout=30) if not args.backdate_only else open(os.devnull)) as s:
-        for n, (frm, to, cc, subject, text, html, att, days, hour) in enumerate(messages(args.address, domain), 1):
+        for n, (frm, to, cc, subject, text, html, att, days, hour, reply) in enumerate(messages(args.address, domain), 1):
             if args.only and args.only.lower() not in subject.lower():
                 continue
             if args.backdate_only:
@@ -226,6 +244,11 @@ def main():
             m["Subject"] = subject
             m["Date"] = format_datetime(when)
             m["Message-ID"] = f"<seed-{n}@anjal.sample>"
+            if reply is not None:
+                parent, how = reply
+                if how == "irt":
+                    m["In-Reply-To"] = f"<seed-{parent}@anjal.sample>"
+                m["References"] = f"<seed-{parent}@anjal.sample>"
             m.set_content(text)
             if html:
                 m.add_alternative(html, subtype="html")

@@ -36,6 +36,9 @@ public sealed class ComposePrefill
 
     /// <summary>Message-ID of the original, for In-Reply-To.</summary>
     public string InReplyTo { get; init; } = string.Empty;
+
+    /// <summary>rc.24 (item 68): the References chain for the reply - the original's References and its own id, as "&lt;id&gt; &lt;id&gt;".</summary>
+    public string References { get; init; } = string.Empty;
 }
 
 /// <summary>
@@ -371,6 +374,7 @@ public sealed partial class MailboxService
             Body = FirstPlainText(parsed.Body),
             BodyHtml = FirstHtml(parsed.Body),
             InReplyTo = parsed.Headers.Get("In-Reply-To")?.Trim('<', '>', ' ') ?? string.Empty,
+            References = parsed.Headers.Get("References") ?? string.Empty,
             Sender = EncodedWordDecoder.Decode(parsed.Headers.Get("Sender") ?? string.Empty),
         };
         return request;
@@ -649,6 +653,7 @@ public sealed partial class MailboxService
             Subject = newSubject,
             Body = QuoteForReply(from, date, body, kind == PrefillKind.Forward, to, cc, subject, ZonedClock.For(context.Value.Mailbox.TimeZone, context.Value.Mailbox.DateFormat)),
             InReplyTo = parsed?.MessageId ?? loaded.Value.Row.MessageId,
+            References = string.Join(" ", ReferencesFor(parsed?.Headers.Get("References"), parsed?.Headers.Get("In-Reply-To"), parsed?.MessageId ?? loaded.Value.Row.MessageId).Select(id => "<" + id + ">")),
         };
     }
 

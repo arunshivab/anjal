@@ -279,6 +279,7 @@ public static class Program
         {
             Evidence = evidence,
             Scanner = scanner,
+            Links = LinkChecker.FromEnvironment(),
             OperatorAddress = (Environment.GetEnvironmentVariable("ANJAL_POSTMASTER") ?? string.Empty).Trim(),
             // rc.13: authenticator secrets are kept encrypted with the webmail's own keys.
             Protector = sp.GetRequiredService<IDataProtectionProvider>().CreateProtector("anjal.secrets.v1"),
@@ -1039,7 +1040,7 @@ public static class Program
         }).RequireAuthorization();
 
         // ---- compose, drafts ----
-        app.MapPost("/compose", async (HttpContext http, [FromForm] string to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? undo, [FromForm] string? sendAt, [FromForm] string? sendAtLocal, [FromForm] string? back, [FromForm] string? merge, [FromForm] string? expect, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/compose", async (HttpContext http, [FromForm] string to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? references, [FromForm] string? undo, [FromForm] string? sendAt, [FromForm] string? sendAtLocal, [FromForm] string? back, [FromForm] string? merge, [FromForm] string? expect, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -1049,7 +1050,7 @@ public static class Program
             ComposeRequest request;
             try
             {
-                request = await BuildRequestAsync(to, cc, bcc, subject, body, draftId, inReplyTo, attachments, ct).ConfigureAwait(false);
+                request = await BuildRequestAsync(to, cc, bcc, subject, body, draftId, inReplyTo, references, attachments, ct).ConfigureAwait(false);
             }
             catch (AttachmentsTooLargeException)
             {
@@ -1169,7 +1170,7 @@ public static class Program
             return Results.Redirect("/folder/Sent?sent=1");
         }).RequireAuthorization();
 
-        app.MapPost("/draft", async (HttpContext http, [FromForm] string? to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? autosave, [FromForm] string? next, [FromForm] string? templates, [FromForm] string? savetemplate, [FromForm] string? expand, [FromForm] string? dock, [FromForm] string? back, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/draft", async (HttpContext http, [FromForm] string? to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? references, [FromForm] string? autosave, [FromForm] string? next, [FromForm] string? templates, [FromForm] string? savetemplate, [FromForm] string? expand, [FromForm] string? dock, [FromForm] string? back, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -1179,7 +1180,7 @@ public static class Program
             ComposeRequest request;
             try
             {
-                request = await BuildRequestAsync(to ?? string.Empty, cc, bcc, subject, body, draftId, inReplyTo, attachments, ct).ConfigureAwait(false);
+                request = await BuildRequestAsync(to ?? string.Empty, cc, bcc, subject, body, draftId, inReplyTo, references, attachments, ct).ConfigureAwait(false);
             }
             catch (AttachmentsTooLargeException)
             {
@@ -1711,6 +1712,18 @@ public static class Program
             return Results.Redirect("/settings/mail?saved=mail");
         }).RequireAuthorization();
 
+        // rc.24 (item 68, brief 10a): group by conversation, or each mail on its own.
+        app.MapPost("/settings/conversations", async (HttpContext http, [FromForm] string? group, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? personId = WebmailAuthService.PersonIdOf(http.User);
+            if (personId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            await svc.SetGroupByConversationAsync(personId.Value, group != "each", ct).ConfigureAwait(false);
+            return Results.Redirect("/settings/mail?saved=mail");
+        }).RequireAuthorization();
+
         // rc.11 (item 11): the new-mail sound on or off.
         app.MapPost("/settings/sound", async (HttpContext http, [FromForm] string? on, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
         {
@@ -2214,7 +2227,7 @@ public static class Program
     }
 
     /// <summary>Build a compose request from the posted form, reading any attachments into memory.</summary>
-    private static async Task<ComposeRequest> BuildRequestAsync(string to, string? cc, string? bcc, string? subject, string? body, string? draftId, string? inReplyTo, IFormFileCollection attachments, CancellationToken ct)
+    private static async Task<ComposeRequest> BuildRequestAsync(string to, string? cc, string? bcc, string? subject, string? body, string? draftId, string? inReplyTo, string? references, IFormFileCollection attachments, CancellationToken ct)
     {
         var request = new ComposeRequest
         {
@@ -2224,6 +2237,7 @@ public static class Program
             Subject = subject ?? string.Empty,
             Body = body ?? string.Empty,
             InReplyTo = inReplyTo ?? string.Empty,
+            References = references ?? string.Empty,
         };
         if (Guid.TryParse(draftId, out Guid parsed))
         {

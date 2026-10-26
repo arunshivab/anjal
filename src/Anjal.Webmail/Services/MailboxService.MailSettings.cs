@@ -55,6 +55,9 @@ public sealed class MailSettings
 
     /// <summary>The order the person chose for each folder, and for search (owner, 9 Oct 2026); a folder not here is newest first.</summary>
     public Dictionary<string, string> Sorts { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>rc.24 (item 68, brief 10a): lists show a conversation once and the reader shows the whole conversation; off shows each mail on its own. On unless the person turns it off.</summary>
+    public bool GroupByConversation { get; set; } = true;
 }
 
 /// <summary>
@@ -112,6 +115,18 @@ public sealed partial class MailboxService
         MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);
         s.OpenOn = where == "inbox" ? "inbox" : "today";
         await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>rc.24 (item 68): group mail by conversation, or show each mail on its own.</summary>
+    /// <param name="personId">The person.</param>
+    /// <param name="on">Group by conversation.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public async Task SetGroupByConversationAsync(Guid personId, bool on, CancellationToken ct = default)
+    {
+        MailSettings s = await this.GetMailSettingsAsync(personId, ct).ConfigureAwait(false);
+        s.GroupByConversation = on;
+        await this.WriteDocumentAsync(personId, MailSettingsKind, s, ct).ConfigureAwait(false);
     }
 
     /// <summary>Where a person lands after signing in, and at "/": Today, or the Inbox if they chose it.</summary>

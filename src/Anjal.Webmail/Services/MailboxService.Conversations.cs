@@ -66,6 +66,23 @@ public sealed partial class MailboxService
         };
     }
 
+    /// <summary>
+    /// rc.24 (item 68, brief 10a): how a folder's list groups conversations. A message leads its
+    /// conversation in a folder when no newer message of the same conversation is in that folder;
+    /// only the leads are listed. The row opens the conversation at its newest unread mail
+    /// (any folder), or at the lead itself when all are read.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="folderName">The folder listed.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The grouping.</returns>
+    public async Task<ConversationGrouping> ConversationGroupingAsync(Guid mailboxId, string folderName, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(folderName);
+        IReadOnlyDictionary<string, IReadOnlyList<ConversationItem>> index = await this.ConversationIndexAsync(mailboxId, ct).ConfigureAwait(false);
+        return new ConversationGrouping(index, folderName);
+    }
+
     /// <summary>Mark every message of a conversation read (the board's "Mark all in conversation read").</summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="messageId">Any message of it.</param>
@@ -121,5 +138,65 @@ public sealed partial class MailboxService
     {
         IReadOnlyList<MailAddress> parsed = AddressParser.Parse(EncodedWordDecoder.Decode(r.FromHeader));
         return parsed.Count > 0 ? (parsed[0].DisplayName.Length > 0 ? parsed[0].DisplayName : parsed[0].Address) : r.EnvelopeFrom;
+    }
+}
+
+/// <summary>A folder list's view of its conversations (rc.24, item 68): which rows lead, their counts, and where each opens.</summary>
+public sealed class ConversationGrouping
+{
+    private readonly IReadOnlyDictionary<string, IReadOnlyList<ConversationItem>> index;
+    private readonly string folder;
+
+    /// <summary>Group by this index, for this folder.</summary>
+    /// <param name="index">The conversations by key.</param>
+    /// <param name="folder">The folder listed.</param>
+    public ConversationGrouping(IReadOnlyDictionary<string, IReadOnlyList<ConversationItem>> index, string folder)
+    {
+        this.index = index ?? throw new ArgumentNullException(nameof(index));
+        this.folder = folder ?? throw new ArgumentNullException(nameof(folder));
+    }
+
+    private IReadOnlyList<ConversationItem> Of(MessageRow m)
+    {
+        string key = MailboxService.ConversationKey(m.Subject);
+        return key.Length > 0 && this.index.TryGetValue(key, out IReadOnlyList<ConversationItem>? items) && items.Any(i => i.Id == m.Id)
+            ? items
+            : Array.Empty<ConversationItem>();
+    }
+
+    /// <summary>True when this message is listed: no newer message of its conversation is in this folder.</summary>
+    /// <param name="m">The message.</param>
+    public bool Leads(MessageRow m)
+    {
+        ArgumentNullException.ThrowIfNull(m);
+        IReadOnlyList<ConversationItem> items = this.Of(m);
+        return items.Count == 0 || !items.Any(i => i.Id != m.Id && i.Folder == this.folder && (i.At > m.ReceivedAt || (i.At == m.ReceivedAt && i.Id.CompareTo(m.Id) > 0)));
+    }
+
+    /// <summary>How many mails the conversation holds (1 when it stands alone).</summary>
+    /// <param name="m">The message.</param>
+    public int Count(MessageRow m)
+    {
+        ArgumentNullException.ThrowIfNull(m);
+        IReadOnlyList<ConversationItem> items = this.Of(m);
+        return items.Count == 0 ? 1 : items.Count;
+    }
+
+    /// <summary>The mail the row opens: the conversation's newest unread mail, or this one.</summary>
+    /// <param name="m">The message.</param>
+    public Guid OpensAt(MessageRow m)
+    {
+        ArgumentNullException.ThrowIfNull(m);
+        ConversationItem? unread = this.Of(m).Where(i => !i.Seen && i.Folder is not ("Sent" or "Drafts")).OrderByDescending(i => i.At).FirstOrDefault();
+        return unread?.Id ?? m.Id;
+    }
+
+    /// <summary>True when the open message is in this row's conversation.</summary>
+    /// <param name="m">The row's message.</param>
+    /// <param name="openId">The open message, if any.</param>
+    public bool Holds(MessageRow m, Guid? openId)
+    {
+        ArgumentNullException.ThrowIfNull(m);
+        return openId is Guid id && (id == m.Id || this.Of(m).Any(i => i.Id == id));
     }
 }

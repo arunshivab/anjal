@@ -70,6 +70,33 @@ public sealed partial class MailboxService
         return null;
     }
 
+    /// <summary>Why the server's own domain cannot be removed (DEF-168).</summary>
+    public const string ServerDomainWords = "This server answers to that domain, so it cannot be removed here.";
+
+    /// <summary>Why a domain in use cannot be removed; {boxes} and {addresses} are filled in (DEF-168).</summary>
+    public const string InUseWords = "Still in use: {boxes} mailbox(es) and {addresses} other address(es) at this domain. Remove or move them first.";
+
+    /// <summary>
+    /// What still holds a domain (DEF-168, rc.24): the console shows "Remove this domain" only when nothing
+    /// does, and otherwise says why - the same reasons the removal itself refuses with.
+    /// </summary>
+    /// <param name="tenant">The organisation.</param>
+    /// <param name="domain">The domain.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Whether the server answers to it, and how many mailboxes and other addresses live there.</returns>
+    public async Task<DomainUse> DomainUseAsync(TenantRow tenant, string domain, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tenant);
+        ArgumentNullException.ThrowIfNull(domain);
+        string d = domain.Trim().TrimEnd('.').ToLowerInvariant();
+        bool server = string.Equals(d, this.hostName, StringComparison.OrdinalIgnoreCase) || this.hostName.EndsWith("." + d, StringComparison.OrdinalIgnoreCase);
+        int boxes = (await this.store.ListMailboxesAsync(tenant.Id, ct).ConfigureAwait(false)).Count(m => string.Equals(m.Domain, d, StringComparison.OrdinalIgnoreCase));
+        AddressBook book = await this.AddressBookAsync(tenant.Id, ct).ConfigureAwait(false);
+        int addresses = book.Aliases.Count(x => x.Address.EndsWith("@" + d, StringComparison.OrdinalIgnoreCase))
+            + book.Groups.Count(x => x.Address.EndsWith("@" + d, StringComparison.OrdinalIgnoreCase));
+        return new DomainUse(server, boxes, addresses);
+    }
+
     /// <summary>
     /// Remove one of an organisation's proved domains (DEF-122, rc.23). Refused while anything still
     /// lives at the domain - a mailbox, a shared mailbox, an application's mailbox, an alias or a
@@ -89,19 +116,16 @@ public sealed partial class MailboxService
         {
             return "That domain is not this organisation's.";
         }
-        if (string.Equals(d, this.hostName, StringComparison.OrdinalIgnoreCase) || this.hostName.EndsWith("." + d, StringComparison.OrdinalIgnoreCase))
+        DomainUse use = await this.DomainUseAsync(tenant, d, ct).ConfigureAwait(false);
+        if (use.ServerDomain)
         {
-            return "This server answers to that domain, so it cannot be removed here.";
+            return ServerDomainWords;
         }
-        int boxes = (await this.store.ListMailboxesAsync(tenant.Id, ct).ConfigureAwait(false)).Count(m => string.Equals(m.Domain, d, StringComparison.OrdinalIgnoreCase));
-        AddressBook book = await this.AddressBookAsync(tenant.Id, ct).ConfigureAwait(false);
-        int addresses = book.Aliases.Count(x => x.Address.EndsWith("@" + d, StringComparison.OrdinalIgnoreCase))
-            + book.Groups.Count(x => x.Address.EndsWith("@" + d, StringComparison.OrdinalIgnoreCase));
-        if (boxes > 0 || addresses > 0)
+        if (use.InUse)
         {
-            return "Still in use: {boxes} mailbox(es) and {addresses} other address(es) at this domain. Remove or move them first."
-                .Replace("{boxes}", boxes.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
-                .Replace("{addresses}", addresses.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
+            return InUseWords
+                .Replace("{boxes}", use.Mailboxes.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal)
+                .Replace("{addresses}", use.Addresses.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
         }
         await this.store.DeleteTenantDomainAsync(d, ct).ConfigureAwait(false);
         await this.messageStore.DeleteDkimKeyAsync(d, ct).ConfigureAwait(false);
@@ -178,4 +202,17 @@ public sealed partial class MailboxService
     private static bool KeysCanBeKept(IMessageStore store) =>
         store is not PostgresMessageStore
         || string.Equals(Environment.GetEnvironmentVariable("ANJAL_ALLOW_PLAINTEXT_KEYS"), "true", StringComparison.OrdinalIgnoreCase);
+}
+
+/// <summary>What still holds a domain (DEF-168, rc.24).</summary>
+/// <param name="ServerDomain">True when this server itself answers to the domain.</param>
+/// <param name="Mailboxes">Mailboxes at the domain.</param>
+/// <param name="Addresses">Aliases and group addresses at the domain.</param>
+public sealed record DomainUse(bool ServerDomain, int Mailboxes, int Addresses)
+{
+    /// <summary>True when anything still lives at the domain.</summary>
+    public bool InUse => this.Mailboxes > 0 || this.Addresses > 0;
+
+    /// <summary>True when the domain can be removed.</summary>
+    public bool Removable => !this.ServerDomain && !this.InUse;
 }

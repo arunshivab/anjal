@@ -1,0 +1,49 @@
+@page "/recovery/confirm"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+
+<PageTitle>@L["Confirm your recovery address"] — Anjal</PageTitle>
+
+@* rc.24 (item 90): the link mailed to a recovery address. Opening it shows one button; the press proves the address. *@
+<AuthFrame L="L" Org="org">
+    <h1 class="authtitle">@L["Confirm your recovery address"]</h1>
+    @if (Done == "1")
+    {
+        <div class="note n-ok" role="status" data-recovery-done><LipiIcon Name="check" Size="16" /><span>@L["Confirmed. A forgotten password is now reset with a code sent to this address."]</span></div>
+        <p class="authnote"><a class="authlink" href="/">@L["Open your mail"]</a></p>
+    }
+    else if (Bad == "1" || M is null || T is null)
+    {
+        <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["This link has expired, was used already, or is for an address no longer set. Sign in and send a new one."]</span></div>
+        <p class="authnote"><a class="authlink" href="/settings/recovery">@L["Send a new link"]</a></p>
+    }
+    else
+    {
+        <p class="authlead">@L["Press Confirm to make this address the one your password reset codes are sent to."]</p>
+        <form method="post" action="/auth/recovery/confirm" class="authfields">
+            <AntiforgeryToken />
+            <input type="hidden" name="m" value="@M" />
+            <input type="hidden" name="t" value="@T" />
+            <button type="submit" class="authbtn">@L["Confirm"]</button>
+        </form>
+    }
+</AuthFrame>
+
+@code {
+    [SupplyParameterFromQuery(Name = "m")] private string? M { get; set; }
+    [SupplyParameterFromQuery(Name = "t")] private string? T { get; set; }
+    [SupplyParameterFromQuery(Name = "done")] private string? Done { get; set; }
+    [SupplyParameterFromQuery(Name = "bad")] private string? Bad { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+    }
+}

@@ -453,6 +453,10 @@ else
             <h2 class="asidehead">@L["Virus scanning"]</h2>
             <p class="asidetext">@L["Decisions of 2 Oct 2026, built in rc.22. The rules are the same for every organisation; the recipient notice is always on."]</p>
             <p class="asidetext">@L["Set ANJAL_CLAMAV in the mail server's and the webmail's settings to clamd's socket, for example 127.0.0.1:3310 or /run/clamav/clamd.ctl."]</p>
+            @* rc.24 (items 93 and 94, D-196 and D-197). *@
+            <h3 class="asidetitle">@L["The whole mail and its links"]</h3>
+            <p class="asidetext">@L["Every mail from outside is scanned whole as well, text and links included; a mail ClamAV flags is delivered with a warning and its links switched off. Locked archives and files with macros are delivered with a warning."]</p>
+            <p class="asidetext" data-link-lists><b>@L["Lists of known dangerous links"]</b>: @(Mail.Links.HasBlocklist ? L["your own list is on"] : L["your own list is off"]) · @(Mail.Links.HasDnsList ? L["the DNS list is on"] : L["the DNS list is off"]). @L["The free lists do not allow use in a paid service; set ANJAL_LINK_BLOCKLIST or ANJAL_LINK_DNSBL when a paid list is bought."]</p>
             break;
 
         case "health":
@@ -460,6 +464,15 @@ else
             <h3 class="asidetitle">@L["Summary"]</h3>
             <p class="asidetext">@L["Sent to the operators: the health above, the mail received, and the organisations."]</p>
             <form method="post" action="/ops/health/summary"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn">@L["Send it now"]</button></form>
+            @* rc.24 (item 86, D-177): one mail a day, or every alert as it happens - the operator chooses. *@
+            <h3 class="asidetitle">@L["Alert mails"]</h3>
+            <form method="post" action="/ops/alerts" class="asideform" data-alert-mode>
+                <AntiforgeryToken />
+                <label class="checkline"><input type="radio" name="mode" value="@MailboxService.AlertDigest" checked="@(alertMode != MailboxService.AlertEach)" /><span>@L["One digest a day at 09:00"]</span></label>
+                <label class="checkline"><input type="radio" name="mode" value="@MailboxService.AlertEach" checked="@(alertMode == MailboxService.AlertEach)" /><span>@L["Every alert as it happens"]</span></label>
+                <p class="asidetext">@L["With the digest, a new problem marked bad is still mailed at once. Each new mail replaces the last one in your Inbox."]</p>
+                <button type="submit" class="btn btn-s asidebtn" data-needs-server>@L["Save"]</button>
+            </form>
             <div class="asidecard"><span class="asidebody"><b>@L["Watch for"]</b>: @L["a failed backup; disk over 80%; a certificate under 15 days; the oldest waiting message over 6 hours."]</span></div>
             @* rc.15 (item 61): the restore drill, every six months, recorded here. *@
             <h3 class="asidetitle">@L["Restore drill"]</h3>
@@ -527,6 +540,7 @@ else
     private IReadOnlyList<HealthTile> tiles = Array.Empty<HealthTile>();
     private IReadOnlyList<(DateTimeOffset Hour, long Count)> hours = Array.Empty<(DateTimeOffset, long)>();
     private string? scannerVersion;
+    private string alertMode = MailboxService.AlertDigest;
     private Anjal.Mailbox.VirusStats virusStats = new();
     private IReadOnlyList<HeldMessage> heldMail = Array.Empty<HeldMessage>();
     private string healthWord = "All systems normal";
@@ -581,6 +595,7 @@ else
         "released" => L["Delivered to the person's mailbox."],
         "stillheld" => L["The scanner is still not answering; the message stays held."],
         "drill" => L["Restore drill recorded."],
+        "alerts" => L["Alert mails saved."],
         "drill-date" => L["Choose the day the drill was done."],
         "self" => L["You cannot suspend your own organisation."],
         _ => L["Saved."],
@@ -866,13 +881,16 @@ else
             DateTimeOffset nowT = DateTimeOffset.UtcNow;
             trans = await Mail.TransactionalAsync(MailboxService.AtLocal(clock, clock.Local(nowT).Date), nowT);
         }
-        if (Current == "virus")
+        // DEF-169 (rc.24): the side list says how the scanner is on every page of the console, so it is asked
+        // on every page - before, it was asked only on the virus page and the list said "not answering" elsewhere.
+        if (Current == "virus" || Mail.Scanner is not null)
         {
             (scannerVersion, virusStats) = await Mail.ScannerStateAsync();
             heldMail = await Mail.HeldMessagesAsync();
         }
         if (Current == "health")
         {
+            alertMode = await Mail.AlertModeAsync();
             drills = await Mail.DrillsAsync();
             (tiles, hours) = await Mail.HealthAsync(OpsEndpoints.RootOf(Maildir), DateTimeOffset.UtcNow);
             healthWord = tiles.Any(t => t.Level == "bad") ? "Needs attention" : tiles.Any(t => t.Level == "warn") ? "Some things to look at" : "All systems normal";
