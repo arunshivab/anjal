@@ -1659,6 +1659,9 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.24 to rc.24.1** (a mail sent to oneself shows once in its conversation): the usual steps only
+(backup first). No schema change, no setting.
+
 **rc.23 to rc.24** (threads, Anjal's own alerts, the whole mail and its links, the recovery
 address): the usual steps only (backup first). No schema change, and no setting has to change.
 Two new settings are optional and off until set: `ANJAL_LINK_BLOCKLIST` and `ANJAL_LINK_DNSBL`
@@ -1667,7 +1670,7 @@ the restart: the operators' alert mails come as one digest at 09:00 India time (
 bad still at once; Service health, Alert mails, to choose every alert); individuals on
 anjalmail.com are asked to prove their recovery address at their next sign-in (Later is allowed for
 seven days). The deploy-smoke check now runs `anjal-firewall.sh generate`; nothing changes on the
-server for it.
+server for it. Done on the first server 26 Oct 2026 08:26 (hash a82c8b1eeb434140).
 
 **rc.22.2 to rc.23** (the TST-15 fixes): the usual steps only (backup first). No schema change, no
 setting to change. After the restart, check `https://mail.anjal.co.in/robots.txt`,

@@ -10,6 +10,10 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.24.1** (26 October 2026) - A mail sent to oneself (kept in Sent and delivered to the
+Inbox, one Message-ID) is one mail in its conversation, not two (found by the owner on the first
+server, 26 Oct); the list's conversation count counts it once too.
+
 **v1.0.0-rc.24** (26 October 2026) - Threads, Anjal's own mail out of the way, and safer mail.
 Conversations: replies now carry the whole References chain, and the reader shows a conversation
 around the open mail - earlier and later mails folded into rows with letters A, B, C, who answered

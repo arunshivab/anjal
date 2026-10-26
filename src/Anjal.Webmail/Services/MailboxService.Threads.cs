@@ -155,7 +155,29 @@ public sealed partial class MailboxService
             rows.Add((row, await this.ThreadLinkAsync(mailboxId, row, ct).ConfigureAwait(false)));
         }
         rows.Sort((a, b) => a.Row.ReceivedAt.CompareTo(b.Row.ReceivedAt));
-        return BuildThread(rows, me, folderNames);
+        return BuildThread(OneCopyEach(rows, message, folderNames), me, folderNames);
+    }
+
+    /// <summary>
+    /// rc.24.1 (owner, 26 Oct 2026: "F and G came - how it came twice?"): a mail sent to oneself is kept in
+    /// Sent and delivered to the Inbox - two copies with one Message-ID. A conversation shows it once: the
+    /// copy that is open, else the copy in the open mail's folder, else the first kept.
+    /// </summary>
+    private static List<(MessageRow Row, ThreadLink Link)> OneCopyEach(List<(MessageRow Row, ThreadLink Link)> rows, MessageRow open, IReadOnlyDictionary<Guid, string> folderNames)
+    {
+        string openFolder = folderNames.TryGetValue(open.FolderId, out string? f) ? f : string.Empty;
+        var kept = new List<(MessageRow Row, ThreadLink Link)>(rows.Count);
+        foreach (IGrouping<string, (MessageRow Row, ThreadLink Link)> same in rows.GroupBy(r => r.Link.MessageId.Length > 0 ? r.Link.MessageId.ToLowerInvariant() : r.Row.Id.ToString("N")))
+        {
+            (MessageRow Row, ThreadLink Link) pick = same.FirstOrDefault(r => r.Row.Id == open.Id);
+            if (pick.Row is null)
+            {
+                pick = same.FirstOrDefault(r => folderNames.TryGetValue(r.Row.FolderId, out string? n) && n == openFolder);
+            }
+            kept.Add(pick.Row is null ? same.First() : pick);
+        }
+        kept.Sort((a, b) => a.Row.ReceivedAt.CompareTo(b.Row.ReceivedAt));
+        return kept;
     }
 
     private static ThreadView BuildThread(List<(MessageRow Row, ThreadLink Link)> rows, string me, IReadOnlyDictionary<Guid, string> folderNames)

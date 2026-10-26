@@ -208,6 +208,38 @@ public sealed class Rc24Tests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task Threads_AMailSentToOneself_IsOneMailInTheConversation_NotTwo()
+    {
+        // rc.24.1 (owner, 26 Oct 2026): a reply sent to oneself is kept in Sent and arrives in the Inbox -
+        // one Message-ID, two copies. It showed as F and G; it is one mail.
+        (MessageRow _, MessageRow b, MessageRow _, MessageRow _) = await this.SplitConversationAsync();
+        ComposePrefill prefill = (await this.svc.PrefillAsync(this.arun.Id, b.Id, MailboxService.PrefillKind.Reply))!;
+        Assert.Null(await this.svc.SendAsync(this.arun.Id, new ComposeRequest
+        {
+            To = "arun@sgh.in",
+            Subject = prefill.Subject,
+            Body = "A note to myself",
+            InReplyTo = prefill.InReplyTo,
+            References = prefill.References,
+        }));
+        FolderRow sent = (await this.svc.GetFolderAsync(this.arun.Id, "Sent"))!;
+        FolderRow inbox = (await this.svc.GetFolderAsync(this.arun.Id, FolderRow.Inbox))!;
+        MessageRow sentCopy = (await this.store.ListMessagesAsync(this.arun.Id, sent.Id, 1, 0))[0];
+        MessageRow inboxCopy = (await this.store.ListMessagesAsync(this.arun.Id, inbox.Id, 1, 0))[0];
+        Assert.Equal(sentCopy.MessageId, inboxCopy.MessageId);
+        ThreadView fromSent = await this.svc.ThreadOfAsync(this.arun.Id, sentCopy);
+        Assert.Equal(5, fromSent.Mails.Count);
+        Assert.NotNull(fromSent.Get(sentCopy.Id));
+        Assert.Null(fromSent.Get(inboxCopy.Id));
+        Assert.Equal("E", Assert.Single(fromSent.RepliesTo(b.Id)).Letter);
+        ThreadView fromInbox = await this.svc.ThreadOfAsync(this.arun.Id, inboxCopy);
+        Assert.Equal(5, fromInbox.Mails.Count);
+        Assert.NotNull(fromInbox.Get(inboxCopy.Id));
+        Func<MessageRow, int> counts = await this.svc.ConversationCountsAsync(this.arun.Id);
+        Assert.Equal(5, counts(inboxCopy));
+    }
+
+    [Fact]
     public async Task Threads_GroupByConversation_IsOnByDefault_AndEachMailOnItsOwnTurnsItOff()
     {
         (MessageRow _, MessageRow _, MessageRow c, MessageRow _) = await this.SplitConversationAsync();
