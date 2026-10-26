@@ -11,7 +11,14 @@ namespace Anjal.Webmail.Services;
 /// <param name="From">Who wrote it.</param>
 /// <param name="At">When it arrived or was sent.</param>
 /// <param name="Seen">Read.</param>
-public sealed record ConversationItem(Guid Id, string Folder, string From, DateTimeOffset At, bool Seen);
+public sealed record ConversationItem(Guid Id, string Folder, string From, DateTimeOffset At, bool Seen)
+{
+    /// <summary>
+    /// rc.24.1: the mail's Message-ID, so two copies of one mail (a mail sent to oneself sits in Sent and in
+    /// the Inbox) count once; empty when it has none.
+    /// </summary>
+    public string MessageKey { get; init; } = string.Empty;
+}
 
 /// <summary>
 /// Conversations (rc.12, UX-04): replies grouped. A conversation is the
@@ -62,7 +69,7 @@ public sealed partial class MailboxService
         return m =>
         {
             string key = ConversationKey(m.Subject);
-            return key.Length > 0 && index.TryGetValue(key, out IReadOnlyList<ConversationItem>? items) ? items.Count : 1;
+            return key.Length > 0 && index.TryGetValue(key, out IReadOnlyList<ConversationItem>? items) ? ConversationGrouping.Distinct(items) : 1;
         };
     }
 
@@ -127,7 +134,10 @@ public sealed partial class MailboxService
             .ToDictionary(
                 g => g.Key,
                 g => (IReadOnlyList<ConversationItem>)g.OrderBy(r => r.ReceivedAt)
-                    .Select(r => new ConversationItem(r.Id, folderNames.TryGetValue(r.FolderId, out string? n) ? n : string.Empty, ConversationSender(r), r.ReceivedAt, r.Seen))
+                    .Select(r => new ConversationItem(r.Id, folderNames.TryGetValue(r.FolderId, out string? n) ? n : string.Empty, ConversationSender(r), r.ReceivedAt, r.Seen)
+                    {
+                        MessageKey = r.MessageId.Trim().Trim('<', '>').ToLowerInvariant(),
+                    })
                     .ToList(),
                 StringComparer.Ordinal);
         this.conversations[mailboxId] = (now, index);
@@ -179,7 +189,16 @@ public sealed class ConversationGrouping
     {
         ArgumentNullException.ThrowIfNull(m);
         IReadOnlyList<ConversationItem> items = this.Of(m);
-        return items.Count == 0 ? 1 : items.Count;
+        return items.Count == 0 ? 1 : Distinct(items);
+    }
+
+    /// <summary>How many different mails: copies of one mail (same Message-ID) count once (rc.24.1).</summary>
+    /// <param name="items">The conversation.</param>
+    /// <returns>The count.</returns>
+    public static int Distinct(IReadOnlyList<ConversationItem> items)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        return items.Select(i => i.MessageKey.Length > 0 ? i.MessageKey : i.Id.ToString("N")).Distinct(StringComparer.Ordinal).Count();
     }
 
     /// <summary>The mail the row opens: the conversation's newest unread mail, or this one.</summary>
