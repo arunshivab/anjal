@@ -398,7 +398,12 @@ public sealed class Rc24Tests : IAsyncLifetime, IDisposable
             "--b\r\nContent-Type: application/zip; name=\"results.zip\"\r\nContent-Disposition: attachment; filename=\"results.zip\"\r\nContent-Transfer-Encoding: base64\r\n\r\n" + Convert.ToBase64String(locked) + "\r\n" +
             "--b\r\nContent-Type: application/msword; name=\"plan.docx\"\r\nContent-Disposition: attachment; filename=\"plan.docx\"\r\nContent-Transfer-Encoding: base64\r\n\r\n" + Convert.ToBase64String(macro) + "\r\n--b--\r\n";
         MessageRow m = await this.DeliverAsync(raw, "ramesh@lab.test");
-        MessageView view = (await this.svc.OpenAsync(this.arun.Id, m.Id, allowRemoteImages: false))!;
+        MessageView view;
+        using (MailKeyring ring = TestMail.Ring(this.store))
+        using (MailKeyring.Use(ring))
+        {
+            view = (await this.svc.OpenAsync(this.arun.Id, m.Id, allowRemoteImages: false))!;
+        }
         Assert.Equal(2, view.FileRisks.Count);
         HttpClient client = this.Client();
         await SignInAsync(client, "arun@sgh.in");
@@ -463,7 +468,12 @@ public sealed class Rc24Tests : IAsyncLifetime, IDisposable
         Assert.Equal(DeliveryOutcome.Accepted, result.Outcome);
         FolderRow inbox = (await this.svc.GetFolderAsync(this.arun.Id, FolderRow.Inbox))!;
         MessageRow m = (await this.store.ListMessagesAsync(this.arun.Id, inbox.Id, 1, 0))[0];
-        MessageView view = (await this.svc.OpenAsync(this.arun.Id, m.Id, allowRemoteImages: false))!;
+        MessageView view;
+        using (MailKeyring ring = TestMail.Ring(this.store))
+        using (MailKeyring.Use(ring))
+        {
+            view = (await this.svc.OpenAsync(this.arun.Id, m.Id, allowRemoteImages: false))!;
+        }
         Assert.Equal("Heuristics.Phishing.Email.SpoofedDomain", view.MailWarning);
         Assert.Contains("class=\"anjal-off\"", view.BodyHtml, StringComparison.Ordinal);
         HttpClient client = this.Client();
@@ -638,7 +648,8 @@ public sealed class Rc24Tests : IAsyncLifetime, IDisposable
     {
         // CI, PR #62 (26 Oct 2026): the webmail's five-minute pass "scanned again" with no scanner set,
         // and so delivered held mail unscanned. Without a scanner it now stays held.
-        var sink = new MailboxSink(this.store, this.maildir) { Scanner = new DownScanner() };
+        // Mail held under the rc.22 quarantine (before rc.25 answered "try later" instead).
+        var sink = new MailboxSink(this.store, this.maildir) { Scanner = new DownScanner(), HoldNothing = false };
         DeliveryResult result = await sink.DeliverAsync(new DeliveryContext
         {
             EnvelopeFrom = "a@x.test",
@@ -790,14 +801,19 @@ public sealed class Rc24Tests : IAsyncLifetime, IDisposable
 
     private List<string> Subjects() => this.Mail().Select(m => m.Subject).ToList();
 
-    private List<MessageRow> Mail() => this.store.MailboxMessages.Where(m => m.MailboxId == this.arun.Id).ToList();
+    private List<MessageRow> Mail() => this.store.Seen().Where(m => m.MailboxId == this.arun.Id).ToList();
 
     private async Task<string> FolderNameAsync(MessageRow m) =>
-        (await this.store.ListFoldersAsync(this.arun.Id)).Single(f => f.Id == this.store.MailboxMessages.Single(x => x.Id == m.Id).FolderId).Name;
+        (await this.store.ListFoldersAsync(this.arun.Id)).Single(f => f.Id == this.store.Seen().Single(x => x.Id == m.Id).FolderId).Name;
 
     private async Task<ParsedText> TextOfAsync(MessageRow m)
     {
-        MessageView view = (await this.svc.OpenAsync(this.arun.Id, m.Id, allowRemoteImages: false))!;
+        MessageView view;
+        using (MailKeyring ring = TestMail.Ring(this.store))
+        using (MailKeyring.Use(ring))
+        {
+            view = (await this.svc.OpenAsync(this.arun.Id, m.Id, allowRemoteImages: false))!;
+        }
         return new ParsedText(WebUtility.HtmlDecode(Regex.Replace(view.BodyHtml, "<[^>]+>", " ")));
     }
 

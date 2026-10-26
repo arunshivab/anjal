@@ -211,6 +211,17 @@ public interface IMessageStore
     System.Threading.Tasks.Task<bool> RetryOutboundNowAsync(System.Guid id, string envelopeFrom, System.Threading.CancellationToken ct = default);
 
     /// <summary>
+    /// rc.25 (DES-15 §9): keep a queued message's signed bytes in the queue (sealed like any queued
+    /// message), so that a retry sends the same signed bytes without reading the evidence copy, which
+    /// is sealed to the organisation and which the mail server cannot open.
+    /// </summary>
+    /// <param name="id">The queue row.</param>
+    /// <param name="raw">The signed bytes.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    System.Threading.Tasks.Task ReplaceOutboundRawAsync(System.Guid id, byte[] raw, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
     /// Append an entry to the audit trail. Entries are never updated or
     /// deleted; in PostgreSQL a trigger refuses any attempt to.
     /// </summary>

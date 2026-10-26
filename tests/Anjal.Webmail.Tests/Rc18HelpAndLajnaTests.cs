@@ -190,7 +190,12 @@ public sealed class Rc18HelpAndLajnaTests : IAsyncLifetime, IDisposable
         MailboxService svc = this.app.Services.GetRequiredService<MailboxService>();
         MessageRow old = await this.DeliverAsync(ToArun, "From: Arun Shiva <arun@anjal.co.in>\r\nTo: Meera Iyer <meera@anjal.co.in>\r\nSubject: Leave 3-5 Aug\r\n\r\nI will be on leave from 3 to 5 August. Dr Rao will cover my patients while I am away.\r\n");
         await svc.MoveAsync(this.arun.Id, old.Id, "Sent");
-        LajnaCover? cover = await svc.WhoCoveredAsync(this.arun.Id);
+        LajnaCover? cover;
+        using (Anjal.Store.MailKeyring ring = TestMail.Ring(this.store))
+        using (Anjal.Store.MailKeyring.Use(ring))
+        {
+            cover = await svc.WhoCoveredAsync(this.arun.Id);
+        }
         Assert.NotNull(cover);
         Assert.Equal("Dr Rao", cover!.Name);
         Assert.False(cover.Copied);

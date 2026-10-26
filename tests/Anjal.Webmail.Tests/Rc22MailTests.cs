@@ -175,7 +175,13 @@ public sealed class Rc22MailTests : IDisposable
         Assert.Contains("attachment removed", row.Subject, StringComparison.Ordinal);
         Assert.False(row.HasAttachments);
 
-        Assert.Equal(DeliveryOutcome.Accepted, (await this.DeliverResultAsync(report, ArunOnly, "a@x.test", new FakeScanner(ScanVerdict.Unavailable))).Outcome);
+        // rc.25 (D-242): with the scanner down, mail with files is answered "try later"; nothing is kept.
+        DeliveryResult later = await this.DeliverResultAsync(report, ArunOnly, "a@x.test", new FakeScanner(ScanVerdict.Unavailable));
+        Assert.Equal(DeliveryOutcome.TransientFailure, later.Outcome);
+        Assert.Contains("try again later", later.ReplyText, StringComparison.Ordinal);
+        Assert.Null(await this.svc.GetFolderAsync(this.arun.Id, AttachmentPolicy.QuarantineFolder));
+        // The rc.22 quarantine (still there for mail held before rc.25) when the sink is set to hold.
+        Assert.Equal(DeliveryOutcome.Accepted, (await this.DeliverResultAsync(report, ArunOnly, "a@x.test", new FakeScanner(ScanVerdict.Unavailable), holdNothing: false)).Outcome);
         FolderRow? held = await this.svc.GetFolderAsync(this.arun.Id, AttachmentPolicy.QuarantineFolder);
         Assert.NotNull(held);
         Assert.Equal(1, await this.store.CountMessagesAsync(this.arun.Id, held!.Id));
@@ -296,8 +302,8 @@ public sealed class Rc22MailTests : IDisposable
         return this.store.MailboxMessages[this.store.MailboxMessages.Count - 1];
     }
 
-    private async Task<DeliveryResult> DeliverResultAsync(string raw, string[] to, string envelopeFrom, IVirusScanner? scanner = null) =>
-        await new MailboxSink(this.store, this.maildir) { Scanner = scanner }.DeliverAsync(new DeliveryContext
+    private async Task<DeliveryResult> DeliverResultAsync(string raw, string[] to, string envelopeFrom, IVirusScanner? scanner = null, bool holdNothing = true) =>
+        await new MailboxSink(this.store, this.maildir) { Scanner = scanner, HoldNothing = holdNothing }.DeliverAsync(new DeliveryContext
         {
             EnvelopeFrom = envelopeFrom,
             EnvelopeTo = to,

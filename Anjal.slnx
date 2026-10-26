@@ -17,6 +17,7 @@
     <Project Path="src/Anjal.Acme/Anjal.Acme.csproj" />
     <Project Path="src/Anjal.Api/Anjal.Api.csproj" />
     <Project Path="src/Anjal.Auth/Anjal.Auth.csproj" />
+    <Project Path="src/Anjal.BreakGlass/Anjal.BreakGlass.csproj" />
     <Project Path="src/Anjal.Dkim/Anjal.Dkim.csproj" />
     <Project Path="src/Anjal.Dns/Anjal.Dns.csproj" />
     <Project Path="src/Anjal.Mailbox/Anjal.Mailbox.csproj" />

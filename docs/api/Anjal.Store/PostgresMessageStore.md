@@ -8,7 +8,9 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 
 - **#ctor** *(method)* - Create the store with a PostgreSQL connection string.
 - **AddEvidenceAttemptAsync** *(method)* - _(no description)_
+- **AddMailboxKeysAsync** *(method)* - _(no description)_
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
+- **AddTenantKeysAsync** *(method)* - _(no description)_
 - **AddTrustedSenderAsync** *(method)* - _(no description)_
 - **AppendAuditAsync** *(method)* - _(no description)_
 - **CancelOutboundAsync** *(method)* - _(no description)_
@@ -29,13 +31,17 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **DeleteCategoryRuleAsync** *(method)* - _(no description)_
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
 - **DeleteEmptyFolderAsync** *(method)* - _(no description)_
+- **DeleteGrantAsync** *(method)* - _(no description)_
 - **DeleteLocalDomainAsync** *(method)* - _(no description)_
 - **DeleteMailboxAsync** *(method)* - _(no description)_
 - **DeleteMailboxSenderRuleAsync** *(method)* - _(no description)_
+- **DeleteMailboxSessionKeysAsync** *(method)* - _(no description)_
 - **DeleteMessageAsync** *(method)* - _(no description)_
 - **DeleteOutboundTlsPolicyAsync** *(method)* - _(no description)_
+- **DeleteRestoreRequestAsync** *(method)* - _(no description)_
 - **DeleteRoutingRuleAsync** *(method)* - _(no description)_
 - **DeleteSenderRuleAsync** *(method)* - _(no description)_
+- **DeleteSessionKeysAsync** *(method)* - _(no description)_
 - **DeleteSettingAsync** *(method)* - _(no description)_
 - **DeleteSmtpUserAsync** *(method)* - _(no description)_
 - **DeleteTenantAsync** *(method)* - _(no description)_
@@ -45,6 +51,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **EnsureFolderAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
 - **GetActivityAsync** *(method)* - _(no description)_
+- **GetBreakGlassAsync** *(method)* - _(no description)_
 - **GetCategoryAsync** *(method)* - _(no description)_
 - **GetDkimKeyAsync** *(method)* - _(no description)_
 - **GetEvidenceAsync** *(method)* - _(no description)_
@@ -54,18 +61,23 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **GetMailboxAsync** *(method)* - _(no description)_
 - **GetMailboxByIdAsync** *(method)* - _(no description)_
 - **GetMailboxDocumentAsync** *(method)* - _(no description)_
+- **GetMailboxKeysAsync** *(method)* - _(no description)_
 - **GetMessageByIdAsync** *(method)* - _(no description)_
 - **GetOutboundByIdAsync** *(method)* - _(no description)_
 - **GetOutboundEvidenceLinkAsync** *(method)* - _(no description)_
 - **GetOutboundTlsPolicyAsync** *(method)* - _(no description)_
+- **GetPublicKeysAsync** *(method)* - _(no description)_
+- **GetRestoreRequestAsync** *(method)* - _(no description)_
 - **GetRoutingRuleAsync** *(method)* - _(no description)_
 - **GetServiceRecordAsync** *(method)* - _(no description)_
+- **GetSessionKeysAsync** *(method)* - _(no description)_
 - **GetSignatureAsync** *(method)* - _(no description)_
 - **GetSmtpUserAsync** *(method)* - _(no description)_
 - **GetTenantAsync** *(method)* - _(no description)_
 - **GetTenantByIdAsync** *(method)* - _(no description)_
 - **GetTenantDocumentAsync** *(method)* - _(no description)_
 - **GetTenantDomainAsync** *(method)* - _(no description)_
+- **GetTenantKeysAsync** *(method)* - _(no description)_
 - **ImportSettingsAsync** *(method)* - _(no description)_
 - **InsertEvidenceAsync** *(method)* - _(no description)_
 - **InsertEvidenceManifestAsync** *(method)* - _(no description)_
@@ -83,6 +95,8 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **ListEvidenceManifestsAsync** *(method)* - _(no description)_
 - **ListEvidencePurgedAsync** *(method)* - _(no description)_
 - **ListFoldersAsync** *(method)* - _(no description)_
+- **ListGrantsForHolderAsync** *(method)* - _(no description)_
+- **ListGrantsOfAsync** *(method)* - _(no description)_
 - **ListGreylistAsync** *(method)* - _(no description)_
 - **ListLocalDomainsAsync** *(method)* - _(no description)_
 - **ListMailboxSenderRulesAsync** *(method)* - _(no description)_
@@ -100,23 +114,37 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **ListSenderRulesAsync** *(method)* - _(no description)_
 - **ListSettingsAsync** *(method)* - _(no description)_
 - **ListSmtpUsersAsync** *(method)* - _(no description)_
+- **ListStoredTextsAsync** *(method)* - _(no description)_
 - **ListTenantDomainsAsync** *(method)* - _(no description)_
 - **ListTenantsAsync** *(method)* - _(no description)_
 - **ListTrustedSendersAsync** *(method)* - _(no description)_
+- **ListWaitingRestoresAsync** *(method)* - _(no description)_
 - **ListWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **ListWebhookJobsAsync** *(method)* - _(no description)_
+- **MailboxPublicKeyAsync** *(method)* - A mailbox's public key, or null when it has none (cached: a key, once made, never changes; "none" is checked again after a minute).
 - **MarkEvidencePurgedAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
 - **OldestPendingOutboundAsync** *(method)* - _(no description)_
+- **PurgeSessionKeysAsync** *(method)* - _(no description)_
+- **QueueSealKeyAsync** *(method)* - The mail server's seal public key for the outgoing queue (DES-15 §7.4), or null before the server has made it.
 - **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
+- **RecordKeyAsync** *(method)* - Who may read a queued message's record (DES-15 §7.4): the sending mailbox's key, else the organisation's recovery key for the sending domain (an application's mail), else nobody in particular (null - the record stays plain, as for an individual's mail).
 - **RemoveOutboundContentAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
+- **ReplaceOutboundRawAsync** *(method)* - _(no description)_
 - **ReplayWebhookJobAsync** *(method)* - _(no description)_
 - **RetryOutboundNowAsync** *(method)* - _(no description)_
+- **SaveBreakGlassAsync** *(method)* - _(no description)_
+- **SaveGrantAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
+- **SaveMailboxKeysAsync** *(method)* - _(no description)_
 - **SaveMessageAsync** *(method)* - _(no description)_
+- **SaveRestoreRequestAsync** *(method)* - _(no description)_
+- **SaveSessionKeysAsync** *(method)* - _(no description)_
+- **SaveStoredTextAsync** *(method)* - _(no description)_
+- **SaveTenantKeysAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SearchMessagesAsync** *(method)* - _(no description)_
 - **SetEvidenceOutcomeAsync** *(method)* - _(no description)_

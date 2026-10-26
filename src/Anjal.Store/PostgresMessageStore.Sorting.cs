@@ -8,6 +8,14 @@ public sealed partial class PostgresMessageStore
     /// <inheritdoc/>
     public async Task<IReadOnlyList<MessageRow>> ListMessagesSortedAsync(System.Guid mailboxId, System.Guid folderId, bool? seen, string sort, int limit, int offset, CancellationToken ct = default)
     {
+        System.ArgumentNullException.ThrowIfNull(sort);
+        if (sort == "subject" && await this.MailboxPublicKeyAsync(mailboxId, ct).ConfigureAwait(false) is not null)
+        {
+            // rc.25 (DES-15 §8): subjects are encrypted, so the database cannot sort by them; the session does.
+            IReadOnlyList<MessageRow> all = await this.ListMessagesSortedAsync(mailboxId, folderId, seen, "newest", int.MaxValue, 0, ct).ConfigureAwait(false);
+            return all.OrderBy(m => MessageCipher.SortKey(m.Subject), System.StringComparer.Ordinal).ThenByDescending(m => m.ReceivedAt).ThenByDescending(m => m.Id)
+                .Skip(System.Math.Max(0, offset)).Take(System.Math.Max(0, limit)).ToList();
+        }
         // Only fixed text goes into the ORDER BY: the choice picks one of these, never the person's words.
         string order = sort switch
         {

@@ -8,7 +8,8 @@ namespace Anjal.Examples.WebmailDemo;
 /// <summary>
 /// Runs the Anjal webmail against an in-memory store seeded with one
 /// tenant, one mailbox and a few messages, so the UI can be explored in
-/// a browser with no PostgreSQL or SMTP setup:
+/// a browser with no PostgreSQL or SMTP setup. The one person is the organisation's
+/// administrator, so the organisation screens (Encryption among them) can be seen too:
 ///
 ///   dotnet run --project examples/Anjal.WebmailDemo
 ///   open http://127.0.0.1:8080/  and sign in as arun@anjal.localhost / demo-password
@@ -23,7 +24,7 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         var store = new InMemoryMessageStore();
-        TenantRow tenant = await store.UpsertTenantAsync(new TenantRow { Slug = "imagiqa", DisplayName = "imagiQa" });
+        TenantRow tenant = await store.UpsertTenantAsync(new TenantRow { Slug = "imagiqa", DisplayName = "imagiQa", PostmasterMailbox = "arun@anjal.localhost" });
         await store.UpsertTenantDomainAsync(new TenantDomainRow { TenantId = tenant.Id, Domain = "anjal.localhost" });
         await store.UpsertMailboxAsync(new MailboxRow
         {

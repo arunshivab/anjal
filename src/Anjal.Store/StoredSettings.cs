@@ -15,7 +15,8 @@ public static class StoredSettings
     /// <summary>
     /// True for a setting that must never be stored in the database: the
     /// database connection itself and anything holding a password, token,
-    /// secret or key-encryption key.
+    /// secret, key-encryption key or pepper (rc.25: the pepper must never be in
+    /// the database, or a copy of it could open the keys it protects).
     /// </summary>
     /// <param name="key">The setting's name.</param>
     /// <returns>True when the setting is secret.</returns>
@@ -28,7 +29,8 @@ public static class StoredSettings
             || k.Contains("PASSWORD", System.StringComparison.Ordinal)
             || k.Contains("TOKEN", System.StringComparison.Ordinal)
             || k.Contains("SECRET", System.StringComparison.Ordinal)
-            || k.Contains("KEK", System.StringComparison.Ordinal);
+            || k.Contains("KEK", System.StringComparison.Ordinal)
+            || k.Contains("PEPPER", System.StringComparison.Ordinal);
     }
 
     /// <summary>True for a name that may be stored: an <c>ANJAL_</c> setting that is not secret.</summary>

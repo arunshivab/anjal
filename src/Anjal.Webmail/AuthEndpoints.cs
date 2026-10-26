@@ -95,6 +95,9 @@ internal static class AuthEndpoints
             {
                 await svc.PasswordAcceptedAsync(signedIn, password ?? string.Empty, ct).ConfigureAwait(false);
             }
+            // rc.25 (DES-15 §4): the password opens the person's mail too; the keys wait for the session.
+            Anjal.Mailbox.UnlockResult unlock = await svc.UnlockAtSignInAsync(mailboxId.Value, password ?? string.Empty, ct).ConfigureAwait(false);
+            http.Items[MailKeySession.UnlockItem] = unlock;
             bool shared = device == "shared";
             SecurityDocument security = await svc.GetSecurityAsync(mailboxId.Value, ct).ConfigureAwait(false);
             bool trusted = !shared && await svc.IsTrustedDeviceAsync(mailboxId.Value, http.Request.Cookies[TrustCookie], ct).ConfigureAwait(false);
@@ -108,6 +111,10 @@ internal static class AuthEndpoints
             {
                 SessionRegistry sessions = http.RequestServices.GetRequiredService<SessionRegistry>();
                 string pending = sessions.AddPending(mailboxId.Value, account, shared);
+                if (sessions.Pending(pending) is PendingSignIn waiting)
+                {
+                    waiting.Unlock = unlock;
+                }
                 http.Response.Cookies.Append(PendingCookie, pending, ShortCookie(http, TimeSpan.FromMinutes(10)));
                 await audit.RecordAsync(account, "webmail.signin.password-accepted", account, client).ConfigureAwait(false);
                 return Results.Redirect("/sign-in/two-step");
@@ -425,6 +432,8 @@ internal static class AuthEndpoints
                 return Results.Redirect("/invite/" + Uri.EscapeDataString(token!) + "?e=" + Uri.EscapeDataString(Note(dp, error)));
             }
             await audit.RecordAsync(found.Value.Mailbox.Address, "webmail.invitation.accepted", found.Value.Mailbox.Address, ClientOf(http)).ConfigureAwait(false);
+            // rc.25 (DES-15 §4): the new password opens (or makes) the person's keys for the session it starts.
+            http.Items[MailKeySession.UnlockItem] = await svc.UnlockAtSignInAsync(found.Value.Mailbox.Id, password ?? string.Empty, ct).ConfigureAwait(false);
             string? next = await CompleteAsync(http, found.Value.Mailbox.Id, false, "invitation", ct).ConfigureAwait(false);
             return Results.Redirect(next is null ? "/sign-in" : "/settings/security/two-step?welcome=1");
         });
@@ -456,6 +465,8 @@ internal static class AuthEndpoints
                 return Results.Redirect("/join/" + Uri.EscapeDataString(token!) + "?" + kept);
             }
             await audit.RecordAsync(mailbox.Address, "webmail.registered", mailbox.Address, ClientOf(http), found.Invitation.Individual ? "individual" : "organisation").ConfigureAwait(false);
+            // rc.25 (DES-15 §4): the person's keys are made from the password just chosen, for the session it starts.
+            http.Items[MailKeySession.UnlockItem] = await svc.UnlockAtSignInAsync(mailbox.Id, password ?? string.Empty, ct).ConfigureAwait(false);
             string? next = await CompleteAsync(http, mailbox.Id, false, "registration", ct).ConfigureAwait(false);
             return Results.Redirect(next is null ? "/sign-in" : "/settings/security/two-step?welcome=1");
         });
@@ -611,6 +622,11 @@ internal static class AuthEndpoints
                 return Results.Redirect("/folder/INBOX?sharedclosed=1");
             }
             await ResignAsync(http, WebmailAuthService.WithActing(http.User, id)).ConfigureAwait(false);
+            // rc.25 (DES-15 §7.3): the shared mailbox's stored mail is moved and re-keyed by whoever opens it.
+            if (Anjal.Store.MailKeyring.Current.PrivateKeyOf(id) is byte[] sharedPrivate && Anjal.Store.MailKeyring.Current.DataKey(id) is byte[] sharedData)
+            {
+                svc.HousekeepInBackground(id, new Anjal.Mailbox.UnlockedKeys(sharedPrivate, sharedData));
+            }
             string who = http.User.Identity?.Name ?? string.Empty;
             string box = (await svc.GetContextAsync(id, ct).ConfigureAwait(false))?.Mailbox.Address ?? id.ToString();
             await audit.RecordAsync(who, "webmail.shared.opened", box, ClientOf(http)).ConfigureAwait(false);
@@ -897,6 +913,43 @@ internal static class AuthEndpoints
 
     private static void MapSecuritySettings(WebApplication app)
     {
+        // rc.25 (DES-15 §4, D-239): the password opens the mail on this device - after a passkey
+        // sign-in, or once an administrator has restored it.
+        app.MapPost("/auth/unlock", async (HttpContext http, [FromForm] string? password, [FromForm] string? back,
+            MailboxService svc, LoginThrottle throttle, AuditTrail audit, CancellationToken ct) =>
+        {
+            Guid? personId = WebmailAuthService.PersonIdOf(http.User);
+            (TenantRow Tenant, MailboxRow Mailbox)? context = personId is null ? null : await svc.GetContextAsync(personId.Value, ct).ConfigureAwait(false);
+            if (context is null || SessionRegistry.SessionOf(http.User) is not string sid)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string onward = Program.SafeBack(back, "/folder/INBOX");
+            string again = "/unlock?back=" + Uri.EscapeDataString(onward);
+            string client = ClientOf(http);
+            string address = context.Value.Mailbox.Address;
+            string key = "unlock:" + address;
+            if (!throttle.IsAllowed(client, key))
+            {
+                return Results.Redirect(again + "&throttled=1");
+            }
+            if (!Anjal.Smtp.Pbkdf2Hasher.Verify(password ?? string.Empty, context.Value.Mailbox.PasswordPbkdf2))
+            {
+                throttle.RecordFailure(client, key);
+                await audit.RecordAsync(address, "webmail.unlock.refused", address, client).ConfigureAwait(false);
+                return Results.Redirect(again + "&wrong=1");
+            }
+            throttle.RecordSuccess(client, key);
+            Anjal.Mailbox.UnlockResult unlock = await svc.UnlockAtSignInAsync(personId!.Value, password ?? string.Empty, ct).ConfigureAwait(false);
+            if (unlock.Keys is null)
+            {
+                return Results.Redirect(unlock.Outcome == Anjal.Mailbox.UnlockOutcome.NotEncrypted ? onward : "/unlock");
+            }
+            await MailKeySession.KeepAsync(http, sid, personId.Value, SessionRegistry.IsShared(http.User), unlock.Keys, ct).ConfigureAwait(false);
+            await audit.RecordAsync(address, unlock.Outcome == Anjal.Mailbox.UnlockOutcome.Restored ? "webmail.unlock.restored" : "webmail.unlock", address, client).ConfigureAwait(false);
+            return Results.Redirect(onward);
+        }).RequireAuthorization();
+
         // DES-11 S4: "Confirm it is you" - the password, or a passkey.
         app.MapPost("/settings/security/confirm", async (HttpContext http, [FromForm] string? password, [FromForm] string? next,
             MailboxService svc, SessionRegistry sessions, LoginThrottle throttle, AuditTrail audit, CancellationToken ct) =>
@@ -1361,6 +1414,7 @@ internal static class AuthEndpoints
         }
         string sid = await sessions.StartAsync(mailboxId, shared, http.Request.Headers.UserAgent.ToString(), ClientOf(http), ct).ConfigureAwait(false);
         principal = WebmailAuthService.WithSession(principal, sid, shared);
+        await MailKeySession.AfterSignInAsync(http, sid, mailboxId, shared, ct).ConfigureAwait(false);
         DateTimeOffset now = DateTimeOffset.UtcNow;
         await http.SignInAsync(Scheme, principal, new AuthenticationProperties
         {
@@ -1432,6 +1486,10 @@ internal static class AuthEndpoints
         SessionRegistry sessions = http.RequestServices.GetRequiredService<SessionRegistry>();
         sessions.RemovePending(pending.Id);
         http.Response.Cookies.Delete(PendingCookie);
+        if (pending.Unlock is not null)
+        {
+            http.Items[MailKeySession.UnlockItem] = pending.Unlock;
+        }
         if (trust && !pending.Shared)
         {
             MailboxService svc = http.RequestServices.GetRequiredService<MailboxService>();

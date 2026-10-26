@@ -615,3 +615,77 @@ ALTER TABLE sender_rules DROP CONSTRAINT IF EXISTS sender_rules_action_check;
 ALTER TABLE sender_rules ADD CONSTRAINT sender_rules_action_check CHECK (action IN ('allow', 'block', 'discard'));
 ALTER TABLE mailbox_sender_rules DROP CONSTRAINT IF EXISTS mailbox_sender_rules_action_check;
 ALTER TABLE mailbox_sender_rules ADD CONSTRAINT mailbox_sender_rules_action_check CHECK (action IN ('allow', 'block', 'discard'));
+
+-- v1.0.0-rc.25 (DES-15, organisation-held encryption, owner 26 Oct 2026, D-230 to D-246): the keys.
+-- Nothing here opens anything on its own: private keys and data keys are only ever stored wrapped -
+-- with a key derived from the person's password and the pepper (which is not in the database), with
+-- the organisation's recovery key, or with a session's cookie value; an organisation's recovery key
+-- also, until its first recovery sheet is confirmed, with a key derived from the pepper. Mail, subjects and body texts themselves stay in their own places,
+-- as envelopes (MailEnvelope); this schema adds only the keys.
+CREATE TABLE IF NOT EXISTS mailbox_keys (
+    mailbox_id          UUID PRIMARY KEY REFERENCES mailboxes(id) ON DELETE CASCADE,
+    public_key          BYTEA NOT NULL,
+    unlock_salt         BYTEA NOT NULL,
+    private_by_password BYTEA,
+    private_by_org      BYTEA NOT NULL,
+    data_key            BYTEA NOT NULL,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS tenant_keys (
+    tenant_id             UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+    recovery_public       BYTEA NOT NULL,
+    recovery_by_secret    BYTEA NOT NULL,
+    secret_check          TEXT NOT NULL,
+    sheet_confirmed_at    TIMESTAMPTZ,
+    break_glass_on        BOOLEAN NOT NULL DEFAULT TRUE,
+    secret_by_break_glass BYTEA,
+    recovery_by_server    BYTEA,
+    created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- A key given to a holder: an organisation's recovery key to each of its administrators
+-- ('org-admin'), a shared mailbox's private key to each member ('shared-member'). The body is an
+-- envelope sealed to the holder's mailbox public key.
+CREATE TABLE IF NOT EXISTS key_grants (
+    key_owner   UUID NOT NULL,
+    holder_id   UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('org-admin', 'shared-member')),
+    body        BYTEA NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (key_owner, holder_id, kind)
+);
+CREATE INDEX IF NOT EXISTS key_grants_holder_idx ON key_grants (holder_id);
+
+CREATE TABLE IF NOT EXISTS session_keys (
+    session_id  TEXT PRIMARY KEY,
+    mailbox_id  UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    body        BYTEA NOT NULL,
+    expires_at  TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX IF NOT EXISTS session_keys_mailbox_idx ON session_keys (mailbox_id);
+CREATE INDEX IF NOT EXISTS session_keys_expires_idx ON session_keys (expires_at);
+
+CREATE TABLE IF NOT EXISTS restore_requests (
+    mailbox_id         UUID PRIMARY KEY REFERENCES mailboxes(id) ON DELETE CASCADE,
+    restore_public     BYTEA NOT NULL,
+    restore_by_unlock  BYTEA NOT NULL,
+    unlock_salt        BYTEA NOT NULL,
+    granted            BYTEA,
+    granted_by         TEXT NOT NULL DEFAULT '',
+    granted_at         TIMESTAMPTZ,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS break_glass (
+    id                 INTEGER PRIMARY KEY CHECK (id = 1),
+    public_key         BYTEA NOT NULL,
+    private_by_secret  BYTEA NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- v1.0.0-rc.25 (DES-15 §3): the list's preview of an encrypted mail. For an organisation's mailbox,
+-- subject, body_text and snippet hold MailEnvelope fields ("e1.…"), readable only in a session.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS snippet TEXT NOT NULL DEFAULT '';

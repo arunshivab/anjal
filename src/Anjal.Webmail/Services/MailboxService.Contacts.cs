@@ -576,6 +576,12 @@ public sealed partial class MailboxService
         {
             return null;
         }
+        if (MailEnvelope.IsField(json))
+        {
+            // rc.25 (DES-15 §3): an encrypted document opens only with the mailbox's keys; without
+            // them nothing is shown - and nothing is written over it.
+            json = MailEnvelope.OpenField(json, MailKeyring.Current) ?? throw new Anjal.Mailbox.MailLockedException();
+        }
         try
         {
             return JsonSerializer.Deserialize<T>(json, DocumentJson);
@@ -586,14 +592,19 @@ public sealed partial class MailboxService
         }
     }
 
-    private Task WriteDocumentAsync<T>(Guid mailboxId, string kind, T value, CancellationToken ct)
+    private async Task WriteDocumentAsync<T>(Guid mailboxId, string kind, T value, CancellationToken ct)
     {
         if (kind == SecurityKind)
         {
             // A new password or two-step changes what the organisation still asks of the person.
             this.ForgetDemand(mailboxId);
         }
-        return this.store.SetMailboxDocumentAsync(mailboxId, kind, JsonSerializer.Serialize(value, DocumentJson), ct);
+        string json = JsonSerializer.Serialize(value, DocumentJson);
+        if (Array.IndexOf(SealedDocumentKinds, kind) >= 0)
+        {
+            json = await this.SealDocumentAsync(mailboxId, kind, json, ct).ConfigureAwait(false);
+        }
+        await this.store.SetMailboxDocumentAsync(mailboxId, kind, json, ct).ConfigureAwait(false);
     }
 
     private static string Clip(string? text, int max)

@@ -79,7 +79,25 @@ public sealed partial class MailboxService
         }
         var state = new ExportState { RequestedAt = DateTimeOffset.UtcNow };
         await this.WriteDocumentAsync(mailboxId, ExportState.Kind, state, ct).ConfigureAwait(false);
-        _ = Task.Run(() => this.BuildExportAsync(mailboxId, maildirRoot, baseUrl, CancellationToken.None));
+        // rc.25 (DES-15 §7.10): the download is made in the background with a copy of the person's
+        // keys from this request - the request's own keyring goes when the request ends.
+        Anjal.Mailbox.UnlockedKeys? keys = MailKeyring.Current.PrivateKeyOf(mailboxId) is byte[] priv && MailKeyring.Current.DataKey(mailboxId) is byte[] data
+            ? new Anjal.Mailbox.UnlockedKeys((byte[])priv.Clone(), (byte[])data.Clone())
+            : null;
+        _ = Task.Run(
+            async () =>
+            {
+                using var ring = new MailKeyring();
+                if (keys is not null)
+                {
+                    ring.Add(mailboxId, keys.PrivateKey, keys.DataKey);
+                }
+                using (MailKeyring.Use(ring))
+                {
+                    await this.BuildExportAsync(mailboxId, maildirRoot, baseUrl, CancellationToken.None).ConfigureAwait(false);
+                }
+            },
+            CancellationToken.None);
         return null;
     }
 
@@ -112,8 +130,18 @@ public sealed partial class MailboxService
             }
             string file = Path.Combine(folder, "anjal-export-" + DateTimeOffset.UtcNow.ToString("yyyyMMdd-HHmm", CultureInfo.InvariantCulture) + ".zip");
             int messages = 0;
+            // rc.25 (DES-15 §7.10): an encrypted mailbox's download is kept encrypted on the server
+            // with the person's data key, and opened only as it is downloaded in their session.
+            byte[]? dataKey = MailKeyring.Current.DataKey(mailboxId);
+            if (dataKey is null && this.KeyManager is Anjal.Mailbox.MailKeyManager km && await km.Store.GetMailboxKeysAsync(mailboxId, ct).ConfigureAwait(false) is not null)
+            {
+                state.Error = "Your mail is not open here. Sign in with your password and ask again.";
+                await this.WriteDocumentAsync(mailboxId, ExportState.Kind, state, ct).ConfigureAwait(false);
+                return state;
+            }
             using (FileStream fs = File.Create(file))
-            using (var zip = new ZipArchive(fs, ZipArchiveMode.Create, leaveOpen: false))
+            using (Stream target = dataKey is null ? fs : SealedFile.Writer(fs, dataKey))
+            using (var zip = new ZipArchive(target, ZipArchiveMode.Create, leaveOpen: true))
             {
                 foreach (FolderRow f in await this.store.ListFoldersAsync(mailboxId, ct).ConfigureAwait(false))
                 {

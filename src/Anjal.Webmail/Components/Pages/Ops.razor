@@ -370,6 +370,21 @@ else
                 <p class="asideline"><b>@L["Storage plan"]</b>: @PlanText(sel)</p>
                 <p class="asideline"><b>@L["Sending"]</b>: @L["up to {n} a day"].Replace("{n}", sel.Ops.SendPerDay.ToString("N0", Inv), StringComparison.Ordinal)</p>
                 <p class="asideline"><b>@L["Data agreement"]</b>: @(sel.Ops.AgreementSigned is DateTimeOffset signed ? L["signed {date}"].Replace("{date}", clock.Date(signed), StringComparison.Ordinal) : L["not signed yet"])</p>
+                @if (selKeys is { Encrypts: true } k)
+                {
+                    @* rc.25 (DES-15 §7.14): the operator sees whether it is encrypted and recoverable - never content. *@
+                    <p class="asideline"><b>@L["Encryption"]</b>: @L["{n} mailboxes encrypted"].Replace("{n}", k.WithKeys.ToString(Inv), StringComparison.Ordinal)@(k.NotYet > 0 ? ", " + L["{n} not signed in since encryption began"].Replace("{n}", k.NotYet.ToString(Inv), StringComparison.Ordinal) : string.Empty)</p>
+                    <p class="asideline"><b>@L["Recovery sheet"]</b>: @(k.SheetConfirmedAt is DateTimeOffset sc ? L["Confirmed {date}"].Replace("{date}", clock.Date(sc), StringComparison.Ordinal) : L["Not confirmed"])</p>
+                    <p class="asideline"><b>@L["Break-glass key"]</b>: @(k.BreakGlassOn ? (k.SealedSecret.Length > 0 ? L["On"] : L["On, from the next recovery sheet"]) : L["Switched off by the organisation"])</p>
+                    @if (k.SealedSecret.Length > 0)
+                    {
+                        <details class="asideconfirm">
+                            <summary class="linkbtn">@L["Sealed recovery secret, for the offline tool"]</summary>
+                            <p class="asidetext">@L["Use only on the organisation's written request, signed by its authorised signatory (OPS-16). It opens nothing without two shares of the break-glass key."]</p>
+                            <textarea class="inp sheetinp" rows="4" readonly aria-label="@L["Sealed recovery secret, for the offline tool"]">@k.SealedSecret</textarea>
+                        </details>
+                    }
+                }
                 @if (sel.DkimMissing.Count > 0)
                 {
                     <div class="asidecard warn"><span class="asidebody"><b>@L["DKIM key missing"]</b> @L["for {domains}. Mail they send may be refused."].Replace("{domains}", string.Join(", ", sel.DkimMissing), StringComparison.Ordinal) @(canMakeKeys ? L["Anjal makes a key when a domain is added; create one with the admin API for a domain added before."] : L["Start the mail server once, so that it publishes its seal key; Anjal then makes and locks DKIM keys itself."])</span></div>
@@ -537,6 +552,7 @@ else
     private IReadOnlyList<string>? revealed;
     private IReadOnlyList<OrgSummary> orgs = Array.Empty<OrgSummary>();
     private OrgSummary? sel;
+    private OpsEncryption? selKeys;
     private IReadOnlyList<HealthTile> tiles = Array.Empty<HealthTile>();
     private IReadOnlyList<(DateTimeOffset Hour, long Count)> hours = Array.Empty<(DateTimeOffset, long)>();
     private string? scannerVersion;
@@ -872,6 +888,7 @@ else
         orgs = await Mail.ListOrganisationsAsync();
         canMakeKeys = await Mail.CanMakeDkimKeysAsync();
         sel = Guid.TryParse(Sel, out Guid id) ? orgs.FirstOrDefault(o => o.Tenant.Id == id) : null;
+        selKeys = sel is null ? null : await Mail.OpsEncryptionOfAsync(sel.Tenant);
         if (Current == "overview")
         {
             await this.LoadOverviewAsync();

@@ -166,7 +166,7 @@ public sealed class Des11SecurityTests : IAsyncLifetime, IDisposable
         Assert.DoesNotContain(this.Subjects(), s => s.StartsWith("New sign-in", StringComparison.Ordinal));
 
         HttpClient phone = await this.SignedInAsync(Phone);
-        MessageRow alert = this.store.MailboxMessages.Last(m => m.MailboxId == this.arun.Id && m.Subject.StartsWith("New sign-in", StringComparison.Ordinal));
+        MessageRow alert = this.store.Seen().Last(m => m.MailboxId == this.arun.Id && m.Subject.StartsWith("New sign-in", StringComparison.Ordinal));
         Assert.Contains("Android", alert.BodyText, StringComparison.Ordinal);
         Assert.Contains("This was me: ", alert.BodyText, StringComparison.Ordinal);
         string notMe = Regex.Match(alert.BodyText, @"/sign-in/check\?a=not-me&t=(\S+)").Groups[1].Value;
@@ -245,7 +245,7 @@ public sealed class Des11SecurityTests : IAsyncLifetime, IDisposable
         proofs.Clear();
     }
 
-    private List<string> Subjects() => this.store.MailboxMessages.Where(m => m.MailboxId == this.arun.Id).Select(m => m.Subject).ToList();
+    private List<string> Subjects() => this.store.Seen().Where(m => m.MailboxId == this.arun.Id).Select(m => m.Subject).ToList();
 
     private HttpClient Client(string userAgent)
     {

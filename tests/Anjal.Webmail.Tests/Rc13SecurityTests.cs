@@ -346,7 +346,8 @@ public sealed class Rc13SecurityTests : IDisposable
         (MailboxRow Mailbox, InvitationState Invitation, string Organisation)? found = await this.svc.FindInvitationAsync(token);
         Assert.Equal(invited.Id, found!.Value.Mailbox.Id);
         Assert.Equal("Imagiqa", found.Value.Organisation);
-        Assert.Null(await this.svc.FindInvitationAsync(token[..^2] + "AA"));
+        // A changed token is refused (changed for certain: a token that already ends "AA" gets "BB").
+        Assert.Null(await this.svc.FindInvitationAsync(token[..^2] + (token.EndsWith("AA", StringComparison.Ordinal) ? "BB" : "AA")));
         Assert.Null(await this.svc.FindInvitationAsync("not-a-token"));
 
         Assert.NotNull(await this.svc.AcceptInvitationAsync(token, "meera", string.Empty));   // her own name

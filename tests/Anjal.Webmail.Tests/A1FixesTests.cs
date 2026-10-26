@@ -92,7 +92,7 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
             EnvelopeTo = Arun,
             RawBytes = System.Text.Encoding.UTF8.GetBytes(raw),
         });
-        return this.store.MailboxMessages[this.store.MailboxMessages.Count - 1];
+        return this.store.Seen()[this.store.Seen().Count - 1];
     }
 
     private const string WithAttachment =
@@ -235,12 +235,12 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
 
         // Forged: no token. Nothing changes.
         await this.client.PostAsync("folder/INBOX/readall", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
-        Assert.Contains(this.store.MailboxMessages, m => !m.Seen);
+        Assert.Contains(this.store.Seen(), m => !m.Seen);
 
         // Genuine: with the page's token. Everything is read.
         string token = await this.TokenAsync("folder/INBOX");
         await this.PostAsync("folder/INBOX/readall", token);
-        Assert.DoesNotContain(this.store.MailboxMessages, m => !m.Seen);
+        Assert.DoesNotContain(this.store.Seen(), m => !m.Seen);
     }
 
     [Fact]
@@ -263,18 +263,18 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         await this.PostAsync("folder/Trash/bulk", token, ("action", "restore"), ("id", a.Id.ToString()));
         await this.PostAsync("folder/Trash/bulk", token, ("action", "purge"), ("id", b.Id.ToString()), ("id", keep.Id.ToString()));
 
-        Assert.Contains(this.store.MailboxMessages, m => m.Id == a.Id);
-        Assert.DoesNotContain(this.store.MailboxMessages, m => m.Id == b.Id);
-        Assert.Contains(this.store.MailboxMessages, m => m.Id == keep.Id); // not in Trash: untouched
+        Assert.Contains(this.store.Seen(), m => m.Id == a.Id);
+        Assert.DoesNotContain(this.store.Seen(), m => m.Id == b.Id);
+        Assert.Contains(this.store.Seen(), m => m.Id == keep.Id); // not in Trash: untouched
         FolderRow inbox = (await this.store.ListFoldersAsync(this.mailbox.Id)).Single(f => f.Name == FolderRow.Inbox);
-        Assert.Equal(inbox.Id, this.store.MailboxMessages.Single(m => m.Id == a.Id).FolderId);
+        Assert.Equal(inbox.Id, this.store.Seen().Single(m => m.Id == a.Id).FolderId);
 
         // Empty Trash needs the token too, then removes what is left.
         await this.client.PostAsync("folder/Trash/empty", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
-        Assert.Contains(this.store.MailboxMessages, m => m.Id == c.Id);
+        Assert.Contains(this.store.Seen(), m => m.Id == c.Id);
         await this.PostAsync("folder/Trash/empty", token);
-        Assert.DoesNotContain(this.store.MailboxMessages, m => m.Id == c.Id);
-        Assert.Contains(this.store.MailboxMessages, m => m.Id == keep.Id);
+        Assert.DoesNotContain(this.store.Seen(), m => m.Id == c.Id);
+        Assert.Contains(this.store.Seen(), m => m.Id == keep.Id);
     }
 
     [Fact]
@@ -288,10 +288,10 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         Assert.Contains("Empty Junk", await this.client.GetStringAsync("folder/Junk"), StringComparison.Ordinal);
 
         await this.client.PostAsync("folder/Junk/empty", new FormUrlEncodedContent(Array.Empty<KeyValuePair<string, string>>()));
-        Assert.Contains(this.store.MailboxMessages, m => m.Id == junk.Id);
+        Assert.Contains(this.store.Seen(), m => m.Id == junk.Id);
         await this.PostAsync("folder/Junk/empty", await this.TokenAsync("folder/Junk"));
-        Assert.DoesNotContain(this.store.MailboxMessages, m => m.Id == junk.Id);
-        Assert.Contains(this.store.MailboxMessages, m => m.Id == keep.Id);
+        Assert.DoesNotContain(this.store.Seen(), m => m.Id == junk.Id);
+        Assert.Contains(this.store.Seen(), m => m.Id == keep.Id);
     }
 
     [Fact]
@@ -299,7 +299,7 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
     {
         await this.SignInAsync();
         await this.ComposeAsync("rao@hospital.example", "Scan", new byte[2048]);
-        MessageRow sent = this.store.MailboxMessages.Single(m => m.Subject == "Scan");
+        MessageRow sent = this.store.Seen().Single(m => m.Subject == "Scan");
         Assert.True(sent.HasAttachments);
         MailboxActivity activity = await this.store.GetActivityAsync(this.mailbox.Id, DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(1), "UTC");
         Assert.Equal(1, activity.SentWithAttachments);
@@ -361,12 +361,12 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
 
     private string SentRaw(string subject)
     {
-        MessageRow sent = this.store.MailboxMessages.Single(m => m.Subject == subject);
+        MessageRow sent = this.store.Seen().Single(m => m.Subject == subject);
         FolderRow folder = this.store.ListFoldersAsync(this.mailbox.Id).GetAwaiter().GetResult().Single(f => f.Id == sent.FolderId);
         Assert.Equal("Sent", folder.Name);
         string dir = Path.Combine(this.root, "imagiqa", this.mailbox.Address, FolderRow.MaildirNameFor(folder.Name));
         string file = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Single(f => f.Contains(Path.GetFileName(sent.MaildirFile), StringComparison.Ordinal));
-        return File.ReadAllText(file);
+        return TestMail.OpenText(this.store, file);
     }
 
     [Fact]
@@ -384,7 +384,7 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         await this.PostMultipartAsync("compose", token, new[] { ("to", "rao@hospital.example"), ("subject", "Fwd: kept"), ("carryFrom", original.Id.ToString()), ("carry", "0") });
         string kept = this.SentRaw("Fwd: kept");
         Assert.Contains("filename=\"report.csv\"", kept, StringComparison.Ordinal);
-        Assert.True(this.store.MailboxMessages.Single(m => m.Subject == "Fwd: kept").HasAttachments);
+        Assert.True(this.store.Seen().Single(m => m.Subject == "Fwd: kept").HasAttachments);
 
         token = await this.TokenAsync($"compose?forward={original.Id}");
         await this.PostMultipartAsync("compose", token, new[] { ("to", "rao@hospital.example"), ("subject", "Fwd: dropped"), ("carryFrom", original.Id.ToString()) });
@@ -407,7 +407,7 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         token = await this.TokenAsync(draftPath);
         await this.PostMultipartAsync("compose", token, new[] { ("to", "rao@hospital.example"), ("subject", "Scan for review"), ("draftId", draftId.ToString()), ("carryFrom", draftId.ToString()), ("carry", "0") });
         Assert.Contains("filename=\"scan.pdf\"", this.SentRaw("Scan for review"), StringComparison.Ordinal);
-        Assert.DoesNotContain(this.store.MailboxMessages, m => m.Id == draftId);
+        Assert.DoesNotContain(this.store.Seen(), m => m.Id == draftId);
     }
 
     [Fact]
@@ -422,7 +422,7 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
             EnvelopeTo = new[] { victim.Address },
             RawBytes = System.Text.Encoding.UTF8.GetBytes(WithAttachment),
         });
-        MessageRow theirs = this.store.MailboxMessages.Last(m => m.MailboxId == victim.Id);
+        MessageRow theirs = this.store.Seen().Last(m => m.MailboxId == victim.Id);
 
         await this.SignInAsync();
         string token = await this.TokenAsync("compose");
@@ -765,14 +765,14 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
         await this.SignInAsync();
         await this.ComposeAsync("colleague@anjal.co.in, doctor@hospital.example, nobody@anjal.co.in", "Ward round");
 
-        MessageRow arrived = this.store.MailboxMessages.Single(m => m.MailboxId == colleague.Id && m.Subject == "Ward round");
+        MessageRow arrived = this.store.Seen().Single(m => m.MailboxId == colleague.Id && m.Subject == "Ward round");
         FolderRow inbox = (await this.store.ListFoldersAsync(colleague.Id)).Single(f => f.Id == arrived.FolderId);
         Assert.Equal(FolderRow.Inbox, inbox.Name);
         IReadOnlyList<OutboundMessage> queued = await this.store.LeaseOutboundBatchAsync(100, DateTimeOffset.UtcNow.AddMinutes(1));
         Assert.DoesNotContain(queued, q => q.EnvelopeTo == "colleague@anjal.co.in");
         Assert.Contains(queued, q => q.EnvelopeTo == "doctor@hospital.example");
         Assert.Contains(queued, q => q.EnvelopeTo == "nobody@anjal.co.in"); // not a mailbox: left to the MTA, which may route it to a webhook
-        Assert.Contains("Ward round", string.Join("", this.store.MailboxMessages.Where(m => m.MailboxId == this.mailbox.Id).Select(m => m.Subject)), StringComparison.Ordinal); // Sent copy
+        Assert.Contains("Ward round", string.Join("", this.store.Seen().Where(m => m.MailboxId == this.mailbox.Id).Select(m => m.Subject)), StringComparison.Ordinal); // Sent copy
     }
 
     [Fact]
@@ -928,7 +928,7 @@ public sealed class PersonalSenderRulesTests : IDisposable
             EnvelopeTo = new[] { mailbox.Address },
             RawBytes = System.Text.Encoding.ASCII.GetBytes($"From: {from}\r\nSubject: Hello\r\nMessage-ID: <{Guid.NewGuid():N}@x>\r\nDate: Mon, 21 Sep 2026 10:00:00 +0000\r\n\r\nbody\r\n"),
         });
-        MessageRow latest = this.store.MailboxMessages.Last(m => m.MailboxId == mailbox.Id);
+        MessageRow latest = this.store.Seen().Last(m => m.MailboxId == mailbox.Id);
         return (await this.store.ListFoldersAsync(mailbox.Id)).Single(f => f.Id == latest.FolderId).Name;
     }
 

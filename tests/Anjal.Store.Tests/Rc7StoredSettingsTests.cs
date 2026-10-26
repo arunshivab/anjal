@@ -9,6 +9,8 @@ public sealed class Rc7StoredSettingsTests
     [InlineData("ANJAL_POSTGRES_ADMIN", true)]
     [InlineData("ANJAL_API_TOKEN", true)]
     [InlineData("ANJAL_KEK", true)]
+    [InlineData("ANJAL_KEY_PEPPER", true)]
+    [InlineData("ANJAL_BREAKGLASS_KEY", false)]
     [InlineData("ANJAL_SUBMISSION_PASSWORD", true)]
     [InlineData("ANJAL_WEBHOOK_SECRET", true)]
     [InlineData("ANJAL_TLS_DEFAULT_MODE", false)]

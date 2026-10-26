@@ -140,6 +140,25 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
     /// <summary>The virus scanner for files on mail from outside (rc.22, item 39); null when scanning is off.</summary>
     public IVirusScanner? Scanner { get; init; }
 
+    /// <summary>
+    /// rc.25 (D-242): while the scanner is down, mail with files is answered "try later" instead of
+    /// being held, so that nothing readable is kept (DES-15 §7.5). True by default; false keeps the
+    /// rc.22 quarantine (held mail rescanned every five minutes).
+    /// </summary>
+    public bool HoldNothing { get; init; } = true;
+
+    private readonly object noticeGate = new();
+    private System.DateTimeOffset lastDeferredNotice = System.DateTimeOffset.MinValue;
+
+    /// <summary>rc.25 (DES-15 §7.6): the document of the address marks of a person's encrypted contacts.</summary>
+    public const string ContactMarksKind = "contacts-marks";
+
+    /// <summary>rc.25: the document of the address marks of a person's encrypted contact groups.</summary>
+    public const string GroupMarksKind = "contact-groups-marks";
+
+    /// <summary>The pepper the address marks are keyed from (the server's <c>ANJAL_KEY_PEPPER</c>).</summary>
+    public byte[] AddressPepper { get; init; } = Anjal.Store.MailKeys.PepperFromEnvironment();
+
     /// <summary>The header a forwarded copy carries (rc.22, item 29): each mailbox it passed, so a loop stops.</summary>
     public const string ForwardedHeader = "X-Anjal-Forwarded";
 
@@ -448,6 +467,19 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             {
                 Outcome = Anjal.Smtp.DeliveryOutcome.PermanentFailure,
                 ReplyText = "Programs and scripts are not accepted (" + string.Join(", ", files.Files) + "); send them another way",
+            };
+        }
+        if (files.Verdict == FileVerdict.Held && this.HoldNothing)
+        {
+            // rc.25 (D-242, owner 26 Oct 2026: "Try later"): nothing readable is kept while the scanner
+            // is down - the sending server keeps the mail and tries again.
+            this.log?.Invoke($"Mailbox: the virus scanner is not answering; mail with files answered 'try later': {string.Join(", ", files.Files)}");
+            Anjal.Smtp.Counters.Increment("anjal_virus_deferred_total");
+            await this.DeferredNoticeAsync(ctx, files, ct).ConfigureAwait(false);
+            return new Anjal.Smtp.DeliveryResult
+            {
+                Outcome = Anjal.Smtp.DeliveryOutcome.TransientFailure,
+                ReplyText = "The virus scanner is not answering; please try again later",
             };
         }
         if (files.Verdict == FileVerdict.Removed && files.RawBytes is not null)
@@ -972,6 +1004,42 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
     }
 
     /// <summary>
+    /// rc.25 (D-242): the operator hears at once when mail with files is answered "try later" because
+    /// the scanner is down - then at most every 30 minutes while it stays down.
+    /// </summary>
+    private async System.Threading.Tasks.Task DeferredNoticeAsync(Anjal.Smtp.DeliveryContext ctx, FileJudgement files, System.Threading.CancellationToken ct)
+    {
+        System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
+        lock (this.noticeGate)
+        {
+            if (now - this.lastDeferredNotice < System.TimeSpan.FromMinutes(30))
+            {
+                return;
+            }
+            this.lastDeferredNotice = now;
+        }
+        string? ops = this.OperatorPostmaster ?? (this.ServerHostName is string host ? "postmaster@" + ParentDomain(host) : null);
+        if (ops is null || !TrySplitAddress(ops, out string ol, out string od))
+        {
+            return;
+        }
+        string text = "The virus scanner (ClamAV) did not answer: " + files.Detail + "\r\n\r\n"
+            + "Mail with files from " + ctx.EnvelopeFrom + " was answered \"try again later\"; the sending server keeps it and tries again. Nothing of it was kept here.\r\n"
+            + "Files: " + string.Join(", ", files.Files) + "\r\n\r\n"
+            + "Check clamd (systemctl status clamav-daemon). Mail with files is accepted again as soon as the scanner answers. This notice is repeated at most every 30 minutes while it does not.\r\n";
+        var sb = new System.Text.StringBuilder();
+        sb.Append("From: \"Anjal\" <no-reply@").Append(od).Append(">\r\n");
+        sb.Append("To: <").Append(ol).Append('@').Append(od).Append(">\r\n");
+        sb.Append("Subject: Mail with files waits: the virus scanner is not answering\r\n");
+        sb.Append("Date: ").Append(now.ToString("ddd, dd MMM yyyy HH:mm:ss +0000", System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
+        sb.Append("Message-ID: <").Append(System.Guid.NewGuid().ToString("N")).Append('@').Append(od).Append(">\r\n");
+        sb.Append("Auto-Submitted: auto-generated\r\n");
+        sb.Append("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n");
+        sb.Append(text);
+        await this.SendOnAsync(string.Empty, ol + "@" + od, System.Text.Encoding.UTF8.GetBytes(sb.ToString()), ct, "no-reply@" + od, security: true).ConfigureAwait(false);
+    }
+
+    /// <summary>
     /// rc.22 (item 39): the operator hears at once when mail is held because the scanner is down.
     /// The webmail repeats the notice every 30 minutes while anything is still held.
     /// </summary>
@@ -1043,6 +1111,13 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         if (string.IsNullOrWhiteSpace(json))
         {
             return false;
+        }
+        if (Anjal.Store.MailEnvelope.IsField(json))
+        {
+            // rc.25 (DES-15 §7.6): the contacts are encrypted; their address marks answer for one address.
+            System.Collections.Generic.List<string>? marks = Anjal.Mailbox.MailDocuments.Parse<System.Collections.Generic.List<string>>(
+                await this.store.GetMailboxDocumentAsync(mailboxId, ContactMarksKind, ct).ConfigureAwait(false));
+            return marks is not null && marks.Contains(Anjal.Store.MailKeys.AddressMark(mailboxId, address, this.AddressPepper));
         }
         try
         {
@@ -1242,6 +1317,34 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             && !string.Equals(f, Anjal.Store.FolderRow.Inbox, System.StringComparison.OrdinalIgnoreCase);
     }
 
+    // A person's contact groups for the rules; when they are encrypted, each group's address marks
+    // say whether this sender is in it, and the group is given as holding this sender or no one.
+    private async System.Threading.Tasks.Task<IReadOnlyDictionary<string, IReadOnlyList<string>>> GroupsForAsync(System.Guid mailboxId, string fromAddress, System.Threading.CancellationToken ct)
+    {
+        string? json = await this.store.GetMailboxDocumentAsync(mailboxId, MailRules.GroupsKind, ct).ConfigureAwait(false);
+        if (!Anjal.Store.MailEnvelope.IsField(json))
+        {
+            return MailRules.ParseGroups(json);
+        }
+        var result = new System.Collections.Generic.Dictionary<string, IReadOnlyList<string>>(System.StringComparer.OrdinalIgnoreCase);
+        System.Collections.Generic.List<GroupMarks>? groups = Anjal.Mailbox.MailDocuments.Parse<System.Collections.Generic.List<GroupMarks>>(
+            await this.store.GetMailboxDocumentAsync(mailboxId, GroupMarksKind, ct).ConfigureAwait(false));
+        string mark = Anjal.Store.MailKeys.AddressMark(mailboxId, fromAddress, this.AddressPepper);
+        foreach (GroupMarks g in groups ?? new System.Collections.Generic.List<GroupMarks>())
+        {
+            result[g.Name] = g.Marks.Contains(mark) ? new[] { fromAddress } : System.Array.Empty<string>();
+        }
+        return result;
+    }
+
+    /// <summary>A contact group's name and the marks of its addresses (rc.25).</summary>
+    private sealed class GroupMarks
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public System.Collections.Generic.List<string> Marks { get; set; } = new();
+    }
+
     private async System.Threading.Tasks.Task<RuleOutcome?> RuleForAsync(Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox, Anjal.Mime.MimeMessage parsed, string fromAddress, System.Threading.CancellationToken ct)
     {
         IReadOnlyList<MailRule> rules = MailRules.Parse(await this.store.GetMailboxDocumentAsync(mailbox.Id, MailRules.Kind, ct).ConfigureAwait(false));
@@ -1250,7 +1353,7 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             return null;
         }
         IReadOnlyDictionary<string, IReadOnlyList<string>> groups = rules.Any(r => r.Conditions.Any(c => c.Field == "group"))
-            ? MailRules.ParseGroups(await this.store.GetMailboxDocumentAsync(mailbox.Id, MailRules.GroupsKind, ct).ConfigureAwait(false))
+            ? await this.GroupsForAsync(mailbox.Id, fromAddress, ct).ConfigureAwait(false)
             : new System.Collections.Generic.Dictionary<string, IReadOnlyList<string>>();
         int at = fromAddress.LastIndexOf('@');
         string fromDomain = at < 0 ? string.Empty : fromAddress[(at + 1)..];

@@ -404,6 +404,7 @@ public sealed partial class MailboxService
         mailbox.PasswordPbkdf2 = Anjal.Smtp.Pbkdf2Hasher.Hash(newPassword);
         await this.store.UpsertMailboxAsync(mailbox, ct).ConfigureAwait(false);
         await this.WriteDocumentAsync(mailbox.Id, SecurityKind, doc, ct).ConfigureAwait(false);
+        await this.KeysAfterPasswordAsync(mailbox, newPassword, ct).ConfigureAwait(false);
         return null;
     }
 

@@ -74,15 +74,15 @@ public sealed class Rc8EvidenceDisplayTests : IAsyncLifetime, IDisposable
 
     private async Task<string> PageAsync(string subject)
     {
-        MessageRow row = this.store.MailboxMessages.Single(m => m.Subject == subject);
+        MessageRow row = this.store.Seen().Single(m => m.Subject == subject);
         return WebUtility.HtmlDecode(await this.client.GetStringAsync($"message/{row.Id}"));
     }
 
     [Fact]
     public async Task AKeptOriginal_IsShownWithItsFingerprint_AndDeletingSaysItStaysForThreeYears()
     {
-        EvidenceRow evidence = (await this.store.GetEvidenceAsync(this.store.MailboxMessages.Single(m => m.Subject == "Kept").EvidenceId!.Value))!;
-        MessageRow row = this.store.MailboxMessages.Single(m => m.Subject == "Kept");
+        EvidenceRow evidence = (await this.store.GetEvidenceAsync(this.store.Seen().Single(m => m.Subject == "Kept").EvidenceId!.Value))!;
+        MessageRow row = this.store.Seen().Single(m => m.Subject == "Kept");
         // The "Delete permanently" choice shows in Trash: move the file and the index, as the webmail does.
         FolderRow inbox = await this.store.EnsureFolderAsync(this.mailbox.Id, FolderRow.Inbox);
         FolderRow trash = await this.store.EnsureFolderAsync(this.mailbox.Id, "Trash");
@@ -99,7 +99,7 @@ public sealed class Rc8EvidenceDisplayTests : IAsyncLifetime, IDisposable
     [Fact]
     public async Task AReconstructedOriginal_IsNeverCalledAsReceived()
     {
-        MessageRow old = this.store.MailboxMessages.Single(m => m.Subject == "Old");
+        MessageRow old = this.store.Seen().Single(m => m.Subject == "Old");
         var id = Guid.NewGuid();
         await this.store.InsertEvidenceAsync(new EvidenceRow { Id = id, Direction = EvidenceRow.In, CapturedAt = DateTimeOffset.UtcNow, EnvelopeFrom = "s@x.test", EnvelopeTo = Arun, SizeBytes = 1, Sha256 = new string('a', 64), Path = "x.eml", Reconstructed = true, Outcome = "accepted" });
         await this.store.SetMessageEvidenceAsync(old.Id, id);

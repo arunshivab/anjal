@@ -75,16 +75,16 @@ public sealed partial class Rc9UnreadCountTests : IAsyncLifetime, IDisposable
     public async Task OpeningAnUnreadMessage_LowersTheCount_OnThatSamePage()
     {
         Assert.Equal(2, await this.BadgeOnAsync(string.Empty));
-        Guid first = this.store.MailboxMessages.Single(m => m.Subject == "First").Id;
+        Guid first = this.store.Seen().Single(m => m.Subject == "First").Id;
         Assert.Equal(1, await this.BadgeOnAsync($"message/{first}"));                 // at once, not on the next page
-        Guid second = this.store.MailboxMessages.Single(m => m.Subject == "Second").Id;
+        Guid second = this.store.Seen().Single(m => m.Subject == "Second").Id;
         Assert.Equal(0, await this.BadgeOnAsync($"message/{second}"));
     }
 
     [Fact]
     public async Task OpeningAMessageAlreadyRead_LeavesTheCountAlone()
     {
-        Guid first = this.store.MailboxMessages.Single(m => m.Subject == "First").Id;
+        Guid first = this.store.Seen().Single(m => m.Subject == "First").Id;
         await this.client.GetStringAsync($"message/{first}");
         Assert.Equal(1, await this.BadgeOnAsync($"message/{first}"));
     }

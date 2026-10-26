@@ -559,6 +559,76 @@ else
             </form>
             break;
 
+        case "encryption":
+            @* rc.25 (DES-15 §6): the organisation's keys - who holds the recovery key, the recovery sheet,
+               the people whose mail waits for a restore, and the break-glass key. No mail is shown. *@
+            <section class="formcard orgcard">
+                <h2>@L["Encryption"]</h2>
+                @if (!encryption.Encrypts)
+                {
+                    <p class="hint orglead">@L["Mail of individual accounts is not encrypted by the organisation; it is encrypted on its way and on Anjal's disks."]</p>
+                }
+                else
+                {
+                    <p class="hint orglead">@L["{org}'s mail is encrypted. Your people open their own mail with their passwords, and your administrators can restore it through the organisation's recovery key. Anjal cannot read it."].Replace("{org}", OrgName, StringComparison.Ordinal)</p>
+                    @if (revealed is { Count: > 0 } sheet && SheetShown == "1")
+                    {
+                        <div class="sheetcard" role="region" aria-label="@L["Recovery sheet"]">
+                            <h3>@L["Recovery sheet for {org}"].Replace("{org}", OrgName, StringComparison.Ordinal)</h3>
+                            <p class="hint">@L["Print it now, or write it down, and keep it locked away. It is shown once: Anjal does not keep it and cannot show it again. Whoever holds it can open the organisation's recovery key."]</p>
+                            <pre class="sheettext" lang="en">@sheet[0]</pre>
+                            <p class="hint">@L["Made {date} by {name}."].Replace("{date}", clock.Date(DateTimeOffset.UtcNow), StringComparison.Ordinal).Replace("{name}", NameOf(me), StringComparison.Ordinal)</p>
+                            <button type="button" class="btn btn-s btn-sm" data-print><LipiIcon Name="print" Size="15" />@L["Print"]</button>
+                        </div>
+                    }
+                    <table class="orgtable rules">
+                        <tbody>
+                            <tr><th scope="row">@L["Your copy of the recovery key"]</th><td>@if (encryption.HaveRecovery) {<span class="pill pill-info">@L["Yes"]</span>} else {<span class="pill pill-bad">@L["No"]</span>}</td></tr>
+                            <tr><th scope="row">@L["Administrators holding it"]</th><td>@L["{n} of {m}"].Replace("{n}", encryption.AdminsWithKey.ToString(Inv), StringComparison.Ordinal).Replace("{m}", encryption.Admins.ToString(Inv), StringComparison.Ordinal)</td></tr>
+                            <tr><th scope="row">@L["Recovery sheet"]</th><td>@if (encryption.SheetConfirmedAt is DateTimeOffset confirmed) {<span class="pill pill-info">@L["Confirmed {date}"].Replace("{date}", clock.Date(confirmed), StringComparison.Ordinal)</span>} else if (encryption.SheetWaiting) {<span class="pill pill-warn">@L["Printed, not yet typed back"]</span>} else {<span class="pill pill-bad">@L["Not printed yet"]</span>}</td></tr>
+                            <tr><th scope="row">@L["Mailboxes encrypted"]<span>@L["People and shared mailboxes"]</span></th><td>@encryption.WithKeys.ToString(Inv)</td></tr>
+                            <tr><th scope="row">@L["Not signed in since encryption began"]<span>@L["Their mail is encrypted at their first sign-in"]</span></th><td>@(encryption.NotYet.Count == 0 ? L["None"] : string.Join(", ", encryption.NotYet.Select(NameOf)))</td></tr>
+                            <tr><th scope="row">@L["Anjal's break-glass key"]<span>@L["Only at {org}'s written request"].Replace("{org}", OrgName, StringComparison.Ordinal)</span></th><td>@if (encryption.BreakGlassOn) {<span class="pill pill-info">@L["On"]</span>} else {<span class="pill pill-mute">@L["Off"]</span>}</td></tr>
+                        </tbody>
+                    </table>
+                    <h3 class="orgsub">@L["Waiting for a restore"]</h3>
+                    @if (encryption.Restores.Count == 0)
+                    {
+                        <p class="orgempty">@L["No one is waiting. When someone's password is set without the old one, their mail stays locked until an administrator restores it here."]</p>
+                    }
+                    else
+                    {
+                        <table class="orgtable">
+                            <thead><tr><th>@L["Person"]</th><th>@L["Since"]</th><th></th></tr></thead>
+                            <tbody>
+                            @foreach (WaitingRestore r in encryption.Restores)
+                            {
+                                <tr>
+                                    <td>@NameOf(r.Mailbox)<span class="sub">@r.Mailbox.Address</span></td>
+                                    <td>@When(r.Since)</td>
+                                    <td>
+                                        @if (r.Granted)
+                                        {
+                                            <span class="pill pill-info">@L["Restored; opens at their next sign-in"]</span>
+                                        }
+                                        else
+                                        {
+                                            <form method="post" action="/org/encryption/restore" class="inline">
+                                                <AntiforgeryToken />
+                                                <input type="hidden" name="person" value="@r.Mailbox.Id" />
+                                                <button type="submit" class="btn btn-p btn-sm" disabled="@(!encryption.HaveRecovery)" title="@L["Restore this person's mail; it opens at their next sign-in"]">@L["Restore"]</button>
+                                            </form>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                            </tbody>
+                        </table>
+                    }
+                }
+            </section>
+            break;
+
         case "figures":
             @* rc.15 (item 60; owner, 7 Oct 2026): off by default; on only with a purpose; everyone told; logged. *@
             <section class="formcard orgcard">
@@ -1240,6 +1310,69 @@ else
             <button type="submit" form="sendingform" class="btn btn-p asidebtn big">@L["Save changes"]</button>
             break;
 
+        case "encryption":
+            @if (!encryption.Encrypts)
+            {
+                <h2 class="asidehead">@L["Encryption"]</h2>
+                <p class="asidetext">@L["Nothing to set here."]</p>
+            }
+            else
+            {
+                @if (!encryption.HaveRecovery)
+                {
+                    <h2 class="asidehead">@L["Use the recovery sheet"]</h2>
+                    <p class="asidetext">@L["No copy of the recovery key reaches you yet. Type the recovery sheet to get one; you can then restore people's mail and print a new sheet."]</p>
+                    <form method="post" action="/org/encryption/use-sheet" class="asideform">
+                        <AntiforgeryToken />
+                        <label class="setlbl" for="usesheet">@L["Recovery sheet"]</label>
+                        <textarea id="usesheet" class="inp sheetinp" name="typed" rows="4" required autocomplete="off" spellcheck="false"></textarea>
+                        <button type="submit" class="btn btn-p asidebtn" title="@L["Open the organisation's recovery key with the sheet, and keep a copy for you"]">@L["Open the recovery key"]</button>
+                    </form>
+                }
+                else
+                {
+                    @if (encryption.SheetWaiting || SheetShown == "1")
+                    {
+                        <h2 class="asidehead">@L["Type the sheet back"]</h2>
+                        <p class="asidetext">@L["To be sure it was printed right, type it here from the paper. Until you do, Anjal keeps a temporary copy of the recovery key for you."]</p>
+                        <form method="post" action="/org/encryption/confirm" class="asideform">
+                            <AntiforgeryToken />
+                            <label class="setlbl" for="confirmsheet">@L["Recovery sheet"]</label>
+                            <textarea id="confirmsheet" class="inp sheetinp" name="typed" rows="4" required autocomplete="off" spellcheck="false"></textarea>
+                            <button type="submit" class="btn btn-p asidebtn" title="@L["Check what you typed against the sheet just made"]">@L["Confirm the sheet"]</button>
+                        </form>
+                    }
+                    <h2 class="asidehead">@(encryption.SheetConfirmedAt is null && !encryption.SheetWaiting ? L["Print the recovery sheet"] : L["Print a new recovery sheet"])</h2>
+                    <p class="asidetext">@L["The sheet opens the organisation's recovery key when no administrator can sign in. A new sheet makes the old one useless."]</p>
+                    <form method="post" action="/org/encryption/sheet" class="asideform">
+                        <AntiforgeryToken />
+                        <button type="submit" class="btn btn-s asidebtn" title="@L["Make a new recovery sheet and show it once; the old sheet stops working"]">@L["Make the sheet"]</button>
+                    </form>
+                }
+                <h2 class="asidehead">@L["Anjal's break-glass key"]</h2>
+                <p class="asidetext">@L["If {org} ever loses every administrator and the recovery sheet, Anjal can bring the mail back - only on {org}'s written request. The key is kept offline on paper, in parts held by two named people and a bank locker; any two are needed."].Replace("{org}", OrgName, StringComparison.Ordinal)</p>
+                @if (!encryption.BreakGlassReady)
+                {
+                    <p class="asidetext">@L["Anjal has not set its break-glass key on this server yet; while it is on here, your sheets are sealed to it from the first sheet after it is set."]</p>
+                }
+                <form method="post" action="/org/encryption/breakglass" class="asideform">
+                    <AntiforgeryToken />
+                    @if (encryption.BreakGlassOn)
+                    {
+                        <input type="hidden" name="on" value="0" />
+                        <label class="radioline"><input type="checkbox" name="understood" value="1" required /> @L["I understand: if we lose the recovery sheet and all our administrators, nobody - not Anjal - can recover our mail."]</label>
+                        <button type="submit" class="btn btn-danger-q asidebtn" title="@L["Stop sealing new recovery sheets to Anjal's break-glass key"]">@L["Switch it off"]</button>
+                    }
+                    else
+                    {
+                        <input type="hidden" name="on" value="1" />
+                        <button type="submit" class="btn btn-s asidebtn" title="@L["Seal the next recovery sheets to Anjal's break-glass key"]">@L["Switch it on"]</button>
+                        <p class="asidetext">@L["It takes effect with the next recovery sheet."]</p>
+                    }
+                </form>
+            }
+            break;
+
         case "figures":
             <h2 class="asidehead">@L[figures.On ? "Turn off" : "Turn on"]</h2>
             @if (figures.On)
@@ -1442,6 +1575,7 @@ else
         ("Mail", "sending", "Sending", "referral-out"),
         ("Mail", "apps", "Sending systems", "server-stack"),
         ("Records", "retention", "Retention", "clock"),
+        ("Records", "encryption", "Encryption", "lock"),
         ("Records", "log", "Activity log", "log"),
         ("Insight", "figures", "Figures per person", "chart-bar"),
         ("Brand", "branding", "Branding", "edit"),
@@ -1498,6 +1632,7 @@ else
     [SupplyParameterFromQuery(Name = "import")] private string? Import { get; set; }
     [SupplyParameterFromQuery(Name = "new")] private string? New { get; set; }
     [SupplyParameterFromQuery(Name = "hold")] private string? Hold { get; set; }
+    [SupplyParameterFromQuery(Name = "sheet")] private string? SheetShown { get; set; }
     [SupplyParameterFromQuery(Name = "q")] private string? QText { get; set; }
     // rc.17, Sending systems: the tab, the period, and the Messages filters.
     [SupplyParameterFromQuery(Name = "tab")] private string? TabText { get; set; }
@@ -1539,6 +1674,7 @@ else
     private IReadOnlyList<(MailboxRow Mailbox, SharedMailbox Info, long Unread)> shared = Array.Empty<(MailboxRow, SharedMailbox, long)>();
     private (MailboxRow Mailbox, SharedMailbox Info, long Unread)? selShared;
     private RetentionPolicy retention = new();
+    private EncryptionView encryption = new();
     private IReadOnlyList<LegalHold> holds = Array.Empty<LegalHold>();
     private IReadOnlyList<OrgApp> apps = Array.Empty<OrgApp>();
     private OrgApp? selApp;
@@ -1617,6 +1753,7 @@ else
         "retention" => L["Trash, Junk, evidence"],
         "apps" => (counts.Apps == 1 ? L["1 application"] : L["{n} applications"].Replace("{n}", counts.Apps.ToString(Inv), StringComparison.Ordinal))
             + ", " + (counts.Keys == 1 ? L["1 key"] : L["{n} keys"].Replace("{n}", counts.Keys.ToString(Inv), StringComparison.Ordinal)),
+        "encryption" => L["Recovery key, sheet, restores"],
         "log" => L["Every administrator action"],
         "figures" => figures.On ? L["On, everyone told"] : L["Off"],
         "branding" => L["Logo, default theme, language"],
@@ -1656,6 +1793,11 @@ else
         "tested" => L["A test is on its way to you. Its tries show here."],
         "replayed" => L["The delivery waits to be posted again."],
         "added" when Current == "apps" => L["Added to Do not send."],
+        "restored" => L["Restored. Their mail opens at their next sign-in, and they have been told."],
+        "sheet" => L["Recovery sheet confirmed. Anjal's temporary copy of the recovery key is destroyed."],
+        "used" => L["The recovery sheet opened the recovery key, and you now hold a copy. If your own mail was locked, it opens at your next sign-in. Print a new sheet if the old one may have been seen."],
+        "glass-on" => L["Anjal's break-glass key is on. It takes effect with the next recovery sheet."],
+        "glass-off" => L["Anjal's break-glass key is off."],
         "removed" when Current == "apps" => L["Taken off Do not send."],
         _ => L["Saved."],
     };
@@ -1754,7 +1896,9 @@ else
         pageSize = MailboxPreferences.Of(me).Normalized().PageSize;
         note = AuthEndpoints.ReadNote(Protection, E);
         string? sid = SessionRegistry.SessionOf(user);
-        revealed = Links == "1" || KeyShown == "1" ? Sessions.TakeReveal(sid) : null;
+        revealed = Links == "1" || KeyShown == "1" || SheetShown == "1" ? Sessions.TakeReveal(sid) : null;
+        // rc.25 (DES-15 §7.3): an administrator's visit brings the key copies up to date.
+        await Mail.SyncKeysAsync(tenant, me.Id);
         counts = await Mail.OrgCountsAsync(tenant);
         domains = await Mail.TenantDomainsAsync(tenant.Id);
         domainUse = SelDomain is string chosen && domains.Any(d => d.Domain == chosen) ? await Mail.DomainUseAsync(tenant, chosen) : null;
@@ -1823,6 +1967,9 @@ else
                 mergeLimit = await Mail.MergeLimitOfAsync(tenant.Id);
                 mergePeople = await Mail.MergePeopleOfAsync(tenant.Id);
                 storagePlan = await Mail.StoragePlanOfAsync(tenant.Id);
+                break;
+            case "encryption":
+                encryption = await Mail.EncryptionOfAsync(tenant, me.Id, everyone);
                 break;
             case "retention":
                 retention = await Mail.RetentionOfAsync(tenant);

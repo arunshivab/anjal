@@ -114,6 +114,13 @@ public static class Program
             return 1;
         }
 
+        // rc.25 (DES-15): the pepper of the organisations' mail encryption (address marks at arrival).
+        if (Anjal.Store.MailKeys.PepperProblem(pg is not null) is string pepperProblem)
+        {
+            System.Console.Error.WriteLine(pepperProblem);
+            return 1;
+        }
+
         // DKIM private keys are sealed at rest under ANJAL_KEK. A malformed
         // KEK stops startup; a missing one is allowed (keys then stay in
         // plaintext) but new keys are refused by the API unless explicitly
@@ -141,6 +148,13 @@ public static class Program
         // DES-11 S6: the seal key - made at the first start, its public half published for the webmail,
         // and every DKIM key still kept unlocked locked with it (whether or not this server sends).
         using System.Security.Cryptography.RSA? sealKey = await DkimSealKey.PrepareAsync(store, Log).ConfigureAwait(false);
+        // rc.25 (DES-15 §7.4): the outgoing queue is sealed to this key; only this process opens it.
+        if (sealKey is not null)
+        {
+            var queueKeys = new Anjal.Store.MailKeyring();
+            queueKeys.AddPrivateKey(sealKey.ExportPkcs8PrivateKey());
+            Anjal.Store.OutboundCipher.ServerOpener = queued => Anjal.Store.MailEnvelope.Open(queued, queueKeys);
+        }
 
         var routing = new Anjal.Routing.StoreBackedRoutingTable(store);
         // Webhooks go only where the target policy allows: https to public
@@ -158,6 +172,12 @@ public static class Program
         var mailboxStore = (Anjal.Store.IMailboxStore)store;
         string maildirRoot = System.Environment.GetEnvironmentVariable("ANJAL_MAILDIR_ROOT") ?? Anjal.Mailbox.MaildirStore.DefaultRoot;
         var maildir = new Anjal.Mailbox.MaildirStore(maildirRoot, hostname);
+        // rc.25 (DES-15 §5): mail for an organisation's mailbox is sealed to its key as it is written.
+        if (store is Anjal.Store.IMailKeyStore keyStore)
+        {
+            maildir.Keys = new Anjal.Mailbox.MailboxKeyDirectory(mailboxStore, keyStore);
+            Log("Mail at rest: an organisation's mail, subjects and files are sealed to its people's keys (DES-15).");
+        }
         // postmaster@ and abuse@ (v1.0.0-rc.8): each tenant's designated mailbox;
         // at this server's own name, the operator (ANJAL_POSTMASTER).
         string? operatorPostmaster = System.Environment.GetEnvironmentVariable("ANJAL_POSTMASTER");
@@ -181,7 +201,11 @@ public static class Program
         if (store is Anjal.Store.IEvidenceStore evidenceStore)
         {
             var vault = new Anjal.Mailbox.EvidenceVault(System.Environment.GetEnvironmentVariable("ANJAL_EVIDENCE_ROOT") ?? Anjal.Mailbox.EvidenceVault.DefaultRoot);
-            evidence = new Anjal.Mailbox.EvidenceRecorder(evidenceStore, vault);
+            evidence = new Anjal.Mailbox.EvidenceRecorder(evidenceStore, vault)
+            {
+                // rc.25 (DES-15 §9): an organisation's originals are sealed to its recovery key.
+                Keys = store is Anjal.Store.IMailKeyStore evidenceKeys ? new Anjal.Mailbox.EvidenceKeyDirectory((Anjal.Store.IMailboxStore)store, evidenceKeys) : null,
+            };
             evidenceWorker = new Anjal.Mailbox.EvidenceWorker(evidenceStore, vault, log: Log);
             Log($"Evidence: originals kept in {vault.Root} - incoming as received, outgoing as sent, SHA-256 each, daily manifest chain; a message is not accepted or sent unless its original is kept.");
         }

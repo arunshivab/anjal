@@ -218,6 +218,7 @@ public sealed partial class MailboxService
         this.messageStore = messageStore;
         this.maildir = maildir;
         this.hostName = hostName;
+        this.InitKeys();
     }
 
     /// <summary>Load the signed-in mailbox and its tenant. Null if either is missing or disabled.</summary>

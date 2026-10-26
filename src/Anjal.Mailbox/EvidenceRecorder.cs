@@ -25,11 +25,18 @@ public sealed class EvidenceRecorder : IEvidenceRecorder
     }
 
     /// <inheritdoc/>
+    /// <summary>
+    /// rc.25 (DES-15 §9, D-246): whose keys an original is sealed to - the organisations it belongs to.
+    /// Unset (tests, development), originals are kept as they are.
+    /// </summary>
+    public IEvidenceKeys? Keys { get; set; }
+
     public async Task<System.Guid> RecordInboundAsync(InboundEvidence evidence, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(evidence);
         var id = System.Guid.NewGuid();
-        (string path, long size, string sha) = await this.vault.WriteAsync(id, evidence.ReceivedAt, evidence.RawBytes, ct).ConfigureAwait(false);
+        byte[] kept = await this.SealAsync(evidence.RawBytes, evidence.AuthenticatedUser is { Length: > 0 } user ? user : null, evidence.EnvelopeTo, ct).ConfigureAwait(false);
+        (string path, long size, string sha) = await this.vault.WriteAsync(id, evidence.ReceivedAt, kept, ct).ConfigureAwait(false);
         await this.store.InsertEvidenceAsync(new EvidenceRow
         {
             Id = id,
@@ -88,7 +95,8 @@ public sealed class EvidenceRecorder : IEvidenceRecorder
         System.ArgumentNullException.ThrowIfNull(outbound);
         System.ArgumentNullException.ThrowIfNull(signedBytes);
         var id = System.Guid.NewGuid();
-        (string path, long size, string sha) = await this.vault.WriteAsync(id, capturedAt, signedBytes, ct).ConfigureAwait(false);
+        byte[] kept = await this.SealAsync(signedBytes, outbound.EnvelopeFrom, System.Array.Empty<string>(), ct).ConfigureAwait(false);
+        (string path, long size, string sha) = await this.vault.WriteAsync(id, capturedAt, kept, ct).ConfigureAwait(false);
         await this.store.InsertEvidenceAsync(new EvidenceRow
         {
             Id = id,
@@ -138,5 +146,74 @@ public sealed class EvidenceRecorder : IEvidenceRecorder
         {
             await this.store.SetEvidenceOutcomeAsync(id, "sent", ct).ConfigureAwait(false);
         }
+    }
+
+    // The keys of the organisations an original belongs to: its sender's (when the sender is on this
+    // server) and each recipient's. None (individuals, outside senders to individuals) keeps it as it is.
+    private async Task<byte[]> SealAsync(byte[] raw, string? sender, IReadOnlyCollection<string> recipients, CancellationToken ct)
+    {
+        if (this.Keys is null)
+        {
+            return raw;
+        }
+        IReadOnlyList<byte[]> keys = await this.Keys.ForAsync(sender, recipients, ct).ConfigureAwait(false);
+        return keys.Count == 0 ? raw : MailEnvelope.SealToPublicKeys(raw, keys);
+    }
+}
+
+/// <summary>rc.25 (DES-15 §9): the organisations' recovery keys an original is sealed to.</summary>
+public interface IEvidenceKeys
+{
+    /// <summary>The recovery public keys of the organisations of a sender and of recipients (none for individuals and outside addresses).</summary>
+    /// <param name="sender">The sender, when it is an address on this server.</param>
+    /// <param name="recipients">The recipients.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The keys.</returns>
+    Task<IReadOnlyList<byte[]>> ForAsync(string? sender, IReadOnlyCollection<string> recipients, CancellationToken ct = default);
+}
+
+/// <summary>rc.25 (DES-15 §9): recovery keys by the domains of addresses.</summary>
+public sealed class EvidenceKeyDirectory : IEvidenceKeys
+{
+    private readonly IMailboxStore boxes;
+    private readonly IMailKeyStore keys;
+
+    /// <summary>Initializes a new instance of the <see cref="EvidenceKeyDirectory"/> class.</summary>
+    /// <param name="boxes">The mailbox store.</param>
+    /// <param name="keys">The key store.</param>
+    public EvidenceKeyDirectory(IMailboxStore boxes, IMailKeyStore keys)
+    {
+        System.ArgumentNullException.ThrowIfNull(boxes);
+        System.ArgumentNullException.ThrowIfNull(keys);
+        this.boxes = boxes;
+        this.keys = keys;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<byte[]>> ForAsync(string? sender, IReadOnlyCollection<string> recipients, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(recipients);
+        var tenants = new HashSet<System.Guid>();
+        foreach (string address in recipients.Append(sender ?? string.Empty))
+        {
+            int at = address.LastIndexOf('@');
+            if (at <= 0 || at == address.Length - 1)
+            {
+                continue;
+            }
+            if (await this.boxes.GetTenantDomainAsync(address[(at + 1)..], ct).ConfigureAwait(false) is TenantDomainRow owner)
+            {
+                tenants.Add(owner.TenantId);
+            }
+        }
+        var result = new List<byte[]>();
+        foreach (System.Guid tenant in tenants)
+        {
+            if (await this.keys.GetTenantKeysAsync(tenant, ct).ConfigureAwait(false) is TenantKeyRow row)
+            {
+                result.Add(row.RecoveryPublic);
+            }
+        }
+        return result;
     }
 }

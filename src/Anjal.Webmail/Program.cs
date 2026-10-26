@@ -74,6 +74,12 @@ public static class Program
             return 1;
         }
         string? pg = Environment.GetEnvironmentVariable("ANJAL_POSTGRES");
+        // rc.25 (DES-15): the pepper of the organisations' mail encryption.
+        if (MailKeys.PepperProblem(pg is not null) is string pepperProblem)
+        {
+            Console.Error.WriteLine(pepperProblem);
+            return 1;
+        }
         IMessageStore store = pg is null ? new InMemoryMessageStore() : new PostgresMessageStore(pg);
         string maildirRoot = Environment.GetEnvironmentVariable("ANJAL_MAILDIR_ROOT") ?? MaildirStore.DefaultRoot;
         string hostname = Environment.GetEnvironmentVariable("ANJAL_HOSTNAME") ?? "anjal.localhost";
@@ -261,6 +267,10 @@ public static class Program
         string evidenceRoot = Environment.GetEnvironmentVariable("ANJAL_EVIDENCE_ROOT") ?? Anjal.Mailbox.EvidenceVault.DefaultRoot;
         Anjal.Mailbox.EvidenceRecorder? evidence = store is IEvidenceStore evidenceStore && Directory.Exists(evidenceRoot)
             ? new Anjal.Mailbox.EvidenceRecorder(evidenceStore, new Anjal.Mailbox.EvidenceVault(evidenceRoot))
+            {
+                // rc.25 (DES-15 §9): an organisation's originals are sealed to its recovery key.
+                Keys = store is IMailKeyStore evidenceKeys && store is IMailboxStore evidenceBoxes ? new Anjal.Mailbox.EvidenceKeyDirectory(evidenceBoxes, evidenceKeys) : null,
+            }
             : null;
         // v1.0.0-rc.10 (D-75): once per process - tests build the app many times.
         // rc.15 (item 35): passwords set here are checked against the full leaked-password list,
@@ -506,6 +516,7 @@ public static class Program
 
 
         app.UseAuthentication();
+        app.UseMailKeys();
 
         // rc.13: "leaves nothing behind" - no page of a signed-in mailbox is kept
         // in the browser's cache (the fingerprinted assets are not mail, and keep theirs).
@@ -564,6 +575,8 @@ public static class Program
         });
         // rc.14: a shared mailbox's rights, and what the organisation asks first.
         app.Use(AuthEndpoints.DemandsAsync);
+        // rc.25 (DES-15 §4): then mail that cannot be opened here goes to the unlock page.
+        app.UseLockedMailPages();
         app.UseAuthorization();
         app.UseAntiforgery();
 
@@ -622,6 +635,7 @@ public static class Program
 
         // ---- rc.14: the organisation console and the Anjal console ----
         OrgEndpoints.Map(app);
+        OrgEncryptionEndpoints.Map(app);
         OpsEndpoints.Map(app);
 
         // ---- rc.15: offline mail (item 65 b) ----
@@ -1489,7 +1503,30 @@ public static class Program
             {
                 return Results.Redirect("/settings/data?error=" + Uri.EscapeDataString("There is no download ready. Prepare one first."));
             }
-            return Results.File(state.File, "application/zip", "anjal-" + (http.User.Identity?.Name ?? "mail").Replace('@', '-') + ".zip");
+            string downloadName = "anjal-" + (http.User.Identity?.Name ?? "mail").Replace('@', '-') + ".zip";
+            byte[] head = new byte[5];
+            using (FileStream peek = File.OpenRead(state.File))
+            {
+                _ = await peek.ReadAtLeastAsync(head, head.Length, throwOnEndOfStream: false, ct).ConfigureAwait(false);
+            }
+            if (!SealedFile.IsSealed(head))
+            {
+                return Results.File(state.File, "application/zip", downloadName);
+            }
+            // rc.25 (DES-15 §7.10): kept encrypted on the server; opened as it is sent, in the person's session.
+            if (MailKeyring.Current.DataKey(person) is null)
+            {
+                return Results.Redirect("/unlock?back=" + Uri.EscapeDataString("/settings/data"));
+            }
+            string path = state.File;
+            return Results.Stream(
+                async body =>
+                {
+                    await using FileStream input = File.OpenRead(path);
+                    await SealedFile.OpenToAsync(input, body, MailKeyring.Current, CancellationToken.None).ConfigureAwait(false);
+                },
+                "application/zip",
+                downloadName);
         }).RequireAuthorization();
 
         app.MapPost("/settings/data/delete", async (HttpContext http, [FromForm] string? reason, MailboxService svc, AuditTrail audit, CancellationToken ct) =>

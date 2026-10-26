@@ -181,7 +181,7 @@ public sealed class Rc22AccountTests : IAsyncLifetime, IDisposable
         // The Terms went to the personal address; the Welcome mail is in the Inbox.
         Assert.Contains(await this.store.ListOutboundForSenderAsync(string.Empty), m => m.EnvelopeTo == "nandini.k@gmail.test");
         FolderRow inboxFolder = (await this.store.ListFoldersAsync(made.Id)).Single(f => f.Name == FolderRow.Inbox);
-        Assert.Contains(await this.store.ListMessagesAsync(made.Id, inboxFolder.Id, 10, 0), m => m.Subject.StartsWith("Welcome to Anjal", StringComparison.Ordinal));
+        Assert.Contains(this.store.Seen(), m => m.MailboxId == made.Id && m.FolderId == inboxFolder.Id && m.Subject.StartsWith("Welcome to Anjal", StringComparison.Ordinal));
         // Name on mails: locked to first + last unless the organisation allows nicknames.
         Assert.NotNull(await this.svc.SetNameOnMailsAsync(made.Id, "Nandu"));
         await this.svc.SaveMailPolicyAsync(this.sgh.Id, new OrgMailPolicy { Nicknames = true });
@@ -289,10 +289,24 @@ public sealed class Rc22AccountTests : IAsyncLifetime, IDisposable
         string page = await arun.GetStringAsync("settings/data");
         Assert.Contains("Prepare my download", page, StringComparison.Ordinal);
         Assert.Contains("Digital Personal Data Protection", page, StringComparison.Ordinal);
-        ExportState state = await this.svc.BuildExportAsync(this.arun.Id, this.root, "http://anjal.localhost");
-        Assert.True(state.Ready(DateTimeOffset.UtcNow));
+        ExportState state;
+        // rc.25 (DES-15 §7.10): made with the person's keys (here, the organisation's), and kept encrypted on disk.
+        using (Anjal.Store.MailKeyring ring = TestMail.Ring(this.store))
+        using (Anjal.Store.MailKeyring.Use(ring))
+        {
+            state = await this.svc.BuildExportAsync(this.arun.Id, this.root, "http://anjal.localhost");
+        }
+        Assert.True(state.Ready(DateTimeOffset.UtcNow), state.Error);
         Assert.Equal(1, state.Messages);
-        using (var zip = System.IO.Compression.ZipFile.OpenRead(state.File))
+        Assert.True(Anjal.Store.SealedFile.IsSealed(File.ReadAllBytes(state.File)));
+        using var opened = new MemoryStream();
+        using (Anjal.Store.MailKeyring ring = TestMail.Ring(this.store))
+        await using (FileStream sealedFile = File.OpenRead(state.File))
+        {
+            await Anjal.Store.SealedFile.OpenToAsync(sealedFile, opened, ring);
+        }
+        opened.Position = 0;
+        using (var zip = new System.IO.Compression.ZipArchive(opened, System.IO.Compression.ZipArchiveMode.Read, leaveOpen: true))
         {
             Assert.Contains(zip.Entries, e => e.FullName.StartsWith("mail/INBOX/", StringComparison.Ordinal) && e.FullName.EndsWith(".eml", StringComparison.Ordinal));
             Assert.Contains(zip.Entries, e => e.FullName == "contacts.vcf");
@@ -307,7 +321,7 @@ public sealed class Rc22AccountTests : IAsyncLifetime, IDisposable
         Assert.Contains("Download the zip", page, StringComparison.Ordinal);
         // The person was mailed.
         FolderRow inbox = (await this.store.ListFoldersAsync(this.arun.Id)).Single(f => f.Name == FolderRow.Inbox);
-        Assert.Contains(await this.store.ListMessagesAsync(this.arun.Id, inbox.Id, 10, 0), m => m.Subject == "Your data is ready to download");
+        Assert.Contains(this.store.Seen(), m => m.MailboxId == this.arun.Id && m.FolderId == inbox.Id && m.Subject == "Your data is ready to download");
         Assert.Equal(0, MailboxService.ClearOldExports(this.root, DateTimeOffset.UtcNow));
         Assert.Equal(1, MailboxService.ClearOldExports(this.root, DateTimeOffset.UtcNow.AddDays(8)));
 
