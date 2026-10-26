@@ -11,5 +11,5 @@ Keeps incoming originals (v1.0.0-rc.8): the file first, safely on disk, then its
 - **GetOutboundLinkAsync** *(method)* - A queued row's existing evidence copy and Sent copy, when known.
 - **ReadVerifiedAsync** *(method)* - The exact bytes of an evidence copy, checked against its recorded SHA-256.
 - **RecordAttemptAsync** *(method)* - Record one delivery attempt and the receiving server's reply; a delivered copy is marked sent.
-- **RecordInboundAsync** *(method)* - _(no description)_
 - **RecordOutboundAsync** *(method)* - Keep the exact outgoing bytes (after DKIM signing) of a queued row; every retry then sends them.
+- **Keys** *(property)* - rc.25 (DES-15 §9, D-246): whose keys an original is sealed to - the organisations it belongs to. Unset (tests, development), originals are kept as they are.

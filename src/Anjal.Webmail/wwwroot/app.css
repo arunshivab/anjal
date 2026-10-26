@@ -4318,3 +4318,16 @@ html[data-zoom="80"] { --z: 0.8; zoom: 0.8; }
 /* rc.24 (item 93): a file delivered with a warning - locked with a password, or with macros. */
 .attrow span.frisk, .frisk { flex: 0 0 auto; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--warning); color: var(--warning); white-space: nowrap; }
 .readnotice .sig { font-style: normal; color: var(--ink-muted); overflow-wrap: anywhere; }
+
+/* ===================== rc.25 (DES-15 §6): the Encryption section and the recovery sheet ===================== */
+.orgsub { margin: 20px 0 8px !important; }
+.sheetcard { margin: 4px 0 18px; padding: 16px 18px; border: 2px dashed var(--line-strong); border-radius: 12px; background: var(--surface-200); }
+.sheetcard .hint { font-size: 13px; color: var(--ink-muted); margin: 6px 0 10px; }
+.sheettext { margin: 0 0 10px; padding: 12px 14px; border-radius: 8px; background: var(--surface-100); font: 600 18px/1.7 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 0.06em; color: var(--ink); white-space: pre-wrap; word-spacing: 0.4em; }
+.sheetinp { width: 100%; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; text-transform: uppercase; resize: vertical; }
+@media print {
+  .orgconsole:has(.sheetcard) .orgcard > :not(.sheetcard) { display: none !important; }
+  .orgconsole:has(.sheetcard) .sheetcard button { display: none !important; }
+  .sheetcard { border-color: #000; background: none; }
+  .sheettext { background: none; color: #000; }
+}

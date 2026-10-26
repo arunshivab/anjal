@@ -40,7 +40,14 @@ public sealed partial class MailboxService
         IReadOnlyList<(MailboxRow Mailbox, SharedMailbox Info, long Unread)> shared = await this.SharedListAsync(tenant.Id, ct).ConfigureAwait(false);
         List<OrgApp> apps = await this.AppsOfAsync(tenant.Id, ct).ConfigureAwait(false);
         List<PersonView> invited = people.Where(p => !p.Admin).ToList();
-        return new[]
+        var steps = new List<SetupStep>();
+        // rc.25 (DES-15 §6.2, §11): an encrypted organisation prints its recovery sheet before anything else.
+        if (this.KeyManager is Anjal.Mailbox.MailKeyManager km && await km.EncryptsAsync(tenant.Id, ct).ConfigureAwait(false))
+        {
+            DateTimeOffset? sheet = (await km.Store.GetTenantKeysAsync(tenant.Id, ct).ConfigureAwait(false))?.SheetConfirmedAt;
+            steps.Add(new SetupStep("sheet", "Print the recovery sheet", sheet is not null, sheet, "/org/encryption", "Print the sheet"));
+        }
+        steps.AddRange(new[]
         {
             new SetupStep("name", "Name and logo", branding.Logo.Length > 0, null, "/org/branding", "Add your logo"),
             new SetupStep("domain", "Add your domain", domains.Count > 0, domains.Count > 0 ? domains.Min(d => d.CreatedAt) : null, "/org/domains", "Add a domain"),
@@ -48,6 +55,7 @@ public sealed partial class MailboxService
             new SetupStep("people", "Invite your first people", invited.Count > 0, invited.Count > 0 ? invited.Min(p => p.Mailbox.CreatedAt) : null, "/org/people", "Invite people"),
             new SetupStep("shared", "Shared mailboxes", shared.Count > 0, null, "/org/shared", "Add a shared mailbox"),
             new SetupStep("apps", "Applications that send mail", apps.Count > 0, apps.Count > 0 && apps.SelectMany(a => a.Keys).Any() ? apps.SelectMany(a => a.Keys).Min(k => k.Created) : null, "/org/apps", "Add an application"),
-        };
+        });
+        return steps;
     }
 }

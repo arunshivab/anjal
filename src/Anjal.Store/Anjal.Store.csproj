@@ -16,4 +16,13 @@
     <PackageReference Include="Npgsql" Version="9.0.5" />
   </ItemGroup>
 
+  <!-- rc.25: the test projects make smaller RSA keys, so that thousands of mailboxes in tests stay quick. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Anjal.Api.Tests" />
+    <InternalsVisibleTo Include="Anjal.Mailbox.Tests" />
+    <InternalsVisibleTo Include="Anjal.Server.Tests" />
+    <InternalsVisibleTo Include="Anjal.Store.Tests" />
+    <InternalsVisibleTo Include="Anjal.Webmail.Tests" />
+  </ItemGroup>
+
 </Project>

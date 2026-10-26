@@ -491,7 +491,7 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -c '\dt'
 On a first run two notices are expected - `NOTICE: trigger "audit_events_no_change" ... does not
 exist, skipping` and, from rc.8, the same for `messages_evidence_deleted`; on a re-run, `already exists, skipping`
 notices are expected. The script is safe to apply again, which is how an
-upgrade applies it. **Check:** `\dt` lists **26 tables** at v1.0.0-rc.9.x (20 at rc.2), all owned by
+upgrade applies it. **Check:** `\dt` lists **35 tables** from v1.0.0-rc.25 (29 at rc.24, 26 at rc.9.x, 20 at rc.2), all owned by
 `anjal`, including `tenants`, `mailboxes`, `messages`, `sender_rules` and
 `audit_events` (measured on PostgreSQL 18.6, with the file's CRLF line
 endings exactly as shipped).
@@ -550,6 +550,24 @@ Write it in the first row of all three forms, marking the look-alikes
 vm$ sudo sed -i "s|^ANJAL_KEK=.*|ANJAL_KEK=$KEK|" /etc/anjal/server.env; unset KEK; clear
 ```
 
+**The mail-encryption pepper** (from rc.25, DES-15) - each person's mail key is
+locked with a key made from their password **and** this pepper, so a copy of the
+database alone cannot be attacked by guessing passwords. It is never stored in the
+database. Like the KEK it cannot be reset: losing or changing it locks every
+organisation's mail until its administrators restore each person (section 13k).
+The same value goes into **both** files; both services refuse to start without it.
+
+```
+vm$ PEPPER=$(openssl rand -base64 32); echo "$PEPPER"
+```
+
+Write it in the row "Mail encryption pepper" of all three forms, marking the
+look-alikes, then:
+
+```
+vm$ sudo sed -i "s|^ANJAL_KEY_PEPPER=.*|ANJAL_KEY_PEPPER=$PEPPER|" /etc/anjal/server.env /etc/anjal/webmail.env; unset PEPPER; clear
+```
+
 **The certificate rehearsal** - staging on in `webmail.env` only (section 7
 turns it off again):
 
@@ -569,6 +587,7 @@ vm$ prove() { local want got c
         if [ "$(printf '%s' "$got" | sha256sum | cut -c1-16)" = "$want" ]; then echo "copy $c: MATCH"; else echo "copy $c: NO MATCH - check this copy"; fi
       done; }
 vm$ prove ANJAL_KEK
+vm$ prove ANJAL_KEY_PEPPER
 vm$ prove ANJAL_API_TOKEN
 ```
 
@@ -580,6 +599,8 @@ current_user;` line three times, typing from each copy.
 ```
 vm$ sudo awk '/^ANJAL_(API_TOKEN|KEK)=/{i=index($0,"="); print substr($0,1,i-1), "length", length(substr($0,i+1))}' /etc/anjal/server.env   # 48 and 44
 vm$ sudo grep '^ANJAL_KEK=' /etc/anjal/server.env | cut -d= -f2- | base64 -d | wc -c          # 32
+vm$ sudo grep '^ANJAL_KEY_PEPPER=' /etc/anjal/server.env | cut -d= -f2- | base64 -d | wc -c   # 32
+vm$ for f in server webmail; do sudo grep '^ANJAL_KEY_PEPPER=' /etc/anjal/$f.env | sha256sum | cut -c1-16; done   # the same twice
 vm$ sudo grep -c 'CHANGE-ME' /etc/anjal/server.env /etc/anjal/webmail.env                      # 0 and 0
 vm$ sudo grep -E '^ANJAL_(ACME_STAGING|WEBMAIL_KEYS_DIR|OPERATORS)' /etc/anjal/server.env /etc/anjal/webmail.env
 vm$ for f in server webmail; do
@@ -1659,6 +1680,34 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.24.1 to rc.25** (organisation-held encryption, DES-15): backup first (section 11) and check it
+restores. Then, in this order:
+
+1. **Held mail first.** Mail with files is no longer held while the scanner is down - it is
+   answered "try later" (D-242). Release or scan again anything still in quarantine (Anjal console,
+   Virus scanning) so none is left: `psql ... -Atc "select count(*) from messages m join folders f on f.id = m.folder_id where f.name = 'Quarantine'"` must print 0.
+2. **The pepper** - section 4, the box "The mail-encryption pepper": generated on the VM, written on
+   the three forms, put into **both** env files, proved. The services refuse to start without it.
+3. The usual install, and `schema.sql` once: six new tables (`mailbox_keys`, `tenant_keys`,
+   `key_grants`, `session_keys`, `restore_requests`, `break_glass`) and `messages.snippet` - 35
+   tables in all.
+4. Restart. Each organisation's mail is encrypted from now on; nothing changes for individuals.
+5. **Sign in once as each person** (on the first server: arun@ and ops@, D-243): the password makes
+   the person's keys at that sign-in and their stored mail, contacts and templates are encrypted in
+   the background. Organisation > Encryption lists who has not signed in yet.
+6. **Each organisation's administrator prints the recovery sheet** (Organisation > Set up shows it
+   first; Organisation > Encryption > Make the sheet, then type it back). Until it is typed back
+   Anjal keeps a temporary copy of the organisation's recovery key (DES-15 §6.2).
+7. The break-glass key: OPS-16, when the three custodians are together. Until it is made, its line
+   (`ANJAL_BREAKGLASS_KEY`, webmail.env) stays unset and the console says so.
+
+**Check** (no content is shown, only counts):
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from mailbox_keys"
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*), count(*) filter (where subject like 'e1.%') from messages m join mailboxes b on b.id = m.mailbox_id join mailbox_keys k on k.mailbox_id = b.id"   # the two equal
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select key, value from settings where key like '%PEPPER%'"   # nothing
+```
+
 **rc.24 to rc.24.1** (a mail sent to oneself shows once in its conversation): the usual steps only
 (backup first). No schema change, no setting.
 
@@ -2056,6 +2105,37 @@ DKIM key signs for it.
 
 `ANJAL_SHARED_DOMAIN=anjalmail.com` in `webmail.env` is what turns the automatic
 subdomains on; unset, organisations get only the domains they bring.
+
+## 13k. Organisation mail encryption (from rc.25, DES-15)
+
+Every organisation's mail is encrypted so that Anjal's own staff - with the database, the mail
+folders, the evidence store or the backups - cannot read it (D-232). Individuals' mail is not (D-234).
+
+| What | Where it is | Who can open it |
+|---|---|---|
+| A person's mail, contacts, templates and data downloads | Encrypted in the database and the mail folders | The person (their password); the organisation's administrators (recovery key) |
+| The keys of a signed-in session | The database, locked with a value only the browser's cookie holds | That browser while the session lasts; nothing once signed out |
+| The organisation's recovery key | Locked for each administrator, and with the recovery sheet | The administrators; whoever holds the sheet |
+| Mail waiting to be sent | The outgoing queue, sealed to the mail server's seal key | The mail server until it is delivered; afterwards only its record (D-244) |
+| Mail waiting in Scheduled | Sealed with a key the webmail derives from the pepper | The webmail |
+| The words of mail rules, From and To | Plain | As before (D-231, D-244) |
+
+- **The pepper** (`ANJAL_KEY_PEPPER`, both env files, section 4) is never in the database. Lost or
+  changed, every person's password still signs in but opens nothing: their mail waits for their
+  administrator's restore, and each administrator is mailed. An administrator whose own mail is
+  locked uses the recovery sheet first. If the pepper was only mistyped, putting the right value
+  back (from the custody forms) and restarting opens everyone's mail again; nothing is destroyed.
+- **A forgotten password**: the person resets it as before; the mail stays locked until an
+  administrator presses Restore (Organisation > Encryption). Anjal cannot do it.
+- **No administrator left**: the recovery sheet, typed under Organisation > Encryption > Use the
+  recovery sheet.
+- **Sheet and administrators both lost**: the break-glass key, on the organisation's written
+  request only - OPS-16. The Anjal console shows each organisation's sealed recovery secret for the
+  offline tool; it opens nothing without two of the three shares.
+- **A passkey sign-in** opens the account, not the mail: the person types the password once on that
+  device (DES-15 §4, D-239).
+- **Operators** see, per organisation, how many mailboxes are encrypted, whether the recovery sheet is
+  confirmed and whether the break-glass key is on (Anjal console > Organisations) - never content.
 
 ## 14. When something is wrong
 

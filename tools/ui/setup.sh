@@ -23,6 +23,7 @@ SMTP_PORT="${ANJAL_UI_SMTP_PORT:-2525}"
 ADDRESS="${ANJAL_UI_ADDRESS:-arun@qa.test}"
 PASSWORD="${ANJAL_UI_PASSWORD:-Lotus-Garden-42}"
 TOKEN="$(openssl rand -hex 24)"
+PEPPER="$(openssl rand -base64 32)"
 
 stop() {
   for f in "$WORK"/server.pid "$WORK"/webmail.pid; do
@@ -53,6 +54,7 @@ COMMON=(
   "ANJAL_POSTGRES=Host=localhost;Database=$DB;Username=postgres;Password=$PGPASSWORD"
   "ANJAL_MAILDIR_ROOT=$WORK/maildir" "ANJAL_EVIDENCE_ROOT=$WORK/evidence" "ANJAL_HOSTNAME=qa.test"
   "ANJAL_PWNED_MODE=off" "ANJAL_GEO_MODE=off" "ANJAL_DNS_CHECK=off"
+  "ANJAL_KEY_PEPPER=$PEPPER"
 )
 
 wait_for() {

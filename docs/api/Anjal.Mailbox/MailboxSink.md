@@ -6,15 +6,18 @@ that delivers accepted SMTP messages into tenant mailboxes. For each recipient: 
 
 ## Members
 
+- **ContactMarksKind** *(field)* - rc.25 (DES-15 §7.6): the document of the address marks of a person's encrypted contacts.
 - **DiscardsKind** *(field)* - The mailbox document counting mail discarded from blocked senders (rc.22, item 32), by sender.
 - **ForwardAudit** *(field)* - The audit action written for every forward (rc.22, item 29: forwards are logged).
 - **ForwardedHeader** *(field)* - The header a forwarded copy carries (rc.22, item 29): each mailbox it passed, so a loop stops.
+- **GroupMarksKind** *(field)* - rc.25: the document of the address marks of a person's encrypted contact groups.
 - **JunkFolder** *(field)* - Name of the folder spam is filed in.
 - **MaxForwardHops** *(field)* - The most mailboxes a copy is forwarded through in a chain.
 - **UnsubscribeLocal** *(field)* - The local part that takes unsubscribe requests for an organisation's applications (rc.22, item 51).
 - **#ctor** *(method)* - Construct the sink.
 - **AwayReplyAsync** *(method)* - rc.22 (item 30): the out-of-office reply. Once per sender while it is on; never to automatic mail, lists, no-reply addresses or the mailbox itself; outside the organisation only when the organisation and the person both allow it.
 - **ChooseFolder** *(method)* - Decide the destination folder: a sender rule wins outright; otherwise the score is compared with the tenant threshold (a threshold of 0 or less disables junk filing for the tenant).
+- **DeferredNoticeAsync** *(method)* - rc.25 (D-242): the operator hears at once when mail with files is answered "try later" because the scanner is down - then at most every 30 minutes while it stays down.
 - **DeliverAsync** *(method)* - _(no description)_
 - **DescribeServerRoleAddresses** *(method)* - One line for the start-up log: where postmaster@ and abuse@ at this server's own name are delivered (v1.0.0-rc.10, DEF-082). Built from the same rule the delivery uses, so the two cannot disagree.
 - **EncodeHeader** *(method)* - A header value as RFC 2047 text when it is not plain ASCII.
@@ -34,6 +37,8 @@ that delivers accepted SMTP messages into tenant mailboxes. For each recipient: 
 - **SendOnAsync** *(method)* - Deliver a message Anjal itself makes (a forwarded copy, an away reply, a notice): here when the recipient is a mailbox on this server, otherwise through the outgoing queue.
 - **TrySplitAddress** *(method)* - Split an address into (local-part without "+tag", domain), both lowercased. Returns if the address has no "@" or an empty side.
 - **WithReturnPath** *(method)* - The message as filed at final delivery (v1.0.0-rc.9, DEF-069; RFC 5321 4.4): a Return-Path line with the envelope sender first, after removing any Return-Path the sender included (the standard allows it; only the final server knows the real envelope - D-55). The evidence copy is untouched.
+- **AddressPepper** *(property)* - The pepper the address marks are keyed from (the server's ANJAL_KEY_PEPPER).
+- **HoldNothing** *(property)* - rc.25 (D-242): while the scanner is down, mail with files is answered "try later" instead of being held, so that nothing readable is kept (DES-15 §7.5). True by default; false keeps the rc.22 quarantine (held mail rescanned every five minutes).
 - **OperatorPostmaster** *(property)* - The operator's mailbox for postmaster@ this server; null for postmaster@ its parent domain.
 - **Scanner** *(property)* - The virus scanner for files on mail from outside (rc.22, item 39); null when scanning is off.
 - **ServerHostName** *(property)* - This server's own name, for postmaster@ it (v1.0.0-rc.8); null to not recognise it.

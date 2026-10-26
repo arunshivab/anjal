@@ -827,16 +827,38 @@
    "steps": [
     "Open Settings, Security, Recovery address.",
     "Type a personal address (not this one) and save.",
-    "If you forget your password, press Forgot password on the sign-in page; the code goes there."
+    "If you forget your password, press Forgot password on the sign-in page; the code goes there.",
+    "In an organisation, a password set this way signs you in but leaves your mail locked until an administrator restores it; you get a mail when it is done."
    ],
    "tip": null,
    "show": null,
    "related": [
-    "password"
+    "password",
+    "mail-encryption"
    ],
    "keywords": "forgot password reset code personal email",
    "release": "rc.13",
    "org": null
+  },
+  {
+   "id": "mail-encryption",
+   "part": "security",
+   "title": "Your mail is encrypted",
+   "summary": "In an organisation, your mail is encrypted so that only you, and your administrators through the organisation's recovery key, can read it - not Anjal.",
+   "steps": [
+    "Your password opens your mail. If you sign in with a passkey, Anjal asks for your password once on that device.",
+    "If your password is set without the old one (forgotten, or reset by your administrator), your mail stays locked until an administrator of your organisation restores it; you get a mail when it is done.",
+    "Who mailed whom stays visible, so that mail can be delivered; subjects, the mail itself, files and your contacts do not."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "recovery",
+    "password"
+   ],
+   "keywords": "encrypted encryption locked unlock open my mail restore passkey privacy",
+   "release": "rc.25",
+   "org": "Administrators: Organisation, Encryption holds the recovery sheet, the people waiting for a restore, and the switch for Anjal's break-glass key."
   },
   {
    "id": "devices",
@@ -1559,11 +1581,11 @@
    "id": "virus",
    "part": "admin",
    "title": "Virus scanning and held mail",
-   "summary": "With ClamAV running, every file on incoming mail is scanned. Programs and scripts are refused, an infected file is removed and the message says so, disk images go to Junk; while the scanner is down, mail with files is held and scanned again every five minutes.",
+   "summary": "With ClamAV running, every file on incoming mail is scanned. Programs and scripts are refused, an infected file is removed and the message says so, disk images go to Junk; while the scanner is down, mail with files is answered \"try later\", so the sending server keeps it and tries again - nothing is kept here.",
    "steps": [
-    "The Anjal console, Virus scanning, shows the scanner's version, the counts, and every message held.",
+    "The Anjal console, Virus scanning, shows the scanner's version, the counts, and any message still held from before.",
     "A held message is delivered on its own once the scanner answers. Scan again tries now; Release delivers it without a scan - the operator's decision.",
-    "The operator is reminded every thirty minutes while anything is held."
+    "The operator is mailed at once when the scanner stops answering, and again every thirty minutes while it does not."
    ],
    "tip": null,
    "show": null,

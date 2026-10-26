@@ -173,7 +173,11 @@ public sealed class OutboundWorker
                 (evidenceId, sentCopy) = await this.evidence.GetOutboundLinkAsync(m.Id, ct).ConfigureAwait(false);
                 if (evidenceId is System.Guid kept)
                 {
-                    bytesToSend = await this.evidence.ReadVerifiedAsync(kept, ct).ConfigureAwait(false);
+                    // rc.25 (DES-15 §9): the evidence copy of an organisation's mail is sealed to the
+                    // organisation and this server cannot open it; the signed bytes were kept in the
+                    // queue at the first attempt instead, and are what m carries now.
+                    byte[] keptBytes = await this.evidence.ReadVerifiedAsync(kept, ct).ConfigureAwait(false);
+                    bytesToSend = Anjal.Store.MailEnvelope.IsEnvelope(keptBytes) ? m.RawBytes : keptBytes;
                 }
             }
 #pragma warning disable CA1031 // Unreadable evidence holds the message; the retry schedule decides what happens next.
@@ -263,6 +267,7 @@ public sealed class OutboundWorker
             try
             {
                 evidenceId = await this.evidence.RecordOutboundAsync(m, bytesToSend, sentCopy, this.clock(), ct).ConfigureAwait(false);
+                await this.store.ReplaceOutboundRawAsync(m.Id, bytesToSend, ct).ConfigureAwait(false);
             }
 #pragma warning disable CA1031 // Evidence that cannot be kept holds the message.
             catch (System.Exception ex) when (ex is not System.OperationCanceledException)

@@ -50,6 +50,9 @@ public sealed class PendingSignIn
 
     /// <summary>The approval asked of another device, if any.</summary>
     public string? ApprovalId { get; set; }
+
+    /// <summary>rc.25 (DES-15 §4): the person's keys, opened with the password, waiting in memory for the second step (ten minutes at most).</summary>
+    public Anjal.Mailbox.UnlockResult? Unlock { get; set; }
 }
 
 /// <summary>A request for another signed-in device to approve a sign-in or a reset (rc.13).</summary>
@@ -481,10 +484,19 @@ public sealed class SessionRegistry : IDisposable
         try
         {
             List<SessionRecord> all = await this.mail.GetSessionsAsync(mailboxId, ct).ConfigureAwait(false);
+            List<string> gone = all.Where(r => which(r)).Select(r => r.Id).ToList();
             int removed = all.RemoveAll(which);
             if (removed > 0)
             {
                 await this.mail.SaveSessionsAsync(mailboxId, all, ct).ConfigureAwait(false);
+            }
+            // rc.25 (DES-15 §4): a session that ends takes its copy of the keys with it.
+            if (this.mail.KeyManager is Anjal.Mailbox.MailKeyManager km)
+            {
+                foreach (string id in gone)
+                {
+                    await km.Store.DeleteSessionKeysAsync(id, ct).ConfigureAwait(false);
+                }
             }
             return removed;
         }

@@ -14,7 +14,7 @@ public sealed partial class PostgresMessageStore
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
     private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme, time_zone, language, density, layout, rail_folded, date_format, week_start, page_size, new_mail_sound, welcome_done, rail_chosen, zoom";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
-    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id, left(body_text, 160)";
+    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id, CASE WHEN body_text LIKE 'e1.QU5KRQE%' THEN snippet ELSE left(body_text, 160) END";
 
     /// <inheritdoc/>
     public async Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
@@ -343,10 +343,11 @@ RETURNING " + FolderColumns + ";";
     public async Task<MessageRow> SaveMessageAsync(MessageRow message, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(message);
+        StoredText text = MessageCipher.Seal(message.Subject, message.BodyText, await this.MailboxPublicKeyAsync(message.MailboxId, ct).ConfigureAwait(false));
 
         const string sql = @"
-INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, spam_checked, transport_encrypted, transport_tls, evidence_id)
-VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @spam_checked, @transport_encrypted, @transport_tls, @evidence_id)
+INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, snippet, spam_checked, transport_encrypted, transport_tls, evidence_id)
+VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @snippet, @spam_checked, @transport_encrypted, @transport_tls, @evidence_id)
 RETURNING " + MessageColumns + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -357,12 +358,13 @@ RETURNING " + MessageColumns + ";";
         cmd.Parameters.AddWithValue("message_id", message.MessageId);
         cmd.Parameters.AddWithValue("from_header", message.FromHeader);
         cmd.Parameters.AddWithValue("to_header", message.ToHeader);
-        cmd.Parameters.AddWithValue("subject", message.Subject);
+        cmd.Parameters.AddWithValue("subject", text.Subject);
         cmd.Parameters.AddWithValue("date_header", message.DateHeader);
         cmd.Parameters.AddWithValue("size_bytes", message.SizeBytes);
         cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("category_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = message.CategoryId });
         cmd.Parameters.AddWithValue("has_attachments", message.HasAttachments);
-        cmd.Parameters.AddWithValue("body_text", message.BodyText ?? string.Empty);
+        cmd.Parameters.AddWithValue("body_text", text.BodyText);
+        cmd.Parameters.AddWithValue("snippet", text.Snippet);
         cmd.Parameters.AddWithValue("seen", message.Seen);
         cmd.Parameters.AddWithValue("flagged", message.Flagged);
         cmd.Parameters.AddWithValue("answered", message.Answered);
@@ -480,6 +482,11 @@ WHERE mailbox_id = @mailbox_id AND (@folder_id IS NULL OR folder_id = @folder_id
     public async Task<IReadOnlyList<MessageRow>> SearchMessagesAsync(System.Guid mailboxId, System.Guid? folderId, string query, int limit, int offset, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(query);
+        if (query.Trim().Length > 0 && await this.MailboxPublicKeyAsync(mailboxId, ct).ConfigureAwait(false) is not null)
+        {
+            List<MessageRow> found = await this.SearchInSessionAsync(mailboxId, folderId, query, ct).ConfigureAwait(false);
+            return found.Skip(System.Math.Max(0, offset)).Take(System.Math.Max(0, limit)).ToList();
+        }
         const string sql = "SELECT " + MessageColumns + " FROM messages" + SearchWhere + " ORDER BY received_at DESC, id DESC LIMIT @limit OFFSET @offset;";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -502,6 +509,10 @@ WHERE mailbox_id = @mailbox_id AND (@folder_id IS NULL OR folder_id = @folder_id
     public async Task<long> CountSearchAsync(System.Guid mailboxId, System.Guid? folderId, string query, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(query);
+        if (query.Trim().Length > 0 && await this.MailboxPublicKeyAsync(mailboxId, ct).ConfigureAwait(false) is not null)
+        {
+            return (await this.SearchInSessionAsync(mailboxId, folderId, query, ct).ConfigureAwait(false)).Count;
+        }
         const string sql = "SELECT count(*) FROM messages" + SearchWhere + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -821,7 +832,7 @@ UPDATE mailboxes
         MessageId = r.GetString(5),
         FromHeader = r.GetString(6),
         ToHeader = r.GetString(7),
-        Subject = r.GetString(8),
+        Subject = MessageCipher.Open(r.GetString(8)),
         DateHeader = r.GetString(9),
         SizeBytes = r.GetInt64(10),
         Seen = r.GetBoolean(11),
@@ -835,7 +846,7 @@ UPDATE mailboxes
         TransportEncrypted = r.IsDBNull(19) ? null : r.GetBoolean(19),
         TransportTls = r.IsDBNull(20) ? null : r.GetString(20),
         EvidenceId = r.IsDBNull(21) ? null : r.GetGuid(21),
-        Preview = r.IsDBNull(22) ? string.Empty : r.GetString(22),
+        Preview = r.IsDBNull(22) ? string.Empty : MessageCipher.Open(r.GetString(22)),
     };
 
     // ================= Categories (v0.15.0) =================
@@ -1104,7 +1115,7 @@ LIMIT @limit;";
         while (await r.ReadAsync(ct).ConfigureAwait(false))
         {
             list.Add(new MessageFact(
-                r.GetGuid(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4), r.GetString(5),
+                r.GetGuid(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4), MessageCipher.Open(r.GetString(5)),
                 r.GetFieldValue<System.DateTimeOffset>(6), r.GetBoolean(7), r.GetBoolean(8), r.GetBoolean(9), r.GetInt64(10), r.GetInt32(11),
                 r.IsDBNull(12) ? null : r.GetBoolean(12), r.IsDBNull(13) ? null : r.GetBoolean(13), r.IsDBNull(14) ? null : r.GetGuid(14)));
         }

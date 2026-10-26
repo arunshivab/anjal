@@ -1,0 +1,90 @@
+@page "/unlock"
+@layout MainLayout
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject NavigationManager Nav
+
+<PageTitle>@L["Open your mail"] — Anjal</PageTitle>
+
+@* rc.25 (DES-15 §4, §6.1): the organisation's mail is encrypted, and only the person's password opens
+   it. A sign-in with a passkey asks for the password once on this device; a password set without
+   the old one waits for an administrator to restore the mail; a shared mailbox waits for its key. *@
+<AuthFrame L="L" Org="org">
+    @if (state == "shared")
+    {
+        <h1 class="authtitle">@L["This shared mailbox is not open to you yet"]</h1>
+        <p class="authlead">@L["Its mail is encrypted, and its key reaches you the next time an administrator of your organisation opens the organisation console. Your own mail is not affected."]</p>
+        <form method="post" action="/shared/close" class="authfields">
+            <AntiforgeryToken />
+            <button type="submit" class="authbtn">@L["Back to your mail"]</button>
+        </form>
+    }
+    else if (state == "waiting")
+    {
+        <h1 class="authtitle">@L["Your mail is locked"]</h1>
+        <p class="authlead">@L["Your password was set without the old one, so your mail stays locked. Anjal cannot open it; your administrator can restore it, and we have told them. You will get a mail when it is done."]</p>
+        <p class="authnote"><a class="authlink" href="/settings">@L["Settings"]</a></p>
+    }
+    else
+    {
+        <h1 class="authtitle">@L["Open your mail"]</h1>
+        <p class="authlead">@(state == "restored" ? L["Your administrator restored your mail. Type your password to open it."] : L["Your mail is encrypted, and only your password opens it. Type it once on this device; a passkey alone cannot open it."])</p>
+        @if (Wrong is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["That password is not right."]</span></div>
+        }
+        @if (Throttled is not null)
+        {
+            <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L["Too many unsuccessful attempts. Wait fifteen minutes and try again."]</span></div>
+        }
+        <form method="post" action="/auth/unlock" class="authfields">
+            <AntiforgeryToken />
+            <input type="hidden" name="back" value="@Back" />
+            <label class="authlbl" for="password">@L["Password"]</label>
+            <div class="authinpwrap"><input class="authinp-in" id="password" name="password" type="password" autocomplete="current-password" required autofocus /></div>
+            <button type="submit" class="authbtn">@L["Open my mail"]</button>
+        </form>
+        <p class="authnote"><a class="authlink" href="/sign-in/forgot">@L["Forgot password?"]</a></p>
+    }
+</AuthFrame>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [SupplyParameterFromQuery(Name = "back")] private string? BackQuery { get; set; }
+    [SupplyParameterFromQuery] private string? Wrong { get; set; }
+    [SupplyParameterFromQuery] private string? Throttled { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private string state = "password";
+
+    private string Back => Program.SafeBack(BackQuery, "/folder/INBOX");
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        if (WebmailAuthService.ActingOf(user) is Guid acting && await Mail.MailLockedHereAsync(acting))
+        {
+            state = "shared";
+        }
+        else if (WebmailAuthService.PersonIdOf(user) is Guid me)
+        {
+            state = await Mail.LockStateAsync(me);
+        }
+
+        // Owner, 26 Oct: the page asked for the password while the mail was already open here; it now
+        // goes straight back. Only a mailbox this session cannot open shows the page.
+        if (state == "password" && WebmailAuthService.MailboxIdOf(user) is Guid box && !await Mail.MailLockedHereAsync(box))
+        {
+            Nav.NavigateTo(Back);
+        }
+    }
+}

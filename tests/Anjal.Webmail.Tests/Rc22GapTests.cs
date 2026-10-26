@@ -214,12 +214,22 @@ public sealed class Rc22GapTests : IAsyncLifetime, IDisposable
     public async Task WhenTheScannerIsDown_TheOperatorHearsAtOnce_AndTheHeldBarShowsForThePerson()
     {
         MailboxRow ops = await this.Person("ops", "Operator");
-        var sink = new MailboxSink(this.store, this.maildir) { Scanner = new DownScanner(), ServerHostName = "mail.sgh.in", OperatorPostmaster = "ops@sgh.in" };
+        byte[] withFiles = Encoding.UTF8.GetBytes("From: a@x.test\r\nSubject: Files\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n--b1\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\n\r\n%PDF\r\n--b1--\r\n");
+        // rc.25 (D-242): "try later" - nothing kept - and the operator hears at once, once.
+        var later = new MailboxSink(this.store, this.maildir) { Scanner = new DownScanner(), ServerHostName = "mail.sgh.in", OperatorPostmaster = "ops@sgh.in" };
+        DeliveryResult deferred = await later.DeliverAsync(new DeliveryContext { EnvelopeFrom = "a@x.test", EnvelopeTo = ArunOnly, RawBytes = withFiles });
+        Assert.Equal(DeliveryOutcome.TransientFailure, deferred.Outcome);
+        Assert.Equal(DeliveryOutcome.TransientFailure, (await later.DeliverAsync(new DeliveryContext { EnvelopeFrom = "a@x.test", EnvelopeTo = ArunOnly, RawBytes = withFiles })).Outcome);
+        FolderRow? opsInboxNow = await this.svc.GetFolderAsync(ops.Id, FolderRow.Inbox);
+        Assert.Single(await this.store.ListMessagesAsync(ops.Id, opsInboxNow!.Id, 10, 0));
+        Assert.Equal(0, await this.svc.HeldCountAsync(this.arun.Id));
+        // The rc.22 quarantine, for mail held before rc.25.
+        var sink = new MailboxSink(this.store, this.maildir) { Scanner = new DownScanner(), ServerHostName = "mail.sgh.in", OperatorPostmaster = "ops@sgh.in", HoldNothing = false };
         DeliveryResult result = await sink.DeliverAsync(new DeliveryContext
         {
             EnvelopeFrom = "a@x.test",
             EnvelopeTo = ArunOnly,
-            RawBytes = Encoding.UTF8.GetBytes("From: a@x.test\r\nSubject: Files\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n--b1\r\nContent-Type: application/pdf; name=\"report.pdf\"\r\nContent-Disposition: attachment; filename=\"report.pdf\"\r\n\r\n%PDF\r\n--b1--\r\n"),
+            RawBytes = withFiles,
         });
         Assert.Equal(DeliveryOutcome.Accepted, result.Outcome);
         FolderRow? held = await this.svc.GetFolderAsync(this.arun.Id, AttachmentPolicy.QuarantineFolder);

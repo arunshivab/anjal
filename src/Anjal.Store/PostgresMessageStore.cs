@@ -243,7 +243,9 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.AddWithValue("envelope_from", message.EnvelopeFrom ?? string.Empty);
         cmd.Parameters.AddWithValue("envelope_to", message.EnvelopeTo ?? string.Empty);
-        cmd.Parameters.AddWithValue("raw_bytes", message.RawBytes ?? System.Array.Empty<byte>());
+        byte[] raw = message.RawBytes ?? System.Array.Empty<byte>();
+        raw = OutboundCipher.Seal(raw, await this.QueueSealKeyAsync(ct).ConfigureAwait(false), await this.RecordKeyAsync(message.EnvelopeFrom ?? string.Empty, ct).ConfigureAwait(false));
+        cmd.Parameters.AddWithValue("raw_bytes", raw);
         cmd.Parameters.AddWithValue("status", (int)OutboundStatus.Pending);
         cmd.Parameters.AddWithValue("next_attempt_at", next);
         cmd.Parameters.AddWithValue("give_up_at", giveUp);
@@ -532,7 +534,12 @@ SET status          = @status,
     next_attempt_at = @next_attempt_at,
     last_error      = @last_error,
     lease_expires_at = NULL,
-    finished_at     = CASE WHEN @status IN (2, 3) THEN now() ELSE NULL END
+    finished_at     = CASE WHEN @status IN (2, 3) THEN now() ELSE NULL END,
+    -- rc.25 (DES-15 §7.4, D-244): delivered, the sealed message goes at once; the record stays.
+    raw_bytes       = CASE WHEN @status = 2 AND substring(raw_bytes from 1 for 4) = '\x414e4a51'::bytea
+                           THEN substring(raw_bytes from 1 for 9 + (get_byte(raw_bytes, 5) << 24 | get_byte(raw_bytes, 6) << 16 | get_byte(raw_bytes, 7) << 8 | get_byte(raw_bytes, 8)))
+                           ELSE raw_bytes END,
+    body_removed_at = CASE WHEN @status = 2 AND substring(raw_bytes from 1 for 4) = '\x414e4a51'::bytea THEN now() ELSE body_removed_at END
 WHERE id = @id
 RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error;";
 
@@ -845,7 +852,7 @@ LIMIT 1;";
         Id = r.GetGuid(0),
         EnvelopeFrom = r.GetString(1),
         EnvelopeTo = r.GetString(2),
-        RawBytes = (byte[])r.GetValue(3),
+        RawBytes = OutboundCipher.ForReader((byte[])r.GetValue(3)),
         Status = (OutboundStatus)r.GetInt32(4),
         Attempts = r.GetInt32(5),
         CreatedAt = r.GetFieldValue<System.DateTimeOffset>(6),
@@ -871,6 +878,8 @@ LIMIT 1;";
         const string sql = @"
 UPDATE outbound_messages o
 SET raw_bytes = CASE
+        WHEN substring(o.raw_bytes from 1 for 4) = '\x414e4a51'::bytea
+            THEN substring(o.raw_bytes from 1 for 9 + (get_byte(o.raw_bytes, 5) << 24 | get_byte(o.raw_bytes, 6) << 16 | get_byte(o.raw_bytes, 7) << 8 | get_byte(o.raw_bytes, 8)))
         WHEN position('\x0d0a0d0a'::bytea in o.raw_bytes) > 0
             THEN substring(o.raw_bytes from 1 for position('\x0d0a0d0a'::bytea in o.raw_bytes) + 3)
         WHEN position('\x0a0a'::bytea in o.raw_bytes) > 0

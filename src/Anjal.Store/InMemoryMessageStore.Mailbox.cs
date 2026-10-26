@@ -25,6 +25,33 @@ public sealed partial class InMemoryMessageStore
         }
     }
 
+    /// <summary>
+    /// rc.25: the mailbox message rows as a request holding the keys in <see cref="MailKeyring.Current"/>
+    /// reads them - subjects and text opened. Copies; provided for inspection in tests.
+    /// </summary>
+    public IReadOnlyList<MessageRow> MailboxMessagesOpened
+    {
+        get
+        {
+            lock (this.gate)
+            {
+                return this.mailboxMessages.Select(Clone).ToArray();
+            }
+        }
+    }
+
+    /// <summary>rc.25: every mailbox, for inspection in tests.</summary>
+    public IReadOnlyList<MailboxRow> AllMailboxes
+    {
+        get
+        {
+            lock (this.gate)
+            {
+                return this.mailboxes.Select(Clone).ToArray();
+            }
+        }
+    }
+
     /// <inheritdoc/>
     public Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
     {
@@ -382,6 +409,15 @@ public sealed partial class InMemoryMessageStore
         lock (this.gate)
         {
             var row = Clone(message);
+            row.Subject = message.Subject;
+            row.BodyText = message.BodyText;
+            if (this.mailboxKeys.TryGetValue(message.MailboxId, out MailboxKeyRow? keys))
+            {
+                // rc.25 (DES-15 §3): an organisation's mailbox keeps its text sealed to its key.
+                StoredText sealedText = MessageCipher.Seal(message.Subject, message.BodyText, keys.PublicKey);
+                row.Subject = sealedText.Subject;
+                row.BodyText = sealedText.BodyText;
+            }
             row.Id = System.Guid.NewGuid();
             row.ReceivedAt = this.MessageClock();
             this.mailboxMessages.Add(row);
@@ -523,12 +559,7 @@ public sealed partial class InMemoryMessageStore
             {
                 continue;
             }
-            if (q.Length == 0 ||
-                m.Subject.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
-                m.FromHeader.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
-                m.BodyText.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
-                m.ToHeader.Contains(q, System.StringComparison.OrdinalIgnoreCase) ||
-                m.EnvelopeFrom.Contains(q, System.StringComparison.OrdinalIgnoreCase))
+            if (MessageCipher.Matches(Clone(m), MessageCipher.Open(m.BodyText), q))
             {
                 matched.Add(m);
             }
@@ -844,7 +875,7 @@ public sealed partial class InMemoryMessageStore
         MessageId = m.MessageId,
         FromHeader = m.FromHeader,
         ToHeader = m.ToHeader,
-        Subject = m.Subject,
+        Subject = MessageCipher.Open(m.Subject),
         DateHeader = m.DateHeader,
         SizeBytes = m.SizeBytes,
         Seen = m.Seen,
@@ -858,8 +889,8 @@ public sealed partial class InMemoryMessageStore
         ReceivedAt = m.ReceivedAt,
         CategoryId = m.CategoryId,
         HasAttachments = m.HasAttachments,
-        BodyText = m.BodyText,
-        Preview = MessageRow.PreviewOf(m.BodyText),
+        BodyText = MessageCipher.Open(m.BodyText),
+        Preview = MessageRow.PreviewOf(MessageCipher.Open(m.BodyText)),
     };
 
     // ================= Categories (v0.15.0) =================
@@ -1047,7 +1078,7 @@ public sealed partial class InMemoryMessageStore
                 .Where(m => m.MailboxId == mailboxId && m.ReceivedAt >= periodStart && m.ReceivedAt < periodEnd)
                 .OrderByDescending(m => m.ReceivedAt)
                 .Take(System.Math.Max(0, limit))
-                .Select(m => new MessageFact(m.Id, folders.TryGetValue(m.FolderId, out string? name) ? name : "Unknown", m.FromHeader, m.ToHeader, m.EnvelopeFrom, m.Subject,
+                .Select(m => new MessageFact(m.Id, folders.TryGetValue(m.FolderId, out string? name) ? name : "Unknown", m.FromHeader, m.ToHeader, m.EnvelopeFrom, MessageCipher.Open(m.Subject),
                     m.ReceivedAt, m.Seen, m.Answered, m.HasAttachments, m.SizeBytes, m.SpamScore, m.SpamChecked, m.TransportEncrypted, m.CategoryId))
                 .ToList();
             return Task.FromResult(list);

@@ -52,6 +52,7 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 - **OldestPendingOutboundAsync** *(method)* - When the oldest message still waiting in the outbound queue was queued (rc.14); null when none waits.
 - **RemoveOutboundContentAsync** *(method)* - v1.0.0-rc.21.1 (DEF-117, owner 16 Oct 2026, option (a)): remove the content of delivered or given-up messages that ended before a time, keeping only their header block, so the queue stops holding every message for ever while the record of who, when and what happened stays. Messages still being tried are never touched; the evidence store is not touched.
 - **ReplaceGreylistAsync** *(method)* - Replace the remembered triplets with , in one transaction.
+- **ReplaceOutboundRawAsync** *(method)* - rc.25 (DES-15 §9): keep a queued message's signed bytes in the queue (sealed like any queued message), so that a retry sends the same signed bytes without reading the evidence copy, which is sealed to the organisation and which the mail server cannot open.
 - **ReplayWebhookJobAsync** *(method)* - rc.17 (design review [7d], Replay): post a notification again - it waits to be sent now, with its tries counted afresh and a new give-up time. Returns false when it is not there or is being sent at this moment.
 - **RetryOutboundNowAsync** *(method)* - Make a waiting outbound row of this sender due now ("Try now").
 - **SaveInboundMessageAsync** *(method)* - Persist an inbound message. Returns the saved message with populated.

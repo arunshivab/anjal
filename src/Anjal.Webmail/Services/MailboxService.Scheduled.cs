@@ -81,12 +81,17 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public async Task<Guid?> UnholdAsync(Guid mailboxId, Guid heldId, CancellationToken ct = default)
     {
+        using IDisposable hold = this.UseHoldKey();
         if (!await this.IsWaitingAsync(mailboxId, heldId, ct).ConfigureAwait(false))
         {
             return null;
         }
         this.waiting.TryRemove(heldId, out _);
         MessageRow? moved = await this.MoveAsync(mailboxId, heldId, "Drafts", ct).ConfigureAwait(false);
+        if (moved is not null)
+        {
+            await this.ResealFromHoldAsync(mailboxId, moved.Id, ct).ConfigureAwait(false);
+        }
         return moved?.Id;
     }
 
@@ -100,6 +105,7 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public async Task<string?> SendHeldAsync(Guid mailboxId, Guid heldId, CancellationToken ct = default)
     {
+        using IDisposable hold = this.UseHoldKey();
         // Claimed first, so two passes never send the same message twice.
         if (!this.waiting.TryRemove(heldId, out _) && !await this.IsWaitingAsync(mailboxId, heldId, ct).ConfigureAwait(false))
         {
@@ -122,8 +128,14 @@ public sealed partial class MailboxService
         if (error is not null)
         {
             await this.MoveAsync(mailboxId, heldId, "Drafts", ct).ConfigureAwait(false);
+            await this.ResealFromHoldAsync(mailboxId, heldId, ct).ConfigureAwait(false);
             string subject = request.Subject.Trim().Length > 0 ? request.Subject.Trim() : "(no subject)";
             await this.AddNoticeAsync(mailboxId, $"\"{subject}\" was not sent: {error} It is in Drafts.", ct).ConfigureAwait(false);
+        }
+        else
+        {
+            // Sent: the waiting copy went to Trash; it is sealed to the mailbox again there.
+            await this.ResealFromHoldAsync(mailboxId, heldId, ct).ConfigureAwait(false);
         }
         return error;
     }
@@ -138,6 +150,7 @@ public sealed partial class MailboxService
     /// <param name="ct">Cancellation.</param>
     public async Task<(string? Error, Guid? Id)> RescheduleAsync(Guid mailboxId, Guid heldId, DateTimeOffset sendAt, CancellationToken ct = default)
     {
+        using IDisposable hold = this.UseHoldKey();
         ComposeRequest? request = await this.LoadComposeCopyAsync(mailboxId, heldId, ScheduledFolder, ct).ConfigureAwait(false);
         if (request is null)
         {
@@ -424,6 +437,15 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
                     {
                         Console.WriteLine($"[keys] {retired} rotated application key(s) stopped working, as planned.");
                     }
+                    // rc.25 (DES-15 §4): sessions' copies of keys go when the session's longest life is over.
+                    if (this.mail.KeyManager is Anjal.Mailbox.MailKeyManager km)
+                    {
+                        int sessionKeys = await km.Store.PurgeSessionKeysAsync(now, stoppingToken).ConfigureAwait(false);
+                        if (sessionKeys > 0)
+                        {
+                            Console.WriteLine($"[keys] {sessionKeys} ended session(s)' key copies removed.");
+                        }
+                    }
                     await this.DailyAsync(now, stoppingToken).ConfigureAwait(false);
                     // DES-11 D2: storage warnings at 80, 90 and 100%.
                     int warned = await this.mail.StorageWarningsAsync(stoppingToken).ConfigureAwait(false);
@@ -436,7 +458,9 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
 #pragma warning disable CA1031 // A failed pass is tried again on the next one; the sender never stops.
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                Console.Error.WriteLine($"[scheduled] {ex.GetType().Name}: {ex.Message}");
+                // rc.25: where it happened (the first line of Anjal's own code; no mail content is in a stack).
+                string where = ex.StackTrace?.Split('\n').Select(l => l.Trim()).FirstOrDefault(l => l.Contains("Anjal.", StringComparison.Ordinal)) ?? string.Empty;
+                Console.Error.WriteLine($"[scheduled] {ex.GetType().Name}: {ex.Message} {where}");
             }
 #pragma warning restore CA1031
             try

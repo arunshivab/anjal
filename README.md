@@ -10,6 +10,19 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.25** (26 October 2026) - Organisation-held encryption (DES-15). Every organisation's
+mail is encrypted so that Anjal's own staff, with the database, the mail folders, the evidence
+store or the backups, cannot read it: mail files, subjects, the text kept for search, previews,
+contacts, contact groups, personal templates and data downloads are sealed with keys that only the
+organisation's people open with their passwords; From and To stay visible. Each person's keys are
+made at their first sign-in; a passkey sign-in asks for the password once to open the mail. The
+administrators restore a person whose password was reset (Organisation, Encryption), print and
+type back the recovery sheet, and may switch off Anjal's break-glass key, held offline in three
+paper shares (OPS-16, the Anjal.BreakGlass tool). Mail waiting to be sent is readable only to the
+mail server, and only its record stays after delivery. While the virus scanner is down, mail with
+files is answered "try later" instead of being held. A new secret, `ANJAL_KEY_PEPPER`, is required
+in both env files (DEPLOY.md sections 4 and 13d); individuals' mail is not changed.
+
 **v1.0.0-rc.24.1** (26 October 2026) - A mail sent to oneself (kept in Sent and delivered to the
 Inbox, one Message-ID) is one mail in its conversation, not two (found by the owner on the first
 server, 26 Oct); the list's conversation count counts it once too.
@@ -892,6 +905,8 @@ Every `ANJAL_*` setting the code reads is described in this README; a test holds
 
 | Variable | Read by | Default | Values | Purpose |
 |---|---|---|---|---|
+| `ANJAL_KEY_PEPPER` | Server and Webmail | Unset: development only - a fixed value, so nothing is protected by it | 32 bytes, base64 (`openssl rand -base64 32`); the same in both env files | rc.25 (DES-15): the pepper of the organisations' mail encryption. Each person's unlock key is made from their password and this pepper, so a copy of the database alone cannot be attacked by guessing passwords; it also keys the temporary copy of a new organisation's recovery key, the webmail's key for mail waiting in Scheduled, and the address marks of encrypted contacts. **Never stored in the database** (a secret, like `ANJAL_KEK`); kept on the paper custody forms (SEC-03). Losing it locks every encrypted mailbox until each organisation's administrators restore their people; changing it does the same. |
+| `ANJAL_BREAKGLASS_KEY` | Webmail | Unset: no break-glass key on this server | The one line printed by `Anjal.BreakGlass make` (`anjal-breakglass-v1.…`) | rc.25 (DES-15 §6.3, OPS-16): Anjal's break-glass key - its public half, and its private half locked by a secret that exists only as three paper shares (the owner, Sthakitha, a bank locker). Each organisation that keeps the break-glass key on has its recovery secret sealed to it with every new recovery sheet. The line opens nothing alone; it is kept in the database the first time the webmail sees it. |
 | `ANJAL_DKIM_SEAL_KEY` | Server | `/var/lib/anjal/dkim-seal.pem` on Linux, `%LOCALAPPDATA%\Anjal\dkim-seal.pem` elsewhere | File path | The mail server's seal key (rc.15, DES-11 S6), made at the first start. Its public half is published in the database; the webmail locks every DKIM key it makes with it, and only the mail server can open them, to sign. Keys kept unlocked (or under `ANJAL_KEK`) are locked with it at start. `backup.sh` copies it to the encrypted backup. Losing it unbacked means new DKIM keys and DNS records for every domain. |
 | `ANJAL_ALLOW_PLAINTEXT_KEYS` | Both | false | `true` (case-insensitive) or anything else | When ANJAL_KEK is unset and the store is PostgreSQL, DKIM private keys are refused (API returns 409 `kek_required`; Webmail says it cannot make keys). `true` allows storing them unencrypted anyway. Has no effect when ANJAL_KEK is set or the store is in-memory. |
 | `ANJAL_API_ALLOW_NO_AUTH` | Server | false | `true` or anything else | Lets the admin API start with no ANJAL_API_TOKEN. Without it, a missing token stops the server (exit 1). Meant for local development only. Only checked when ANJAL_API_PORT > 0. |

@@ -128,6 +128,24 @@ public sealed class MaildirStore : IMaildirStore
     public string Root { get; }
 
     /// <summary>
+    /// rc.25 (DES-15 §5.2): where the public keys of organisations' mailboxes come from. When set,
+    /// a message written for a mailbox with a key is sealed to it before it touches the disk; reading
+    /// opens it with the keys of the current flow (<see cref="Anjal.Store.MailKeyring.Current"/>).
+    /// Unset (tests, development), files are written as given.
+    /// </summary>
+    public IMaildirKeyDirectory? Keys { get; set; }
+
+    /// <summary>
+    /// rc.25 (DES-15 §7.4): the webmail's own key for mail waiting in the Scheduled folder, which it
+    /// must send by itself at the time chosen, when nobody is signed in. Such mail is sealed with this
+    /// key instead of the mailbox's; it is re-sealed to the mailbox if it goes back to Drafts.
+    /// </summary>
+    public byte[]? HoldKey { get; set; }
+
+    /// <summary>The folder whose mail is sealed with <see cref="HoldKey"/>.</summary>
+    public string HoldFolder { get; set; } = "Scheduled";
+
+    /// <summary>
     /// The default Maildir root for this platform when nothing is configured:
     /// <c>/var/mail/anjal</c> on Unix, <c>%LOCALAPPDATA%\Anjal\mail</c> on Windows.
     /// </summary>
@@ -181,6 +199,13 @@ public sealed class MaildirStore : IMaildirStore
     {
         System.ArgumentNullException.ThrowIfNull(rawBytes);
         string dir = this.EnsureFolder(tenantSlug, address, folderName);
+        if (this.Keys is not null && !Anjal.Store.MailEnvelope.IsEnvelope(rawBytes) &&
+            await this.Keys.PublicKeyAsync(tenantSlug, address, ct).ConfigureAwait(false) is byte[] publicKey)
+        {
+            rawBytes = this.HoldKey is byte[] hold && string.Equals(folderName, this.HoldFolder, System.StringComparison.Ordinal)
+                ? Anjal.Store.MailEnvelope.SealWithKey(rawBytes, hold)
+                : Anjal.Store.MailEnvelope.SealToPublicKey(rawBytes, publicKey);
+        }
 
         string name = this.NextUniqueName();
         string tmpPath = System.IO.Path.Combine(dir, "tmp", name);
@@ -223,7 +248,71 @@ public sealed class MaildirStore : IMaildirStore
         {
             return null;
         }
-        return await System.IO.File.ReadAllBytesAsync(full, ct).ConfigureAwait(false);
+        byte[] stored = await System.IO.File.ReadAllBytesAsync(full, ct).ConfigureAwait(false);
+        if (!Anjal.Store.MailEnvelope.IsEnvelope(stored))
+        {
+            return stored;
+        }
+        return Anjal.Store.MailEnvelope.Open(stored, Anjal.Store.MailKeyring.Current) ?? throw new MailLockedException();
+    }
+
+    /// <summary>
+    /// The stored bytes of a message as they are on disk (an envelope for an organisation's mailbox),
+    /// for the session's housekeeping. Null when the file is gone.
+    /// </summary>
+    /// <param name="tenantSlug">Tenant directory name.</param>
+    /// <param name="address">Mailbox address.</param>
+    /// <param name="folderName">Folder name.</param>
+    /// <param name="relativePath">The relative path.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The bytes.</returns>
+    public async System.Threading.Tasks.Task<byte[]?> ReadStoredAsync(string tenantSlug, string address, string folderName, string relativePath, System.Threading.CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(relativePath);
+        if (!TrySplitRelative(relativePath, out string sub, out string name))
+        {
+            return null;
+        }
+        string full = System.IO.Path.Combine(this.FolderPath(tenantSlug, address, folderName), sub, name);
+        return System.IO.File.Exists(full) ? await System.IO.File.ReadAllBytesAsync(full, ct).ConfigureAwait(false) : null;
+    }
+
+    /// <summary>
+    /// Replace a message's stored bytes in place, under the same name (written under <c>tmp/</c> and
+    /// renamed over the old file, so a reader never sees a partial file). For sealing existing mail
+    /// (the move) and re-keying (DES-15 §5.3). False when the file is gone.
+    /// </summary>
+    /// <param name="tenantSlug">Tenant directory name.</param>
+    /// <param name="address">Mailbox address.</param>
+    /// <param name="folderName">Folder name.</param>
+    /// <param name="relativePath">The relative path.</param>
+    /// <param name="stored">The new stored bytes.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Whether it was replaced.</returns>
+    public async System.Threading.Tasks.Task<bool> ReplaceStoredAsync(string tenantSlug, string address, string folderName, string relativePath, byte[] stored, System.Threading.CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(relativePath);
+        System.ArgumentNullException.ThrowIfNull(stored);
+        if (!TrySplitRelative(relativePath, out string sub, out string name))
+        {
+            return false;
+        }
+        string dir = this.FolderPath(tenantSlug, address, folderName);
+        string full = System.IO.Path.Combine(dir, sub, name);
+        if (!System.IO.File.Exists(full))
+        {
+            return false;
+        }
+        System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, "tmp"));
+        string tmp = System.IO.Path.Combine(dir, "tmp", this.NextUniqueName());
+        await using (var fs = new System.IO.FileStream(tmp, System.IO.FileMode.CreateNew, System.IO.FileAccess.Write, System.IO.FileShare.None, 65536, useAsync: true))
+        {
+            await fs.WriteAsync(stored, ct).ConfigureAwait(false);
+            await fs.FlushAsync(ct).ConfigureAwait(false);
+            fs.Flush(flushToDisk: true);
+        }
+        System.IO.File.Move(tmp, full, overwrite: true);
+        return true;
     }
 
     /// <summary>
@@ -391,5 +480,45 @@ public sealed class MaildirStore : IMaildirStore
             }
         }
         return segment;
+    }
+}
+
+/// <summary>rc.25 (DES-15 §5.2): the public key of a mailbox, by where its Maildir is.</summary>
+public interface IMaildirKeyDirectory
+{
+    /// <summary>The mailbox's public key, or null when it has none (an individual; before its keys are made).</summary>
+    /// <param name="tenantSlug">The tenant directory name.</param>
+    /// <param name="address">The mailbox address.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The key.</returns>
+    System.Threading.Tasks.Task<byte[]?> PublicKeyAsync(string tenantSlug, string address, System.Threading.CancellationToken ct = default);
+}
+
+/// <summary>
+/// rc.25 (DES-15 §1): an organisation's mail is encrypted and this request has no key that opens it -
+/// the person is not signed in to it, their mail is locked waiting for a restore, or the work is done
+/// by Anjal itself, which never holds the key.
+/// </summary>
+public sealed class MailLockedException : System.Exception
+{
+    /// <summary>Initializes a new instance of the <see cref="MailLockedException"/> class.</summary>
+    public MailLockedException()
+        : base("This mail is encrypted and is not open here.")
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="MailLockedException"/> class.</summary>
+    /// <param name="message">The message.</param>
+    public MailLockedException(string message)
+        : base(message)
+    {
+    }
+
+    /// <summary>Initializes a new instance of the <see cref="MailLockedException"/> class.</summary>
+    /// <param name="message">The message.</param>
+    /// <param name="innerException">The cause.</param>
+    public MailLockedException(string message, System.Exception innerException)
+        : base(message, innerException)
+    {
     }
 }
