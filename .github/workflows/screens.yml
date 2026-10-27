@@ -15,7 +15,7 @@ on:
     branches: [main]
 
 # rc.15 (11 Oct 2026): the 17 checks took longer than one job may run (the first pull request
-# hit the 75-minute limit), so they run in four groups side by side. Every check is in exactly
+# hit the 75-minute limit), so they run in groups side by side (five from rc.26). Every check is in exactly
 # one group; a test (SystemWideTests) keeps it so.
 jobs:
   screens:
@@ -29,7 +29,11 @@ jobs:
           - group: menus
             checks: "noscroll,names,menus"
           - group: buttons
-            checks: "tips,close,keyboard,swap,flap,reach"
+            checks: "tips,close,keyboard,swap,flap"
+          # rc.26 (27 Oct 2026): pressing every button grew past the job's limit with the new
+          # console pages (the buttons group was cancelled at 75 minutes), so it runs on its own.
+          - group: reach
+            checks: "reach"
           - group: layout
             checks: "shrink,clip,steady,live,lineup"
           - group: look

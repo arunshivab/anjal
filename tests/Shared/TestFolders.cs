@@ -30,4 +30,37 @@ internal static class TestFolders
             }
         }
     }
+
+    /// <summary>
+    /// Delete a folder holding read-only files (the evidence store's originals): each file is made writable
+    /// first. A file that disappears meanwhile - a background writer moving it from tmp to new as the test
+    /// ends (CI, windows-latest, 27 Oct 2026) - is no failure.
+    /// </summary>
+    /// <param name="path">The folder.</param>
+    public static void DeleteReadOnly(string path)
+    {
+        for (int attempt = 1; attempt <= 10 && Directory.Exists(path); attempt++)
+        {
+            try
+            {
+                foreach (string f in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                {
+                    try
+                    {
+                        File.SetAttributes(f, FileAttributes.Normal);
+                    }
+                    catch (Exception e) when (e is FileNotFoundException || e is DirectoryNotFoundException)
+                    {
+                        // Moved or removed while we looked: nothing to make writable.
+                    }
+                }
+                break;
+            }
+            catch (Exception e) when (e is IOException || e is UnauthorizedAccessException)
+            {
+                Thread.Sleep(100 * attempt);
+            }
+        }
+        Delete(path);
+    }
 }
