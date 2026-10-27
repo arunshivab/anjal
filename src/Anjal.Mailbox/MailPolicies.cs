@@ -31,6 +31,12 @@ public sealed class OrgMailPolicy
     /// </summary>
     public bool AskBeforeFilesOutside { get; set; }
 
+    /// <summary>
+    /// rc.26 (item 80, brief 11f): the confidentiality line printed at the foot of every printed page of
+    /// the organisation's mail, for example "Confidential: for the addressee only". Empty: none.
+    /// </summary>
+    public string PrintNote { get; set; } = string.Empty;
+
     /// <summary>Read an organisation's policy; Anjal's defaults when it has set none.</summary>
     /// <param name="store">The store.</param>
     /// <param name="tenantId">The organisation.</param>

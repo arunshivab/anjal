@@ -1,3 +1,4 @@
+using System.Globalization;
 using Anjal.Store;
 
 namespace Anjal.Webmail.Services;
@@ -47,8 +48,26 @@ public sealed class MailSettings
     /// <summary>rc.22 (item 35): the browser's desktop pop-up for new mail, even when the tab is in the background; off until turned on.</summary>
     public bool DesktopNotify { get; set; }
 
-    /// <summary>rc.22 (item 35): which new mail pops up - "inbox" (every new mail in the Inbox) or "contacts" (only from saved contacts).</summary>
-    public string NotifyScope { get; set; } = "inbox";
+    private string notifyScope = "needs";
+
+    /// <summary>
+    /// Which new mail pops up: rc.26 (item 80, brief 11g) "needs" (mail that needs me - Today's Needs you),
+    /// "inbox" (all new mail), "answers" (only answers to my mail); rc.22's "contacts" reads as "needs".
+    /// </summary>
+    public string NotifyScope
+    {
+        get => this.notifyScope;
+        set => this.notifyScope = value is "inbox" or "answers" ? value : "needs";
+    }
+
+    /// <summary>rc.26 (item 80): quiet hours - no pop-ups from this time ("HH:mm", the person's clock); empty for none.</summary>
+    public string QuietFrom { get; set; } = string.Empty;
+
+    /// <summary>rc.26 (item 80): quiet hours end ("HH:mm").</summary>
+    public string QuietTo { get; set; } = string.Empty;
+
+    /// <summary>rc.26 (item 80): no pop-ups while the person's automatic reply is on.</summary>
+    public bool QuietWhileAway { get; set; } = true;
 
     /// <summary>Where Anjal opens after signing in (rc.16, design review 8): "today" (the default) or "inbox".</summary>
     public string OpenOn { get; set; } = "today";
@@ -136,23 +155,80 @@ public sealed partial class MailboxService
     public async Task<string> LandingAsync(Guid personId, CancellationToken ct = default) =>
         (await this.GetMailSettingsAsync(personId, ct).ConfigureAwait(false)).OpenOn == "inbox" ? "/folder/INBOX" : "/dashboard/today";
 
-    /// <summary>Turn "Your habits" on or off (rc.15, item 58).</summary>
-    /// <param name="mailboxId">The mailbox.</param>
-    /// <param name="on">On or off.</param>
-    /// <param name="ct">Cancellation.</param>
-    /// <returns>A task.</returns>
-    /// <summary>rc.22 (item 35): desktop notifications on or off, and their scope.</summary>
+    /// <summary>rc.22 (item 35), rc.26 (item 80): desktop notifications on or off, their scope, and quiet hours.</summary>
     /// <param name="mailboxId">The person.</param>
     /// <param name="on">Whether to show them.</param>
-    /// <param name="scope">"inbox" or "contacts".</param>
+    /// <param name="scope">"needs", "inbox", "answers", or "none" (off).</param>
+    /// <param name="quietFrom">Quiet hours from ("HH:mm"), or empty.</param>
+    /// <param name="quietTo">Quiet hours to ("HH:mm"), or empty.</param>
+    /// <param name="quietAway">Quiet while the automatic reply is on.</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>A task.</returns>
-    public async Task SetDesktopNotifyAsync(Guid mailboxId, bool on, string scope, CancellationToken ct = default)
+    public async Task SetDesktopNotifyAsync(Guid mailboxId, bool on, string scope, string? quietFrom = null, string? quietTo = null, bool? quietAway = null, CancellationToken ct = default)
     {
         MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);
-        s.DesktopNotify = on;
-        s.NotifyScope = scope == "contacts" ? "contacts" : "inbox";
+        // rc.26 (item 80): "Nothing" is the switch off.
+        s.DesktopNotify = on && scope != "none";
+        s.NotifyScope = scope is "inbox" or "answers" ? scope : "needs";
+        if (quietFrom is not null && quietTo is not null)
+        {
+            bool fine = TimeOnly.TryParseExact(quietFrom, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _) && TimeOnly.TryParseExact(quietTo, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out _);
+            s.QuietFrom = fine ? quietFrom : string.Empty;
+            s.QuietTo = fine ? quietTo : string.Empty;
+        }
+        if (quietAway is bool qa)
+        {
+            s.QuietWhileAway = qa;
+        }
         await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Whether a moment is inside quiet hours from <paramref name="from"/> to <paramref name="to"/> (they may cross midnight).</summary>
+    /// <param name="from">"HH:mm".</param>
+    /// <param name="to">"HH:mm".</param>
+    /// <param name="local">The moment in the person's clock.</param>
+    /// <returns>True when quiet.</returns>
+    public static bool InQuietHours(string from, string to, TimeOnly local)
+    {
+        if (!TimeOnly.TryParseExact(from ?? string.Empty, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out TimeOnly f)
+            || !TimeOnly.TryParseExact(to ?? string.Empty, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out TimeOnly t) || f == t)
+        {
+            return false;
+        }
+        return f < t ? local >= f && local < t : local >= f || local < t;
+    }
+
+    /// <summary>
+    /// rc.26 (item 80, brief 11g): whether the newest mail in the Inbox pops up now, by the person's
+    /// choice, quiet hours and automatic reply. Only the message's id goes back: the pop-up never shows a
+    /// subject or a name, because a screen may be seen by others.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="personId">The person (their settings).</param>
+    /// <param name="clock">The person's clock.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The id to pop up for, or null.</returns>
+    public async Task<Guid?> NotifyForAsync(Guid mailboxId, Guid personId, ZonedClock clock, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        MailSettings s = await this.GetMailSettingsAsync(personId, ct).ConfigureAwait(false);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        if (!s.DesktopNotify || InQuietHours(s.QuietFrom, s.QuietTo, TimeOnly.FromDateTime(clock.Local(now).DateTime))
+            || (s.QuietWhileAway && await this.AwayActiveAsync(personId, ct).ConfigureAwait(false) is not null))
+        {
+            return null;
+        }
+        if (await this.LatestForNotifyAsync(mailboxId, ct).ConfigureAwait(false) is not { } latest)
+        {
+            return null;
+        }
+        if (s.NotifyScope == "inbox")
+        {
+            return latest.Id;
+        }
+        TodayView today = await this.TodayAsync(mailboxId, clock, now, ct).ConfigureAwait(false);
+        TodayRow? row = today.NeedsYou.FirstOrDefault(r => r.Message.Id == latest.Id);
+        return row is null ? null : s.NotifyScope == "answers" ? (row.Reason == "answer" ? latest.Id : null) : latest.Id;
     }
 
     /// <summary>The newest message in the Inbox, for the desktop pop-up (rc.22, item 35): who, the subject, and whether the sender is a saved contact.</summary>
@@ -179,6 +255,11 @@ public sealed partial class MailboxService
         return (m.Id, who, m.Subject, contact);
     }
 
+    /// <summary>Turn "Your habits" on or off (rc.15, item 58).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="on">On or off.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
     public async Task SetHabitsAsync(Guid mailboxId, bool on, CancellationToken ct = default)
     {
         MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);

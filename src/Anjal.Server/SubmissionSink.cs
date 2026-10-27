@@ -46,6 +46,28 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
         this.clock = clock ?? (() => System.DateTimeOffset.UtcNow);
     }
 
+    // rc.26 (item 99): the organisation a submission counts against - the signed-in mailbox's, else the
+    // organisation owning the signed-in name's domain, else the envelope sender's domain's.
+    private static async System.Threading.Tasks.Task<System.Guid?> SenderTenantAsync(Anjal.Store.IMailboxStore boxes, string? user, string envelopeDomain, System.Threading.CancellationToken ct)
+    {
+        string name = user ?? string.Empty;
+        int at = name.LastIndexOf('@');
+        if (at > 0)
+        {
+            if (await boxes.GetMailboxAsync(name[..at], name[(at + 1)..], ct).ConfigureAwait(false) is Anjal.Store.MailboxRow box)
+            {
+                return box.TenantId;
+            }
+            if (await boxes.GetTenantDomainAsync(name[(at + 1)..], ct).ConfigureAwait(false) is Anjal.Store.TenantDomainRow byName)
+            {
+                return byName.TenantId;
+            }
+        }
+        return envelopeDomain.Length > 0 && await boxes.GetTenantDomainAsync(envelopeDomain, ct).ConfigureAwait(false) is Anjal.Store.TenantDomainRow byEnvelope
+            ? byEnvelope.TenantId
+            : null;
+    }
+
     /// <inheritdoc/>
     public async System.Threading.Tasks.Task<Anjal.Smtp.DeliveryResult> DeliverAsync(Anjal.Smtp.DeliveryContext ctx, System.Threading.CancellationToken ct = default)
     {
@@ -78,6 +100,29 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
             ctx = ctx.WithRawBytes(withHeader);
         }
 
+        // rc.26 (item 85, D-173): programs, scripts and disk images are refused for mail written here too,
+        // before anything is delivered or queued; the mail app shows the reason.
+        Anjal.Mime.MimeMessage? parsedForFiles = null;
+        try
+        {
+            parsedForFiles = Anjal.Mime.MimeParser.Parse(ctx.RawBytes);
+        }
+#pragma warning disable CA1031 // A message that cannot be parsed has no files to judge; it goes on as before.
+        catch (System.Exception)
+        {
+            parsedForFiles = null;
+        }
+#pragma warning restore CA1031
+        if (Anjal.Mailbox.AttachmentPolicy.RefusedInside(parsedForFiles) is string refused)
+        {
+            Anjal.Smtp.Counters.Increment("anjal_virus_refused_total");
+            return new Anjal.Smtp.DeliveryResult
+            {
+                Outcome = Anjal.Smtp.DeliveryOutcome.PermanentFailure,
+                ReplyText = refused + "; share them another way",
+            };
+        }
+
         var local = new System.Collections.Generic.List<string>();
         var external = new System.Collections.Generic.List<string>();
         foreach (string rcpt in ctx.EnvelopeTo)
@@ -90,6 +135,39 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
             {
                 external.Add(rcpt);
             }
+        }
+
+        // rc.26 (item 99, D-219): the organisation's sends per day counted on this route too; over the
+        // figure the mail app is told to try tomorrow (452), before anything is delivered or queued.
+        // The organisation is the signed-in user's (a person's address, or an application key's
+        // app-<id>@<domain>), never the envelope sender's: an empty MAIL FROM, or a sender address on
+        // another domain, must not escape the count.
+        if (external.Count > 0 && this.outbound is Anjal.Store.IMailboxStore boxes
+            && await SenderTenantAsync(boxes, ctx.AuthenticatedUser, at >= 0 ? ctx.EnvelopeFrom[(at + 1)..] : string.Empty, ct).ConfigureAwait(false) is System.Guid owner)
+        {
+            // The day's count is kept by the sender's domain, so mail to the outside must carry one of
+            // the organisation's own: an empty MAIL FROM or another domain's would not be counted.
+            string envelopeDomain = at >= 0 ? ctx.EnvelopeFrom[(at + 1)..] : string.Empty;
+            if (envelopeDomain.Length == 0 || await boxes.GetTenantDomainAsync(envelopeDomain, ct).ConfigureAwait(false) is not Anjal.Store.TenantDomainRow own || own.TenantId != owner)
+            {
+                this.log?.Invoke($"Submission: {ctx.AuthenticatedUser} sent to outside addresses from '{ctx.EnvelopeFrom}'; refused");
+                return new Anjal.Smtp.DeliveryResult
+                {
+                    Outcome = Anjal.Smtp.DeliveryOutcome.PermanentFailure,
+                    ReplyText = "Mail to outside addresses must be sent from an address of your organisation",
+                };
+            }
+        }
+        if (external.Count > 0 && this.outbound is Anjal.Store.IMailboxStore counted
+            && await SenderTenantAsync(counted, ctx.AuthenticatedUser, at >= 0 ? ctx.EnvelopeFrom[(at + 1)..] : string.Empty, ct).ConfigureAwait(false) is System.Guid payer
+            && await Anjal.Mailbox.SendingDay.RefusedAsync(counted, this.outbound, payer, external.Count, this.clock(), ct).ConfigureAwait(false) is string over)
+        {
+            this.log?.Invoke($"Submission: {over}");
+            return new Anjal.Smtp.DeliveryResult
+            {
+                Outcome = Anjal.Smtp.DeliveryOutcome.TransientFailure,
+                ReplyText = over,
+            };
         }
 
         // Local first: if it fails for a temporary reason, nothing has been
@@ -170,7 +248,8 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
         {
             return await this.localDomains.IsLocalAsync(recipient.Substring(at + 1), ct).ConfigureAwait(false);
         }
-        return this.mailboxes is not null && await this.mailboxes.ResolveAsync(recipient, ct).ConfigureAwait(false) is not null;
+        return this.mailboxes is not null && (await this.mailboxes.ResolveAsync(recipient, ct).ConfigureAwait(false) is not null
+            || await this.mailboxes.IsApplicationAddressAsync(recipient, ct).ConfigureAwait(false));
     }
 
     /// <summary>Whether the header block names a header (rc.22).</summary>

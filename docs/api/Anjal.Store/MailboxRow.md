@@ -6,8 +6,10 @@ A mailbox: a receiving identity local_part@domain belonging to a tenant. The mai
 
 ## Members
 
+- **ApplicationKind** *(field)* - The kind of an application's hidden inbox: no sign-in, no person, never inactive (D-271).
 - **DefaultQuotaBytes** *(field)* - One gibibyte - the default per-mailbox quota (owner, 10 Oct 2026, DES-11 D2).
 - **DefaultTheme** *(field)* - Default webmail theme: Anjal, the house colour of the approved boards, light (rc.15).
+- **PersonKind** *(field)* - The kind of a person's mailbox (shared mailboxes are people's mailboxes too, marked in their organisation).
 - **NormalizeTheme** *(method)* - The theme to use for a stored or remembered value: a known theme as it is; a theme name from before rc.11 converted (ink and midnight were dark, paper and postcard light); anything else the default.
 - **Address** *(property)* - The full address local_part@domain.
 - **CreatedAt** *(property)* - When the mailbox was created.
@@ -17,7 +19,9 @@ A mailbox: a receiving identity local_part@domain belonging to a tenant. The mai
 - **Domain** *(property)* - Domain of the address, lowercase. Must be a domain of the tenant.
 - **Enabled** *(property)* - When false, delivery and authentication both fail.
 - **Id** *(property)* - Identifier assigned by the store.
+- **Kind** *(property)* - rc.26: a person's mailbox ("person") or an application's hidden inbox ("application", DES-14 §13).
 - **Language** *(property)* - Webmail language (rc.11): one of .
+- **LastSignInAt** *(property)* - rc.26 (item 63, POL-01 v1.1 §4): the last sign-in - webmail, passkey or a mail app on port 587. Set to the moment of installation for every mailbox that existed before rc.26.
 - **Layout** *(property)* - Three panes, focus, or list only (rc.11).
 - **LocalPart** *(property)* - Local-part of the address, lowercase (left of "@", no "+tag").
 - **NewMailSound** *(property)* - Play a sound when new mail arrives (rc.11); on by default.

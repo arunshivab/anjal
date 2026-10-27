@@ -51,4 +51,21 @@ public sealed partial class InMemoryMessageStore
         }
         return Task.CompletedTask;
     }
+
+    /// <inheritdoc/>
+    public Task<bool> ChangeTenantDocumentAsync(System.Guid tenantId, string kind, System.Func<string?, string?> change, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(kind);
+        System.ArgumentNullException.ThrowIfNull(change);
+        lock (this.gate)
+        {
+            string? next = change(this.tenantDocuments.TryGetValue((tenantId, kind), out string? json) ? json : null);
+            if (next is null)
+            {
+                return Task.FromResult(false);
+            }
+            this.tenantDocuments[(tenantId, kind)] = next;
+            return Task.FromResult(true);
+        }
+    }
 }

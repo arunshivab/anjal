@@ -399,6 +399,7 @@ public sealed partial class InMemoryMessageStore : IMessageStore, IMailboxStore,
             {
                 found.NextAttemptAt = nextAttemptAt;
             }
+            this.OutboundEventLocked(found);
             return Task.FromResult<OutboundMessage?>(found);
         }
     }

@@ -76,27 +76,27 @@ public sealed class Rc22GapTests : IAsyncLifetime, IDisposable
         // Off by default; the toggle keeps the scope.
         Assert.False((await this.svc.GetMailSettingsAsync(this.arun.Id)).DesktopNotify);
         string settings = await client.GetStringAsync("settings/mail");
-        HttpResponseMessage saved = await Post(client, "settings/notify", Token(settings), ("on", "1"), ("scope", "contacts"), ("back", "/settings/mail"));
+        HttpResponseMessage saved = await Post(client, "settings/notify", Token(settings), ("on", "1"), ("scope", "inbox"), ("back", "/settings/mail"));
         Assert.Equal(HttpStatusCode.Redirect, saved.StatusCode);
         MailSettings after = await this.svc.GetMailSettingsAsync(this.arun.Id);
         Assert.True(after.DesktopNotify);
-        Assert.Equal("contacts", after.NotifyScope);
+        Assert.Equal("inbox", after.NotifyScope);
         settings = await client.GetStringAsync("settings/mail");
         Assert.Contains("data-notify-form", settings, StringComparison.Ordinal);
 
-        // The feed: empty Inbox gives {}, then the newest message, with the contact flag.
+        // The feed (rc.26, brief 11g): empty Inbox gives {}, then only the newest message's id - never who wrote or the subject.
         string empty = await client.GetStringAsync("api/latest");
         Assert.Equal("{}", empty);
-        await this.DeliverAsync("From: Priya <priya@gmail.test>\r\nSubject: Duty roster for Monday\r\n\r\nx\r\n", "priya@gmail.test");
-        using JsonDocument first = JsonDocument.Parse(await client.GetStringAsync("api/latest"));
-        Assert.Equal("Priya", first.RootElement.GetProperty("from").GetString());
-        Assert.Equal("Duty roster for Monday", first.RootElement.GetProperty("subject").GetString());
-        Assert.False(first.RootElement.GetProperty("contact").GetBoolean());
-        Assert.Null(await this.svc.SaveContactAsync(this.arun.Id, new Contact { FirstName = "Priya", LastName = "N", Address = "priya@gmail.test" }));
-        await this.DeliverAsync("From: Priya <priya@gmail.test>\r\nSubject: Second\r\n\r\nx\r\n", "priya@gmail.test");
-        using JsonDocument second = JsonDocument.Parse(await client.GetStringAsync("api/latest"));
-        Assert.Equal("Second", second.RootElement.GetProperty("subject").GetString());
-        Assert.True(second.RootElement.GetProperty("contact").GetBoolean());
+        MessageRow first = await this.DeliverAsync("From: Priya <priya@gmail.test>\r\nSubject: Duty roster for Monday\r\n\r\nx\r\n", "priya@gmail.test");
+        string feed = await client.GetStringAsync("api/latest");
+        using (JsonDocument doc = JsonDocument.Parse(feed))
+        {
+            Assert.Equal(first.Id, doc.RootElement.GetProperty("id").GetGuid());
+        }
+        Assert.DoesNotContain("Priya", feed, StringComparison.Ordinal);
+        Assert.DoesNotContain("Duty roster", feed, StringComparison.Ordinal);
+        // The rc.22 "contacts" choice is read as "Mail that needs me".
+        Assert.Equal("needs", new MailSettings { NotifyScope = "contacts" }.NotifyScope);
         // Nobody signed in gets nothing.
         HttpClient stranger = this.Client();
         Assert.NotEqual(HttpStatusCode.OK, (await stranger.GetAsync("api/latest")).StatusCode);

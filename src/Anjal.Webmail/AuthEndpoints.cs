@@ -1459,6 +1459,13 @@ internal static class AuthEndpoints
             Console.Error.WriteLine($"[sign-in] network not noted: {ex.GetType().Name}");
         }
 #pragma warning restore CA1031
+        // rc.26 (item 63): every sign-in counts for the inactive-account clock.
+        await http.RequestServices.GetRequiredService<MailboxService>().TouchSignInAsync(mailboxId, ct).ConfigureAwait(false);
+        // rc.26 (item 80, brief 11a): a draft kept when the last session ended opens again, for its own person only.
+        if (DraftKeeping.TakeKept(http, mailboxId) is Guid kept)
+        {
+            return "/draft/" + kept + "?kept=1";
+        }
         // rc.16 (design review 8): everyone lands on Today - or the Inbox, if they chose it.
         return await http.RequestServices.GetRequiredService<MailboxService>().LandingAsync(mailboxId, ct).ConfigureAwait(false);
     }

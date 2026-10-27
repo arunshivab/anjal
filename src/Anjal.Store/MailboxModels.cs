@@ -142,6 +142,21 @@ public sealed class MailboxRow
     /// <summary>One gibibyte - the default per-mailbox quota (owner, 10 Oct 2026, DES-11 D2).</summary>
     public const long DefaultQuotaBytes = 1L * 1024 * 1024 * 1024;
 
+    /// <summary>rc.26: a person's mailbox ("person") or an application's hidden inbox ("application", DES-14 §13).</summary>
+    public string Kind { get; set; } = PersonKind;
+
+    /// <summary>The kind of a person's mailbox (shared mailboxes are people's mailboxes too, marked in their organisation).</summary>
+    public const string PersonKind = "person";
+
+    /// <summary>The kind of an application's hidden inbox: no sign-in, no person, never inactive (D-271).</summary>
+    public const string ApplicationKind = "application";
+
+    /// <summary>
+    /// rc.26 (item 63, POL-01 v1.1 §4): the last sign-in - webmail, passkey or a mail app on port 587.
+    /// Set to the moment of installation for every mailbox that existed before rc.26.
+    /// </summary>
+    public System.DateTimeOffset LastSignInAt { get; set; } = System.DateTimeOffset.UtcNow;
+
     /// <summary>Identifier assigned by the store.</summary>
     public System.Guid Id { get; set; }
 
@@ -329,6 +344,19 @@ public sealed class FolderRow
 /// </summary>
 public sealed class MessageRow
 {
+    /// <summary>
+    /// rc.26 (item 73): the mailing list the message came from, as a keyed mark (an HMAC of its
+    /// List-Id with the mailbox and the pepper) - a list's identity without its readable name; empty
+    /// for mail that is not from a list.
+    /// </summary>
+    public string ListMark { get; set; } = string.Empty;
+
+    /// <summary>rc.26 (item 76): "urgent" or "routine" for a referral (its X-Anjal-Referral-Urgency header); empty otherwise.</summary>
+    public string Referral { get; set; } = string.Empty;
+
+    /// <summary>rc.26 (DES-14 §14): when an application acknowledged this mail of its inbox; null until then.</summary>
+    public System.DateTimeOffset? AcknowledgedAt { get; set; }
+
     /// <summary>Identifier assigned by the store.</summary>
     public System.Guid Id { get; set; }
 

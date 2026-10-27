@@ -73,6 +73,70 @@
     try { fn(); } catch (err) { if (window.console && window.console.error) { window.console.error(err); } }
   }
   function page(fn) { PAGE.push(fn); runSafely(fn); }
+
+  // Owner, 26 Oct 2026 (D-267): Tab goes where people type next. A container marked data-taborder
+  // lists, in order, the places people type in; Tab and Shift+Tab follow that list first, then every
+  // other control inside the container in page order, so nothing becomes unreachable.
+  (function tabOrder() {
+    var TABBABLE = "a[href], button, input:not([type=hidden]), select, textarea, summary, iframe, [contenteditable='true'], [tabindex]";
+    function usable(el) {
+      return el && !el.disabled && (el.tabIndex >= 0 || (el.isContentEditable && el.getAttribute("tabindex") !== "-1")) && el.offsetParent !== null && !el.closest("[hidden], template, [inert]") &&
+        !(el.type === "radio" && !el.checked && el.form && $$("input[type=radio][name='" + el.name + "']", el.form).some(function (r) { return r.checked; }));
+    }
+    function orderOf(box) {
+      var list = [];
+      (box.getAttribute("data-taborder") || "").split(",").forEach(function (sel) {
+        sel = sel.trim();
+        if (!sel) { return; }
+        var hit = $$(sel, box).filter(usable)[0];
+        if (hit && list.indexOf(hit) < 0) { list.push(hit); }
+      });
+      $$(TABBABLE, box).forEach(function (el) { if (usable(el) && list.indexOf(el) < 0) { list.push(el); } });
+      return list;
+    }
+    // The whole page's Tab order: page order, with each marked container's own order in its place.
+    function sequence() {
+      var seq = [];
+      var done = [];
+      $$(TABBABLE).filter(usable).forEach(function (el) {
+        var box = el.closest("[data-taborder]");
+        if (!box) { seq.push(el); return; }
+        if (done.indexOf(box) >= 0) { return; }
+        done.push(box);
+        orderOf(box).forEach(function (x) { seq.push(x); });
+      });
+      return seq;
+    }
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Tab" || e.altKey || e.ctrlKey || e.metaKey || e.defaultPrevented) { return; }
+      if (!document.querySelector("[data-taborder]")) { return; }
+      var seq = sequence();
+      var at = seq.indexOf(e.target);
+      if (at < 0) { return; }
+      e.preventDefault();
+      // The next one that really takes focus (a control may refuse it); round from the other end at the edge.
+      var step = e.shiftKey ? -1 : 1;
+      for (var n = 1; n <= seq.length; n++) {
+        var el = seq[(at + step * n + seq.length * 2) % seq.length];
+        el.focus();
+        if (document.activeElement === el) { return; }
+      }
+    });
+  })();
+  // rc.26 (item 80, brief 11a): the session ended while writing - what is written is kept as a draft
+  // with the page's keep token (no session needed), and signing in again opens it.
+  window.anjalKeepDraft = function (form) {
+    var body = new FormData(form);
+    body.delete("attachments");
+    body.delete("__RequestVerificationToken");
+    body.set("keep", form.getAttribute("data-keep") || "");
+    var has = ["to", "subject", "body"].some(function (n) { var v = body.get(n); return v && String(v).trim(); });
+    if (!has) { return Promise.resolve(false); }
+    return fetch("/draft/keep", { method: "POST", body: body, credentials: "same-origin", headers: { "X-Requested-With": "anjal" } })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { return !!(d && d.id); })
+      .catch(function () { return false; });
+  };
   // The tab's own icon (the mark with the letter of the language shown): used for notifications.
   function anjalIcon() { var l = document.querySelector("link[rel='icon']"); return l ? l.href : "/logos/anjal-favicon-latn.svg"; }
 
@@ -178,6 +242,8 @@
       busy = ctl;
       var method = (init && init.method) || "GET";
       document.documentElement.classList.add("swapping");
+      // rc.26 (item 46): a list that takes longer than 300 ms shows grey rows where it will be.
+      var rows = method === "GET" ? window.setTimeout(function () { if (busy === ctl) { document.documentElement.classList.add("loading-rows"); } }, 300) : 0;
       return fetch(url, {
         method: method,
         body: init && init.body,
@@ -195,6 +261,10 @@
             return;
           }
           return saveFile(r);
+        }
+        // rc.26 (item 80): a compose form sent after the session ended - keep it, then sign in.
+        if (method !== "GET" && r.redirected && /\/sign-in/.test(r.url) && init && init.form && init.form.hasAttribute("data-compose")) {
+          return window.anjalKeepDraft(init.form).then(function () { window.location.href = "/sign-in?kept=1"; });
         }
         return r.text().then(function (html) {
           var to = method === "GET" || r.redirected ? r.url : window.location.href;
@@ -215,7 +285,8 @@
         if (window.anjalPaint) { window.anjalPaint(false); }
         offlineNote();
       }).then(function () {
-        if (busy === ctl) { busy = null; document.documentElement.classList.remove("swapping"); }
+        if (rows) { window.clearTimeout(rows); }
+        if (busy === ctl) { busy = null; document.documentElement.classList.remove("swapping", "loading-rows"); }
       });
     }
     function link(href) {
@@ -240,7 +311,7 @@
         go(u.href, null, { push: true });
         return;
       }
-      go(new URL(action, window.location.href).href, { method: "POST", body: enctype === "multipart/form-data" ? data : new URLSearchParams(data) }, { push: true });
+      go(new URL(action, window.location.href).href, { method: "POST", body: enctype === "multipart/form-data" ? data : new URLSearchParams(data), form: form }, { push: true });
     }
     function swappable(form, submitter) {
       if (form.hasAttribute("data-noswap") || attr(form, submitter, "target", "formtarget") || (attr(form, submitter, "method", "formmethod") || "").toLowerCase() === "dialog") { return false; }
@@ -658,11 +729,18 @@
       body.delete("attachments");   // files are only sent when the user presses Send or Save draft
       saving = true;
       fetch("/draft", { method: "POST", body: body, headers: { "X-Requested-With": "anjal" } })
-        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (r) {
+          // rc.26 (item 80): the session has ended - keep what is written and go to sign in.
+          if (r.redirected && /\/sign-in/.test(r.url)) {
+            return window.anjalKeepDraft(form).then(function () { window.location.href = "/sign-in?kept=1"; return null; });
+          }
+          return r.ok ? r.json() : null;
+        })
         .then(function (data) {
           saving = false;
           if (!data || !data.id) { return; }
           idField.value = data.id;
+          if (data.keep) { form.setAttribute("data-keep", data.keep); }
           dirty = false;
           state.innerHTML = "";
           var dot = document.createElement("i");
@@ -1661,7 +1739,7 @@
     scope.on(document, "keydown", function (e) {
       if (e.key === "Escape") {
         if (window.location.hash === "#shortcuts") { e.preventDefault(); window.location.hash = "close"; return; }
-        if (typing(e.target)) { return; }
+        if (typing(e.target) || e.defaultPrevented) { return; }
         var url = new URL(window.location.href);
         if (url.searchParams.has("open")) { url.searchParams.delete("open"); window.location.href = url.pathname + url.search; return; }
         var back = $(".focusbar a");
@@ -2518,7 +2596,10 @@
     }
 
     // rc.22 (item 35): the desktop pop-up for new mail, from the tab that listens, when the person
-    // turned it on and the browser allowed it. "contacts" pops up only mail from saved contacts.
+    // turned it on and the browser allowed it. rc.26 (item 80, brief 11g): the server says whether this
+    // mail pops up (the person's choice, quiet hours, automatic reply); the pop-up never shows a name or
+    // a subject - only "New mail" - and several mails within a minute make one pop-up with their count.
+    var burst = { n: 0, since: 0 };
     function popUp() {
       var scope = bar.getAttribute("data-notify") || "";
       if (!scope || !("Notification" in window) || Notification.permission !== "granted" || document.visibilityState === "visible" && document.hasFocus()) { return; }
@@ -2526,10 +2607,14 @@
         .then(function (r) { return r.ok ? r.json() : null; })
         .then(function (m) {
           if (!m || !m.id) { return; }
-          if (scope === "contacts" && !m.contact) { return; }
-          // rc.23: the icon is the tab's own, with the letter of the language shown.
-          var n = new Notification(m.from || "Anjal", { body: m.subject || "", tag: "anjal-" + m.id, icon: anjalIcon() });
-          n.onclick = function () { window.focus(); window.location.href = "/message/" + m.id; n.close(); };
+          var now = Date.now();
+          if (now - burst.since > 60000) { burst = { n: 0, since: now }; }
+          burst.n++;
+          var body = burst.n > 1 ? (bar.getAttribute("data-word-newmails") || "{n} new mails").replace("{n}", String(burst.n)) : (bar.getAttribute("data-word-newmail") || "New mail");
+          // rc.23: the icon is the tab's own, with the letter of the language shown. One tag: a newer pop-up replaces the last.
+          var n = new Notification("Anjal", { body: body, tag: "anjal-new", renotify: true, icon: anjalIcon() });
+          var open = burst.n > 1 ? "/folder/INBOX" : "/message/" + m.id;
+          n.onclick = function () { window.focus(); window.location.href = open; n.close(); };
         })
         .catch(function () { /* nothing to show */ });
     }
@@ -2651,6 +2736,35 @@
       area.hidden = true;
       area.setAttribute("aria-hidden", "true");
 
+      // Owner, 26 Oct 2026 (D-267): Tab goes where people type next. The formatting bar is one stop
+      // reached from the text with Alt+F10; the arrow keys move along it; Escape returns to the text.
+      function barItems() {
+        return $$("button, select, summary", bar).filter(function (el) { return !el.disabled && el.offsetParent !== null; });
+      }
+      function tameBar() { $$("button, select, summary", bar).forEach(function (el) { el.tabIndex = -1; }); }
+      tameBar();
+      bar.setAttribute("aria-keyshortcuts", "Alt+F10");
+      editor.setAttribute("aria-keyshortcuts", "Alt+F10");
+      editor.addEventListener("keydown", function (e) {
+        if (e.key === "F10" && e.altKey) {
+          e.preventDefault();
+          remember();
+          var items = barItems();
+          if (items.length) { items[0].focus(); }
+        }
+      });
+      bar.addEventListener("keydown", function (e) {
+        if (e.key !== "ArrowRight" && e.key !== "ArrowLeft" && e.key !== "Home" && e.key !== "End") { return; }
+        if (e.target && e.target.tagName === "SELECT" && (e.key === "ArrowUp" || e.key === "ArrowDown")) { return; }
+        var items = barItems();
+        var at = items.indexOf(document.activeElement);
+        if (at < 0) { return; }
+        e.preventDefault();
+        var next = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + (e.key === "ArrowRight" ? 1 : -1) + items.length) % items.length;
+        items[next].focus();
+      });
+      bar.addEventListener("toggle", tameBar, true);
+
       // The whole mail's background lives on one wrapper inside the editor.
       function mailBgWrap() {
         var first = editor.firstElementChild;
@@ -2753,7 +2867,8 @@
         d.addEventListener("toggle", function () { if (d.open) { remember(); closePops(d); } });
       });
       scope.on(document, "click", function (e) { if (!bar.contains(e.target)) { closePops(null); } });
-      bar.addEventListener("keydown", function (e) { if (e.key === "Escape") { closePops(null); restore(); } });
+      // Escape returns to the text; it must not also leave the page (escapeGoesBack).
+      bar.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); closePops(null); restore(); } });
 
       function run(cmd, val, pic, name) {
         restore();
@@ -3011,13 +3126,22 @@
       box.appendChild(input);
     }
     box.appendChild(btn);
+    // Owner, 26 Oct 2026 (D-267): the eye is not a Tab stop - Tab goes from the password to the button
+    // that sends it; Alt+F8 shows or hides the password from the keyboard.
+    btn.tabIndex = -1;
+    btn.setAttribute("aria-keyshortcuts", "Alt+F8");
+    btn.setAttribute("title", btn.getAttribute("title") + " (Alt+F8)");
+    input.setAttribute("aria-keyshortcuts", "Alt+F8");
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "F8" && e.altKey) { e.preventDefault(); btn.click(); }
+    });
     btn.addEventListener("click", function () {
       var show = input.type === "password";
       input.type = show ? "text" : "password";
       btn.setAttribute("aria-pressed", show ? "true" : "false");
       var word = btn.getAttribute(show ? "data-hide" : "data-show");
       btn.setAttribute("aria-label", word);
-      btn.setAttribute("title", word);
+      btn.setAttribute("title", word + " (Alt+F8)");
       input.focus();
     });
     // Hidden again before the form is sent, so the browser keeps treating it as a password.
@@ -3497,7 +3621,14 @@
         body.delete("attachments");
         var has = ["to", "subject", "body"].some(function (n) { var v = body.get(n); return v && String(v).trim(); });
         if (has) {
-          fetch("/draft", { method: "POST", body: body, headers: { "X-Requested-With": "anjal" } }).then(done, done);
+          // rc.26 (item 80, brief 11a): the draft opens again when the person signs in next.
+          fetch("/draft", { method: "POST", body: body, headers: { "X-Requested-With": "anjal" } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (d) {
+              var me = bar.getAttribute("data-me") || "";
+              if (d && d.id && me) { document.cookie = "anjal-kept=" + me.replace(/-/g, "") + ":" + String(d.id).replace(/-/g, "") + "; path=/; max-age=86400; samesite=lax" + (location.protocol === "https:" ? "; secure" : ""); }
+            })
+            .then(done, done);
           return;
         }
       }

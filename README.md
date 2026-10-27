@@ -10,6 +10,20 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.26** (27 October 2026) - The application API (DES-14 §28) and the people's rc.26 items.
+Applications such as Lipi send through `/api/v1` with an HTTP key (sandbox keys `ak_test_` send
+nothing), optional request signing (required for patient data), Allowed from ranges, per-hour and
+per-day limits, idempotent retries, batches, templates and evidence; they follow each mail through
+its status, events and signed webhooks, and receive mail to their own addresses encrypted to their
+key. Bounces come back to `bounce+<id>@` on the organisation's domain, its `bounce.` subdomain or
+Anjal's own (`ANJAL_BOUNCE_DOMAIN`); hard bounces and complaints go on the do-not-send list. The
+`Anjal.Client` package wraps the API for .NET. For people: a person leaving (sign-in stopped, reply,
+forward, mail handed over through the recovery key), eDiscovery productions for legal holds,
+inactive mailboxes (POL-01 v1.1), notifications with quiet hours, mailing-list cards and "after my
+leave", referrals on Today, rule match counts, program and disk-image checks for mail written
+inside, one daily sending figure for every route, and help in five languages as drafts. The
+database gains five tables; run `tools/sql/schema.sql` (DEPLOY.md section 13d).
+
 **v1.0.0-rc.25** (26 October 2026) - Organisation-held encryption (DES-15). Every organisation's
 mail is encrypted so that Anjal's own staff, with the database, the mail folders, the evidence
 store or the backups, cannot read it: mail files, subjects, the text kept for search, previews,
@@ -914,6 +928,8 @@ Every `ANJAL_*` setting the code reads is described in this README; a test holds
 | `ANJAL_CLAMAV` | Server and Webmail | Unset: no scanning; files are delivered as they come | `host:port` (for example `127.0.0.1:3310`) or the path of clamd's Unix socket (`/var/run/clamav/clamd.ctl`), trimmed | rc.22 (item 39): the ClamAV daemon that scans every file on incoming mail (zINSTREAM). Programs and scripts are refused at SMTP (550), an infected file is removed and the subject says so, disk images go to Junk; while clamd does not answer, mail with files is held in the Quarantine folder and scanned again every five minutes, with the operator reminded every thirty. |
 | `ANJAL_LINK_BLOCKLIST` | Webmail | Unset: off | Path of a text file: one host name (`bad.example`, which also covers its subdomains) or one address beginning `http://` or `https://` per line; `#` starts a comment. Read again within a minute of changing | rc.24 (item 94): the operator's list of known dangerous links. A link in a mail that goes there is switched off when the mail is shown, with a warning; the words stay. Off by default: the free lists do not allow use in a paid service (abuse.ch URLhaus, Spamhaus, SURBL, URIBL; checked 25 Oct 2026). |
 | `ANJAL_LINK_DNSBL` | Webmail | Unset: off | A DNS list zone for domain names, trimmed (for example a paid Spamhaus DQS zone) | rc.24 (item 94): each link's host name is looked up as `<host>.<zone>`; an answer in 127.0.0.0/8 (not 127.255.255.x) switches the link off. Only the domain name leaves the server; answers are kept for an hour; no answer within 1.5 seconds counts as not listed. |
+| `ANJAL_REPUTATION_BARRACUDA` | Webmail | Unset: off | `on` | rc.26 (item 96, D-212): the operator's Reputation tile also asks Barracuda (`b.barracudacentral.org`). Barracuda answers only resolvers registered with it (free registration); turn it on once this server's resolver is registered. SpamCop is always asked; Spamhaus is not asked automatically (its free lists are for non-commercial use only) — the tile links to its lookup page, to Google Postmaster Tools and to Microsoft SNDS. |
+| `ANJAL_BOUNCE_DOMAIN` | Webmail | `bounce.` and the parent of the server's host name (`bounce.anjal.co.in` for `mail.anjal.co.in`) | A domain name, trimmed, lower case | rc.26 (DES-14 §17, D-229): Anjal's own return domain for application sends whose sending domain has neither its MX at Anjal nor the optional `bounce.<domain>` record. Its DNS (`bounce MX 10 <mail host>` and `bounce TXT "v=spf1 ip4:<server> -all"`) is the operator's; DEPLOY 13d has the set. |
 | `ANJAL_SHARED_DOMAIN` | Webmail | Unset: no automatic subdomains are made | A domain name, trimmed, lower case (`anjalmail.com` in production) | rc.22: Anjal's shared domain - the individuals' tenant is made on it, and every organisation created afterwards gets an automatic subdomain of it (`<slug>.<shared domain>`) beside its own domain. The DNS for it (MX, SPF, DKIM, a wildcard for the subdomains) is the operator's. |
 | `ANJAL_BACKUP_SCRATCH` | Webmail | `/var/lib/anjal/backup` (also when set to empty) | Folder path | Folder where backup copies wait before they are sent off. Webmail only measures its size for the operator capacity view; backup.sh is what actually writes there. |
 | `ANJAL_BACKUP_RETRY_WAITS` | Backup | `120 240 480 960` (set to empty: no new tries) | Seconds, separated by spaces | How long backup.sh waits before each new try after a failed run (D-88): by default 2, 4, 8 and 16 minutes, about 30 minutes in all. When the last try fails, a `failed` line is added to the status file. "Not configured" is never tried again. |

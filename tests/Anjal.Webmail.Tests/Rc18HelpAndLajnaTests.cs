@@ -65,7 +65,7 @@ public sealed class Rc18HelpAndLajnaTests : IAsyncLifetime, IDisposable
     public void TheGuide_HoldsItsPartsAndArticles_AndEveryLinkInItLeadsSomewhere()
     {
         HelpGuide guide = HelpGuide.Load();
-        Assert.Equal(11, guide.Parts.Count);
+        Assert.Equal(12, guide.Parts.Count);
         Assert.True(guide.Articles.Count >= 50, guide.Articles.Count + " articles");
         Assert.Equal(guide.Articles.Count, guide.Articles.Select(a => a.Id).Distinct().Count());
         Assert.All(guide.Articles, a =>

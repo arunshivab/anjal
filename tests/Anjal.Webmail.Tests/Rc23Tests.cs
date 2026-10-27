@@ -593,12 +593,13 @@ public sealed class Rc23Tests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
-    public async Task D171_TheWebhooksTab_SaysWebhooksAreTheOperatorsForNow()
+    public async Task D171_TheWebhooksTab_PointsToEachApplicationsApiPage()
     {
         Assert.Null(await this.svc.SetAdminAsync(this.sgh, this.arun.Id, true));
         HttpClient admin = this.Client();
         await SignInAsync(admin, "arun@sgh.in");
-        Assert.Contains("Webhooks are set up by the Anjal operator for now.", await admin.GetStringAsync("org/apps?tab=webhooks"), StringComparison.Ordinal);
+        // rc.26 (DES-14 §8): the webhooks are now each application's own, on its API page.
+        Assert.Contains("Each application&#x27;s webhooks for its sending events are on its Application API page.", await admin.GetStringAsync("org/apps?tab=webhooks"), StringComparison.Ordinal);
     }
 
     [Fact]

@@ -48,6 +48,7 @@ public sealed record HelpArticle(string Id, string Part, string Title, string Su
 public sealed partial class HelpGuide
 {
     private readonly Dictionary<string, HelpArticle> byId;
+    private readonly Dictionary<string, Dictionary<string, HelpArticle>> drafts = new(StringComparer.Ordinal);
 
     /// <summary>Make a guide from its parts and articles.</summary>
     /// <param name="parts">The parts, in order.</param>
@@ -59,6 +60,48 @@ public sealed partial class HelpGuide
         this.Parts = parts;
         this.Articles = articles;
         this.byId = articles.ToDictionary(a => a.Id, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// rc.26 (item 78, DES-16 §11): an article in another language - a draft, not checked by a person
+    /// yet, as the word list's - or null when it has none. Everything but the words is the English one's.
+    /// </summary>
+    /// <param name="id">The article.</param>
+    /// <param name="language">ta, ml, hi, mr or gu.</param>
+    /// <returns>The draft, or null.</returns>
+    public HelpArticle? Draft(string? id, string? language) =>
+        id is not null && language is not null && this.drafts.TryGetValue(language, out Dictionary<string, HelpArticle>? set) && set.TryGetValue(id, out HelpArticle? a) ? a : null;
+
+    /// <summary>The languages that have drafts.</summary>
+    public IReadOnlyCollection<string> DraftLanguages => this.drafts.Keys;
+
+    /// <summary>Add one language's drafts (from Resources/Help/&lt;language&gt;.preview.json).</summary>
+    /// <param name="language">The language.</param>
+    /// <param name="json">The drafts: {"articles": [{id, title, summary, steps, tip, line, org}]}.</param>
+    public void AddDrafts(string language, JsonElement json)
+    {
+        ArgumentNullException.ThrowIfNull(language);
+        var set = new Dictionary<string, HelpArticle>(StringComparer.Ordinal);
+        foreach (JsonElement d in json.GetProperty("articles").EnumerateArray())
+        {
+            if (this.Get(Str(d, "id")) is not HelpArticle en)
+            {
+                continue;
+            }
+            List<string> steps = d.TryGetProperty("steps", out JsonElement st) && st.ValueKind == JsonValueKind.Array
+                ? st.EnumerateArray().Select(x => x.GetString() ?? string.Empty).ToList()
+                : new List<string>();
+            set[en.Id] = en with
+            {
+                Title = Str(d, "title") is { Length: > 0 } t ? t : en.Title,
+                Summary = Str(d, "summary") is { Length: > 0 } sm ? sm : en.Summary,
+                Steps = steps.Count == en.Steps.Count ? steps : en.Steps,
+                Tip = en.Tip is null ? null : Str(d, "tip") is { Length: > 0 } tip ? tip : en.Tip,
+                Show = en.Show is null ? null : en.Show with { Line = Str(d, "line") is { Length: > 0 } l ? l : en.Show.Line },
+                Org = en.Org is null ? null : Str(d, "org") is { Length: > 0 } o ? o : en.Org,
+            };
+        }
+        this.drafts[language] = set;
     }
 
     /// <summary>The parts, in order.</summary>
@@ -95,7 +138,15 @@ public sealed partial class HelpGuide
                 a.TryGetProperty("org", out JsonElement o) && o.ValueKind == JsonValueKind.String ? o.GetString() : null,
                 a.TryGetProperty("figure", out JsonElement f) && f.ValueKind == JsonValueKind.Object ? new HelpFigure(Str(f, "src"), Str(f, "caption")) : null));
         }
-        return new HelpGuide(parts, articles);
+        var guide = new HelpGuide(parts, articles);
+        foreach (string resource in assembly.GetManifestResourceNames().Where(n => n.Contains(".Resources.Help.", StringComparison.Ordinal) && n.EndsWith(".preview.json", StringComparison.Ordinal)))
+        {
+            string language = resource[(resource.IndexOf(".Resources.Help.", StringComparison.Ordinal) + ".Resources.Help.".Length)..^".preview.json".Length];
+            using Stream draft = assembly.GetManifestResourceStream(resource) ?? throw new InvalidOperationException("Missing help drafts " + resource);
+            using JsonDocument drafts = JsonDocument.Parse(draft);
+            guide.AddDrafts(language, drafts.RootElement);
+        }
+        return guide;
     }
 
     private static string Str(JsonElement e, string name) => e.TryGetProperty(name, out JsonElement v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? string.Empty : string.Empty;

@@ -286,6 +286,9 @@ public static class AttachmentPolicy
 
     private static readonly string[] DiskImages = { ".iso", ".img", ".vhd", ".vhdx", ".vmdk", ".dmg", ".bin", ".toast" };
 
+    // Inside an archive, ".bin" is not a disk image: Office files hold vbaProject.bin, printerSettings1.bin and the like.
+    private static readonly string[] DiskImagesInside = { ".iso", ".img", ".vhd", ".vhdx", ".vmdk", ".dmg", ".toast" };
+
     /// <summary>Whether a file name is a program or script, by its ending.</summary>
     /// <param name="fileName">The name.</param>
     /// <returns>True when refused.</returns>
@@ -295,6 +298,124 @@ public static class AttachmentPolicy
     /// <param name="fileName">The name.</param>
     /// <returns>True when sent to Junk.</returns>
     public static bool IsDiskImage(string fileName) => EndsWithOneOf(fileName, DiskImages);
+
+    /// <summary>
+    /// Whether a file's bytes are a program, whatever its name says (rc.26, item 85, D-173): a Windows
+    /// program (MZ), a Linux one (ELF), a Mac one (Mach-O), a Java class, a script that names its own
+    /// interpreter (#!), or an archive holding a program (a ZIP, a JAR among them).
+    /// </summary>
+    /// <param name="body">The file's bytes, decoded.</param>
+    /// <returns>True when it is a program.</returns>
+    public static bool IsProgramContent(byte[] body)
+    {
+        System.ArgumentNullException.ThrowIfNull(body);
+        if (body.Length < 4)
+        {
+            return false;
+        }
+        uint head = (uint)(body[0] << 24 | body[1] << 16 | body[2] << 8 | body[3]);
+        if (IsWindowsProgram(body) || head == 0x7F454C46 || head is 0xFEEDFACE or 0xFEEDFACF or 0xCEFAEDFE or 0xCFFAEDFE or 0xCAFEBABE)
+        {
+            return true;
+        }
+        if (body[0] == (byte)'#' && body[1] == (byte)'!')
+        {
+            return true;
+        }
+        IReadOnlyList<string> entries = FileRisks.ZipEntryNames(body);
+        return !IsOfficeContainer(entries) && entries.Any(n => IsProgram(n) || n.EndsWith(".class", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // A disk image inside an archive; an Office document (a ZIP with [Content_Types].xml) is not an archive here.
+    private static bool DiskImageInside(byte[] body)
+    {
+        IReadOnlyList<string> entries = FileRisks.ZipEntryNames(body);
+        return !IsOfficeContainer(entries) && entries.Any(n => EndsWithOneOf(n, DiskImagesInside));
+    }
+
+    private static bool IsOfficeContainer(IReadOnlyList<string> entries) =>
+        entries.Any(n => string.Equals(n, "[Content_Types].xml", StringComparison.OrdinalIgnoreCase));
+
+    // MZ, and the PE header it points to ("PE\0\0"): a text that happens to begin "MZ" is not one.
+    private static bool IsWindowsProgram(byte[] b)
+    {
+        if (b.Length < 0x40 || b[0] != 0x4D || b[1] != 0x5A)
+        {
+            return false;
+        }
+        int pe = b[0x3C] | (b[0x3D] << 8) | (b[0x3E] << 16) | (b[0x3F] << 24);
+        return pe > 0 && pe + 4 <= b.Length && b[pe] == (byte)'P' && b[pe + 1] == (byte)'E' && b[pe + 2] == 0 && b[pe + 3] == 0;
+    }
+
+    /// <summary>
+    /// The files of a message that are programs or scripts - by name, by content, or inside an archive
+    /// (rc.26, item 85).
+    /// </summary>
+    /// <param name="parsed">The message; null gives none.</param>
+    /// <returns>Their names.</returns>
+    public static IReadOnlyList<string> ProgramsIn(Anjal.Mime.MimeMessage? parsed)
+    {
+        if (parsed is null)
+        {
+            return Array.Empty<string>();
+        }
+        var files = new List<(Anjal.Mime.MimePart Part, Anjal.Mime.MimeMultipart? Parent, string Name)>();
+        Collect(parsed.Body, null, files);
+        return files.Where(f => IsProgram(f.Name) || IsProgramContent(f.Part.Body)).Select(f => f.Name).ToList();
+    }
+
+    /// <summary>The files of a message that are disk images, by name or inside an archive (rc.26, item 85).</summary>
+    /// <param name="parsed">The message; null gives none.</param>
+    /// <returns>Their names.</returns>
+    public static IReadOnlyList<string> DiskImagesIn(Anjal.Mime.MimeMessage? parsed)
+    {
+        if (parsed is null)
+        {
+            return Array.Empty<string>();
+        }
+        var files = new List<(Anjal.Mime.MimePart Part, Anjal.Mime.MimeMultipart? Parent, string Name)>();
+        Collect(parsed.Body, null, files);
+        return files.Where(f => IsDiskImage(f.Name) || DiskImageInside(f.Part.Body)).Select(f => f.Name).ToList();
+    }
+
+    /// <summary>
+    /// Inside the organisation (rc.26, item 85, D-173): programs, scripts and disk images are refused
+    /// for mail written here too - webmail, a mail app on port 587, an application. Null when the
+    /// message may go; else the sentence for the sender.
+    /// </summary>
+    /// <param name="parsed">The message.</param>
+    /// <returns>The reason, or null.</returns>
+    public static string? RefusedInside(Anjal.Mime.MimeMessage? parsed)
+    {
+        List<string> names = ProgramsIn(parsed).Concat(DiskImagesIn(parsed)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return names.Count == 0 ? null : "Programs, scripts and disk images cannot be sent by mail (" + string.Join(", ", names) + ")";
+    }
+
+    /// <summary>
+    /// rc.26 (DES-14 §13, D-196): the files of a message that carry a risk the reader warns about - a
+    /// locked archive or document, or one with macros - for an application inbox's data.
+    /// </summary>
+    /// <param name="parsed">The message; null gives none.</param>
+    /// <returns>Each file's name and its risk ("encrypted" or "macros").</returns>
+    public static IReadOnlyList<(string File, string Risk)> RisksIn(Anjal.Mime.MimeMessage? parsed)
+    {
+        if (parsed is null)
+        {
+            return Array.Empty<(string, string)>();
+        }
+        var files = new List<(Anjal.Mime.MimePart Part, Anjal.Mime.MimeMultipart? Parent, string Name)>();
+        Collect(parsed.Body, null, files);
+        var risks = new List<(string, string)>();
+        foreach ((Anjal.Mime.MimePart part, _, string name) in files)
+        {
+            FileRisk risk = FileRisks.Inspect(name, part.Body);
+            if (risk != FileRisk.None)
+            {
+                risks.Add((name, risk == FileRisk.Encrypted ? "encrypted" : "macros"));
+            }
+        }
+        return risks;
+    }
 
     /// <summary>The file name of a part: its Content-Disposition filename, else its Content-Type name, else empty.</summary>
     /// <param name="part">The part.</param>
@@ -331,12 +452,13 @@ public static class AttachmentPolicy
         {
             return new FileJudgement(FileVerdict.Clean, Array.Empty<string>(), string.Empty, null, 0);
         }
-        List<string> programs = files.Where(f => IsProgram(f.Name)).Select(f => f.Name).ToList();
+        // rc.26 (item 85): by content as well as by name, and inside archives.
+        List<string> programs = files.Where(f => IsProgram(f.Name) || IsProgramContent(f.Part.Body)).Select(f => f.Name).ToList();
         if (programs.Count > 0)
         {
             return new FileJudgement(FileVerdict.Refused, programs, "Programs and scripts are not accepted", null, 0);
         }
-        List<string> images = files.Where(f => IsDiskImage(f.Name)).Select(f => f.Name).ToList();
+        List<string> images = files.Where(f => IsDiskImage(f.Name) || DiskImageInside(f.Part.Body)).Select(f => f.Name).ToList();
         if (scanner is null)
         {
             return images.Count > 0

@@ -483,6 +483,24 @@ else
                 }
             </section>
 
+            @if (listCard is ListCard lc)
+            {
+                @* rc.26 (item 73): the mailing-list card - which list, how many this month, why it comes. *@
+                <section class="ecard elist" aria-label="@L["Mailing list"]">
+                    <span class="elabel">@L["Mailing list"]</span>
+                    <div class="elistname"><b>@lc.Name</b></div>
+                    <span class="elabel">@L["This month"]</span>
+                    <div>@(lc.ThisMonth == 1 ? L["1 mail from this list"] : L["{n} mails from this list"].Replace("{n}", MailboxService.Count(lc.ThisMonth), StringComparison.Ordinal))</div>
+                    <span class="elabel">@L["Why you get it"]</span>
+                    <div>@L["It was sent to {address}."].Replace("{address}", lc.SentTo, StringComparison.Ordinal)</div>
+                    @if (lc.Left is DateTimeOffset leftAt)
+                    {
+                        <span class="elabel">@L["Unsubscribed"]</span>
+                        <div>@L["You unsubscribed from this list on {date}; later mail from it goes to Junk."].Replace("{date}", clock.Date(leftAt), StringComparison.Ordinal)</div>
+                    }
+                </section>
+            }
+
             @* rc.24 (brief 10a, 10f): the envelope follows the open mail - who it answers, who else answered
                that, who answered it - then the conversation's people and all its files. *@
             @if (thread is not null && OpenMail is ThreadMail cur)
@@ -701,9 +719,9 @@ else
                         <summary class="eb" title="@L["Snooze"]"><LipiIcon Name="clock" Size="15" /><span>@(view.Folder.Name == MailboxService.SnoozedFolder ? L["Snoozed"] : L["Snooze"])</span></summary>
                         <div class="emenu" role="menu">
                             <p class="pm-head">@L["Snooze until"]</p>
-                            @foreach ((string preset, string word) in SnoozeWords)
+                            @foreach ((string preset, string word) in SnoozeWords.Where(w => w.Preset != "leave" || leaveEnd is not null))
                             {
-                                DateTimeOffset? at = MailboxService.SnoozeTime(clock, DateTimeOffset.UtcNow, preset);
+                                DateTimeOffset? at = MailboxService.SnoozeTime(clock, DateTimeOffset.UtcNow, preset, leaveEnd);
                                 <form method="post" action="/message/@Id/snooze" class="inline">
                                     <AntiforgeryToken />
                                     <input type="hidden" name="until" value="@preset" />
@@ -728,7 +746,21 @@ else
                         </div>
                     </details>
                 }
-                <a class="eb" href="/message/@Id/print" target="_blank" rel="noopener" title="@L["Print"]"><LipiIcon Name="print" Size="15" /><span>@L["Print"]</span></a>
+                @if (thread is not null && thread.Mails.Count > 1)
+                {
+                    @* rc.26 (item 80, brief 11f): this mail, or the whole conversation, oldest first. *@
+                    <details class="emore eprint">
+                        <summary class="eb" title="@L["Print"]"><LipiIcon Name="print" Size="15" /><span>@L["Print"]</span></summary>
+                        <div class="emenu" role="menu">
+                            <a role="menuitem" href="/message/@Id/print" target="_blank" rel="noopener">@L["This mail"]</a>
+                            <a role="menuitem" href="/message/@Id/print?whole=1" target="_blank" rel="noopener">@L["The whole conversation ({n} mails)"].Replace("{n}", MailboxService.Count(thread.Mails.Count), StringComparison.Ordinal)</a>
+                        </div>
+                    </details>
+                }
+                else
+                {
+                    <a class="eb" href="/message/@Id/print" target="_blank" rel="noopener" title="@L["Print"]"><LipiIcon Name="print" Size="15" /><span>@L["Print"]</span></a>
+                }
                 <details class="emore">
                     <summary class="eb" title="@L["More"]"><LipiIcon Name="more-horizontal" Size="15" /><span>@L["More"]</span></summary>
                     <div class="emenu" role="menu">
@@ -758,6 +790,8 @@ else
                             </form>
                         }
                         <a role="menuitem" href="/compose?forwardatt=@Id"><LipiIcon Name="file-attach" Size="14" />@L["Forward as attachment"]</a>
+                        @* rc.26 (item 80, brief 11e): a rule started from this mail's sender; the 30-day trial shows what it would catch before saving. *@
+                        <a role="menuitem" href="/settings/rules?rule=new&from=@Uri.EscapeDataString(SenderAddress)" title="@L["Start a rule for mail from this sender; you choose what it does and see what it would have caught."]"><LipiIcon Name="filter" Size="14" />@L["Make a rule from this mail"]</a>
                         @if (SenderAddress.Length > 0 && !senderSaved && !IsOwn)
                         {
                             @* rc.15 (owner, 7 Oct): a small window asks for the names first. *@
@@ -958,8 +992,11 @@ else
     /// <summary>rc.22 (item 51): set after Unsubscribe was pressed, to say so.</summary>
     [Parameter] public string? Unsubscribed { get; set; }
 
-    private static readonly (string Preset, string Word)[] SnoozeWords = { ("today", "Later today"), ("tomorrow", "Tomorrow"), ("weekend", "This weekend"), ("week", "Next week") };
+    // rc.26 (item 73): "After my leave" while an automatic reply with an end date is on.
+    private static readonly (string Preset, string Word)[] SnoozeWords = { ("today", "Later today"), ("tomorrow", "Tomorrow"), ("weekend", "This weekend"), ("week", "Next week"), ("leave", "After my leave") };
+    private DateTimeOffset? leaveEnd;
     private (string Mailto, string Link)? unsubscribe;
+    private ListCard? listCard;
 
     private AttachmentView? Previewed => Preview is int i && view is not null ? view.Attachments.FirstOrDefault(a => a.Index == i) : null;
 
@@ -1421,6 +1458,9 @@ else
             }
             thread = threaded;
             unsubscribe = opened.Folder.Name is "Sent" or "Drafts" ? null : await Mail.UnsubscribeOfAsync(mailboxId.Value, Id);
+            leaveEnd = await Mail.LeaveEndAsync(mailboxId.Value);
+            DateTimeOffset monthStart = MailboxService.AtLocal(clock, new DateTime(clock.Local(DateTimeOffset.UtcNow).Year, clock.Local(DateTimeOffset.UtcNow).Month, 1));
+            listCard = opened.Folder.Name is "Sent" or "Drafts" ? null : await Mail.ListCardAsync(mailboxId.Value, Id, monthStart);
             if (SenderAddress.Length > 0)
             {
                 // DES-11 F6: the contact book is the person's own, also in a shared mailbox - read and saved the same.

@@ -277,6 +277,10 @@ else
                                     <option value="tomorrow" selected>@L["Tomorrow"]</option>
                                     <option value="weekend">@L["This weekend"]</option>
                                     <option value="week">@L["Next week"]</option>
+                                    @if (leaveEnd is not null)
+                                    {
+                                        <option value="leave">@L["After my leave"]</option>
+                                    }
                                 </select>
                                 <button class="btn btn-s btn-sm" name="action" value="snooze" type="submit" data-bulkaction data-needs-server>@L["Snooze"]</button>
                             </div>
@@ -663,6 +667,9 @@ else
     }
 
     /// <summary>Today shows the clock; this week the weekday; older the date.</summary>
+    // rc.26 (item 73): when the person's leave ends, for "After my leave".
+    private DateTimeOffset? leaveEnd;
+
     protected override async Task OnParametersSetAsync()
     {
         items = null;
@@ -777,6 +784,7 @@ else
             unread = Math.Max(0, unread - 1);
         }
         categories = await Mail.ListCategoriesAsync(mailboxId.Value);
+        leaveEnd = await Mail.LeaveEndAsync(mailboxId.Value);
         trusted = await Mail.TrustedSendersAsync(mailboxId.Value);
         OfferDmarcRule = Name == FolderRow.Inbox && !Writing
             && items.Any(m => m.Subject.TrimStart().StartsWith("Report domain:", StringComparison.OrdinalIgnoreCase))

@@ -689,3 +689,98 @@ CREATE TABLE IF NOT EXISTS break_glass (
 -- v1.0.0-rc.25 (DES-15 §3): the list's preview of an encrypted mail. For an organisation's mailbox,
 -- subject, body_text and snippet hold MailEnvelope fields ("e1.…"), readable only in a session.
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS snippet TEXT NOT NULL DEFAULT '';
+
+-- rc.26 (item 73): the mailing list a message came from, as a keyed mark (HMAC of the List-Id with
+-- the mailbox and the pepper) - the list's identity without its name; "" for mail not from a list.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS list_mark TEXT NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS messages_list_mark_idx ON messages (mailbox_id, list_mark) WHERE list_mark <> '';
+-- rc.26 (item 76): "urgent" or "routine" from a referral's X-Anjal-Referral-Urgency header; "" otherwise.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS referral TEXT NOT NULL DEFAULT '';
+-- rc.26 (DES-14 §14): when an application acknowledged a mail of its inbox.
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMPTZ;
+-- rc.26 (DES-14 §13, D-271): a person's mailbox, or an application's hidden inbox.
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'person';
+-- rc.26 (item 63, POL-01 v1.1 §4): the last sign-in. Added with the moment of installation for every
+-- existing mailbox, so that nobody becomes inactive because the column is new.
+ALTER TABLE mailboxes ADD COLUMN IF NOT EXISTS last_sign_in_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- rc.26 (DES-14 §28.1): the application API.
+-- One row per send through /api/v1 (a batch item is a send). Idempotency keys are kept 24 hours,
+-- then cleared; sandbox sends are deleted after 7 days. No subject is kept (DES-14 §28.2).
+CREATE TABLE IF NOT EXISTS app_sends (
+    id               UUID PRIMARY KEY,
+    tenant_id        UUID NOT NULL,
+    app_id           TEXT NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    scheduled_at     TIMESTAMPTZ,
+    from_address     TEXT NOT NULL DEFAULT '',
+    to_addresses     TEXT NOT NULL DEFAULT '[]',
+    tags             TEXT NOT NULL DEFAULT '[]',
+    metadata         TEXT NOT NULL DEFAULT '{}',
+    idempotency_key  TEXT,
+    body_sha256      TEXT NOT NULL DEFAULT '',
+    response         TEXT NOT NULL DEFAULT '',
+    sandbox          BOOLEAN NOT NULL DEFAULT false,
+    template         TEXT NOT NULL DEFAULT '',
+    template_version INTEGER NOT NULL DEFAULT 0,
+    message_id       TEXT NOT NULL DEFAULT '',
+    status           TEXT NOT NULL DEFAULT 'queued',
+    last_event       TEXT NOT NULL DEFAULT '',
+    evidence_id      UUID
+);
+CREATE UNIQUE INDEX IF NOT EXISTS app_sends_idempotency_idx ON app_sends (app_id, idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS app_sends_app_time_idx ON app_sends (app_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS app_sends_message_id_idx ON app_sends (message_id) WHERE message_id <> '';
+ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS app_send_id UUID;
+CREATE INDEX IF NOT EXISTS outbound_messages_app_send_idx ON outbound_messages (app_send_id) WHERE app_send_id IS NOT NULL;
+
+-- Events, for /api/v1/events and the webhooks; kept 30 days.
+CREATE TABLE IF NOT EXISTS app_events (
+    seq        BIGSERIAL PRIMARY KEY,
+    id         UUID NOT NULL UNIQUE,
+    tenant_id  UUID NOT NULL,
+    app_id     TEXT NOT NULL,
+    send_id    UUID,
+    type       TEXT NOT NULL,
+    at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    data       TEXT NOT NULL DEFAULT '{}',
+    dispatched BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS app_events_app_idx ON app_events (app_id, seq);
+CREATE INDEX IF NOT EXISTS app_events_undispatched_idx ON app_events (seq) WHERE NOT dispatched;
+
+-- Each event's delivery to each webhook: retries at 1, 5 and 30 minutes, then hourly for 24 hours.
+CREATE TABLE IF NOT EXISTS app_webhook_deliveries (
+    id          UUID PRIMARY KEY,
+    event_seq   BIGINT NOT NULL,
+    app_id      TEXT NOT NULL,
+    webhook_id  TEXT NOT NULL,
+    attempts    INTEGER NOT NULL DEFAULT 0,
+    at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    code        INTEGER,
+    next_at     TIMESTAMPTZ,
+    status      TEXT NOT NULL DEFAULT 'pending',
+    error       TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS app_webhook_deliveries_due_idx ON app_webhook_deliveries (next_at) WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS app_webhook_deliveries_app_idx ON app_webhook_deliveries (app_id, at DESC);
+
+-- Signed requests seen in the last 10 minutes (DES-14 §11): a restart does not reopen the window.
+CREATE TABLE IF NOT EXISTS app_signatures_seen (
+    key_id     TEXT NOT NULL,
+    signature  TEXT NOT NULL,
+    seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (key_id, signature)
+);
+
+-- An application's inbox addresses (DES-14 §13): its hidden mailbox, and the mailbox that shares
+-- the address when the application's copy is a second one (D-227).
+CREATE TABLE IF NOT EXISTS app_inbox_addresses (
+    address            CITEXT PRIMARY KEY,
+    tenant_id          UUID NOT NULL,
+    app_id             TEXT NOT NULL,
+    mailbox_id         UUID NOT NULL,
+    shared_mailbox_id  UUID,
+    added_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS messages_acknowledged_idx ON messages (mailbox_id, received_at) WHERE acknowledged_at IS NULL;

@@ -376,6 +376,7 @@ public sealed partial class MailboxService
             InReplyTo = parsed.Headers.Get("In-Reply-To")?.Trim('<', '>', ' ') ?? string.Empty,
             References = parsed.Headers.Get("References") ?? string.Empty,
             Sender = EncodedWordDecoder.Decode(parsed.Headers.Get("Sender") ?? string.Empty),
+            Referral = Anjal.Mailbox.MailboxSink.ReferralOf(parsed),
         };
         return request;
     }

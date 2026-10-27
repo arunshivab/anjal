@@ -297,6 +297,10 @@ public static class Program
         builder.Services.AddSingleton(sp => new SessionRegistry(sp.GetRequiredService<MailboxService>()));
         builder.Services.AddSingleton(new WebmailAuthService(mailboxStore));
         builder.Services.AddHostedService(sp => new ScheduledSender(sp.GetRequiredService<MailboxService>(), OpsEndpoints.RootOf(sp.GetRequiredService<IMaildirStore>())));
+        // rc.26 (DES-14): the application API and the worker that delivers its webhooks.
+        builder.Services.AddSingleton<Anjal.Webmail.AppApi.AppApiService>();
+        builder.Services.AddSingleton<Anjal.Webmail.AppApi.AppWebhookWorker>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<Anjal.Webmail.AppApi.AppWebhookWorker>());
         builder.Services.AddSingleton(new HostInfo(hostName));
         builder.Services.AddSingleton(Words.Load());
         // rc.18 (design review section 11): the help guide, and Lajna, which reads it and the person's own mail - inside Anjal.
@@ -543,7 +547,10 @@ public static class Program
         {
             if (HttpMethods.IsPost(http.Request.Method) &&
                 http.User.Identity?.IsAuthenticated != true &&
-                !http.Request.Path.StartsWithSegments("/auth", StringComparison.OrdinalIgnoreCase))
+                !http.Request.Path.StartsWithSegments("/auth", StringComparison.OrdinalIgnoreCase) &&
+                !http.Request.Path.StartsWithSegments(Anjal.Webmail.AppApi.AppApiRoutes.Base, StringComparison.OrdinalIgnoreCase) &&
+                // rc.26 (item 80): the page whose session ended keeps its draft with its keep token.
+                !http.Request.Path.Equals("/draft/keep", StringComparison.OrdinalIgnoreCase))
             {
                 http.Response.Redirect("/sign-in?unsaved=1");
                 return;
@@ -581,6 +588,7 @@ public static class Program
         app.UseAntiforgery();
 
         MapEndpoints(app);
+        Anjal.Webmail.AppApi.AppApiEndpoints.MapAppApi(app);
         app.MapRazorComponents<App>();
 
         // Host the renewal service when configured to.
@@ -635,7 +643,9 @@ public static class Program
 
         // ---- rc.14: the organisation console and the Anjal console ----
         OrgEndpoints.Map(app);
+        OrgAppApiEndpoints.Map(app);
         OrgEncryptionEndpoints.Map(app);
+        app.MapDraftKeeping();
         OpsEndpoints.Map(app);
 
         // ---- rc.15: offline mail (item 65 b) ----
@@ -812,7 +822,7 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
-            DateTimeOffset? at = MailboxService.SnoozeTime(WebmailAuthService.ClockOf(http.User), DateTimeOffset.UtcNow, until);
+            DateTimeOffset? at = MailboxService.SnoozeTime(WebmailAuthService.ClockOf(http.User), DateTimeOffset.UtcNow, until, await svc.LeaveEndAsync(mailboxId.Value, ct).ConfigureAwait(false));
             string? error = at is null ? "Choose when it should come back." : await svc.SnoozeAsync(mailboxId.Value, id, at.Value, ct).ConfigureAwait(false);
             string target = SafeBack(back, "/folder/INBOX");
             return Results.Redirect(error is null ? target + (target.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "snoozed=1" : $"/message/{id}?error=" + Uri.EscapeDataString(error));
@@ -844,7 +854,9 @@ public static class Program
         // rc.11 (D-103): print - the letter with its envelope details. The body is
         // the same cleaned HTML the message page shows; everything else is
         // escaped; and this page's own policy allows no outside loading at all.
-        app.MapGet("/message/{id:guid}/print", async (HttpContext http, Guid id, MailboxService svc, Words words, CancellationToken ct) =>
+        // rc.26 (item 80, brief 11f): print this mail or the whole conversation; every page says who
+        // printed it and when, the mail's Message ID, and the organisation's confidentiality line.
+        app.MapGet("/message/{id:guid}/print", async (HttpContext http, Guid id, [FromQuery] string? whole, MailboxService svc, Words words, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -856,30 +868,64 @@ public static class Program
             {
                 return Results.NotFound();
             }
+            var views = new List<MessageView> { view };
+            if (whole == "1")
+            {
+                ThreadView thread = await svc.ThreadOfAsync(mailboxId.Value, view.Row, ct).ConfigureAwait(false);
+                views.Clear();
+                foreach (ThreadMail m in thread.Mails.OrderBy(m => m.At))
+                {
+                    if ((m.Id == id ? view : await svc.OpenAsync(mailboxId.Value, m.Id, allowRemoteImages: false, ct).ConfigureAwait(false)) is MessageView v)
+                    {
+                        views.Add(v);
+                    }
+                }
+                if (views.Count == 0)
+                {
+                    views.Add(view);
+                }
+            }
             Lexicon l = words.For(WebmailAuthService.LanguageOf(http.User, words));
             ZonedClock clock = WebmailAuthService.ClockOf(http.User);
+            string printedBy = await svc.PrintedByAsync(WebmailAuthService.PersonIdOf(http.User) ?? mailboxId.Value, ct).ConfigureAwait(false);
+            string note = (await svc.MailPolicyOfAsync((await svc.TenantOfAsync(mailboxId.Value, ct).ConfigureAwait(false)) ?? Guid.Empty, ct).ConfigureAwait(false)).PrintNote;
             static string E(string s) => System.Net.WebUtility.HtmlEncode(s);
             var page = new System.Text.StringBuilder();
             page.Append("<!DOCTYPE html><html lang=\"").Append(E(l.Language)).Append("\"><head><meta charset=\"utf-8\">")
                 .Append("<title>").Append(E(view.Subject)).Append(" - Anjal</title>")
                 .Append("<link rel=\"stylesheet\" href=\"/fonts/lipi.css\">")
-                .Append("<style>body{font-family:'LiPi Sans',system-ui,sans-serif;font-size:14px;line-height:1.5;margin:24px;color:#111;background:#fff}")
+                .Append("<style>body{font-family:'LiPi Sans',system-ui,sans-serif;font-size:14px;line-height:1.5;margin:24px 24px 72px;color:#111;background:#fff}")
                 .Append("h1{font-size:20px;margin:0 0 12px}table{border-collapse:collapse;margin:0 0 12px}th{text-align:left;padding:2px 12px 2px 0;color:#555;font-weight:600;vertical-align:top}")
-                .Append("td{padding:2px 0}hr{border:0;border-top:1px solid #ccc;margin:12px 0}img{max-width:100%}pre{white-space:pre-wrap;font-family:inherit}</style>")
-                .Append("</head><body data-autoprint><header><h1>").Append(E(string.IsNullOrWhiteSpace(view.Subject) ? l["(no subject)"] : view.Subject)).Append("</h1><table>");
-            void Row(string label, string value)
+                .Append("td{padding:2px 0}hr{border:0;border-top:1px solid #ccc;margin:12px 0}img{max-width:100%}pre{white-space:pre-wrap;font-family:inherit}")
+                .Append("section.pmail+section.pmail{break-before:page}")
+                .Append("footer.pfoot{position:fixed;left:0;right:0;bottom:0;padding:6px 24px;border-top:1px solid #ccc;background:#fff;font-size:11px;color:#444}footer.pfoot p{margin:0}</style>")
+                .Append("</head><body data-autoprint>");
+            foreach (MessageView v in views)
             {
-                if (value.Length > 0)
+                page.Append("<section class=\"pmail\"><header><h1>").Append(E(string.IsNullOrWhiteSpace(v.Subject) ? l["(no subject)"] : v.Subject)).Append("</h1><table>");
+                void Row(string label, string value)
                 {
-                    page.Append("<tr><th>").Append(E(label)).Append("</th><td>").Append(E(value)).Append("</td></tr>");
+                    if (value.Length > 0)
+                    {
+                        page.Append("<tr><th>").Append(E(label)).Append("</th><td>").Append(E(value)).Append("</td></tr>");
+                    }
                 }
+                Row(l["From"], v.From);
+                Row(l["To"], v.To);
+                Row(l["Cc"], v.Cc);
+                Row(l["Received"], clock.Full(v.Row.ReceivedAt));
+                Row(l["Attachments"], string.Join(", ", v.Attachments.Select(a => a.FileName)));
+                Row(l["Message ID"], v.Row.MessageId);
+                page.Append("</table></header><hr><main>").Append(v.BodyHtml).Append("</main></section>");
             }
-            Row(l["From"], view.From);
-            Row(l["To"], view.To);
-            Row(l["Cc"], view.Cc);
-            Row(l["Received"], clock.Full(view.Row.ReceivedAt));
-            Row(l["Attachments"], string.Join(", ", view.Attachments.Select(a => a.FileName)));
-            page.Append("</table></header><hr><main>").Append(view.BodyHtml).Append("</main><script src=\"/app.js\"></script></body></html>");
+            page.Append("<footer class=\"pfoot\"><p>")
+                .Append(E(l["Printed by {name} on {when}"].Replace("{name}", printedBy, StringComparison.Ordinal).Replace("{when}", clock.Full(DateTimeOffset.UtcNow), StringComparison.Ordinal)))
+                .Append(" · ").Append(E(l["Message ID"])).Append(' ').Append(E(view.Row.MessageId)).Append("</p>");
+            if (note.Length > 0)
+            {
+                page.Append("<p>").Append(E(note)).Append("</p>");
+            }
+            page.Append("</footer><script src=\"/app.js\"></script></body></html>");
             http.Response.Headers.ContentSecurityPolicy =
                 "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src data:; font-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
             return Results.Content(page.ToString(), "text/html; charset=utf-8");
@@ -960,7 +1006,7 @@ public static class Program
             else if (action == "snooze" && id.Length > 0)
             {
                 // rc.22 (item 31): the selected mail sleeps until the preset chosen.
-                DateTimeOffset? at = MailboxService.SnoozeTime(WebmailAuthService.ClockOf(http.User), DateTimeOffset.UtcNow, until ?? "tomorrow");
+                DateTimeOffset? at = MailboxService.SnoozeTime(WebmailAuthService.ClockOf(http.User), DateTimeOffset.UtcNow, until ?? "tomorrow", await svc.LeaveEndAsync(mailboxId.Value, ct).ConfigureAwait(false));
                 if (at is DateTimeOffset when)
                 {
                     foreach (Guid messageId in id.Take(200))
@@ -1184,7 +1230,7 @@ public static class Program
             return Results.Redirect("/folder/Sent?sent=1");
         }).RequireAuthorization();
 
-        app.MapPost("/draft", async (HttpContext http, [FromForm] string? to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? references, [FromForm] string? autosave, [FromForm] string? next, [FromForm] string? templates, [FromForm] string? savetemplate, [FromForm] string? expand, [FromForm] string? dock, [FromForm] string? back, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/draft", async (HttpContext http, [FromForm] string? to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? references, [FromForm] string? autosave, [FromForm] string? next, [FromForm] string? templates, [FromForm] string? savetemplate, [FromForm] string? expand, [FromForm] string? dock, [FromForm] string? back, IFormFileCollection attachments, MailboxService svc, IDataProtectionProvider dp, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -1221,7 +1267,8 @@ public static class Program
             }
             if (autosave == "1" || http.Request.Headers["X-Requested-With"] == "anjal")
             {
-                return Results.Json(new { id = saved.Value.ToString() });
+                // rc.26 (item 80): a fresh keep token with every save (DraftKeeping).
+                return Results.Json(new { id = saved.Value.ToString(), keep = DraftKeeping.Token(dp, mailboxId.Value) });
             }
             // rc.12 (item 62): Templates opens the picker over this draft;
             // "Save as template" keeps the message as one of the person's own.
@@ -1416,6 +1463,21 @@ public static class Program
             }
             bool done = await svc.CancelOutboxAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
             return Results.Redirect(done ? "/outbox?cancelled=1" : "/outbox");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        // rc.26 (item 80, brief 11c): Try all again.
+        app.MapPost("/outbox/retry-all", async (HttpContext http, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            foreach (OutboxItem o in (await svc.ListOutboxAsync(mailboxId.Value, ct).ConfigureAwait(false)).Where(o => o.Attempts > 0))
+            {
+                await svc.RetryOutboxAsync(mailboxId.Value, o.Id, ct).ConfigureAwait(false);
+            }
+            return Results.Redirect("/outbox?retrying=1");
         }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
         app.MapPost("/outbox/{id:guid}/retry", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
@@ -1837,14 +1899,14 @@ public static class Program
         }).RequireAuthorization();
 
         // rc.22 (item 35, mockup 19): desktop notifications.
-        app.MapPost("/settings/notify", async (HttpContext http, [FromForm] string? on, [FromForm] string? scope, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/settings/notify", async (HttpContext http, [FromForm] string? on, [FromForm] string? scope, [FromForm] string? quietFrom, [FromForm] string? quietTo, [FromForm] string? quietAway, [FromForm] string? quietAwaySent, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
             }
-            await svc.SetDesktopNotifyAsync(mailboxId.Value, on is "1" or "on", scope ?? "inbox", ct).ConfigureAwait(false);
+            await svc.SetDesktopNotifyAsync(mailboxId.Value, on is "1" or "on", scope ?? "needs", quietFrom ?? string.Empty, quietTo ?? string.Empty, quietAwaySent == "1" ? quietAway == "1" : null, ct).ConfigureAwait(false);
             return Results.Redirect(LocalPath.Safe(back));
         }).RequireAuthorization();
 
@@ -1855,8 +1917,9 @@ public static class Program
             {
                 return Results.Unauthorized();
             }
-            (Guid Id, string From, string Subject, bool Contact)? latest = await svc.LatestForNotifyAsync(mailboxId.Value, ct).ConfigureAwait(false);
-            return latest is null ? Results.Json(new { }) : Results.Json(new { id = latest.Value.Id, from = latest.Value.From, subject = latest.Value.Subject, contact = latest.Value.Contact });
+            // rc.26 (item 80, brief 11g): only the id, and only when the person's choice lets it pop up.
+            Guid? popUp = await svc.NotifyForAsync(mailboxId.Value, WebmailAuthService.PersonIdOf(http.User) ?? mailboxId.Value, WebmailAuthService.ClockOf(http.User), ct).ConfigureAwait(false);
+            return popUp is Guid id ? Results.Json(new { id }) : Results.Json(new { });
         }).RequireAuthorization();
 
         app.MapPost("/settings/habits", async (HttpContext http, [FromForm] string? on, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
@@ -2250,6 +2313,8 @@ public static class Program
     {
         // The formatting editor's HTML, when JavaScript is on; sanitised before use.
         request.BodyHtml = form["bodyHtml"].ToString();
+        // rc.26 (item 76): a referral carries its urgency in headers (X-Anjal-Referral-*), never a patient detail.
+        request.Referral = form["referral"].ToString() is "routine" or "urgent" ? (form["urgent"].ToString() == "1" ? "urgent" : "routine") : string.Empty;
         if (Guid.TryParse(form["carryFrom"].ToString(), out Guid from))
         {
             request.CarryFrom = from;

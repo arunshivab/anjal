@@ -122,6 +122,15 @@ public sealed class SessionRegistry : IDisposable
     private readonly MailboxService mail;
     private readonly Func<DateTimeOffset> clock;
     private readonly ConcurrentDictionary<string, Live> live = new(StringComparer.Ordinal);
+
+    // rc.26 review: when each mailbox's sessions were last ended on purpose (Sign out everywhere else,
+    // a password reset, a leaver's sign-in stopped) - a draft-keep token from before is refused.
+    private readonly ConcurrentDictionary<Guid, DateTimeOffset> endedOnPurpose = new();
+
+    /// <summary>When a mailbox's sessions were last ended on purpose, or null (since this process started).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <returns>The moment.</returns>
+    public DateTimeOffset? EndedOnPurpose(Guid mailboxId) => this.endedOnPurpose.TryGetValue(mailboxId, out DateTimeOffset at) ? at : null;
     private readonly ConcurrentDictionary<string, PendingSignIn> pending = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Approval> approvals = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, (byte[] Challenge, Guid? MailboxId, string Purpose, DateTimeOffset Expires)> challenges = new(StringComparer.Ordinal);
@@ -281,6 +290,7 @@ public sealed class SessionRegistry : IDisposable
     /// <returns>How many were signed out.</returns>
     public async Task<int> EndOthersAsync(Guid mailboxId, string? keep, CancellationToken ct = default)
     {
+        this.endedOnPurpose[mailboxId] = this.clock();
         foreach (KeyValuePair<string, Live> kv in this.live)
         {
             if (kv.Value.MailboxId == mailboxId && kv.Key != keep)

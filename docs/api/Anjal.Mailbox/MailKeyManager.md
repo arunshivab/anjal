@@ -20,6 +20,7 @@ rc.25 (DES-15): every operation on keys - making them, opening them with a passw
 - **IssueSheetAsync** *(method)* - Make a new recovery sheet (DES-15 §6.2): a new 32-byte secret wraps the recovery key; with the break-glass key switched on and made, the secret is also sealed to it (D-240). Returns the secret to show once; it is never stored.
 - **LoadSessionAsync** *(method)* - A session's keys, opened with the cookie's value; null when there are none or the cookie is wrong.
 - **NewSessionToken** *(method)* - A new random value for a session's cookie.
+- **OpenMailboxByOrgAsync** *(method)* - rc.26 (D-266): a mailbox's keys - its private key and its data key - opened with the organisation's recovery key, for eDiscovery production and a leaver's records; null when they do not open.
 - **OpenMailboxPrivateByOrgAsync** *(method)* - A mailbox's private key opened with the organisation's recovery key (restores, shared mailboxes, legal holds).
 - **OpenRecoveryAsync** *(method)* - The organisation's recovery private key for an administrator: from their own grant (opened with their mailbox key), else from the temporary copy kept until the first sheet is confirmed.
 - **OpenWithSheetAsync** *(method)* - The recovery private key from a typed sheet (no administrator left; or the break-glass secret given back to the organisation).

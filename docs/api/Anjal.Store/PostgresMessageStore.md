@@ -2,20 +2,27 @@
 
 **Namespace:** `Anjal.Store`
 
-PostgreSQL-backed implementation of . Uses Npgsql for connection management; each method opens and closes its own connection through the driver's connection pool. Connection-string is supplied at construction time.
+rc.26 (DES-14 §28.1): the application API's tables - see tools/sql/schema.sql.
 
 ## Members
 
 - **#ctor** *(method)* - Create the store with a PostgreSQL connection string.
+- **AcknowledgeAppMailAsync** *(method)* - _(no description)_
+- **AddAppEventAsync** *(method)* - _(no description)_
 - **AddEvidenceAttemptAsync** *(method)* - _(no description)_
 - **AddMailboxKeysAsync** *(method)* - _(no description)_
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
 - **AddTenantKeysAsync** *(method)* - _(no description)_
 - **AddTrustedSenderAsync** *(method)* - _(no description)_
+- **AppInboxWaitingAsync** *(method)* - _(no description)_
 - **AppendAuditAsync** *(method)* - _(no description)_
 - **CancelOutboundAsync** *(method)* - _(no description)_
+- **ChangeTenantDocumentAsync** *(method)* - _(no description)_
 - **CompleteWebhookJobAsync** *(method)* - _(no description)_
+- **CountAppOutboundElsewhereAsync** *(method)* - _(no description)_
+- **CountAppSendsAsync** *(method)* - _(no description)_
 - **CountArrivalsByHourAsync** *(method)* - _(no description)_
+- **CountListMailAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
 - **CountOutboundAsync** *(method)* - _(no description)_
 - **CountOutboundByRecipientDomainAsync** *(method)* - _(no description)_
@@ -27,6 +34,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **CountWebhookJobsAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DatabaseBytesAsync** *(method)* - _(no description)_
+- **DeleteAppSendAsync** *(method)* - _(no description)_
 - **DeleteCategoryAsync** *(method)* - _(no description)_
 - **DeleteCategoryRuleAsync** *(method)* - _(no description)_
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
@@ -46,11 +54,18 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **DeleteSmtpUserAsync** *(method)* - _(no description)_
 - **DeleteTenantAsync** *(method)* - _(no description)_
 - **DeleteTenantDomainAsync** *(method)* - _(no description)_
+- **DueAppWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **EnqueueOutboundAsync** *(method)* - _(no description)_
 - **EnqueueWebhookJobAsync** *(method)* - _(no description)_
 - **EnsureFolderAsync** *(method)* - _(no description)_
+- **FindAppSendByKeyAsync** *(method)* - _(no description)_
+- **FindAppSendByMessageIdAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
 - **GetActivityAsync** *(method)* - _(no description)_
+- **GetAppEventAsync** *(method)* - _(no description)_
+- **GetAppInboxAddressAsync** *(method)* - _(no description)_
+- **GetAppSendAsync** *(method)* - _(no description)_
+- **GetAppWebhookDeliveryAsync** *(method)* - _(no description)_
 - **GetBreakGlassAsync** *(method)* - _(no description)_
 - **GetCategoryAsync** *(method)* - _(no description)_
 - **GetDkimKeyAsync** *(method)* - _(no description)_
@@ -85,6 +100,11 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
 - **LeaseWebhookJobsAsync** *(method)* - _(no description)_
 - **LinkOutboundToSentCopyAsync** *(method)* - _(no description)_
+- **ListAppEventsAsync** *(method)* - _(no description)_
+- **ListAppInboxAddressesAsync** *(method)* - _(no description)_
+- **ListAppInboxAsync** *(method)* - _(no description)_
+- **ListAppSendsAsync** *(method)* - _(no description)_
+- **ListAppWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **ListAuditAsync** *(method)* - _(no description)_
 - **ListCategoriesAsync** *(method)* - _(no description)_
 - **ListCategoryRulesAsync** *(method)* - _(no description)_
@@ -109,6 +129,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **ListMessagesSortedAsync** *(method)* - _(no description)_
 - **ListOutboundBySendersAsync** *(method)* - _(no description)_
 - **ListOutboundForSenderAsync** *(method)* - _(no description)_
+- **ListOutboundOfAppSendAsync** *(method)* - _(no description)_
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
 - **ListSenderRulesAsync** *(method)* - _(no description)_
@@ -122,20 +143,25 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **ListWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **ListWebhookJobsAsync** *(method)* - _(no description)_
 - **MailboxPublicKeyAsync** *(method)* - A mailbox's public key, or null when it has none (cached: a key, once made, never changes; "none" is checked again after a minute).
+- **MarkAppEventDispatchedAsync** *(method)* - _(no description)_
 - **MarkEvidencePurgedAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
 - **OldestPendingOutboundAsync** *(method)* - _(no description)_
+- **PruneAppApiAsync** *(method)* - _(no description)_
 - **PurgeSessionKeysAsync** *(method)* - _(no description)_
 - **QueueSealKeyAsync** *(method)* - The mail server's seal public key for the outgoing queue (DES-15 §7.4), or null before the server has made it.
 - **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
 - **RecordKeyAsync** *(method)* - Who may read a queued message's record (DES-15 §7.4): the sending mailbox's key, else the organisation's recovery key for the sending domain (an application's mail), else nobody in particular (null - the record stays plain, as for an individual's mail).
+- **RememberSignatureAsync** *(method)* - _(no description)_
+- **RemoveAppInboxAddressAsync** *(method)* - _(no description)_
 - **RemoveOutboundContentAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
 - **ReplaceOutboundRawAsync** *(method)* - _(no description)_
 - **ReplayWebhookJobAsync** *(method)* - _(no description)_
 - **RetryOutboundNowAsync** *(method)* - _(no description)_
+- **SaveAppWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SaveBreakGlassAsync** *(method)* - _(no description)_
 - **SaveGrantAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
@@ -147,6 +173,7 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **SaveTenantKeysAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SearchMessagesAsync** *(method)* - _(no description)_
+- **SetAppInboxAddressAsync** *(method)* - _(no description)_
 - **SetEvidenceOutcomeAsync** *(method)* - _(no description)_
 - **SetMailboxDocumentAsync** *(method)* - _(no description)_
 - **SetMailboxPreferencesAsync** *(method)* - _(no description)_
@@ -157,8 +184,12 @@ PostgreSQL-backed implementation of . Uses Npgsql for connection management; eac
 - **SetServiceRecordAsync** *(method)* - _(no description)_
 - **SetSignatureAsync** *(method)* - _(no description)_
 - **SetTenantDocumentAsync** *(method)* - _(no description)_
+- **StartAppSendAsync** *(method)* - _(no description)_
 - **StartClocksForOutboundWithoutMailboxCopyAsync** *(method)* - _(no description)_
 - **SumFolderBytesAsync** *(method)* - _(no description)_
+- **TouchSignInAsync** *(method)* - _(no description)_
+- **UndispatchedAppEventsAsync** *(method)* - _(no description)_
+- **UpdateAppSendAsync** *(method)* - _(no description)_
 - **UpdateMessageTransportAsync** *(method)* - _(no description)_
 - **UpsertCategoryAsync** *(method)* - _(no description)_
 - **UpsertCategoryRuleAsync** *(method)* - _(no description)_

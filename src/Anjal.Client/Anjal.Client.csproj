@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Anjal.Client</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PackageId>Anjal.Client</PackageId>
+    <Description>The .NET client of Anjal's application API (DES-14): send, batch, status, events, the encrypted inbox, suppressions, signed requests and webhook verification. Only System.Text.Json and HttpClient.</Description>
+    <NoWarn>$(NoWarn);CA1303;CA1812;CA1515</NoWarn>
+  </PropertyGroup>
+
+</Project>

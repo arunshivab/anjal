@@ -501,26 +501,28 @@ public sealed partial class MailboxService
         ArgumentNullException.ThrowIfNull(reason);
         ArgumentNullException.ThrowIfNull(by);
         string a = address.Trim().ToLowerInvariant();
-        DoNotSendDocument doc = await DoNotSend.ReadAsync(this.store, tenant.Id, ct).ConfigureAwait(false);
-        if (remove)
+        if (!remove && (a.Length > 254 || a.IndexOf('@', StringComparison.Ordinal) <= 0 || a.EndsWith('@') || a.Contains(' ', StringComparison.Ordinal)))
         {
-            doc.Entries.RemoveAll(e => string.Equals(e.Address, a, StringComparison.OrdinalIgnoreCase));
-            doc.GaveUp.Remove(a);
+            return "Type one whole address, such as name@example.in.";
         }
-        else
+        string? error = null;
+        await DoNotSend.ChangeAsync(this.store, tenant.Id, doc =>
         {
-            if (a.Length > 254 || a.IndexOf('@', StringComparison.Ordinal) <= 0 || a.EndsWith('@') || a.Contains(' ', StringComparison.Ordinal))
+            if (remove)
             {
-                return "Type one whole address, such as name@example.in.";
+                doc.Entries.RemoveAll(e => string.Equals(e.Address, a, StringComparison.OrdinalIgnoreCase));
+                doc.GaveUp.Remove(a);
+                return true;
             }
             if (doc.Entries.Exists(e => string.Equals(e.Address, a, StringComparison.OrdinalIgnoreCase)))
             {
-                return "That address is already on the list.";
+                error = "That address is already on the list.";
+                return false;
             }
-            doc.Entries.Add(new DoNotSendEntry { Address = a, Reason = reason.Trim().Length > 0 ? reason.Trim()[..Math.Min(100, reason.Trim().Length)] : "Added by an administrator", Added = DateTimeOffset.UtcNow, By = by });
-        }
-        await DoNotSend.WriteAsync(this.store, tenant.Id, doc, ct).ConfigureAwait(false);
-        return null;
+            doc.Entries.Add(new DoNotSendEntry { Address = a, Reason = reason.Trim().Length > 0 ? reason.Trim()[..Math.Min(100, reason.Trim().Length)] : "Added by an administrator", Added = DateTimeOffset.UtcNow, By = by, Code = "manual" });
+            return true;
+        }, ct).ConfigureAwait(false);
+        return error;
     }
 
     /// <summary>

@@ -49,6 +49,11 @@
     {
         <div class="note"><LipiIcon Name="info" Size="16" /><span>@L["Your session expired. Sign in again to carry on; nothing you were reading was lost."]</span></div>
     }
+    @if (Kept is not null)
+    {
+        @* rc.26 (item 80, brief 11a): the session ended while writing; the draft opens again after signing in. *@
+        <div class="note"><LipiIcon Name="info" Size="16" /><span>@L["Your session ended while you were writing. What you wrote is kept as a draft and opens again when you sign in."]</span></div>
+    }
     @if (Ended is not null)
     {
         <div class="note"><LipiIcon Name="info" Size="16" /><span>@L["You were signed out from another device, or your password was changed. Sign in again."]</span></div>
@@ -58,7 +63,7 @@
         <div class="note n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Your password is changed. You are signed out everywhere, and every trusted device will ask for the second step once more. Sign in with the new password."]</span></div>
     }
 
-    <form method="post" action="/auth/login" class="authfields" data-signin>
+    <form method="post" action="/auth/login" class="authfields" data-signin data-taborder="#address, #password, button[type=submit]">
         <AntiforgeryToken />
         @if (Adding || SignedInAs is not null)
         {
@@ -111,6 +116,7 @@
     [SupplyParameterFromQuery] private string? Locked { get; set; }
     [SupplyParameterFromQuery] private string? Unsaved { get; set; }
     [SupplyParameterFromQuery] private string? Ended { get; set; }
+    [SupplyParameterFromQuery] private string? Kept { get; set; }
     [SupplyParameterFromQuery] private string? Reset { get; set; }
     [SupplyParameterFromQuery(Name = "u")] private string? User { get; set; }
     [SupplyParameterFromQuery(Name = "shared")] private string? Shared { get; set; }

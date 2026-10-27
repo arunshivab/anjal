@@ -24,6 +24,18 @@
         {
             <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="clock" Size="16" /><span>@L["Trying again now."]</span></div></div>
         }
+        @if (items.Count(o => o.Attempts > 0) >= 2)
+        {
+            @* rc.26 (item 80, brief 11c): one press tries every waiting message again. *@
+            <div class="notice-wrap"><div class="notice n-warn">
+                <LipiIcon Name="warning" Size="16" />
+                <span>@L["{n} messages could not be delivered yet."].Replace("{n}", items.Count(o => o.Attempts > 0).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span>
+                <form method="post" action="/outbox/retry-all" class="inline">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-s btn-sm" title="@L["Try every message that could not be delivered again now."]" data-needs-server>@L["Try all again"]</button>
+                </form>
+            </div></div>
+        }
         @if (items.Count == 0)
         {
             <p class="empty">@L["Nothing waiting. Everything you sent has been delivered."]</p>

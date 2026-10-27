@@ -308,6 +308,123 @@ public sealed class OrgApp
 
     /// <summary>When it was retired (DEF-162, rc.23): its keys were revoked and no new one can be made; null while in use.</summary>
     public DateTimeOffset? Retired { get; set; }
+
+    /// <summary>rc.26 (DES-14 §2): its HTTP keys for the application API.</summary>
+    public List<AppHttpKey> HttpKeys { get; set; } = new();
+
+    /// <summary>
+    /// rc.26 (DES-14 §4): the addresses it may send as through the API - whole addresses, or "@domain" for
+    /// any address on a domain of the organisation. Empty: the address it sends as, <see cref="SendsAs"/>.
+    /// </summary>
+    public List<string> AllowedSenders { get; set; } = new();
+
+    /// <summary>rc.26 (DES-14 §6): sends an hour (the administrator's choice, at most 2,000).</summary>
+    public int PerHour { get; set; } = 200;
+
+    /// <summary>rc.26 (DES-14 §6): sends a day (the administrator's choice, at most 20,000).</summary>
+    public int PerDay { get; set; } = 1000;
+
+    /// <summary>rc.26 (DES-14 §12): the address ranges (CIDR) requests may come from; empty for anywhere.</summary>
+    public List<string> AllowedFrom { get; set; } = new();
+
+    /// <summary>rc.26 (DES-14 §8): its webhooks, at most 5.</summary>
+    public List<AppWebhook> Webhooks { get; set; } = new();
+
+    /// <summary>rc.26 (DES-14 §11): its signing keys' public halves.</summary>
+    public List<AppSigningKey> SigningKeys { get; set; } = new();
+
+    /// <summary>rc.26 (DES-14 §11): true when every request must be signed ("Signing required").</summary>
+    public bool SigningRequired { get; set; }
+
+    /// <summary>rc.26 (DES-14 §18): its public encryption keys; new mail uses the newest.</summary>
+    public List<Anjal.Store.AppEncryptionKey> EncryptionKeys { get; set; } = new();
+
+    /// <summary>rc.26 (DES-14 §14, D-228): its inbox's storage limit, in bytes.</summary>
+    public long InboxQuotaBytes { get; set; } = Anjal.Store.AppRecords.DefaultInboxQuota;
+
+    /// <summary>rc.26 (DES-14 §13, D-271): its hidden mailbox, made with its first inbox address.</summary>
+    public Guid? InboxMailboxId { get; set; }
+
+    /// <summary>rc.26 (DES-14 §20, D-226): the patient-data mark, set and removed only by an operator.</summary>
+    public bool PatientData { get; set; }
+
+    /// <summary>Why the operator set (or last removed) the mark, and who, when.</summary>
+    public string PatientDataNote { get; set; } = string.Empty;
+
+    /// <summary>When the inbox's "not collecting" warnings went: 7 and 30 (days), so each goes once.</summary>
+    public List<int> InboxWarned { get; set; } = new();
+}
+
+/// <summary>rc.26 (DES-14 §2): an HTTP key of an application. The key itself is shown once and kept only as a salted hash.</summary>
+public sealed class AppHttpKey
+{
+    /// <summary>Its id.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>The first 8 characters of the key's SHA-256, which the console shows ever after.</summary>
+    public string Fingerprint { get; set; } = string.Empty;
+
+    /// <summary>The salted hash (PBKDF2), as SMTP keys are kept.</summary>
+    public string Hash { get; set; } = string.Empty;
+
+    /// <summary>True for a sandbox key (ak_test_): nothing it sends leaves.</summary>
+    public bool Sandbox { get; set; }
+
+    /// <summary>Where it is used, as the administrator wrote it.</summary>
+    public string Note { get; set; } = string.Empty;
+
+    /// <summary>When it was made.</summary>
+    public DateTimeOffset Created { get; set; }
+
+    /// <summary>When it stops working by itself, or null.</summary>
+    public DateTimeOffset? Expires { get; set; }
+
+    /// <summary>When it was retired, or null while live.</summary>
+    public DateTimeOffset? Retired { get; set; }
+
+    /// <summary>When it was last used.</summary>
+    public DateTimeOffset? LastUsed { get; set; }
+}
+
+/// <summary>rc.26 (DES-14 §8): a webhook of an application.</summary>
+public sealed class AppWebhook
+{
+    /// <summary>Its id.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>The https:// address.</summary>
+    public string Url { get; set; } = string.Empty;
+
+    /// <summary>The event types it takes; empty for all.</summary>
+    public List<string> Events { get; set; } = new();
+
+    /// <summary>The secret Anjal made, for the signature (shown to the administrator and returned once by the API).</summary>
+    public string Secret { get; set; } = string.Empty;
+
+    /// <summary>When it was added.</summary>
+    public DateTimeOffset Created { get; set; }
+
+    /// <summary>Since when it has been failing (24 hours of failed deliveries), or null.</summary>
+    public DateTimeOffset? FailingSince { get; set; }
+}
+
+/// <summary>rc.26 (DES-14 §11): the public half of an application's ECDSA P-256 signing key.</summary>
+public sealed class AppSigningKey
+{
+    /// <summary>"sk_" and the first 12 hex characters of the key's SHA-256.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    /// <summary>The public key, PEM.</summary>
+    public string Pem { get; set; } = string.Empty;
+
+    /// <summary>The hex SHA-256 of its DER form.</summary>
+    public string Fingerprint { get; set; } = string.Empty;
+
+    /// <summary>When it was added.</summary>
+    public DateTimeOffset Created { get; set; }
+
+    /// <summary>When it was retired, or null while live.</summary>
+    public DateTimeOffset? Retired { get; set; }
 }
 
 /// <summary>What the operator records for an organisation (rc.14, board OpsOrgs).</summary>
@@ -327,6 +444,15 @@ public sealed class OpsRecord
 
     /// <summary>When the data agreement was signed; null when not yet.</summary>
     public DateTimeOffset? AgreementSigned { get; set; }
+
+    /// <summary>rc.26 (DES-14 §9 point 4): webhooks and Allowed from ranges may use private and loopback addresses (an application on the same machine).</summary>
+    public bool AllowPrivateAddresses { get; set; }
+
+    /// <summary>rc.26 (DES-14 §6): the operator's raised ceilings for this organisation's applications; 0 keeps Anjal's (2,000 an hour, 20,000 a day).</summary>
+    public int AppHourCeiling { get; set; }
+
+    /// <summary>The day ceiling, likewise.</summary>
+    public int AppDayCeiling { get; set; }
 }
 
 /// <summary>One person in the organisation console (rc.14, board OrgPeople).</summary>

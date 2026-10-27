@@ -18,6 +18,7 @@
     <Project Path="src/Anjal.Api/Anjal.Api.csproj" />
     <Project Path="src/Anjal.Auth/Anjal.Auth.csproj" />
     <Project Path="src/Anjal.BreakGlass/Anjal.BreakGlass.csproj" />
+    <Project Path="src/Anjal.Client/Anjal.Client.csproj" />
     <Project Path="src/Anjal.Dkim/Anjal.Dkim.csproj" />
     <Project Path="src/Anjal.Dns/Anjal.Dns.csproj" />
     <Project Path="src/Anjal.Mailbox/Anjal.Mailbox.csproj" />
@@ -33,6 +34,7 @@
     <Project Path="tests/Anjal.Acme.Tests/Anjal.Acme.Tests.csproj" />
     <Project Path="tests/Anjal.Api.Tests/Anjal.Api.Tests.csproj" />
     <Project Path="tests/Anjal.Auth.Tests/Anjal.Auth.Tests.csproj" />
+    <Project Path="tests/Anjal.Client.Tests/Anjal.Client.Tests.csproj" />
     <Project Path="tests/Anjal.Dkim.Tests/Anjal.Dkim.Tests.csproj" />
     <Project Path="tests/Anjal.Dns.Tests/Anjal.Dns.Tests.csproj" />
     <Project Path="tests/Anjal.Mailbox.Tests/Anjal.Mailbox.Tests.csproj" />

@@ -474,7 +474,7 @@ ON CONFLICT (id) DO UPDATE SET public_key = EXCLUDED.public_key, private_by_secr
         while (await r.ReadAsync(ct).ConfigureAwait(false))
         {
             MessageRow row = ReadMailboxMessage(r);
-            if (MessageCipher.Matches(row, MessageCipher.Open(r.GetString(23)), query))
+            if (MessageCipher.Matches(row, MessageCipher.Open(r.GetString(26)), query))
             {
                 result.Add(row);
             }

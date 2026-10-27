@@ -7,3 +7,4 @@ rc.24 (item 93; owner, 25 Oct 2026: "Deliver with a warning"): encrypted archive
 ## Members
 
 - **Inspect** *(method)* - What to warn about for one file.
+- **ZipEntryNames** *(method)* - The names of the entries of a ZIP (rc.26, item 85); empty for anything else or a file that cannot be read.

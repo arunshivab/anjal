@@ -11,6 +11,7 @@ rc.17 (design review [7d], owner 11 Oct 2026): the do-not-send list. Addresses t
 - **Kind** *(field)* - The tenant document that holds the list.
 - **SuppressedPrefix** *(field)* - The start of LastError on a message the list held back.
 - **AppSendersAsync** *(method)* - The addresses an organisation's applications send as.
+- **ChangeAsync** *(method)* - rc.26: change an organisation's list as one step (read, change, write), so that two changes at once - a bounce report on the mail server and an unsubscribe on the webmail - never lose one.
 - **CheckAsync** *(method)* - Why a message from an application to an address must not be sent, or null to send it.
 - **HardReason** *(method)* - The reason a permanent refusal means the address is gone for good, or null when it is some other refusal (a policy, a full mailbox, a message too big) that a later message might pass.
 - **NoteFailureAsync** *(method)* - After an application's message failed for good: a hard bounce (the mailbox or the domain does not exist) adds the address at once; giving up adds it the third time.

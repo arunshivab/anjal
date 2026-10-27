@@ -70,8 +70,9 @@ jobs:
           echo "tables: $tables"
           # 20 up to rc.6; rc.7 adds mailbox_trusted_senders, greylist_entries, settings;
           # rc.8 adds evidence, evidence_attempts, evidence_manifests; rc.12 adds mailbox_documents; rc.13 tenant_documents;
-          # rc.15 adds service_records.
-          test "$tables" -eq 35
+          # rc.15 adds service_records; rc.26 adds app_sends, app_events, app_webhook_deliveries,
+          # app_signatures_seen, app_inbox_addresses (the application API, DES-14 §28).
+          test "$tables" -eq 40
           for t in mailbox_trusted_senders greylist_entries settings evidence evidence_attempts evidence_manifests mailbox_documents tenant_documents service_records; do
             PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select to_regclass('public.$t')" | grep -qx "$t"
           done

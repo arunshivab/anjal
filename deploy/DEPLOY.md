@@ -1680,6 +1680,46 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.25 to rc.26** (the application API, DES-14 §28; a person leaving, eDiscovery, inactive
+mailboxes and the other people's items): the first server goes from rc.25 straight to rc.27 (D-248);
+these steps are part of that upgrade, in this order. Backup first (section 11).
+
+1. **Anjal's own return path** (item 101, D-229) - DNS at GoDaddy, read before write. First look:
+   ```
+   pc$ nslookup -type=MX bounce.anjal.co.in 8.8.8.8
+   pc$ nslookup -type=TXT bounce.anjal.co.in 8.8.8.8
+   ```
+   Both must answer "Non-existent domain" (nothing there yet). Then add, for `anjal.co.in`:
+   `MX` host `bounce`, priority 10, value `mail.anjal.co.in`; and `TXT` host `bounce`, value
+   `v=spf1 ip4:151.185.43.171 -all`. Look again until both answer. Without them, application sends
+   from a domain whose MX is not at Anjal have no working return path and bounces are lost.
+2. The usual install, and `schema.sql` once: five new tables (`app_sends`, `app_events`,
+   `app_webhook_deliveries`, `app_signatures_seen`, `app_inbox_addresses`), `outbound_messages.app_send_id`,
+   `messages.list_mark`, `referral` and `acknowledged_at`, `mailboxes.kind` and `last_sign_in_at` -
+   40 tables in all. `last_sign_in_at` starts at the moment of the upgrade for every mailbox, so the
+   inactive clock (POL-01 v1.1 §4) runs from installation: nobody is inactive before 180 days.
+3. Restart. Check the API answers (no key: 401, and no page):
+   ```
+   vm$ curl -s -o /dev/null -w '%{http_code}\n' -X POST https://mail.anjal.co.in/api/v1/messages/email
+   vm$ curl -s https://mail.anjal.co.in/api/v1/openapi.json | head -c 200
+   ```
+4. **The `sangamid` organisation** (item 88c): OPS-14 - the organisation, its domain proved, its
+   DNS set (MX, SPF, DKIM, DMARC), then under Organisation > Applications the application `Sangam`
+   with its sending addresses, an HTTP key (shown once: hand it to Sangam's operator by the route
+   OPS-15 gives) and its Allowed from ranges. Sangam is told the API's address and the points in the
+   message of item 88e.
+5. Optional settings, off until set: `ANJAL_BOUNCE_DOMAIN` (webmail.env; default
+   `bounce.anjal.co.in`, from the host name) and `ANJAL_REPUTATION_BARRACUDA` (webmail.env, `on`
+   once the server's resolver is registered with Barracuda). Read each first:
+   `grep -E '^ANJAL_(BOUNCE_DOMAIN|REPUTATION_BARRACUDA)=' /etc/anjal/webmail.env` - nothing printed
+   means unset, which is the default and needs no change.
+
+**Check** (counts only):
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 40
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from app_sends"   # 0 until an application sends
+```
+
 **rc.24.1 to rc.25** (organisation-held encryption, DES-15): backup first (section 11) and check it
 restores. Then, in this order:
 

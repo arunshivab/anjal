@@ -54,6 +54,9 @@ internal static class OpsEndpoints
                 StorageGb = current.StorageGb,
                 SendPerDay = send,
                 AgreementSigned = agreement == "1" ? current.AgreementSigned ?? DateTimeOffset.UtcNow : null,
+                AllowPrivateAddresses = current.AllowPrivateAddresses,
+                AppHourCeiling = current.AppHourCeiling,
+                AppDayCeiling = current.AppDayCeiling,
             };
             string? error = await svc.SaveOpsRecordAsync(id, record, ct).ConfigureAwait(false);
             // DES-11 D2 (owner, 10 Oct 2026): the storage plan, applied at once to every mailbox.

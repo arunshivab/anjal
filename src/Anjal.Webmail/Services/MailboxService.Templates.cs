@@ -178,6 +178,11 @@ public sealed partial class MailboxService
         draft.Subject = TemplateCatalogue.Fill(template.Subject, values);
         draft.Body = TemplateCatalogue.Fill(template.Body, values);
         draft.BodyHtml = TemplateHtml(draft.Body, template.Background);
+        // rc.26 (item 76): the referral letter marks the mail as a referral (routine until marked urgent).
+        if (template.Key == "hospital/referral" && draft.Referral.Length == 0)
+        {
+            draft.Referral = "routine";
+        }
         draft.DraftId = draftId;
         return await this.SaveDraftAsync(mailboxId, draft, ct).ConfigureAwait(false);
     }

@@ -445,11 +445,26 @@
                         <span class="toggle" aria-hidden="true"><i></i></span>
                         <span>@L["Show a desktop notification"]</span>
                     </label>
-                    <p class="hint">@L["A small pop-up from your browser - \"Meera Iyer: Duty roster for Monday\" - even when Anjal is in another tab or the window is behind. Click it to open the mail. Your browser asks once for permission."]</p>
-                    <div class="seg" role="radiogroup">
-                        <label class="segopt"><input type="radio" name="scope" value="inbox" checked="@(mailSettings.NotifyScope != "contacts")" data-autosubmit /><span>@L["Every new mail"]</span></label>
-                        <label class="segopt"><input type="radio" name="scope" value="contacts" checked="@(mailSettings.NotifyScope == "contacts")" data-autosubmit /><span>@L["From my contacts"]</span></label>
+                    <p class="hint">@L["A small pop-up from your browser - “New mail” - even when Anjal is in another tab or the window is behind. It never shows who wrote or the subject, because others may see your screen. Click it to open the mail. Your browser asks once for permission."]</p>
+                    @* rc.26 (item 80, brief 11g): which mail, and when not. *@
+                    <div class="seg" role="radiogroup" aria-label="@L["Which mail"]">
+                        <label class="segopt"><input type="radio" name="scope" value="needs" checked="@(mailSettings.NotifyScope is "needs" or "contacts")" data-autosubmit /><span>@L["Mail that needs me"]</span></label>
+                        <label class="segopt"><input type="radio" name="scope" value="inbox" checked="@(mailSettings.NotifyScope == "inbox")" data-autosubmit /><span>@L["All new mail"]</span></label>
+                        <label class="segopt"><input type="radio" name="scope" value="answers" checked="@(mailSettings.NotifyScope == "answers")" data-autosubmit /><span>@L["Only answers to my mail"]</span></label>
                     </div>
+                    <div class="quietrow">
+                        <label class="setlbl" for="qfrom">@L["Quiet hours"]</label>
+                        <input class="inp inp-time" id="qfrom" name="quietFrom" type="time" value="@mailSettings.QuietFrom" aria-label="@L["Quiet from"]" />
+                        <span>@L["to"]</span>
+                        <input class="inp inp-time" name="quietTo" type="time" value="@mailSettings.QuietTo" aria-label="@L["Quiet until"]" />
+                        <button type="submit" class="btn btn-s btn-sm" title="@L["Keep these quiet hours; leave both empty for none."]">@L["Save"]</button>
+                    </div>
+                    <input type="hidden" name="quietAwaySent" value="1" />
+                    <label class="mtoggle">
+                        <input type="checkbox" name="quietAway" value="1" checked="@mailSettings.QuietWhileAway" data-autosubmit role="switch" />
+                        <span class="toggle" aria-hidden="true"><i></i></span>
+                        <span>@L["Quiet while my automatic reply is on"]</span>
+                    </label>
                     <p class="hint" data-notify-state hidden></p>
                     @* DEF-160 (rc.23): a test, so the person sees at once whether the browser and the computer let notifications through. *@
                     <div class="setactions"><button type="button" class="btn btn-s btn-sm" data-notify-test title="@L["Shows one notification now, to check that your browser and computer let them through."]">@L["Show a test notification"]</button></div>

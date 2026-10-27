@@ -8,6 +8,7 @@
    and drag and drop. *@
 @inject MailboxService Mail
 @inject Words Words
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider DataProtection
 
 @if (Picking && DraftId is Guid pickFor)
 {
@@ -15,8 +16,8 @@
 }
 else if (Docked)
 {
-    <form method="post" action="/compose" enctype="multipart/form-data" data-compose data-docked class="@(ReplyId is null ? "cdock cdock-new" : "cdock")" aria-label="@Title"
-          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson"
+    <form method="post" action="/compose" enctype="multipart/form-data" data-compose data-taborder="#to, #cc, #bcc, .csubject, #dsubj, [data-rte-editor], textarea[name=body]:not([hidden]), [data-send], .pcsend" data-docked class="@(ReplyId is null ? "cdock cdock-new" : "cdock")" aria-label="@Title"
+          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson" data-keep="@keepToken"
           data-word-hint="@L["Up and Down to move, Tab or Enter to choose. Chosen addresses are not offered again."]"
           data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
           data-word-sendeach="@L["Send {n} separate messages"]">
@@ -98,8 +99,8 @@ else if (Docked)
 }
 else
 {
-    <form method="post" action="/compose" enctype="multipart/form-data" data-compose class="cform"
-          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson"
+    <form method="post" action="/compose" enctype="multipart/form-data" data-compose data-taborder="#to, #cc, #bcc, .csubject, #dsubj, [data-rte-editor], textarea[name=body]:not([hidden]), [data-send], .pcsend" class="cform"
+          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson" data-keep="@keepToken"
           data-word-hint="@L["Up and Down to move, Tab or Enter to choose. Chosen addresses are not offered again."]"
           data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
           data-word-sendeach="@L["Send {n} separate messages"]">
@@ -144,6 +145,11 @@ else
             <div class="notice n-err readnotice" data-client-error hidden></div>
             @* DEF-140 (rc.23): while files go up, a moving bar says so - the page was otherwise still for seconds. *@
             <div class="uploadbar" data-uploadbar role="status" aria-live="polite" hidden><span class="ub-track" aria-hidden="true"><i></i></span><span data-uploadbar-text></span></div>
+            @if (KeptFlag is not null)
+            {
+                @* rc.26 (item 80, brief 11a). *@
+                <div class="notice n-ok readnotice"><LipiIcon Name="check" Size="16" /><span>@L["Your draft was kept when your session ended. Files added after the last save are in the earlier draft, in Drafts."]</span></div>
+            }
             @if (SavedFlag is not null && Error is null)
             {
                 <div class="notice n-ok readnotice">
@@ -192,6 +198,12 @@ else
                 <p class="cstate" data-draft-state>@(SavedFlag is not null ? L["Draft saved"] : L["Drafts are saved when you press Save draft"])</p>
                 <span class="lh-grow"></span>
                 @* rc.15 (item 63): counted on your dashboard if no answer comes within three days. *@
+                @if (referral.Length > 0)
+                {
+                    @* rc.26 (item 76): a referral; "Urgent" puts it first on the receiver's Today. *@
+                    <input type="hidden" name="referral" value="routine" />
+                    <label class="mtoggle cexpect" title="@L["Shown first on the receiver's Today, as Referral · urgent."]"><span>@L["Urgent referral"]</span><input type="checkbox" name="urgent" value="1" checked="@(referral == "urgent")" /><span class="toggle" aria-hidden="true"><i></i></span></label>
+                }
                 <label class="mtoggle cexpect" title="@L["Shown on your dashboard if no answer comes within three days."]"><span>@L["Expect a reply"]</span><input type="checkbox" name="expect" value="1" /><span class="toggle" aria-hidden="true"><i></i></span></label>
             </div>
         </section>
@@ -364,6 +376,7 @@ else
     [Parameter] public string? ReplyKind { get; set; }
 
     [SupplyParameterFromQuery(Name = "saved")] private string? SavedFlag { get; set; }
+    [SupplyParameterFromQuery(Name = "kept")] private string? KeptFlag { get; set; }
     [SupplyParameterFromQuery(Name = "undone")] private string? Undone { get; set; }
     [SupplyParameterFromQuery(Name = "templates")] private string? TemplatesFlag { get; set; }
     [SupplyParameterFromQuery(Name = "templatesaved")] private string? TemplateSaved { get; set; }
@@ -404,6 +417,8 @@ else
     private string cc = string.Empty;
     private string bcc = string.Empty;
     private string subject = string.Empty;
+    private string referral = string.Empty;
+    private string keepToken = string.Empty;
     private string body = string.Empty;
     private string bodyHtml = string.Empty;
     private string inReplyTo = string.Empty;
@@ -441,6 +456,7 @@ else
         cc = CcQuery ?? string.Empty;
         bcc = string.Empty;
         subject = SubjectQuery ?? string.Empty;
+        referral = string.Empty;
         body = BodyQuery ?? string.Empty;
         bodyHtml = string.Empty;
         inReplyTo = string.Empty;
@@ -476,6 +492,8 @@ else
             displayName = mb.DisplayName ?? string.Empty;
             orgName = context.Value.Tenant.DisplayName.Length > 0 ? context.Value.Tenant.DisplayName : context.Value.Tenant.Slug;
         }
+        // rc.26 (item 80): if the session ends while writing, this lets the page keep the draft.
+        keepToken = DraftKeeping.Token(DataProtection, mailboxId.Value);
         orgDomains = await Mail.OrganisationDomainsAsync(mailboxId.Value);
         mergeLimit = await Mail.MergeLimitForAsync(mailboxId.Value);
         mayMerge = WebmailAuthService.PersonIdOf(user) is Guid merger && await Mail.MayMergeAsync(merger);
@@ -490,6 +508,7 @@ else
                 cc = loaded.Cc;
                 bcc = loaded.Bcc;
                 subject = loaded.Subject;
+                referral = loaded.Referral;
                 body = loaded.Body;
                 bodyHtml = loaded.BodyHtml;
                 inReplyTo = loaded.InReplyTo;

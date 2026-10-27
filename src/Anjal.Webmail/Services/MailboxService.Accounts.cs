@@ -1168,6 +1168,19 @@ public sealed partial class MailboxService
         return null;
     }
 
+    /// <summary>
+    /// rc.26 (item 73): when the person's leave ends - their automatic reply is switched on (now or
+    /// from a later day) and has an Until in the future. Null otherwise, and "After my leave" is not offered.
+    /// </summary>
+    /// <param name="mailboxId">The person.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The end, or null.</returns>
+    public async Task<DateTimeOffset?> LeaveEndAsync(Guid mailboxId, CancellationToken ct = default)
+    {
+        AwayReply away = await this.AwayOfAsync(mailboxId, ct).ConfigureAwait(false);
+        return away.On && away.Until is DateTimeOffset until && until > DateTimeOffset.UtcNow ? until : null;
+    }
+
     /// <summary>Whether a person's away reply is on now (for the yellow line in the Inbox).</summary>
     /// <param name="mailboxId">The person.</param>
     /// <param name="ct">Cancellation.</param>

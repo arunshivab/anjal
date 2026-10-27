@@ -80,6 +80,41 @@ public static class FileRisks
 #pragma warning restore CA1031
     }
 
+    /// <summary>The names of the entries of a ZIP (rc.26, item 85); empty for anything else or a file that cannot be read.</summary>
+    /// <param name="body">The file's bytes.</param>
+    /// <returns>The names.</returns>
+    public static System.Collections.Generic.IReadOnlyList<string> ZipEntryNames(byte[] body)
+    {
+        System.ArgumentNullException.ThrowIfNull(body);
+        var names = new System.Collections.Generic.List<string>();
+        if (body.Length < 4 || body[0] != 0x50 || body[1] != 0x4B)
+        {
+            return names;
+        }
+        try
+        {
+            for (int p = 0; p + 30 <= body.Length && names.Count < 10000; p++)
+            {
+                if (U32(body, p) == 0x04034b50)
+                {
+                    int nameLength = U16(body, p + 26);
+                    if (p + 30 + nameLength <= body.Length)
+                    {
+                        names.Add(System.Text.Encoding.UTF8.GetString(body, p + 30, nameLength));
+                    }
+                    p += 29;
+                }
+            }
+        }
+#pragma warning disable CA1031 // A file that cannot be read gives no names.
+        catch (System.Exception)
+        {
+            names.Clear();
+        }
+#pragma warning restore CA1031
+        return names;
+    }
+
     // A ZIP: any entry with the "encrypted" flag (bit 0), or an Office part named vbaProject.bin.
     private static FileRisk InspectZip(byte[] b)
     {

@@ -22,7 +22,15 @@
                 <p class="helpcrumb"><a href="/help">@L["Help"]</a> › <a href="/help/part/@a.Part">@L[Guide.Part(a.Part)?.Title ?? string.Empty]</a></p>
                 <h1 id="h-title">@a.Title</h1>
                 @* rc.20 (owner, 14 Oct 2026): no release label under the title. *@
-                <p class="helpmeta">@L["{n} min read"].Replace("{n}", a.Minutes.ToString(Inv), StringComparison.Ordinal) · @L["In English"]</p>
+                @if (drafted)
+                {
+                    @* rc.26 (item 78): a draft in the reader's language, marked as not checked yet, with the English beside it. *@
+                    <p class="helpmeta">@L["{n} min read"].Replace("{n}", a.Minutes.ToString(Inv), StringComparison.Ordinal) · <span class="pill pill-warn">@L["Draft translation, not checked yet"]</span> · <a href="/help/@a.Id?lang=en" lang="en">@L["Read it in English"]</a></p>
+                }
+                else
+                {
+                    <p class="helpmeta">@L["{n} min read"].Replace("{n}", a.Minutes.ToString(Inv), StringComparison.Ordinal) · @L["In English"]</p>
+                }
                 <p class="helplead">@a.Summary</p>
                 @if (signedIn && a.Show is HelpShow show)
                 {
@@ -191,6 +199,10 @@ else
 
     private Lexicon L = new("en", new Dictionary<string, string>());
     private HelpArticle? article;
+    private bool drafted;
+
+    /// <summary>"en" to read an article in English when a draft in the reader's language exists.</summary>
+    [SupplyParameterFromQuery(Name = "lang")] private string? Lang { get; set; }
     private HelpPart? part;
     private IReadOnlyList<HelpArticle> found = Array.Empty<HelpArticle>();
     private IReadOnlyList<string> admins = Array.Empty<string>();
@@ -240,6 +252,12 @@ else
             }
         }
         article = Guide.Get(ArticleId);
+        drafted = false;
+        if (article is not null && L.Language != "en" && Lang != "en" && Guide.Draft(article.Id, L.Language) is HelpArticle draft)
+        {
+            article = draft;
+            drafted = true;
+        }
         part = Guide.Part(PartId);
         found = string.IsNullOrWhiteSpace(Q) ? Array.Empty<HelpArticle>() : Guide.Search(Q, 10).Select(x => x.Article).ToList();
     }

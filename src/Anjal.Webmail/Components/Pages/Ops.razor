@@ -123,6 +123,8 @@ else
                     <section class="dcard">
                         <h2>@L["Reputation"]</h2>
                         <DashLines Lines="reputation" L="L" Empty="" />
+                        @* rc.26 (item 96, D-212, D-213): the lists that may not be asked automatically, and the owner's own reports, by hand. *@
+                        <p class="dnote replinks"><a href="https://postmaster.google.com/" target="_blank" rel="noopener noreferrer">@L["Google Postmaster Tools"]</a> · <a href="https://sendersupport.olc.protection.outlook.com/snds/" target="_blank" rel="noopener noreferrer">@L["Microsoft SNDS"]</a> · <a href="https://check.spamhaus.org/" target="_blank" rel="noopener noreferrer" title="@L["Spamhaus is checked by hand: its free lists are for non-commercial use only."]">@L["Check Spamhaus by hand"]</a></p>
                     </section>
                     <section class="dcard" id="v-security">
                         <div class="dcardhead col">
@@ -448,6 +450,31 @@ else
                         <form method="post" action="/ops/orgs/@sel.Tenant.Id/suspend"><AntiforgeryToken /><button type="submit" class="btn btn-danger-q asidebtn">@L["Suspend"]</button></form>
                     }
                     <p class="asidetext">@L["Suspending stops everyone signing in and sending; their mail is kept and still received."]</p>
+                    @* rc.26 (DES-14 §9 point 4, §20): what only an operator sets for an organisation's applications. *@
+                    <h3 class="asidetitle">@L["Applications"]</h3>
+                    <form method="post" action="/ops/orgs/@sel.Tenant.Id/private-addresses" class="asideform">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="on" value="@(sel.Ops.AllowPrivateAddresses ? "0" : "1")" />
+                        <p class="asidetext">@(sel.Ops.AllowPrivateAddresses ? L["Its applications may use private and loopback addresses for webhooks and Allowed from."] : L["Its applications' webhooks and Allowed from ranges must be public addresses."])</p>
+                        <button type="submit" class="btn btn-s asidebtn" title="@L["Change which addresses this organisation's applications may use."]">@(sel.Ops.AllowPrivateAddresses ? L["Allow public addresses only"] : L["Allow private addresses"])</button>
+                    </form>
+                    @foreach (OrgApp app in selApps.Where(x => x.Retired is null))
+                    {
+                        <details class="asideconfirm">
+                            <summary class="linkbtn" title="@L["Set or remove this application's patient-data mark, with the reason."]">@app.Name · @(app.PatientData ? L["Patient data"] : L["No patient-data mark"])</summary>
+                            <form method="post" action="/ops/orgs/@sel.Tenant.Id/apps/@Uri.EscapeDataString(app.Id)/patient-data" class="asideform">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="on" value="@(app.PatientData ? "0" : "1")" />
+                                @if (app.PatientDataNote.Length > 0)
+                                {
+                                    <p class="asidetext">@app.PatientDataNote</p>
+                                }
+                                <p class="asidetext">@L["While the mark is set every request must be signed, and the activity log keeps each send's recipient domains."]</p>
+                                <input class="inp" name="reason" required minlength="5" maxlength="300" placeholder="@L["Why (for the activity log)"]" aria-label="@L["Why (for the activity log)"]" />
+                                <div class="setactions"><button type="submit" class="btn btn-s" title="@L["Every request must then be signed; the reason goes in the activity log."]">@(app.PatientData ? L["Remove the mark"] : L["Set the patient-data mark"])</button></div>
+                            </form>
+                        </details>
+                    }
                 }
             }
             else
@@ -552,6 +579,7 @@ else
     private IReadOnlyList<string>? revealed;
     private IReadOnlyList<OrgSummary> orgs = Array.Empty<OrgSummary>();
     private OrgSummary? sel;
+    private List<OrgApp> selApps = new();
     private OpsEncryption? selKeys;
     private IReadOnlyList<HealthTile> tiles = Array.Empty<HealthTile>();
     private IReadOnlyList<(DateTimeOffset Hour, long Count)> hours = Array.Empty<(DateTimeOffset, long)>();
@@ -889,6 +917,7 @@ else
         canMakeKeys = await Mail.CanMakeDkimKeysAsync();
         sel = Guid.TryParse(Sel, out Guid id) ? orgs.FirstOrDefault(o => o.Tenant.Id == id) : null;
         selKeys = sel is null ? null : await Mail.OpsEncryptionOfAsync(sel.Tenant);
+        selApps = sel is null ? new List<OrgApp>() : await Mail.AppsOfAsync(sel.Tenant.Id);
         if (Current == "overview")
         {
             await this.LoadOverviewAsync();

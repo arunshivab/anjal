@@ -1,0 +1,36 @@
+@* rc.26 (D-266): one production's state - being made, ready to download (for the administrator who asked), or what went wrong. *@
+@if (P.Error.Length > 0)
+{
+    <span class="leavedone bad"><LipiIcon Name="warning" Size="14" /> @L[P.Error]</span>
+}
+else if (P.Busy)
+{
+    <span class="leavedone"><LipiIcon Name="clock" Size="14" /> @L["Being made; you are mailed when it is ready."]</span>
+}
+else if (P.Ready(DateTimeOffset.UtcNow) && P.By == Me)
+{
+    <span class="leavedone"><LipiIcon Name="check" Size="14" /> @L["{n} mails, ready until {date}"].Replace("{n}", MailboxService.Count(P.Mails), StringComparison.Ordinal).Replace("{date}", Clock.Date(P.ReadyAt!.Value + ExportState.Life), StringComparison.Ordinal)</span>
+    <a class="btn btn-s" href="/org/productions/@P.Id/download" download>@L["Download"]</a>
+}
+else if (P.Ready(DateTimeOffset.UtcNow))
+{
+    <span class="leavedone"><LipiIcon Name="check" Size="14" /> @L["{n} mails; only the administrator who asked can download it"].Replace("{n}", MailboxService.Count(P.Mails), StringComparison.Ordinal)</span>
+}
+else
+{
+    <span class="leavedone"><LipiIcon Name="check" Size="14" /> @L["Made {date}; its seven days are over"].Replace("{date}", P.ReadyAt is DateTimeOffset at ? Clock.Date(at) : string.Empty, StringComparison.Ordinal)</span>
+}
+
+@code {
+    /// <summary>The production.</summary>
+    [Parameter] public Production P { get; set; } = new();
+
+    /// <summary>The administrator looking.</summary>
+    [Parameter] public Guid Me { get; set; }
+
+    /// <summary>The words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The viewer's clock.</summary>
+    [Parameter] public ZonedClock Clock { get; set; } = ZonedClock.Default;
+}
