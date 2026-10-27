@@ -1,0 +1,440 @@
+@using Anjal.Store
+@using Anjal.Webmail.Services
+
+@* rc.26 (DES-14 §28.6): one application's page for the application API - Keys, Signing, Encryption,
+   Inbox, Webhooks, Limits and Templates. Only the console changes these; a program cannot widen its
+   own rights (§24). *@
+<section class="formcard orgcard sendsys appapi">
+    <header class="orghead sshead">
+        <div>
+            <h2>@App.Name</h2>
+            <p class="hint">@L["Application API: {address}"].Replace("{address}", "https://" + Host + "/api/v1/", StringComparison.Ordinal)</p>
+        </div>
+        <span class="lh-grow"></span>
+        @if (App.PatientData)
+        {
+            <span class="pill pill-warn" title="@App.PatientDataNote">@L["Patient data"]</span>
+        }
+        <a class="btn btn-s" href="/org/apps?sel=@Uri.EscapeDataString(App.Id)&tab=applications" title="@L["Back to this application's page."]">@L["Back to Sending systems"]</a>
+    </header>
+    <nav class="sstabs" aria-label="@L["Application API"]">
+        @foreach ((string key, string icon, string label) in Tabs)
+        {
+            <a href="@Link(key)" aria-current="@(Tab == key ? "page" : null)"><LipiIcon Name="@icon" Size="16" /><span>@L[label]</span></a>
+        }
+    </nav>
+
+    @switch (Tab)
+    {
+        case "signing":
+            <p class="hint orglead">@L["The application signs each request with its own ECDSA P-256 key; Anjal keeps only the public half. Requests to the inbox are always signed."]</p>
+            <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/signing-required" class="setrow">
+                <AntiforgeryToken />
+                <div class="seg" role="radiogroup" aria-label="@L["Signing"]">
+                    <label class="segopt"><input type="radio" name="on" value="0" checked="@(!App.SigningRequired)" disabled="@App.PatientData" data-autosubmit /><span>@L["A key is enough"]</span></label>
+                    <label class="segopt"><input type="radio" name="on" value="1" checked="@(App.SigningRequired || App.PatientData)" disabled="@App.PatientData" data-autosubmit /><span>@L["Signing required"]</span></label>
+                </div>
+                <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+            </form>
+            @if (App.PatientData)
+            {
+                <p class="hint">@L["This application carries patient data: every request must be signed."]</p>
+            }
+            <table class="orgtable sstable">
+                <thead><tr><th scope="col">@L["Key"]</th><th scope="col">@L["Fingerprint"]</th><th scope="col">@L["Added"]</th><th scope="col">@L["Status"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
+                <tbody>
+                    @foreach (AppSigningKey k in App.SigningKeys.OrderByDescending(k => k.Created))
+                    {
+                        <tr>
+                            <td class="mono">@k.Id</td>
+                            <td class="mono">@Short(k.Fingerprint)</td>
+                            <td class="nowrap">@Clock.Date(k.Created)</td>
+                            <td>@if (k.Retired is DateTimeOffset r) { <span class="pill">@L["Retired {date}"].Replace("{date}", Clock.Date(r), StringComparison.Ordinal)</span> } else { <span class="pill pill-info">@L["In use"]</span> }</td>
+                            <td>
+                                @if (k.Retired is null)
+                                {
+                                    <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/signing/retire" class="inline"><AntiforgeryToken /><input type="hidden" name="key" value="@k.Id" /><button type="submit" class="linkbtn">@L["Retire"]</button></form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (App.SigningKeys.Count == 0)
+            {
+                <p class="orgempty">@L["No signing key yet."]</p>
+            }
+            <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/signing" class="asideform">
+                <AntiforgeryToken />
+                <label class="setlbl" for="signpem">@L["Add a public key (PEM)"]</label>
+                <textarea id="signpem" class="inp mono" name="pem" rows="5" required placeholder="@PemHint"></textarea>
+                <div class="setactions"><button type="submit" class="btn btn-p">@L["Add the key"]</button></div>
+            </form>
+            break;
+
+        case "encryption":
+            <p class="hint orglead">@L["Mail to this application is always encrypted to its own RSA key, 3,072 bits or more, before it is stored. Anjal never holds a key that opens it. Two keys may be held while you change over; new mail uses the newest."]</p>
+            <table class="orgtable sstable">
+                <thead><tr><th scope="col">@L["Fingerprint"]</th><th scope="col">@L["Added"]</th><th scope="col">@L["Status"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
+                <tbody>
+                    @foreach (AppEncryptionKey k in App.EncryptionKeys.OrderByDescending(k => k.Added))
+                    {
+                        <tr>
+                            <td class="mono">@Short(k.Fingerprint)</td>
+                            <td class="nowrap">@Clock.Date(k.Added)</td>
+                            <td>@if (ReferenceEquals(k, App.EncryptionKeys.OrderByDescending(x => x.Added).First())) { <span class="pill pill-info">@L["New mail uses this"]</span> } else { <span class="pill">@L["Older key"]</span> }</td>
+                            <td><form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/encryption/remove" class="inline"><AntiforgeryToken /><input type="hidden" name="fingerprint" value="@k.Fingerprint" /><button type="submit" class="linkbtn">@L["Remove"]</button></form></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (App.EncryptionKeys.Count == 0)
+            {
+                <p class="orgempty">@L["No encryption key yet. An inbox address can be added once there is one."]</p>
+            }
+            <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/encryption" class="asideform">
+                <AntiforgeryToken />
+                <label class="setlbl" for="encpem">@L["Upload the application's public key (PEM)"]</label>
+                <textarea id="encpem" class="inp mono" name="pem" rows="6" required placeholder="@PemHint"></textarea>
+                <div class="setactions"><button type="submit" class="btn btn-p">@L["Add the key"]</button></div>
+            </form>
+            break;
+
+        case "inbox":
+            <p class="hint orglead">@L["Mail to these addresses goes to the application, encrypted to its key. It is never filed as Junk; the spam score and the SPF, DKIM and DMARC results go with it. The domain's MX must point at Anjal."]</p>
+            @if (ConfirmShare is { Length: > 0 } && ConfirmHolder is MailboxRow holder)
+            {
+                <div class="notice n-warn orglead" role="status">
+                    <LipiIcon Name="warning" Size="16" />
+                    <span>@L["{address} is already {holder}'s. From now on each mail to it goes to both: {holder} as ordinary mail, with a line saying the application also has it, and the application encrypted to its key. Reading or deleting one copy does nothing to the other."].Replace("{address}", ConfirmShare, StringComparison.Ordinal).Replace("{holder}", holder.Address, StringComparison.Ordinal)</span>
+                    <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/inbox" class="inline"><AntiforgeryToken /><input type="hidden" name="address" value="@ConfirmShare" /><input type="hidden" name="share" value="1" /><button type="submit" class="btn btn-p btn-sm">@L["Share it"]</button></form>
+                    <a class="btn btn-s btn-sm" href="@Link("inbox")">@L["Cancel"]</a>
+                </div>
+            }
+            @if (Inbox is AppInboxView view)
+            {
+                <div class="sskpis three">
+                    <div class="sskpi @(view.Waiting > 0 && view.Oldest is DateTimeOffset w && DateTimeOffset.UtcNow - w > TimeSpan.FromDays(7) ? "k-warn" : "k-ok")"><span>@L["Waiting"]</span><b>@view.Waiting.ToString("N0", Inv)</b></div>
+                    <div class="sskpi k-ink"><span>@L["Oldest"]</span><b>@(view.Oldest is DateTimeOffset o ? DaysText(o) : "-")</b></div>
+                    <div class="sskpi k-ink"><span>@L["Storage"]</span><b>@Sizes.Text(view.UsedBytes)</b><small>@L["of {size}"].Replace("{size}", Sizes.Text(view.QuotaBytes), StringComparison.Ordinal)</small></div>
+                </div>
+                <table class="orgtable sstable">
+                    <thead><tr><th scope="col">@L["Address"]</th><th scope="col">@L["Also delivered to"]</th><th scope="col">@L["Added"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
+                    <tbody>
+                        @foreach (AppInboxAddressView a in view.Addresses)
+                        {
+                            <tr>
+                                <td>@a.Address</td>
+                                <td>@(a.SharedWith?.Address ?? "-")</td>
+                                <td class="nowrap">@Clock.Date(a.AddedAt)</td>
+                                <td><form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/inbox/remove" class="inline"><AntiforgeryToken /><input type="hidden" name="address" value="@a.Address" /><button type="submit" class="linkbtn">@(a.SharedWith is null ? L["Remove"] : L["Stop sharing"])</button></form></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                @if (view.Addresses.Count == 0)
+                {
+                    <p class="orgempty">@L["No inbox address yet."]</p>
+                }
+            }
+            <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/inbox" class="ssfilters">
+                <AntiforgeryToken />
+                <input class="inp" type="email" name="address" required maxlength="254" placeholder="reports@@@(Domain)" aria-label="@L["Address"]" disabled="@(App.EncryptionKeys.Count == 0)" />
+                <button type="submit" class="btn btn-p btn-sm" disabled="@(App.EncryptionKeys.Count == 0)"><LipiIcon Name="plus" Size="15" />@L["Add"]</button>
+            </form>
+            <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/inbox/quota" class="setrow">
+                <AntiforgeryToken />
+                <label class="setlbl" for="inboxgb">@L["Storage limit (GB)"]</label>
+                <input id="inboxgb" class="inp inp-s" type="number" name="gb" min="1" max="50" value="@(App.InboxQuotaBytes / (1024L * 1024 * 1024))" />
+                <button type="submit" class="btn btn-s btn-sm">@L["Save"]</button>
+            </form>
+            <p class="hint">@L["Mail the application has not acknowledged is never deleted. When the inbox is full, senders are asked to try later."]</p>
+            break;
+
+        case "webhooks":
+            <p class="hint orglead">@L["Anjal posts each event to these addresses, signed with the webhook's secret, and tries again at 1, 5 and 30 minutes, then every hour for a day. The application can also read the events from /api/v1/events."]</p>
+            @if (Revealed is { Count: > 0 } && Revealed[0].StartsWith("whsec_", StringComparison.Ordinal))
+            {
+                <div class="asidecard keynew" role="status">
+                    <b>@L["Copy the webhook's secret now: it is shown once"]</b>
+                    <dl class="keyvals"><dt>@L["Secret"]</dt><dd><code>@Revealed[0]</code><button type="button" class="iconbtn sqbtn" data-copy="@Revealed[0]" title="@L["Copy"]" aria-label="@L["Copy the secret"]"><LipiIcon Name="copy" Size="14" /></button></dd></dl>
+                </div>
+            }
+            <table class="orgtable sstable">
+                <thead><tr><th scope="col">@L["Address"]</th><th scope="col">@L["Events"]</th><th scope="col">@L["Status"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
+                <tbody>
+                    @foreach (AppWebhook h in App.Webhooks)
+                    {
+                        <tr>
+                            <td class="mono">@h.Url</td>
+                            <td>@(h.Events.Count == 0 ? L["All"] : string.Join(", ", h.Events))</td>
+                            <td>@if (h.FailingSince is DateTimeOffset f) { <span class="pill pill-warn">@L["Failing since {date}"].Replace("{date}", Clock.Date(f), StringComparison.Ordinal)</span> } else { <span class="pill pill-info">@L["In use"]</span> }</td>
+                            <td><form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/webhooks/remove" class="inline"><AntiforgeryToken /><input type="hidden" name="hook" value="@h.Id" /><button type="submit" class="linkbtn">@L["Remove"]</button></form></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (App.Webhooks.Count < MailboxService.MaxWebhooks)
+            {
+                <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/webhooks" class="asideform">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="hookurl">@L["Webhook address"]</label>
+                    <input id="hookurl" class="inp" type="url" name="url" required maxlength="500" placeholder="@UrlHint" />
+                    <fieldset class="apievents" aria-label="@L["Events"]">
+                        <legend class="setlbl">@L["Events (none ticked: all)"]</legend>
+                        @foreach (string type in MailboxService.AppEventTypes)
+                        {
+                            <label class="checkline"><input type="checkbox" name="events" value="@type" /><span class="mono">@type</span></label>
+                        }
+                    </fieldset>
+                    <div class="setactions"><button type="submit" class="btn btn-p">@L["Add the webhook"]</button></div>
+                </form>
+            }
+            <h3 class="asidetitle">@L["Latest deliveries"]</h3>
+            @if (Deliveries.Count == 0)
+            {
+                <p class="orgempty">@L["Nothing delivered yet."]</p>
+            }
+            else
+            {
+                <div class="sstable-wrap">
+                <table class="orgtable sstable">
+                    <thead><tr><th scope="col">@L["When"]</th><th scope="col">@L["Event"]</th><th scope="col">@L["Answer"]</th><th scope="col">@L["Tries"]</th><th scope="col">@L["Status"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
+                    <tbody>
+                        @foreach (AppWebhookDelivery d in Deliveries)
+                        {
+                            <tr>
+                                <td class="nowrap">@Clock.List(d.At, DateTimeOffset.UtcNow)</td>
+                                <td class="mono">#@d.EventSeq.ToString(Inv)</td>
+                                <td>@(d.Code is int code ? code.ToString(Inv) : d.Error.Length > 0 ? d.Error : "-")</td>
+                                <td class="num">@d.Attempts.ToString(Inv)</td>
+                                <td>@L[d.Status switch { "delivered" => "Delivered", "failed" => "Failed", _ => "Being tried" }]</td>
+                                <td>
+                                    @if (d.Status != "delivered")
+                                    {
+                                        <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/webhooks/resend" class="inline"><AntiforgeryToken /><input type="hidden" name="delivery" value="@d.Id" /><button type="submit" class="linkbtn" data-needs-server>@L["Send again"]</button></form>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                </div>
+            }
+            break;
+
+        case "limits":
+            <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/api-settings" class="asideform">
+                <AntiforgeryToken />
+                <input type="hidden" name="signing" value="@(App.SigningRequired ? "1" : "0")" />
+                <label class="setlbl" for="senders">@L["Addresses it may send as (one a line; @domain for any address on it)"]</label>
+                <textarea id="senders" class="inp mono" name="senders" rows="3" placeholder="@App.SendsAs">@string.Join("\n", App.AllowedSenders)</textarea>
+                <span class="hint">@L["Empty: only {address}."].Replace("{address}", App.SendsAs, StringComparison.Ordinal)</span>
+                <div class="apirow2">
+                    <div><label class="setlbl" for="perhour">@L["Sends an hour"]</label><input id="perhour" class="inp inp-s" type="number" name="perHour" min="1" max="@HourCeiling" value="@App.PerHour" /></div>
+                    <div><label class="setlbl" for="perday">@L["Sends a day"]</label><input id="perday" class="inp inp-s" type="number" name="perDay" min="1" max="@DayCeiling" value="@App.PerDay" /></div>
+                </div>
+                <span class="hint">@L["Anjal also allows at most 60 a minute and 50 recipients a message. Up to {hour} an hour and {day} a day."].Replace("{hour}", HourCeiling.ToString("N0", Inv), StringComparison.Ordinal).Replace("{day}", DayCeiling.ToString("N0", Inv), StringComparison.Ordinal)</span>
+                <label class="setlbl" for="allowedfrom">@L["Allowed from (address ranges, one a line)"]</label>
+                <textarea id="allowedfrom" class="inp mono" name="allowedFrom" rows="3" placeholder="10.0.0.0/8">@string.Join("\n", App.AllowedFrom)</textarea>
+                <span class="hint">@L["Empty: from anywhere. When set, requests from elsewhere are refused."]</span>
+                <div class="setactions"><button type="submit" class="btn btn-p">@L["Save"]</button></div>
+            </form>
+            @if (Windows.Count > 0)
+            {
+                <h3 class="asidetitle">@L["Use now"]</h3>
+                <table class="orgtable sstable">
+                    <thead><tr><th scope="col">@L["Window"]</th><th scope="col" class="num">@L["Used"]</th><th scope="col" class="num">@L["Limit"]</th><th scope="col">@L["Starts again"]</th></tr></thead>
+                    <tbody>
+                        @foreach ((string window, long used, int limit, DateTimeOffset reset) in Windows)
+                        {
+                            <tr><td>@L[window switch { "minute" => "This minute", "hour" => "This hour", _ => "Today" }]</td><td class="num">@used.ToString("N0", Inv)</td><td class="num">@limit.ToString("N0", Inv)</td><td class="nowrap">@Clock.List(reset, DateTimeOffset.UtcNow)</td></tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            break;
+
+        case "templates":
+            <p class="hint orglead">@L["Templates for applications belong to the organisation; any of its applications may send from them. Write {{name}} where a value goes. A language other than English is marked Not checked until a person checks it."]</p>
+            @foreach (AppTemplate t in Templates)
+            {
+                <div class="keycard">
+                    <div class="keyhead"><LipiIcon Name="file" Size="16" /><b class="mono">@t.Name</b><span class="pill">@L["Version {n}"].Replace("{n}", (t.Current?.Version ?? 0).ToString(Inv), StringComparison.Ordinal)</span></div>
+                    <p>@L["Values"]: <span class="mono">@string.Join(", ", MailboxService.AppTemplatePlaceholders(t))</span></p>
+                    <p>
+                        @foreach (string lang in MailboxService.AppTemplateLanguages)
+                        {
+                            @if (t.Current?.Languages.GetValueOrDefault(lang) is AppTemplateText text)
+                            {
+                                <span class="pill @(text.Checked ? "pill-info" : "pill-warn")">@lang · @(text.Checked ? L["Checked"] : L["Not checked"])</span>
+                                @if (!text.Checked)
+                                {
+                                    <form method="post" action="/org/app-templates/check" class="inline"><AntiforgeryToken /><input type="hidden" name="back" value="@Link("templates")" /><input type="hidden" name="name" value="@t.Name" /><input type="hidden" name="language" value="@lang" /><button type="submit" class="linkbtn">@L["Mark checked"]</button></form>
+                                }
+                            }
+                        }
+                    </p>
+                    <form method="post" action="/org/app-templates/remove" class="inline"><AntiforgeryToken /><input type="hidden" name="back" value="@Link("templates")" /><input type="hidden" name="name" value="@t.Name" /><button type="submit" class="btn btn-danger-q btn-sm">@L["Remove"]</button></form>
+                </div>
+            }
+            @if (Templates.Count == 0)
+            {
+                <p class="orgempty">@L["No template yet."]</p>
+            }
+            <form method="post" action="/org/app-templates" class="asideform">
+                <AntiforgeryToken />
+                <input type="hidden" name="back" value="@Link("templates")" />
+                <div class="apirow2">
+                    <div><label class="setlbl" for="tname">@L["Name"]</label><input id="tname" class="inp mono" name="name" required maxlength="64" placeholder="@NameHint" /></div>
+                    <div><label class="setlbl" for="tlang">@L["Language"]</label>
+                        <select id="tlang" class="setsel" name="language">@foreach (string lang in MailboxService.AppTemplateLanguages){<option value="@lang">@lang</option>}</select></div>
+                </div>
+                <label class="setlbl" for="tsubject">@L["Subject"]</label>
+                <input id="tsubject" class="inp" name="subject" maxlength="300" placeholder="@L["Your sign-in code {{code}}"]" />
+                <label class="setlbl" for="ttext">@L["Text"]</label>
+                <textarea id="ttext" class="inp" name="text" rows="4"></textarea>
+                <label class="setlbl" for="thtml">@L["HTML (optional)"]</label>
+                <textarea id="thtml" class="inp mono" name="html" rows="4"></textarea>
+                <label class="checkline"><input type="checkbox" name="checked" value="1" /><span>@L["A person has checked this language"]</span></label>
+                <div class="setactions"><button type="submit" class="btn btn-p">@L["Save as a new version"]</button></div>
+            </form>
+            break;
+
+        default:
+            <p class="hint orglead">@L["An HTTP key lets the application use the API. It is shown once; Anjal keeps a salted hash and its fingerprint. Two may be live while you change over. A sandbox key (ak_test_) runs every step but sends nothing."]</p>
+            @if (Revealed is { Count: > 0 } && Revealed[0].StartsWith("ak_", StringComparison.Ordinal))
+            {
+                <div class="asidecard keynew" role="status">
+                    <b>@L["Copy the new key now: it is shown once"]</b>
+                    <dl class="keyvals">
+                        <dt>@L["Key"]</dt><dd><code>@Revealed[0]</code><button type="button" class="iconbtn sqbtn" data-copy="@Revealed[0]" title="@L["Copy"]" aria-label="@L["Copy the key"]"><LipiIcon Name="copy" Size="14" /></button></dd>
+                    </dl>
+                    <pre><code>@Sample(Revealed[0])</code></pre>
+                </div>
+            }
+            <table class="orgtable sstable">
+                <thead><tr><th scope="col">@L["Fingerprint"]</th><th scope="col">@L["Kind"]</th><th scope="col">@L["Where it is used"]</th><th scope="col">@L["Made"]</th><th scope="col">@L["Last used"]</th><th scope="col">@L["Status"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
+                <tbody>
+                    @foreach (AppHttpKey k in App.HttpKeys.OrderBy(k => k.Retired is null ? 0 : 1).ThenByDescending(k => k.Created))
+                    {
+                        <tr>
+                            <td class="mono">@k.Fingerprint</td>
+                            <td>@(k.Sandbox ? L["Sandbox"] : L["Live"])</td>
+                            <td>@k.Note</td>
+                            <td class="nowrap">@Clock.Date(k.Created)</td>
+                            <td class="nowrap">@(k.LastUsed is DateTimeOffset u ? Clock.List(u, DateTimeOffset.UtcNow) : L["Never"])</td>
+                            <td>@if (k.Retired is DateTimeOffset r) { <span class="pill">@L["Retired {date}"].Replace("{date}", Clock.Date(r), StringComparison.Ordinal)</span> } else if (k.Expires is DateTimeOffset e) { <span class="pill pill-warn">@L["Ends {date}"].Replace("{date}", Clock.Date(e), StringComparison.Ordinal)</span> } else { <span class="pill pill-info">@L["In use"]</span> }</td>
+                            <td>
+                                @if (k.Retired is null)
+                                {
+                                    <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/http-key/retire" class="inline"><AntiforgeryToken /><input type="hidden" name="key" value="@k.Id" /><button type="submit" class="linkbtn" title="@L["Stop this key now; requests with it are answered key_retired."]">@L["Retire"]</button></form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+            @if (App.HttpKeys.Count == 0)
+            {
+                <p class="orgempty">@L["No HTTP key yet."]</p>
+            }
+            @if (App.Retired is null)
+            {
+                <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/http-key" class="asideform">
+                    <AntiforgeryToken />
+                    <label class="setlbl" for="keynote">@L["Where it is used"]</label>
+                    <input id="keynote" class="inp" name="note" maxlength="200" placeholder="@L["The HIS server in the data centre"]" />
+                    <div class="apirow2">
+                        <div><label class="setlbl" for="keyends">@L["Ends (optional)"]</label><input id="keyends" class="inp" type="date" name="expires" /></div>
+                        <div><label class="checkline"><input type="checkbox" name="sandbox" value="1" /><span>@L["Sandbox key: sends nothing"]</span></label></div>
+                    </div>
+                    <div class="setactions"><button type="submit" class="btn btn-p" title="@L["Make a key for the application; it is shown once."]"><LipiIcon Name="plus" Size="16" />@L["New HTTP key"]</button></div>
+                </form>
+            }
+            break;
+    }
+</section>
+
+@code {
+    // Technical examples, not words to translate.
+    private const string PemHint = "-----BEGIN PUBLIC KEY-----";
+
+    private const string UrlHint = "https://";
+
+    private const string NameHint = "signin-code";
+
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    private static readonly (string Key, string Icon, string Label)[] Tabs =
+    {
+        ("keys", "lock", "Keys"),
+        ("signing", "edit", "Signing"),
+        ("encryption", "security", "Encryption"),
+        ("inbox", "email", "Inbox"),
+        ("webhooks", "webhook", "Webhooks"),
+        ("limits", "sliders", "Limits"),
+        ("templates", "email-template", "Templates"),
+    };
+
+    /// <summary>The application.</summary>
+    [Parameter] public OrgApp App { get; set; } = new();
+
+    /// <summary>The tab.</summary>
+    [Parameter] public string? TabText { get; set; }
+
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The viewer's clock.</summary>
+    [Parameter] public ZonedClock Clock { get; set; } = ZonedClock.Default;
+
+    /// <summary>The web address people reach Anjal at.</summary>
+    [Parameter] public string Host { get; set; } = "mail.example.in";
+
+    /// <summary>The organisation's first domain, for placeholders.</summary>
+    [Parameter] public string Domain { get; set; } = "example.in";
+
+    /// <summary>A key or secret shown once.</summary>
+    [Parameter] public IReadOnlyList<string>? Revealed { get; set; }
+
+    /// <summary>The inbox, when the tab shows it.</summary>
+    [Parameter] public AppInboxView? Inbox { get; set; }
+
+    /// <summary>An address waiting for "share it", and its holder.</summary>
+    [Parameter] public string? ConfirmShare { get; set; }
+
+    /// <summary>The mailbox that holds the address.</summary>
+    [Parameter] public MailboxRow? ConfirmHolder { get; set; }
+
+    /// <summary>The latest webhook deliveries.</summary>
+    [Parameter] public IReadOnlyList<AppWebhookDelivery> Deliveries { get; set; } = Array.Empty<AppWebhookDelivery>();
+
+    /// <summary>The organisation's templates for applications.</summary>
+    [Parameter] public IReadOnlyList<AppTemplate> Templates { get; set; } = Array.Empty<AppTemplate>();
+
+    /// <summary>The rate windows now: window, used, limit, when it starts again.</summary>
+    [Parameter] public IReadOnlyList<(string Window, long Used, int Limit, DateTimeOffset Reset)> Windows { get; set; } = Array.Empty<(string, long, int, DateTimeOffset)>();
+
+    /// <summary>The hour's ceiling for this organisation.</summary>
+    [Parameter] public int HourCeiling { get; set; } = MailboxService.AppHourCeiling;
+
+    /// <summary>The day's ceiling for this organisation.</summary>
+    [Parameter] public int DayCeiling { get; set; } = MailboxService.AppDayCeiling;
+
+    private string Tab => TabText is "signing" or "encryption" or "inbox" or "webhooks" or "limits" or "templates" ? TabText : "keys";
+
+    private string Link(string tab) => "/org/apps?sel=" + Uri.EscapeDataString(App.Id) + "&api=" + tab;
+
+    private static string Short(string fingerprint) => fingerprint.Length > 16 ? fingerprint[..16] : fingerprint;
+
+    private string DaysText(DateTimeOffset at)
+    {
+        int days = (int)(DateTimeOffset.UtcNow - at).TotalDays;
+        return days == 0 ? L["Today"] : days == 1 ? L["1 day"] : L["{n} days"].Replace("{n}", days.ToString(Inv), StringComparison.Ordinal);
+    }
+
+    private string Sample(string key) =>
+        "curl https://" + Host + "/api/v1/messages/email \\\n  -H \"X-Api-Key: " + key + "\" -H \"Content-Type: application/json\" \\\n  -H \"Idempotency-Key: order-1\" \\\n"
+        + "  -d '{\"from\":{\"email\":\"" + App.SendsAs + "\"},\"to\":{\"email\":\"person@example.com\"},\"subject\":\"Hello\",\"text\":\"Hello\"}'";
+}

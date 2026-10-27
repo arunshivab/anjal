@@ -35,6 +35,11 @@ public sealed class ServerRecipientResolver : Anjal.Smtp.IRecipientResolver
         {
             return true;
         }
+        // rc.26 (DES-14 §13, §17): an application's inbox address, or a send's return path.
+        if (await this.mailboxes.IsApplicationAddressAsync(address, ct).ConfigureAwait(false))
+        {
+            return true;
+        }
         if (this.routing is not null)
         {
             Anjal.Routing.RoutingDecision decision = await this.routing.ResolveAsync(address, ct).ConfigureAwait(false);

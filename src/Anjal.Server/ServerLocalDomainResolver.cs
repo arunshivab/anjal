@@ -65,6 +65,13 @@ public sealed class ServerLocalDomainResolver : Anjal.Smtp.ILocalDomainResolver
             return true;
         }
 
+        // rc.26 (DES-14 §17): bounce.<a domain here> takes the return paths of application sends.
+        if (domain.StartsWith("bounce.", System.StringComparison.OrdinalIgnoreCase) && domain.Length > 7
+            && !domain[7..].StartsWith("bounce.", System.StringComparison.OrdinalIgnoreCase))
+        {
+            return await this.IsLocalAsync(domain[7..], ct).ConfigureAwait(false);
+        }
+
         if (this.store is not null && await this.store.IsLocalDomainAsync(domain, ct).ConfigureAwait(false))
         {
             return true;

@@ -54,12 +54,15 @@ public sealed partial class MailboxService
     /// <param name="now">Now.</param>
     /// <param name="preset">One of <see cref="SnoozePresets"/>, or a wall-clock time "yyyy-MM-ddTHH:mm" picked by hand.</param>
     /// <returns>The instant, or null when the preset is not one.</returns>
-    public static DateTimeOffset? SnoozeTime(ZonedClock clock, DateTimeOffset now, string? preset)
+    /// <param name="leaveUntil">rc.26 (item 73): when the person's automatic reply ends, for "leave"; null when it has no end.</param>
+    public static DateTimeOffset? SnoozeTime(ZonedClock clock, DateTimeOffset now, string? preset, DateTimeOffset? leaveUntil = null)
     {
         ArgumentNullException.ThrowIfNull(clock);
         DateTimeOffset local = clock.Local(now);
         switch (preset)
         {
+            case "leave":
+                return leaveUntil is DateTimeOffset end && end > now ? AfterLeave(clock, end) : null;
             case "today":
                 DateTime evening = local.Date.AddHours(18);
                 return AtLocal(clock, local.Hour < 17 ? evening : local.DateTime.AddHours(3));
@@ -77,6 +80,26 @@ public sealed partial class MailboxService
                     ? AtLocal(clock, picked)
                     : null;
         }
+    }
+
+    /// <summary>
+    /// rc.26 (item 73): "After my leave" - the first working morning after the automatic reply ends,
+    /// at 09:00 in the person's own clock; Saturday and Sunday are skipped.
+    /// </summary>
+    /// <param name="clock">The person's clock.</param>
+    /// <param name="until">When the automatic reply ends.</param>
+    /// <returns>The instant.</returns>
+    public static DateTimeOffset AfterLeave(ZonedClock clock, DateTimeOffset until)
+    {
+        ArgumentNullException.ThrowIfNull(clock);
+        DateTimeOffset local = clock.Local(until);
+        // The first 09:00 after the end: the same morning when it ends before nine, else the next.
+        DateTime day = local.TimeOfDay < TimeSpan.FromHours(9) ? local.Date : local.Date.AddDays(1);
+        while (day.DayOfWeek is DayOfWeek.Saturday or DayOfWeek.Sunday)
+        {
+            day = day.AddDays(1);
+        }
+        return AtLocal(clock, day.AddHours(9));
     }
 
     /// <summary>What a mailbox has snoozed.</summary>

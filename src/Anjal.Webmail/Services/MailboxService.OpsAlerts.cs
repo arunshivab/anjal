@@ -66,6 +66,60 @@ public sealed class OpenAlert
 /// </summary>
 public sealed partial class MailboxService
 {
+    /// <summary>
+    /// The "Spam this week" section of the Monday summary (rc.26, item 64, D-167): counts only, from
+    /// the mail server's own counters - never a subject or an address of anyone's mail.
+    /// </summary>
+    /// <param name="counts">The counters since a week ago.</param>
+    /// <returns>The section's text.</returns>
+    public static string SpamWeekText(IReadOnlyDictionary<string, long> counts)
+    {
+        ArgumentNullException.ThrowIfNull(counts);
+        long C(string name) => counts.TryGetValue(name, out long v) ? v : 0;
+        var sb = new StringBuilder();
+        sb.Append("\r\nSpam this week\r\n");
+        sb.Append(CultureInfo.InvariantCulture, $"Mails scored: {C("anjal_spam_scored_total"):N0}\r\n");
+        sb.Append(CultureInfo.InvariantCulture, $"Put in Junk: {C("anjal_mailbox_junked_total"):N0}\r\n");
+        sb.Append(CultureInfo.InvariantCulture, $"Refused at the door as spam: {C("anjal_spam_rejected_total"):N0}\r\n");
+        sb.Append(CultureInfo.InvariantCulture, $"Refused or held for a virus: {C("anjal_virus_refused_total") + C("anjal_virus_held_total"):N0}\r\n");
+        sb.Append(CultureInfo.InvariantCulture, $"Delayed by greylisting: {C("anjal_greylist_deferred_total"):N0}\r\n");
+        return sb.ToString();
+    }
+
+    /// <summary>The service record keeping each help article's "No" count at the last Monday summary (rc.26, item 78).</summary>
+    public const string HelpNoWeekKind = "help-feedback-week";
+
+    /// <summary>
+    /// The "Did this help? No" section of the Monday summary (rc.26, item 78): the articles answered
+    /// No since the last summary, most first, with the count - so they can be rewritten.
+    /// </summary>
+    /// <param name="now">Each article's counts now: [yes, no].</param>
+    /// <param name="before">Each article's No count at the last summary.</param>
+    /// <param name="titleOf">An article's title.</param>
+    /// <returns>The section's text.</returns>
+    public static string HelpNoWeekText(IReadOnlyDictionary<string, int[]> now, IReadOnlyDictionary<string, int> before, Func<string, string> titleOf)
+    {
+        ArgumentNullException.ThrowIfNull(now);
+        ArgumentNullException.ThrowIfNull(before);
+        ArgumentNullException.ThrowIfNull(titleOf);
+        List<(string Id, int No)> week = now
+            .Select(kv => (kv.Key, kv.Value.Length == 2 ? kv.Value[1] - before.GetValueOrDefault(kv.Key) : 0))
+            .Where(x => x.Item2 > 0)
+            .OrderByDescending(x => x.Item2).ThenBy(x => x.Key, StringComparer.Ordinal)
+            .ToList();
+        var sb = new StringBuilder();
+        sb.Append("\r\nHelp articles answered \"No\" this week\r\n");
+        if (week.Count == 0)
+        {
+            sb.Append("None.\r\n");
+        }
+        foreach ((string id, int no) in week)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"{titleOf(id)} (/help/{id}): {no:N0}\r\n");
+        }
+        return sb.ToString();
+    }
+
     /// <summary>How often an unresolved alert is mailed again.</summary>
     public static readonly TimeSpan AlertRepeat = TimeSpan.FromHours(6);
 
@@ -128,6 +182,18 @@ public sealed partial class MailboxService
         foreach (OrgSummary o in orgs.Where(o => o.GivenBytes > 0 && Sizes.Percent(o.UsedBytes, o.GivenBytes) >= 80))
         {
             attention.Add(new DashLine("box", "{org}: near its storage", string.Empty, "/ops/orgs?sel=" + o.Tenant.Id, "warn", OrgArgs(o)));
+        }
+        // rc.26 (item 99): organisations at 80% and 100% of today's sending figure.
+        foreach (OrgSummary o in orgs.Where(o => o.Tenant.Enabled))
+        {
+            Anjal.Mailbox.SendingDayState day = await Anjal.Mailbox.SendingDay.StateAsync(this.store, this.messageStore, o.Tenant.Id, now, ct).ConfigureAwait(false);
+            if (day.Percent >= 80)
+            {
+                Dictionary<string, string> args = OrgArgs(o);
+                args["p"] = day.Percent.ToString(CultureInfo.InvariantCulture);
+                args["n"] = day.Limit.ToString("N0", CultureInfo.InvariantCulture);
+                attention.Add(new DashLine("trend-up", day.Percent >= 100 ? "{org}: today's sending figure reached" : "{org}: {p}% of today's sending figure", "{n} a day; more is refused until tomorrow", "/ops/orgs?sel=" + o.Tenant.Id, day.Percent >= 100 ? "bad" : "warn", args));
+            }
         }
         // rc.15 (item 61): organisations whose records the daily check found wrong.
         foreach (OrgSummary o in orgs.Where(o => o.Tenant.Enabled))
@@ -201,6 +267,14 @@ public sealed partial class MailboxService
         if (local.DayOfWeek == DayOfWeek.Monday && local.Hour >= 9 && state.LastSummaryDay != day)
         {
             string text = SummaryText(tiles, hours, orgs);
+            // rc.26 (item 64, D-167): "Spam this week", a section of the same mail, not a second one.
+            text += SpamWeekText(await this.RefusalsSinceAsync(now.AddDays(-7), ct).ConfigureAwait(false));
+            // rc.26 (item 78): the help articles answered "No" since the last summary.
+            Dictionary<string, int[]> helped = await HelpFeedback.ReadAsync(this.messageStore, ct).ConfigureAwait(false);
+            Dictionary<string, int> lastWeek = await this.ServiceRecordAsync<Dictionary<string, int>>(HelpNoWeekKind, ct).ConfigureAwait(false) ?? new Dictionary<string, int>(StringComparer.Ordinal);
+            HelpGuide guide = HelpGuide.Load();
+            text += HelpNoWeekText(helped, lastWeek, id => guide.Get(id)?.Title ?? id);
+            await this.messageStore.SetServiceRecordAsync(HelpNoWeekKind, System.Text.Json.JsonSerializer.Serialize(helped.ToDictionary(kv => kv.Key, kv => kv.Value.Length == 2 ? kv.Value[1] : 0, StringComparer.Ordinal)), ct).ConfigureAwait(false);
             foreach (string op in operators)
             {
                 await this.SendSystemMailAsync(from, op, "Anjal service summary, week of " + clock.Date(now), text, ct).ConfigureAwait(false);

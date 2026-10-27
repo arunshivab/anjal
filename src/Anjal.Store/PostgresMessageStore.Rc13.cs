@@ -67,4 +67,45 @@ ON CONFLICT (tenant_id, kind) DO UPDATE SET body = EXCLUDED.body, updated_at = n
         cmd.Parameters.AddWithValue("body", json);
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
+
+    /// <inheritdoc/>
+    public async Task<bool> ChangeTenantDocumentAsync(System.Guid tenantId, string kind, System.Func<string?, string?> change, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(kind);
+        System.ArgumentNullException.ThrowIfNull(change);
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        // A lock for this document until the transaction ends, so the mail server and the webmail
+        // never write over each other's change (the row may not exist yet, so a row lock cannot do it).
+        await using (var lockCmd = new NpgsqlCommand("SELECT pg_advisory_xact_lock(hashtextextended(@key, 0));", conn, tx))
+        {
+            lockCmd.Parameters.AddWithValue("key", "tenant_documents:" + tenantId.ToString() + ":" + kind);
+            await lockCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        string? body;
+        await using (var read = new NpgsqlCommand("SELECT body FROM tenant_documents WHERE tenant_id = @tenant AND kind = @kind;", conn, tx))
+        {
+            read.Parameters.AddWithValue("tenant", tenantId);
+            read.Parameters.AddWithValue("kind", kind);
+            body = await read.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
+        }
+        string? next = change(body);
+        if (next is null)
+        {
+            await tx.CommitAsync(ct).ConfigureAwait(false);
+            return false;
+        }
+        await using (var write = new NpgsqlCommand(@"
+INSERT INTO tenant_documents (tenant_id, kind, body, updated_at)
+VALUES (@tenant, @kind, @body, now())
+ON CONFLICT (tenant_id, kind) DO UPDATE SET body = EXCLUDED.body, updated_at = now();", conn, tx))
+        {
+            write.Parameters.AddWithValue("tenant", tenantId);
+            write.Parameters.AddWithValue("kind", kind);
+            write.Parameters.AddWithValue("body", next);
+            await write.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+        return true;
+    }
 }

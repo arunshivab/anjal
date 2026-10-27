@@ -423,13 +423,29 @@ public static class Program
                     // A message that fails for good gets a bounce notice in
                     // the sender's own INBOX; nothing is sent outbound.
                     DoNotSend = store is Anjal.Store.IMailboxStore checkStore
-                        ? (message, token) => Anjal.Store.DoNotSend.CheckAsync(checkStore, message.EnvelopeFrom, message.EnvelopeTo, token)
+                        ? (message, token) => message.AppSendId is not null && store is Anjal.Store.IAppApiStore appCheck
+                            ? Anjal.Store.AppSuppressions.CheckRowAsync(checkStore, appCheck, message, token)
+                            : Anjal.Store.DoNotSend.CheckAsync(checkStore, message.EnvelopeFrom, message.EnvelopeTo, token)
                         : null,
                     OnFinalFailure = async (message, reason, permanent, token) =>
                     {
                         if (message.EnvelopeFrom.Length == 0)
                         {
                             return; // never bounce a bounce
+                        }
+                        // rc.26 (DES-14 §17): an application send's failure is its event (written with the row's
+                        // state); a hard bounce puts the address on the application's list; no notice is filed.
+                        if (message.AppSendId is not null)
+                        {
+                            if (store is Anjal.Store.IMailboxStore appListStore && store is Anjal.Store.IAppApiStore appStore)
+                            {
+                                Anjal.Store.DoNotSendEntry? suppressed = await Anjal.Store.AppSuppressions.NoteFinalFailureAsync(appListStore, appStore, message, reason, permanent, System.DateTimeOffset.UtcNow, token).ConfigureAwait(false);
+                                if (suppressed is not null)
+                                {
+                                    Log($"do-not-send: {message.EnvelopeTo} added for application send {message.AppSendId} ({suppressed.Reason})");
+                                }
+                            }
+                            return;
                         }
                         // rc.17 (design review [7d]): an application's hard bounce, or its third give-up
                         // to one address, puts the address on the organisation's do-not-send list.
@@ -996,6 +1012,9 @@ public static class Program
         // held by the sending servers and nothing bounces while the account
         // is suspended (v0.14.0).
         policies.Add(new Anjal.Mailbox.TenantStatePolicy(mailboxStore, log));
+
+        // rc.26 (item 63, POL-01 v1.1 §4): a mailbox nobody signed in to for 180 days refuses mail, 550 5.1.1.
+        policies.Add(new Anjal.Mailbox.InactivePolicy(mailboxStore, log));
         foreach (Anjal.Smtp.ISmtpPolicy p in policies)
         {
             if (p is Anjal.Spam.Greylist g)

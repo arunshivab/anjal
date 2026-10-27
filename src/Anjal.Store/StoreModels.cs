@@ -199,6 +199,9 @@ public sealed class OutboundMessage
     /// </summary>
     public System.DateTimeOffset? BodyRemovedAt { get; set; }
 
+    /// <summary>rc.26 (DES-14 §28.1): the application API send this row belongs to, or null for any other mail.</summary>
+    public System.Guid? AppSendId { get; set; }
+
     /// <summary>
     /// How long a lease lasts. Longer than any single delivery attempt can
     /// take with its timeouts, so a slow but live send is never taken over.

@@ -588,7 +588,25 @@ public sealed partial class MailboxService
         return new HealthTile("Last good backup", "No verified backup recorded", "bad");
     }
 
-    // The service's address against two blocklists. A list that answers
+    /// <summary>
+    /// The setting that turns on the Barracuda lookup (rc.26, item 96): Barracuda answers only resolvers
+    /// registered with it, so it stays off until the operator has registered this server's resolver.
+    /// </summary>
+    public const string BarracudaSetting = "ANJAL_REPUTATION_BARRACUDA";
+
+    /// <summary>
+    /// The blocklists the Reputation tile asks (rc.26, item 96, D-212): SpamCop always; Barracuda when
+    /// the operator has turned it on. Spamhaus is not asked automatically - its public mirrors are for
+    /// non-commercial use only; the tile links to its lookup page for a check by hand.
+    /// </summary>
+    /// <param name="barracuda">The setting's value.</param>
+    /// <returns>The DNS zones.</returns>
+    public static IReadOnlyList<string> ReputationLists(string? barracuda) =>
+        string.Equals(barracuda?.Trim(), "on", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "bl.spamcop.net", "b.barracudacentral.org" }
+            : new[] { "bl.spamcop.net" };
+
+    // The service's address against the blocklists above. A list that answers
     // 127.255.255.x refuses the resolver used; that is "not checked", never "listed".
     private async Task<HealthTile> ReputationTileAsync(CancellationToken ct)
     {
@@ -610,7 +628,7 @@ public sealed partial class MailboxService
         string reversed = string.Join('.', ip.GetAddressBytes().Reverse());
         var listed = new List<string>();
         int checkedLists = 0;
-        foreach (string list in new[] { "zen.spamhaus.org", "bl.spamcop.net" })
+        foreach (string list in ReputationLists(Environment.GetEnvironmentVariable(BarracudaSetting)))
         {
             try
             {

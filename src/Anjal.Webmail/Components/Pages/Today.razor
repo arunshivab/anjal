@@ -325,6 +325,8 @@ else
         "answer" => "Answer to you",
         "to" => "To you",
         "often" => "You write often",
+        "referral-urgent" => "Referral · urgent",
+        "referral" => "Referral",
         _ => string.Empty,
     };
 
@@ -335,6 +337,8 @@ else
             L[r.Expected ? "An answer to {subject}, which you sent {when} and marked Expect a reply." : "An answer to {subject}, which you sent {when}."]
                 .Replace("{subject}", r.AnswersSubject, StringComparison.Ordinal).Replace("{when}", clock.List(at, now), StringComparison.Ordinal),
         "to" => L["You are in To, not only in Cc."],
+        "referral-urgent" => L["A referral the sender marked urgent."],
+        "referral" => L["A referral from a colleague."],
         "often" => L["You wrote to {name} at least three times in the last 90 days."].Replace("{name}", r.Who, StringComparison.Ordinal),
         _ => null,
     };

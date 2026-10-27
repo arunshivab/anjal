@@ -856,6 +856,17 @@ details.ecard > summary.ehead { cursor: pointer; }
 .fview.has-open { height: 100%; display: flex; min-height: 0; position: relative; }
 /* Owner, 9 Oct 2026 (C): while the next page is fetched in place. */
 html.swapping, html.swapping * { cursor: progress; }
+/* rc.26 (item 46): while a list loads (after 300 ms), eight grey rows cover it in place; nothing around it moves. */
+html.loading-rows .mlist, html.loading-rows .tdlist { position: relative; }
+html.loading-rows .mlist::after, html.loading-rows .tdlist::after {
+  content: ""; position: absolute; inset: 0; z-index: 2; pointer-events: none;
+  background-color: var(--surface-100);
+  background-image: repeating-linear-gradient(to bottom, transparent 0 14px, var(--line) 14px 26px, transparent 26px 36px, var(--line) 36px 44px, transparent 44px 64px);
+  background-size: 100% 512px; background-repeat: no-repeat; background-position: 16px 8px;
+  animation: anjal-rows 1.2s ease-in-out infinite alternate;
+}
+@keyframes anjal-rows { from { opacity: 0.55; } to { opacity: 0.9; } }
+@media (prefers-reduced-motion: reduce) { html.loading-rows .mlist::after, html.loading-rows .tdlist::after { animation: none; opacity: 0.75; } }
 /* DES-11 D9: the marigold flap from the open card into the letter (three panes side by side). */
 .flapmark { position: absolute; z-index: 2; width: 16px; height: 24px; pointer-events: none; }
 .flapmark[hidden] { display: none; }
@@ -1848,6 +1859,22 @@ textarea.railinp { resize: vertical; }
 .rcard.on { border: 2px solid var(--brand); }
 .rcard-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; color: var(--ink); text-decoration: none; font-size: 13.5px; line-height: 1.45; }
 .rcard-main > b { font-size: 15px; }
+.rcard-main > .rcount { color: var(--ink-muted); font-size: 12px; }
+/* rc.26 (item 80): quiet hours on one line. */
+.quietrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.quietrow .setlbl { margin: 0; }
+.quietrow .inp-time { width: 120px; }
+/* rc.26 (item 80, D-266): a person leaving, and productions. */
+.leavesteps { margin: 8px 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: 14px; }
+.leavesteps > li { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.leavesteps > li.done > b::after { content: " \2713"; color: var(--success); }
+.leaveform { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; width: 100%; }
+.leaveform textarea { flex: 1 1 320px; min-height: 64px; }
+.leavedone { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-muted); font-size: 13px; }
+.leavedone.bad { color: var(--danger); }
+.produceform { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.producepeople { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.producedates { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .rcard-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .rmove { display: flex; gap: 2px; }
 .rmove .iconbtn { width: 26px; height: 26px; }
@@ -3693,6 +3720,9 @@ a.lc-step:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
 .tag-answer { background: var(--seal-soft); color: var(--seal); }
 .tag-to { background: var(--brand-soft); color: var(--brand); }
 .tag-often { background: var(--warning-soft); color: var(--warning); }
+/* rc.26 (item 76): referrals on Today; an urgent one first, in red. */
+.tag-referral-urgent { background: var(--danger-soft); color: var(--danger); }
+.tag-referral { background: var(--brand-soft); color: var(--brand); }
 .tdlists { margin-top: 12px; border-radius: 12px; background: var(--surface-inset); }
 .tdlists > summary { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; font-size: 13.5px; cursor: pointer; list-style: none; }
 .tdlists > summary::-webkit-details-marker { display: none; }
@@ -4331,3 +4361,12 @@ html[data-zoom="80"] { --z: 0.8; zoom: 0.8; }
   .sheetcard { border-color: #000; background: none; }
   .sheettext { background: none; color: #000; }
 }
+
+/* rc.26 (DES-14 §28.6): an application's API page - Keys, Signing, Encryption, Inbox, Webhooks, Limits, Templates. */
+.appapi .apirow2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.appapi .apievents { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 4px 12px; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin: 8px 0; }
+.appapi .apievents legend { padding: 0 4px; }
+.appapi .keynew pre { margin: 8px 0 0; padding: 10px; background: var(--surface-200); border-radius: 8px; overflow-x: auto; font-size: 12px; }
+.appapi .sstable td.mono { overflow-wrap: anywhere; }
+.appapi textarea.mono { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12.5px; }
+@media (max-width: 720px), (max-height: 480px) and (max-width: 950px) { .appapi .apirow2 { grid-template-columns: 1fr; } }

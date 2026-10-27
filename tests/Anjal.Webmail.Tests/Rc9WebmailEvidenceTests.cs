@@ -22,14 +22,8 @@ public sealed class Rc9WebmailEvidenceTests : IDisposable
 
     public void Dispose()
     {
-        if (Directory.Exists(this.root))
-        {
-            foreach (string f in Directory.GetFiles(this.root, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(f, FileAttributes.Normal);
-            }
-            TestFolders.Delete(this.root);
-        }
+        // Evidence files are read-only; a background writer may still be moving a file as the test ends.
+        TestFolders.DeleteReadOnly(this.root);
     }
 
     private async Task<MailboxService> ServiceAsync(string evidenceRoot)

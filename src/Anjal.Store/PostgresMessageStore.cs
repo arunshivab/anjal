@@ -234,10 +234,10 @@ RETURNING id, inbound_message_id, url, status_code, attempted_at, error_message;
 
         const string sql = @"
 INSERT INTO outbound_messages
-    (envelope_from, envelope_to, raw_bytes, status, attempts, next_attempt_at, give_up_at, last_error)
+    (envelope_from, envelope_to, raw_bytes, status, attempts, next_attempt_at, give_up_at, last_error, app_send_id)
 VALUES
-    (@envelope_from, @envelope_to, @raw_bytes, @status, 0, @next_attempt_at, @give_up_at, '')
-RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error;";
+    (@envelope_from, @envelope_to, @raw_bytes, @status, 0, @next_attempt_at, @give_up_at, '', @app_send_id)
+RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error, app_send_id;";
 
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -249,6 +249,7 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
         cmd.Parameters.AddWithValue("status", (int)OutboundStatus.Pending);
         cmd.Parameters.AddWithValue("next_attempt_at", next);
         cmd.Parameters.AddWithValue("give_up_at", giveUp);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("app_send_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = message.AppSendId });
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         await reader.ReadAsync(ct).ConfigureAwait(false);
@@ -498,7 +499,7 @@ SET status = @sending_status,
     lease_expires_at = @lease_until
 FROM due
 WHERE o.id = due.id
-RETURNING o.id, o.envelope_from, o.envelope_to, o.raw_bytes, o.status, o.attempts, o.created_at, o.next_attempt_at, o.give_up_at, o.last_error, o.lease_expires_at;";
+RETURNING o.id, o.envelope_from, o.envelope_to, o.raw_bytes, o.status, o.attempts, o.created_at, o.next_attempt_at, o.give_up_at, o.last_error, o.lease_expires_at, o.app_send_id;";
 
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -528,6 +529,7 @@ RETURNING o.id, o.envelope_from, o.envelope_to, o.raw_bytes, o.status, o.attempt
         System.ArgumentNullException.ThrowIfNull(lastError);
 
         const string sql = @"
+WITH u AS (
 UPDATE outbound_messages
 SET status          = @status,
     attempts        = attempts + 1,
@@ -541,7 +543,16 @@ SET status          = @status,
                            ELSE raw_bytes END,
     body_removed_at = CASE WHEN @status = 2 AND substring(raw_bytes from 1 for 4) = '\x414e4a51'::bytea THEN now() ELSE body_removed_at END
 WHERE id = @id
-RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error;";
+RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error, app_send_id),
+-- rc.26 (DES-14 §28.4): a row of an application API send gives the send an event.
+ev AS (
+    INSERT INTO app_events (id, tenant_id, app_id, send_id, type, at, data)
+    SELECT gen_random_uuid(), s.tenant_id, s.app_id, s.id, @etype, now(), (@edata::jsonb || jsonb_build_object('to', u.envelope_to, 'attempt', u.attempts))::text
+    FROM u JOIN app_sends s ON s.id = u.app_send_id
+    RETURNING 1),
+sl AS (
+    UPDATE app_sends SET last_event = @etype WHERE id = (SELECT app_send_id FROM u))
+SELECT id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error, app_send_id FROM u;";
 
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -549,6 +560,9 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
         cmd.Parameters.AddWithValue("status", (int)newStatus);
         cmd.Parameters.AddWithValue("next_attempt_at", nextAttemptAt);
         cmd.Parameters.AddWithValue("last_error", lastError);
+        string eventType = AppEvent.ForOutbound(newStatus, lastError);
+        cmd.Parameters.AddWithValue("etype", eventType);
+        cmd.Parameters.AddWithValue("edata", AppEvent.OutboundData(string.Empty, lastError, 0, eventType));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         if (!await reader.ReadAsync(ct).ConfigureAwait(false))
@@ -574,7 +588,7 @@ RETURNING id, envelope_from, envelope_to, raw_bytes, status, attempts, created_a
     {
         const string sql = @"
 SELECT id, envelope_from, envelope_to, raw_bytes, status, attempts, created_at, next_attempt_at, give_up_at, last_error,
-       lease_expires_at, finished_at, body_removed_at
+       lease_expires_at, finished_at, body_removed_at, app_send_id
 FROM outbound_messages
 WHERE id = @id
 LIMIT 1;";
@@ -859,10 +873,27 @@ LIMIT 1;";
         NextAttemptAt = r.GetFieldValue<System.DateTimeOffset>(7),
         GiveUpAt = r.GetFieldValue<System.DateTimeOffset>(8),
         LastError = r.GetString(9),
-        LeaseExpiresAt = r.FieldCount > 10 && !r.IsDBNull(10) ? r.GetFieldValue<System.DateTimeOffset>(10) : null,
-        FinishedAt = r.FieldCount > 11 && !r.IsDBNull(11) ? r.GetFieldValue<System.DateTimeOffset>(11) : null,
-        BodyRemovedAt = r.FieldCount > 12 && !r.IsDBNull(12) ? r.GetFieldValue<System.DateTimeOffset>(12) : null,
+        LeaseExpiresAt = OptionalTime(r, "lease_expires_at"),
+        FinishedAt = OptionalTime(r, "finished_at"),
+        BodyRemovedAt = OptionalTime(r, "body_removed_at"),
+        AppSendId = Ordinal(r, "app_send_id") is int a && !r.IsDBNull(a) ? r.GetGuid(a) : null,
     };
+
+    // The optional columns of an outbound row are found by name: queries return different sets.
+    private static int? Ordinal(NpgsqlDataReader r, string name)
+    {
+        for (int i = 10; i < r.FieldCount; i++)
+        {
+            if (string.Equals(r.GetName(i), name, System.StringComparison.Ordinal))
+            {
+                return i;
+            }
+        }
+        return null;
+    }
+
+    private static System.DateTimeOffset? OptionalTime(NpgsqlDataReader r, string name) =>
+        Ordinal(r, name) is int i && !r.IsDBNull(i) ? r.GetFieldValue<System.DateTimeOffset>(i) : null;
 
     /// <inheritdoc/>
     public async Task<int> RemoveOutboundContentAsync(IReadOnlyCollection<string> senderDomains, IReadOnlyCollection<string> keepSenders, System.DateTimeOffset finishedBefore, int limit, CancellationToken ct = default)

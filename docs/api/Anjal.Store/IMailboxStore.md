@@ -8,7 +8,9 @@ Persistence interface for multi-tenant mailbox storage: tenants, their domains, 
 
 - **AddMailboxUsageAsync** *(method)* - Adjust by a signed delta and return the new total. Returns if no such mailbox.
 - **AddTrustedSenderAsync** *(method)* - Trust an address although its mail arrives unencrypted; adding it twice is harmless.
+- **ChangeTenantDocumentAsync** *(method)* - rc.26: change one of an organisation's documents with no other change in between - read, change, write as one step, across both processes (the PostgreSQL store holds a lock for the document while runs). gets the document as stored (null when there is none) and returns the new one, or null to leave it as it is.
 - **CountArrivalsByHourAsync** *(method)* - How many messages arrived in every mailbox, hour by hour, since a moment (rc.14, the Anjal console's service health). Hours with none are left out.
+- **CountListMailAsync** *(method)* - rc.26 (item 73): how many of a mailbox's messages came from one list (its mark) since a moment.
 - **CountMessagesAsync** *(method)* - Count messages in a folder (or the whole mailbox when is null).
 - **CountReceivedByTenantAsync** *(method)* - Messages received (Junk included) per organisation in a period (rc.15, the operator's dashboard). Organisations with none are left out.
 - **CountSearchAsync** *(method)* - Count of matches.
@@ -61,6 +63,7 @@ Persistence interface for multi-tenant mailbox storage: tenants, their domains, 
 - **SetSignatureAsync** *(method)* - Set a mailbox's signature (already sanitised by the caller).
 - **SetTenantDocumentAsync** *(method)* - Create or replace one of an organisation's own documents (rc.13).
 - **SumFolderBytesAsync** *(method)* - The space each of a mailbox's folders takes, in bytes (rc.15, item 58). Empty folders are left out.
+- **TouchSignInAsync** *(method)* - rc.26 (item 63): note a sign-in - webmail, passkey or port 587 - for the inactive-account clock.
 - **UpsertCategoryAsync** *(method)* - Create or rename a category. A row with null is a tenant default; otherwise it belongs to that mailbox. The slot is assigned by the caller and never recomputed.
 - **UpsertCategoryRuleAsync** *(method)* - Create or replace a sender-to-category rule for a mailbox.
 - **UpsertMailboxAsync** *(method)* - Create or update a mailbox keyed by (local-part, domain). On update the password hash is replaced only when the supplied hash is non-empty; is never overwritten.

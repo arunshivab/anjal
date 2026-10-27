@@ -26,14 +26,8 @@ public sealed class Rc8EvidenceWorkerTests : System.IDisposable
 
     public void Dispose()
     {
-        if (System.IO.Directory.Exists(this.root))
-        {
-            foreach (string f in System.IO.Directory.GetFiles(this.root, "*", System.IO.SearchOption.AllDirectories))
-            {
-                System.IO.File.SetAttributes(f, System.IO.FileAttributes.Normal);
-            }
-            TestFolders.Delete(this.root);
-        }
+        // Evidence files are read-only; a background writer may still be moving a file as the test ends.
+        TestFolders.DeleteReadOnly(this.root);
     }
 
     private EvidenceVault Vault => new(this.root);

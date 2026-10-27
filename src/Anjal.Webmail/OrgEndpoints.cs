@@ -121,15 +121,16 @@ internal static class OrgEndpoints
         }).RequireAuthorization();
 
         // rc.22 (mockup 13): the organisation's mail rules.
-        app.MapPost("/org/rules", async (HttpContext http, [FromForm] string? forward, [FromForm] string? nicknames, [FromForm] string? away, [FromForm] string? askFiles, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
+        app.MapPost("/org/rules", async (HttpContext http, [FromForm] string? forward, [FromForm] string? nicknames, [FromForm] string? away, [FromForm] string? askFiles, [FromForm] string? printNote, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
         {
             if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
             {
                 return Results.NotFound();
             }
-            var policy = new Anjal.Mailbox.OrgMailPolicy { ForwardingOutside = forward == "1", Nicknames = nicknames == "1", AwayOutside = away == "1", AskBeforeFilesOutside = askFiles == "1" };
+            string note = (printNote ?? string.Empty).Replace('\r', ' ').Replace('\n', ' ').Trim();
+            var policy = new Anjal.Mailbox.OrgMailPolicy { ForwardingOutside = forward == "1", Nicknames = nicknames == "1", AwayOutside = away == "1", AskBeforeFilesOutside = askFiles == "1", PrintNote = note.Length > 200 ? note[..200] : note };
             await svc.SaveMailPolicyAsync(a.Tenant.Id, policy, ct).ConfigureAwait(false);
-            await audit.RecordAsync(a.Me.Address, "org.rules", a.Tenant.Slug, Client(http), $"forwarding outside {(policy.ForwardingOutside ? "allowed" : "not allowed")}, nicknames {(policy.Nicknames ? "allowed" : "off")}, away replies {(policy.AwayOutside ? "inside and outside" : "inside only")}, files outside {(policy.AskBeforeFilesOutside ? "asked first" : "as usual")}").ConfigureAwait(false);
+            await audit.RecordAsync(a.Me.Address, "org.rules", a.Tenant.Slug, Client(http), $"forwarding outside {(policy.ForwardingOutside ? "allowed" : "not allowed")}, nicknames {(policy.Nicknames ? "allowed" : "off")}, away replies {(policy.AwayOutside ? "inside and outside" : "inside only")}, files outside {(policy.AskBeforeFilesOutside ? "asked first" : "as usual")}, print note {(policy.PrintNote.Length > 0 ? "set" : "none")}").ConfigureAwait(false);
             return Results.Redirect("/org/rules?saved=1");
         }).RequireAuthorization();
 
@@ -153,6 +154,59 @@ internal static class OrgEndpoints
             sessions.Reveal(SessionRegistry.SessionOf(http.User) ?? string.Empty,
                 results.Select(r => r.Address + "|" + (r.Token is null ? "!" + r.Error : BaseUrl(http) + "/join/" + r.Token)).ToList());
             return Results.Redirect("/org/people?links=1");
+        }).RequireAuthorization();
+
+        // rc.26 (D-266, DES-16 §2.8): eDiscovery production for a legal hold, and the download.
+        app.MapPost("/org/productions/new", async (HttpContext http, [FromForm] Guid[] person, [FromForm] string? from, [FromForm] string? to, [FromForm] string? reason,
+            MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            ZonedClock clock = WebmailAuthService.ClockOf(http.User);
+            DateTimeOffset? start = DateTime.TryParseExact(from ?? string.Empty, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime f) ? MailboxService.AtLocal(clock, f) : null;
+            DateTimeOffset? end = DateTime.TryParseExact(to ?? string.Empty, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime t) ? MailboxService.AtLocal(clock, t.AddDays(1)) : null;
+            IReadOnlyList<LegalHold> holds = await svc.HoldsOfAsync(a.Tenant.Id, ct).ConfigureAwait(false);
+            // Only people under a legal hold can be produced this way; a leaver's records go from their Leaving page.
+            List<Guid> chosen = person.Where(p => holds.Any(h => h.MailboxId == p)).Distinct().ToList();
+            string? error = (reason ?? string.Empty).Trim().Length == 0 ? "Write why the mail is produced (the request or case)."
+                : chosen.Count == 0 ? "Choose people under a legal hold."
+                : await svc.ProduceAsync(a.Tenant, a.Me.Id, "hold", chosen, start, end, reason!, OpsEndpoints.RootOf(http.RequestServices.GetRequiredService<Anjal.Mailbox.IMaildirStore>()), ct).ConfigureAwait(false);
+            if (error is not null)
+            {
+                return Results.Redirect("/org/retention?produce=1&e=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
+            }
+            await audit.RecordAsync(a.Me.Address, "org.production.asked", a.Tenant.Slug, Client(http), $"{chosen.Count} person(s); {from ?? "start"} to {to ?? "now"}").ConfigureAwait(false);
+            return Results.Redirect("/org/retention?saved=produce");
+        }).RequireAuthorization();
+
+        app.MapGet("/org/productions/{id:guid}/download", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
+        {
+            if (await AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
+            {
+                return Results.NotFound();
+            }
+            Production? p = (await svc.ProductionsAsync(a.Tenant.Id, ct).ConfigureAwait(false)).FirstOrDefault(x => x.Id == id);
+            // Only the administrator who asked, within seven days.
+            if (p is null || p.By != a.Me.Id || !p.Ready(DateTimeOffset.UtcNow) || !File.Exists(p.File))
+            {
+                return Results.NotFound();
+            }
+            if (MailKeyring.Current.DataKey(a.Me.Id) is null)
+            {
+                return Results.Redirect("/unlock?back=" + Uri.EscapeDataString("/org/retention"));
+            }
+            await svc.RecordProductionDownloadAsync(a.Me.Address, p, ct).ConfigureAwait(false);
+            string path = p.File;
+            return Results.Stream(
+                async body =>
+                {
+                    await using FileStream input = File.OpenRead(path);
+                    await SealedFile.OpenToAsync(input, body, MailKeyring.Current, CancellationToken.None).ConfigureAwait(false);
+                },
+                "application/zip",
+                "anjal-production-" + p.RequestedAt.UtcDateTime.ToString("yyyyMMdd-HHmm", System.Globalization.CultureInfo.InvariantCulture) + ".zip");
         }).RequireAuthorization();
 
         app.MapPost("/org/people/{id:guid}/{action}", async (HttpContext http, Guid id, string action, [FromForm] string? value,
@@ -242,6 +296,57 @@ internal static class OrgEndpoints
                     error = await svc.SetHoldAsync(a.Tenant, id, true, a.Me.DisplayName.Length > 0 ? a.Me.DisplayName : a.Me.Address, value ?? string.Empty, ct).ConfigureAwait(false);
                     back = "/org/retention";
                     logged = "org.hold.placed";
+                    break;
+                // rc.26 (item 80, brief 11h; D-266): a person leaving - the page's steps, in order.
+                case "leave-stop":
+                    if (id == a.Me.Id)
+                    {
+                        error = "You cannot stop your own sign-in.";
+                        logged = string.Empty;
+                        break;
+                    }
+                    await svc.SetEnabledAsync(id, false, ct).ConfigureAwait(false);
+                    await sessions.EndOthersAsync(id, null, ct).ConfigureAwait(false);
+                    await svc.ForgetTrustedDevicesAsync(id, ct).ConfigureAwait(false);
+                    await svc.NoteLeaverStepAsync(a.Tenant.Id, id, s => s.Stopped = DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                    back = "/org/people?sel=" + id + "&leaving=1";
+                    logged = "org.leaver.stopped";
+                    break;
+                case "leave-reply":
+                    error = await svc.LeaverReplyAsync(a.Tenant, id, value ?? string.Empty, ct).ConfigureAwait(false);
+                    back = "/org/people?sel=" + id + "&leaving=1";
+                    logged = "org.leaver.reply";
+                    break;
+                case "leave-forward":
+                    error = await svc.LeaverForwardAsync(a.Tenant, person, value ?? string.Empty, ct).ConfigureAwait(false);
+                    back = "/org/people?sel=" + id + "&leaving=1";
+                    logged = "org.leaver.forward";
+                    break;
+                case "leave-handover":
+                    {
+                        string[] parts = (value ?? string.Empty).Split('|');
+                        error = Guid.TryParse(parts[0], out Guid colleague)
+                            ? await svc.HandOverAsync(a.Tenant, a.Me.Id, person, colleague, parts.Length > 1 ? parts[1] : "send", ct).ConfigureAwait(false)
+                            : "Choose the colleague.";
+                        back = "/org/people?sel=" + id + "&leaving=1";
+                        logged = "org.leaver.handover";
+                        break;
+                    }
+                case "leave-takeback":
+                    error = await svc.TakeBackAsync(a.Tenant, a.Me.Id, person, ct).ConfigureAwait(false);
+                    back = "/org/people?sel=" + id + "&leaving=1";
+                    logged = "org.leaver.takeback";
+                    break;
+                case "leave-records":
+                    error = await svc.ProduceAsync(a.Tenant, a.Me.Id, "leaver", new[] { id }, null, null, "Records of " + person.Address + ", who has left",
+                        OpsEndpoints.RootOf(http.RequestServices.GetRequiredService<Anjal.Mailbox.IMaildirStore>()), ct).ConfigureAwait(false);
+                    if (error is null)
+                    {
+                        Guid? made = (await svc.ProductionsAsync(a.Tenant.Id, ct).ConfigureAwait(false)).FirstOrDefault(p => p.People.Contains(id) && p.Kind == "leaver")?.Id;
+                        await svc.NoteLeaverStepAsync(a.Tenant.Id, id, s => s.Records = made, ct).ConfigureAwait(false);
+                    }
+                    back = "/org/people?sel=" + id + "&leaving=1";
+                    logged = "org.leaver.records";
                     break;
                 case "unhold":
                     error = await svc.SetHoldAsync(a.Tenant, id, false, a.Me.Address, string.Empty, ct).ConfigureAwait(false);

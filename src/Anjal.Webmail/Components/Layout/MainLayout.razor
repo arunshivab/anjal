@@ -402,7 +402,7 @@ else
                     <button type="button" class="btn btn-danger-q btn-sm" data-approve="refuse">@L["No"]</button>
                 </div>
             </template>
-            <footer class="statusbar" data-statusbar data-me="@mailbox?.Id" data-shared="@(Shared ? "1" : "0")" data-tz="@clock.ZoneId" data-hours="@clock.Hours" data-sound="@((person?.NewMailSound ?? true) ? "1" : "0")" data-notify="@(notifyScope)" data-idle-limit="@((int)SessionRegistry.IdleLimit(Shared).TotalSeconds)"
+            <footer class="statusbar" data-statusbar data-me="@mailbox?.Id" data-shared="@(Shared ? "1" : "0")" data-tz="@clock.ZoneId" data-hours="@clock.Hours" data-sound="@((person?.NewMailSound ?? true) ? "1" : "0")" data-notify="@(notifyScope)" data-word-newmail="@L["New mail"]" data-word-newmails="@L["{n} new mails"]" data-idle-limit="@((int)SessionRegistry.IdleLimit(Shared).TotalSeconds)"
                     data-word-updated="@L["Updated {time}"]" data-word-offline="@L["Offline: showing mail as of {time}"]"
                     data-word-needs-server="@L["Needs a connection. Try again when you are back online."]"
                     data-word-new="@L["{n} new messages just arrived."]">

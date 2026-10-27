@@ -16,7 +16,7 @@ namespace Anjal.Mailbox;
 /// overrides the score: allow forces INBOX, block forces Junk.
 /// </para>
 /// </summary>
-public sealed class MailboxSink : Anjal.Smtp.IMessageSink
+public sealed partial class MailboxSink : Anjal.Smtp.IMessageSink
 {
     /// <summary>Name of the folder spam is filed in.</summary>
     public const string JunkFolder = "Junk";
@@ -152,6 +152,80 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
 
     /// <summary>rc.25 (DES-15 §7.6): the document of the address marks of a person's encrypted contacts.</summary>
     public const string ContactMarksKind = "contacts-marks";
+
+    /// <summary>
+    /// rc.26 (item 73): the mailing lists a person unsubscribed from, as list marks (see
+    /// <see cref="ListMarkOf"/>) with the day; later mail from such a list goes to Junk.
+    /// </summary>
+    public const string ListsLeftKind = "lists-left";
+
+    /// <summary>rc.26 (item 76): the referral header the referral template sets: "1".</summary>
+    public const string ReferralHeader = "X-Anjal-Referral";
+
+    /// <summary>rc.26 (item 76): "urgent" or "routine".</summary>
+    public const string ReferralUrgencyHeader = "X-Anjal-Referral-Urgency";
+
+    /// <summary>
+    /// The identity of the mailing list a message came from (rc.26, item 73): its List-Id (RFC 2919,
+    /// the part inside the angle brackets), else the first address of its List-Unsubscribe; lower
+    /// case; empty when it is not from a list.
+    /// </summary>
+    /// <param name="parsed">The message.</param>
+    /// <returns>The identity.</returns>
+    public static string ListIdentity(Anjal.Mime.MimeMessage? parsed)
+    {
+        if (parsed is null)
+        {
+            return string.Empty;
+        }
+        string listId = (parsed.Headers.Get("List-Id") ?? string.Empty).Trim();
+        int lt = listId.LastIndexOf('<');
+        int gt = listId.LastIndexOf('>');
+        if (lt >= 0 && gt > lt + 1)
+        {
+            return listId[(lt + 1)..gt].Trim().ToLowerInvariant();
+        }
+        if (listId.Length > 0)
+        {
+            return listId.ToLowerInvariant();
+        }
+        string unsubscribe = (parsed.Headers.Get("List-Unsubscribe") ?? string.Empty).Trim();
+        if (unsubscribe.Length == 0)
+        {
+            return string.Empty;
+        }
+        string first = unsubscribe.Split(',')[0].Trim().Trim('<', '>').Trim();
+        int q = first.IndexOf('?', System.StringComparison.Ordinal);
+        return (q > 0 ? first[..q] : first).ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// A list's mark for one mailbox (rc.26, item 73): an HMAC of the list identity with the mailbox and
+    /// the pepper, so that a copy of the database tells which mails came from one list but not which list.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="identity">The list identity (<see cref="ListIdentity"/>); empty gives empty.</param>
+    /// <param name="pepper">The pepper.</param>
+    /// <returns>The mark.</returns>
+    public static string ListMarkOf(System.Guid mailboxId, string identity, byte[] pepper)
+    {
+        System.ArgumentNullException.ThrowIfNull(identity);
+        return identity.Length == 0 ? string.Empty : Anjal.Store.MailKeys.AddressMark(mailboxId, "list:" + identity, pepper);
+    }
+
+    // rc.26 review: the headers are honoured for mail written here (signed in) or from outside when its
+    // DMARC passed; anyone else could mark their mail "urgent".
+    /// <summary>rc.26 (item 76): "urgent", "routine" or empty, from a referral's headers.</summary>
+    /// <param name="parsed">The message.</param>
+    /// <returns>The urgency.</returns>
+    public static string ReferralOf(Anjal.Mime.MimeMessage? parsed)
+    {
+        if (parsed is null || !string.Equals((parsed.Headers.Get(ReferralHeader) ?? string.Empty).Trim(), "1", System.StringComparison.Ordinal))
+        {
+            return string.Empty;
+        }
+        return string.Equals((parsed.Headers.Get(ReferralUrgencyHeader) ?? string.Empty).Trim(), "urgent", System.StringComparison.OrdinalIgnoreCase) ? "urgent" : "routine";
+    }
 
     /// <summary>rc.25: the document of the address marks of a person's encrypted contact groups.</summary>
     public const string GroupMarksKind = "contact-groups-marks";
@@ -448,6 +522,12 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
 
         Anjal.Mime.MimeMessage? parsed = this.ParseQuietly(ctx.RawBytes);
         byte[] raw = ctx.RawBytes;
+        // rc.26 (DES-14 §13): the line naming an application that also received a mail is Anjal's alone.
+        if (parsed?.Headers.Get(AlsoDeliveredHeader) is not null)
+        {
+            raw = RemoveHeader(raw, AlsoDeliveredHeader);
+            parsed = this.ParseQuietly(raw);
+        }
 
         // rc.22 (item 39, decisions of 2 Oct 2026): the files on mail from outside, before anything
         // else. Programs and scripts are refused outright; a virus is removed and the message
@@ -455,6 +535,18 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         FileJudgement files = ctx.AuthenticatedUser is null
             ? await AttachmentPolicy.JudgeAsync(parsed, this.Scanner, ct).ConfigureAwait(false)
             : new FileJudgement(FileVerdict.Clean, System.Array.Empty<string>(), string.Empty, null, 0);
+        // rc.26 (item 85, D-173): inside the organisation too - mail written here (webmail, port 587, an
+        // application) carrying a program, a script or a disk image is refused, and the sender told why.
+        if (ctx.AuthenticatedUser is not null && AttachmentPolicy.RefusedInside(parsed) is string inside)
+        {
+            this.log?.Invoke($"Mailbox: refused from inside: {inside}");
+            Anjal.Smtp.Counters.Increment("anjal_virus_refused_total");
+            return new Anjal.Smtp.DeliveryResult
+            {
+                Outcome = Anjal.Smtp.DeliveryOutcome.PermanentFailure,
+                ReplyText = inside + "; share them another way",
+            };
+        }
         if (files.Scanned > 0 || files.Verdict != FileVerdict.Clean)
         {
             await this.CountFilesAsync(files, ct).ConfigureAwait(false);
@@ -532,9 +624,58 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         string? refusal = null;
         var seenMailboxes = new System.Collections.Generic.HashSet<System.Guid>();
         var heldFor = new System.Collections.Generic.List<string>();
+        var doneApps = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
 
         foreach (string rcpt in ctx.EnvelopeTo)
         {
+            // rc.26 (DES-14 §17): a send's return path takes delivery and feedback reports, nothing else.
+            if (Anjal.Store.AppBounceAddress.IsBounceAddress(rcpt) && this.store is Anjal.Store.IAppApiStore bounceApps)
+            {
+                string? notReport = await this.TakeReportAsync(bounceApps, rcpt, ctx, parsed, ct).ConfigureAwait(false);
+                if (notReport is null)
+                {
+                    delivered++;
+                }
+                else
+                {
+                    refusal ??= notReport;
+                }
+                continue;
+            }
+
+            // rc.26 (DES-14 §13): an application's inbox address - its copy, encrypted to its key; when the
+            // address is shared with a mailbox (D-227), the holder's copy follows as ordinary mail.
+            string? alsoApp = null;
+            if (this.store is Anjal.Store.IAppApiStore apps && await apps.GetAppInboxAddressAsync(rcpt, ct).ConfigureAwait(false) is Anjal.Store.AppInboxAddress inbox)
+            {
+                try
+                {
+                    (bool appDelivered, bool appFull, string? appRefused, string appName) = await this.DeliverToApplicationAsync(apps, inbox, rcpt, raw, parsed, ctx, spamScore, doneApps, ct).ConfigureAwait(false);
+                    if (appDelivered)
+                    {
+                        delivered++;
+                    }
+                    else if (inbox.SharedMailboxId is null && appFull)
+                    {
+                        transient = true;
+                    }
+                    else if (inbox.SharedMailboxId is null)
+                    {
+                        refusal ??= appRefused;
+                    }
+                    alsoApp = appDelivered ? appName : null;
+                }
+                catch (System.IO.IOException ex)
+                {
+                    this.log?.Invoke($"Mailbox: I/O failure for the application inbox {rcpt}: {ex.Message}");
+                    transient = inbox.SharedMailboxId is null || transient;
+                }
+                if (inbox.SharedMailboxId is null)
+                {
+                    continue;
+                }
+            }
+
             // rc.22 (item 51): unsubscribe@ an organisation's domain, the address applications' mail
             // offers in List-Unsubscribe, puts the sender on the organisation's do-not-send list.
             if (await this.UnsubscribeAsync(rcpt, ctx.EnvelopeFrom, fromHeaderAddress, parsed, ct).ConfigureAwait(false))
@@ -562,6 +703,15 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                 {
                     // Same mailbox listed twice (e.g. once with a +tag, or through a group) - deliver once.
                     delivered++;
+                    continue;
+                }
+
+                // rc.26 (item 63): an inactive mailbox receives nothing, from inside either (the mail server
+                // refuses it at RCPT for mail from outside and port 587).
+                if (!ctx.AnjalSecurityMail && await InactiveAccounts.IsInactiveAsync(this.store, mailbox, System.DateTimeOffset.UtcNow, ct).ConfigureAwait(false))
+                {
+                    this.log?.Invoke($"Mailbox: {mailbox.Address} is inactive; not delivered");
+                    refusal ??= InactiveAccounts.RefusalText;
                     continue;
                 }
 
@@ -630,9 +780,17 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                         }
                     }
 
+                    // rc.26 (item 73): mail from a list the person unsubscribed from goes to Junk.
+                    string listMark = ListMarkOf(mailbox.Id, ListIdentity(parsed), this.AddressPepper);
+                    if (listMark.Length > 0 && string.Equals(folderName, Anjal.Store.FolderRow.Inbox, System.StringComparison.OrdinalIgnoreCase)
+                        && await this.LeftListAsync(mailbox.Id, listMark, ct).ConfigureAwait(false))
+                    {
+                        folderName = JunkFolder;
+                    }
+
                     Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
                     MaildirWriteResult written = await this.maildir
-                        .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, WithReturnPath(raw, ctx.EnvelopeFrom), ct)
+                        .WriteAsync(tenant.Slug, mailbox.Address, folder.Name, WithReturnPath(alsoApp is null ? raw : WithAlsoDelivered(raw, alsoApp), ctx.EnvelopeFrom), ct)
                         .ConfigureAwait(false);
                     string storedFile = written.RelativePath;
                     if (ruled is not null && (ruled.MarkRead || ruled.Flag))
@@ -662,6 +820,8 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
                         HasAttachments = HasAttachment(parsed?.Body),
                         BodyText = MessageText.Extract(parsed),
                         CategoryId = await this.CategoryForAsync(mailbox.Id, ctx.EnvelopeFrom, parsed?.Headers.Get("From") ?? string.Empty, ct).ConfigureAwait(false),
+                        ListMark = listMark,
+                        Referral = ctx.AuthenticatedUser is not null || AuthResultsOf(parsed)["dmarc"].StartsWith("pass", System.StringComparison.Ordinal) ? ReferralOf(parsed) : string.Empty,
                     }, ct).ConfigureAwait(false);
 
                     // v1.0.0-rc.8: the evidence is kept at least as long as this tenant requires.
@@ -783,21 +943,20 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         {
             return true;
         }
-        Anjal.Store.DoNotSendDocument doc = await Anjal.Store.DoNotSend.ReadAsync(this.store, domainRow.TenantId, ct).ConfigureAwait(false);
         System.DateTimeOffset now = System.DateTimeOffset.UtcNow;
-        bool changed = false;
-        foreach (string address in who)
+        await Anjal.Store.DoNotSend.ChangeAsync(this.store, domainRow.TenantId, doc =>
         {
-            if (!doc.Entries.Any(e => string.Equals(e.Address, address, System.StringComparison.OrdinalIgnoreCase)))
+            bool changed = false;
+            foreach (string address in who)
             {
-                doc.Entries.Add(new Anjal.Store.DoNotSendEntry { Address = address, Reason = "Unsubscribed", Added = now, By = Anjal.Store.DoNotSend.ByAnjal });
-                changed = true;
+                if (!doc.Entries.Any(e => string.Equals(e.Address, address, System.StringComparison.OrdinalIgnoreCase)))
+                {
+                    doc.Entries.Add(new Anjal.Store.DoNotSendEntry { Address = address, Reason = "Unsubscribed", Added = now, By = Anjal.Store.DoNotSend.ByAnjal, Code = "unsubscribe" });
+                    changed = true;
+                }
             }
-        }
-        if (changed)
-        {
-            await Anjal.Store.DoNotSend.WriteAsync(this.store, domainRow.TenantId, doc, ct).ConfigureAwait(false);
-        }
+            return changed;
+        }, ct).ConfigureAwait(false);
         this.log?.Invoke($"Mailbox: {rcpt}: {string.Join(", ", who)} unsubscribed from the organisation's applications");
         Anjal.Smtp.Counters.Increment("anjal_unsubscribe_total");
         return true;
@@ -928,6 +1087,24 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
         }
         this.log?.Invoke($"Mailbox: {mailbox.Address} forwarded a copy to {targetAddress}");
         Anjal.Smtp.Counters.Increment("anjal_mailbox_forwarded_total");
+    }
+
+    // rc.26 (item 73): whether the person unsubscribed from this list.
+    private async System.Threading.Tasks.Task<bool> LeftListAsync(System.Guid mailboxId, string listMark, System.Threading.CancellationToken ct)
+    {
+        string? json = await this.store.GetMailboxDocumentAsync(mailboxId, ListsLeftKind, ct).ConfigureAwait(false);
+        if (string.IsNullOrEmpty(json))
+        {
+            return false;
+        }
+        try
+        {
+            return (System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, System.DateTimeOffset>>(json) ?? new()).ContainsKey(listMark);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -1376,7 +1553,67 @@ public sealed class MailboxSink : Anjal.Smtp.IMessageSink
             HasUnsubscribe = parsed.Headers.Get("List-Unsubscribe") is not null,
             FromOutside = outside,
         };
-        return MailRules.Evaluate(rules, subject, groups);
+        RuleOutcome? outcome = MailRules.Evaluate(rules, subject, groups);
+        if (outcome is not null)
+        {
+            // rc.26 (item 80, brief 11e): each rule's matches, counted by day (numbers only) for "Matched N times".
+            await this.CountRuleMatchAsync(mailbox.Id, outcome.Rule.Id, ct).ConfigureAwait(false);
+        }
+        return outcome;
+    }
+
+    /// <summary>rc.26 (item 80): the mailbox document holding each rule's matches per day, for the last 30 days.</summary>
+    public const string RuleCountsKind = "rule-counts";
+
+    /// <summary>A rule's matches in the last 30 days, from the counts document.</summary>
+    /// <param name="json">The document.</param>
+    /// <param name="ruleId">The rule.</param>
+    /// <param name="today">Today (yyyy-MM-dd, UTC).</param>
+    /// <returns>The count.</returns>
+    public static int RuleMatches(string? json, System.Guid ruleId, System.DateTime today)
+    {
+        System.Collections.Generic.Dictionary<System.Guid, System.Collections.Generic.Dictionary<string, int>> counts = ReadRuleCounts(json);
+        if (!counts.TryGetValue(ruleId, out System.Collections.Generic.Dictionary<string, int>? days))
+        {
+            return 0;
+        }
+        string from = today.AddDays(-29).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        return days.Where(d => string.CompareOrdinal(d.Key, from) >= 0).Sum(d => d.Value);
+    }
+
+    private static System.Collections.Generic.Dictionary<System.Guid, System.Collections.Generic.Dictionary<string, int>> ReadRuleCounts(string? json)
+    {
+        if (string.IsNullOrEmpty(json))
+        {
+            return new();
+        }
+        try
+        {
+            return System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<System.Guid, System.Collections.Generic.Dictionary<string, int>>>(json) ?? new();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return new();
+        }
+    }
+
+    private async System.Threading.Tasks.Task CountRuleMatchAsync(System.Guid mailboxId, System.Guid ruleId, System.Threading.CancellationToken ct)
+    {
+        System.Collections.Generic.Dictionary<System.Guid, System.Collections.Generic.Dictionary<string, int>> counts =
+            ReadRuleCounts(await this.store.GetMailboxDocumentAsync(mailboxId, RuleCountsKind, ct).ConfigureAwait(false));
+        string today = System.DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        string oldest = System.DateTime.UtcNow.AddDays(-30).ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        if (!counts.TryGetValue(ruleId, out System.Collections.Generic.Dictionary<string, int>? days))
+        {
+            days = new System.Collections.Generic.Dictionary<string, int>(System.StringComparer.Ordinal);
+            counts[ruleId] = days;
+        }
+        days[today] = days.GetValueOrDefault(today) + 1;
+        foreach (string old in days.Keys.Where(k => string.CompareOrdinal(k, oldest) < 0).ToList())
+        {
+            days.Remove(old);
+        }
+        await this.store.SetMailboxDocumentAsync(mailboxId, RuleCountsKind, System.Text.Json.JsonSerializer.Serialize(counts), ct).ConfigureAwait(false);
     }
 
     private async System.Threading.Tasks.Task<System.Guid?> CategoryForAsync(System.Guid mailboxId, string envelopeFrom, string fromHeader, System.Threading.CancellationToken ct)

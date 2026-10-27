@@ -490,6 +490,17 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
                 }
             }
             await this.mail.RecordDiskTodayAsync(now, ct).ConfigureAwait(false);
+            // rc.26 (item 63, POL-01 v1.1 §4): reminders and deletions of inactive mailboxes.
+            (int reminders, int deleted) = await this.mail.InactivePassAsync(this.maildirRoot, now, ct).ConfigureAwait(false);
+            if (reminders + deleted > 0)
+            {
+                Console.WriteLine($"[inactive] {reminders} reminder(s) sent, {deleted} inactive mailbox(es) deleted.");
+            }
+            // rc.26 (DES-14 §14, §28.1): the application API's clearing, and inboxes not collected.
+            foreach (string line in await this.mail.AppApiDailyAsync(this.maildirRoot, now, ct).ConfigureAwait(false))
+            {
+                Console.WriteLine("[app-api] " + line);
+            }
         }
 #pragma warning disable CA1031 // The daily work is tried again within the hour; sending never waits for it.
         catch (Exception ex) when (ex is not OperationCanceledException)

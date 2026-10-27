@@ -66,9 +66,70 @@ function look() {
   };
 }
 
+// Owner, 26 Oct 2026 (D-267): "Username Tab Password Tab Submit" and, in Compose, Subject Tab body.
+// The orders are asserted as written, with the keys that reach what left the Tab order.
+function here() {
+  const e = document.activeElement;
+  if (!e || e === document.body) { return 'body'; }
+  if (e.isContentEditable) { return 'body-text'; }
+  if (e.id) { return '#' + e.id; }
+  if (e.classList.contains('csubject')) { return 'subject'; }
+  if (e.matches('[data-send]')) { return 'send'; }
+  if (e.matches('button[type=submit]')) { return 'submit'; }
+  return e.tagName.toLowerCase() + '.' + (e.className || '').toString().split(' ')[0];
+}
+
+async function orders(browser) {
+  const found = [];
+  const tabs = async (page, n) => { const seen = []; for (let i = 0; i < n; i++) { await page.keyboard.press('Tab'); seen.push(await page.evaluate(here)); } return seen; };
+  // Signed out: the sign-in page.
+  const ctx = await browser.newContext({ viewport: { width: L.SMALL[0], height: L.SMALL[1] } });
+  try {
+    const p = await ctx.newPage();
+    await p.goto(L.base + '/sign-in');
+    await p.waitForTimeout(400);
+    await p.focus('#address');
+    const got = await tabs(p, 2);
+    if (got.join(' > ') !== '#password > submit') { found.push('/sign-in: Tab from the address goes ' + got.join(' > ') + ', not to the password and then Sign in'); }
+    await p.focus('#password');
+    await p.keyboard.type('x');
+    await p.keyboard.press('Alt+F8');
+    if ((await p.getAttribute('#password', 'type')) !== 'text') { found.push('/sign-in: Alt+F8 does not show the password'); }
+    await p.keyboard.press('Alt+F8');
+    if ((await p.getAttribute('#password', 'type')) !== 'password') { found.push('/sign-in: Alt+F8 does not hide the password again'); }
+  } finally {
+    await ctx.close();
+  }
+  // Signed in: Compose.
+  const w = await L.open(L.SMALL, browser);
+  try {
+    await L.visit(w, '/compose', 600);
+    const p = w.page;
+    await p.focus('#to');
+    const got = await tabs(p, 4);
+    if (got.join(' > ') !== '#cc > subject > body-text > send') { found.push('/compose: Tab from To goes ' + got.join(' > ') + ', not Cc > Subject > the letter > Send'); }
+    await p.focus('.csubject');
+    const one = await tabs(p, 1);
+    if (one[0] !== 'body-text') { found.push('/compose: Tab from the subject goes to ' + one[0] + ', not to the letter'); }
+    await p.keyboard.type('Hello');
+    await p.keyboard.press('Alt+F10');
+    const inBar = await p.evaluate(() => !!(document.activeElement && document.activeElement.closest('[data-rte-bar]')));
+    if (!inBar) { found.push('/compose: Alt+F10 from the letter does not go to the formatting bar'); }
+    const a = await p.evaluate(() => document.activeElement && document.activeElement.getAttribute('aria-label'));
+    await p.keyboard.press('ArrowRight');
+    const b = await p.evaluate(() => document.activeElement && document.activeElement.getAttribute('aria-label'));
+    if (!inBar || a === b) { found.push('/compose: the arrow keys do not move along the formatting bar'); }
+    await p.keyboard.press('Escape');
+    if ((await p.evaluate(here)) !== 'body-text') { found.push('/compose: Escape in the formatting bar does not go back to the letter'); }
+  } finally {
+    await w.close();
+  }
+  return found;
+}
+
 module.exports = {
   name: 'keyboard',
-  title: 'Keyboard only: every control reached, focus shown, never trapped (UX-09)',
+  title: 'Keyboard only: every control reached, focus shown, never trapped; the owner\'s Tab orders (UX-09, D-267)',
   async run(screens) {
     const found = [];
     const record = [];
@@ -119,6 +180,13 @@ module.exports = {
       }
     } finally {
       await w.close();
+    }
+    // D-267: the owner's Tab orders and the keys for what left the Tab order.
+    const browser = await L.launch();
+    try {
+      (await orders(browser)).forEach((x) => found.push(x));
+    } finally {
+      await browser.close();
     }
     const lines = ['# Keyboard-only pass (UX-09)', '', `Checked ${new Date().toISOString().slice(0, 10)} at 1366x768 by tools/ui (check "keyboard"): on each kind of screen, Tab pressed from the top until focus came round again. Every stop must be visible and show that it has focus; focus must never be trapped; every control showing must be reached.`, '', '| Screen | Tab stops | Controls showing | Problems |', '|---|---:|---:|---:|'];
     for (const [u, n, shown, bad] of record) { lines.push(`| \`${u}\` | ${n} | ${shown} | ${bad} |`); }

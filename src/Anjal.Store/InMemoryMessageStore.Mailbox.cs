@@ -259,6 +259,8 @@ public sealed partial class InMemoryMessageStore
                 UsedBytes = 0,
                 CreatedAt = now,
                 UpdatedAt = now,
+                Kind = string.IsNullOrEmpty(mailbox.Kind) ? MailboxRow.PersonKind : mailbox.Kind,
+                LastSignInAt = now,
             };
             this.mailboxes.Add(row);
             return Task.FromResult(Clone(row));
@@ -297,7 +299,8 @@ public sealed partial class InMemoryMessageStore
             var snapshot = new List<MailboxRow>();
             foreach (MailboxRow m in this.mailboxes)
             {
-                if (tenantId is null || m.TenantId == tenantId.Value)
+                // rc.26 (D-271): an application's hidden inbox is never listed with people.
+                if ((tenantId is null || m.TenantId == tenantId.Value) && m.Kind != MailboxRow.ApplicationKind)
                 {
                     snapshot.Add(Clone(m));
                 }
@@ -765,6 +768,8 @@ public sealed partial class InMemoryMessageStore
         this.mailboxMessages.RemoveAll(m => m.MailboxId == mailboxId);
         this.StartEvidenceClocks(gone);
         this.folders.RemoveAll(f => f.MailboxId == mailboxId);
+        // rc.26: the mailbox's keys go with it, as the database's ON DELETE CASCADE does.
+        this.RemoveMailboxKeys(mailboxId);
     }
 
     private static int CompareFolders(FolderRow a, FolderRow b)
@@ -802,6 +807,8 @@ public sealed partial class InMemoryMessageStore
 
     private static MailboxRow Clone(MailboxRow m) => new()
     {
+        Kind = m.Kind,
+        LastSignInAt = m.LastSignInAt,
         Id = m.Id,
         TenantId = m.TenantId,
         LocalPart = m.LocalPart,
@@ -891,6 +898,9 @@ public sealed partial class InMemoryMessageStore
         HasAttachments = m.HasAttachments,
         BodyText = MessageCipher.Open(m.BodyText),
         Preview = MessageRow.PreviewOf(MessageCipher.Open(m.BodyText)),
+        ListMark = m.ListMark,
+        Referral = m.Referral,
+        AcknowledgedAt = m.AcknowledgedAt,
     };
 
     // ================= Categories (v0.15.0) =================

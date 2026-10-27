@@ -225,6 +225,16 @@ public sealed partial class MailboxService
     public async Task<Guid> TenantOfDomainAsync(string domain, CancellationToken ct = default) =>
         string.IsNullOrWhiteSpace(domain) ? Guid.Empty : (await this.store.GetTenantDomainAsync(domain.Trim().ToLowerInvariant(), ct).ConfigureAwait(false))?.TenantId ?? Guid.Empty;
 
+    /// <summary>rc.26 (item 80): who printed - the person's name and address, for the printed page's foot.</summary>
+    /// <param name="personId">The person.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The words.</returns>
+    public async Task<string> PrintedByAsync(Guid personId, CancellationToken ct = default)
+    {
+        MailboxRow? me = await this.store.GetMailboxByIdAsync(personId, ct).ConfigureAwait(false);
+        return me is null ? string.Empty : me.DisplayName.Trim().Length > 0 ? me.DisplayName.Trim() + " <" + me.Address + ">" : me.Address;
+    }
+
     /// <summary>The organisation a mailbox belongs to (never changes, so kept).</summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="ct">Cancellation.</param>
@@ -801,6 +811,11 @@ public sealed partial class MailboxService
             holds.Add(new LegalHold(mailboxId, DateTimeOffset.UtcNow, by, Clip(reason, 300)));
         }
         await this.WriteTenantDocumentAsync(tenant.Id, HoldsKind, holds, ct).ConfigureAwait(false);
+        if (!hold)
+        {
+            // rc.26 (item 63): a hold stops the inactive-account clock; when it is lifted, the clock starts again.
+            await this.store.TouchSignInAsync(mailboxId, DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+        }
         return null;
     }
 
@@ -1075,6 +1090,9 @@ public sealed partial class MailboxService
             ("DMARC", "_dmarc", "TXT", "v=DMARC1; p=reject; adkim=s; aspf=s; sp=reject; rua=mailto:dmarc-reports@" + d, found => found.Any(f => f.StartsWith("v=DMARC1", StringComparison.OrdinalIgnoreCase)) ? "pass" : "missing"),
             ("MTA-STS", "_mta-sts", "TXT", "v=STSv1; id=" + DateTimeOffset.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture) + "01", found => found.Any(f => f.StartsWith("v=STSv1", StringComparison.OrdinalIgnoreCase)) ? (MtaStsPolicy.ConfiguredMode() == "enforce" ? "pass" : "testing") : "missing"),
             ("TLS reports", "_smtp._tls", "TXT", "v=TLSRPTv1; rua=mailto:tls-reports@" + d, found => found.Any(f => f.StartsWith("v=TLSRPTv1", StringComparison.OrdinalIgnoreCase)) ? "pass" : "missing"),
+            // rc.26 (DES-14 §17, D-229): optional - a return path of the domain's own for its applications' mail.
+            ("Return path", "bounce", "MX", "10 " + this.hostName, found => found.Any(f => string.Equals(f.TrimEnd('.'), this.hostName, StringComparison.OrdinalIgnoreCase)) ? "pass" : found.Count == 0 ? "optional" : "different"),
+            ("Return path SPF", "bounce", "TXT", "v=spf1 mx -all", found => found.Any(f => f.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase)) ? "pass" : "optional"),
         };
         var result = new List<DnsRecordCheck>();
         foreach ((string kind, string name, string type, string value, Func<IReadOnlyList<string>, string> judge) in wanted)

@@ -21,6 +21,11 @@
    "icon": "edit"
   },
   {
+   "id": "away",
+   "title": "Away and automatic mail",
+   "icon": "clock"
+  },
+  {
    "id": "folders",
    "title": "Folders, rules and categories",
    "icon": "folder"
@@ -417,20 +422,22 @@
   {
    "id": "print",
    "part": "reading",
-   "title": "Print a message or see its original",
-   "summary": "Print gives a clean page; Show original gives the message exactly as it arrived.",
+   "title": "Print a message, a conversation, or see the original",
+   "summary": "Print gives a clean page of one mail or of the whole conversation, with who printed it and when; Show original gives the message exactly as it arrived.",
    "steps": [
-    "Open the message.",
-    "Press Print in the envelope for a printable page.",
+    "Open the message and press Print in the envelope.",
+    "Choose This mail, or The whole conversation to print every mail of it in order.",
+    "Each page ends with \"Printed by\" your name and the time, the Message-ID, and your organisation's note if it set one.",
     "Under More, choose Show original to see the raw message and download it."
    ],
    "tip": null,
    "show": null,
    "related": [
-    "stamps"
+    "stamps",
+    "print-note"
    ],
-   "keywords": "print original raw source eml",
-   "release": "rc.11",
+   "keywords": "print printout paper conversation thread original raw source eml footer printed by",
+   "release": "rc.26",
    "org": null
   },
   {
@@ -854,7 +861,8 @@
    "show": null,
    "related": [
     "recovery",
-    "password"
+    "password",
+    "unlock-mail"
    ],
    "keywords": "encrypted encryption locked unlock open my mail restore passkey privacy",
    "release": "rc.25",
@@ -1084,7 +1092,9 @@
    "tip": null,
    "show": null,
    "related": [
-    "originals"
+    "originals",
+    "produce",
+    "activity-7y"
    ],
    "keywords": "retention legal hold keep delete compliance",
    "release": "rc.14",
@@ -1333,7 +1343,7 @@
   },
   {
    "id": "forward",
-   "part": "folders",
+   "part": "away",
    "title": "Forward mail to another address",
    "summary": "A rule can send a copy of matching mail to any address; the original always stays in your mailbox. A rule can also be run over mail you already have.",
    "steps": [
@@ -1348,7 +1358,8 @@
     "line": "Forward a copy to is in every rule."
    },
    "related": [
-    "rules"
+    "rules",
+    "hand-over-leave"
    ],
    "keywords": "forwarding forward copy redirect auto-forward",
    "release": "rc.22",
@@ -1356,7 +1367,7 @@
   },
   {
    "id": "away",
-   "part": "writing",
+   "part": "away",
    "title": "Set an out-of-office reply",
    "summary": "While you are away, everyone who writes to you gets one reply, once, with your subject and text. Automatic mail and mailing lists are never answered.",
    "steps": [
@@ -1372,7 +1383,9 @@
    },
    "related": [
     "forward",
-    "send-later"
+    "snooze-leave",
+    "quiet-away",
+    "hand-over-leave"
    ],
    "keywords": "out of office vacation holiday auto reply autoreply away message leave",
    "release": "rc.22",
@@ -1469,24 +1482,26 @@
   {
    "id": "notifications",
    "part": "reading",
-   "title": "Get desktop notifications",
-   "summary": "Anjal can show a notification on your desktop when new mail arrives, while a tab is open.",
+   "title": "Choose which new mail pops up",
+   "summary": "Anjal can show a small notification for new mail, even when its tab is in the background. It says only \"New mail\" - never who wrote or the subject, because others may see your screen.",
    "steps": [
-    "Open Settings, Mail, and tick Desktop notifications.",
-    "Allow notifications when the browser asks.",
-    "Choose whether every message, or only mail from your contacts, is announced."
+    "Open Settings, Mail, and turn on Desktop notifications; allow them when the browser asks.",
+    "Choose Mail that needs me (what Today lists under Needs you), All new mail, or Only answers to my mail.",
+    "Set quiet hours if you like, and keep Quiet while my automatic reply is on ticked to hear nothing while you are away.",
+    "Several mails close together come as one notification: \"3 new mails\"."
    ],
-   "tip": null,
+   "tip": "Click the notification to open the mail.",
    "show": {
     "path": "/settings/mail",
     "at": ".setmain",
     "line": "Desktop notifications is here."
    },
    "related": [
-    "open-on"
+    "quiet-away",
+    "today"
    ],
-   "keywords": "notification notify alert desktop popup new mail sound",
-   "release": "rc.22",
+   "keywords": "notification notify alert desktop popup new mail sound quiet hours needs me answers",
+   "release": "rc.26",
    "org": null
   },
   {
@@ -1639,6 +1654,810 @@
    ],
    "keywords": "usermanagement individuals anjalmail.com add person invite fill in",
    "release": "rc.22",
+   "org": null
+  },
+  {
+   "id": "snooze-leave",
+   "part": "away",
+   "title": "Snooze mail until after your leave",
+   "summary": "With an away reply set, Snooze offers After my leave: the mail comes back to the top of your Inbox the morning after your leave ends.",
+   "steps": [
+    "Set your away reply with its Until day (Settings, Away).",
+    "Open a message, or tick it in the list, and press Snooze.",
+    "Choose After my leave. The message waits in Snoozed and comes back, marked Back, on the first morning after the Until day."
+   ],
+   "tip": "Without an away reply, After my leave is not offered: Anjal does not know when you are back.",
+   "show": null,
+   "related": [
+    "away",
+    "snooze"
+   ],
+   "keywords": "snooze after leave holiday vacation back return morning later",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "hand-over-leave",
+   "part": "away",
+   "title": "Hand over your work before leave",
+   "summary": "Before a long leave, send new mail on to a colleague, tell senders who is covering, and give the colleague a shared mailbox if one is used.",
+   "steps": [
+    "Settings, Rules: add a rule that matches all mail and fill in Forward a copy to with your colleague's address. Your own copy stays in your mailbox.",
+    "Settings, Away: name your colleague in the reply, with the dates.",
+    "If the work comes to a shared mailbox, ask your administrator to give your colleague access to it.",
+    "When you are back, turn the rule and the reply off."
+   ],
+   "tip": "Lajna can draft the away reply, naming whoever covered for you last time.",
+   "show": {
+    "path": "/settings/rules",
+    "at": ".setmain",
+    "line": "Forward a copy to is in every rule."
+   },
+   "related": [
+    "forward",
+    "away",
+    "shared"
+   ],
+   "keywords": "handover hand over leave colleague cover delegate forward vacation maternity",
+   "release": "rc.26",
+   "org": "Your organisation decides whether mail may be forwarded outside it."
+  },
+  {
+   "id": "quiet-away",
+   "part": "away",
+   "title": "Keep notifications quiet while you are away",
+   "summary": "While your away reply is on, Anjal shows no new-mail notifications, unless you turn this off. Quiet hours do the same every day at the times you choose.",
+   "steps": [
+    "Open Settings, Mail.",
+    "Keep Quiet while my automatic reply is on ticked.",
+    "For every day, set Quiet hours - from and until - and press Save. Leave both empty for none."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/mail",
+    "at": ".setmain",
+    "line": "Quiet hours are under Desktop notifications."
+   },
+   "related": [
+    "notifications",
+    "away"
+   ],
+   "keywords": "quiet hours do not disturb silence notifications away leave night",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "away-automatic",
+   "part": "away",
+   "title": "What gets an automatic reply",
+   "summary": "An away reply goes once to each person who writes, and never to automatic mail, so it does not start loops or answer newsletters.",
+   "steps": [
+    "Each sender gets the reply once while it is on; a second mail from them gets none.",
+    "Mailing lists, newsletters, delivery reports and other automatic mail get no reply.",
+    "Mail filed as Junk gets no reply.",
+    "Who gets it - everyone, your organisation, or your contacts - is your choice in Settings, Away."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/away",
+    "at": ".setmain",
+    "line": "Who gets the reply is chosen here."
+   },
+   "related": [
+    "away",
+    "junk"
+   ],
+   "keywords": "auto reply automatic once loop newsletter list bounce who gets",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "tab-keys",
+   "part": "start",
+   "title": "Move through a form with Tab",
+   "summary": "Tab goes to where you type next: in Compose from the subject straight to the text, at sign-in from your address to your password to Sign in.",
+   "steps": [
+    "Press Tab to move to the next field, Shift+Tab to go back.",
+    "The formatting bar is one stop: press Alt+F10 to reach it, the arrow keys to move along it, and Escape to go back to your text.",
+    "On the sign-in page, Alt+F8 shows or hides the password."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "shortcuts"
+   ],
+   "keywords": "tab key keyboard order focus next field formatting toolbar alt f10 show password",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "unlock-mail",
+   "part": "security",
+   "title": "Open your mail when it is locked",
+   "summary": "If your password was reset without the old one, your mail stays locked until an administrator of your organisation restores it. Nothing is lost.",
+   "steps": [
+    "Sign in with your new password. The Unlock page says your mail is locked and that your administrators have been told.",
+    "An administrator opens Organisation, Encryption, and restores your mail with the organisation's recovery key.",
+    "You get a mail when it is done; sign in again and your mail opens."
+   ],
+   "tip": "Remembered your old password? Type it on the Unlock page: your mail opens at once.",
+   "show": null,
+   "related": [
+    "mail-encryption",
+    "password"
+   ],
+   "keywords": "locked mail unlock restore reset forgot password encryption cannot open",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "keep-active",
+   "part": "security",
+   "title": "Keep your account active",
+   "summary": "An account nobody signs in to for 180 days becomes inactive: mail to it is refused. 186 days later it is deleted. One sign-in is enough to keep it.",
+   "steps": [
+    "Sign in at least once every few months - the webmail, a passkey or a mail app all count.",
+    "Before deletion, you and your administrators are mailed 60, 30, 15, 7, 3 and 1 days ahead - at your recovery address if you set one.",
+    "A deleted account's address is never given to anyone else."
+   ],
+   "tip": "Shared mailboxes, mailboxes under a legal hold and applications' inboxes are never made inactive.",
+   "show": null,
+   "related": [
+    "recovery",
+    "inactive-admin"
+   ],
+   "keywords": "inactive account deleted 180 days sign in keep active dormant",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "programs-refused",
+   "part": "writing",
+   "title": "Why programs and scripts cannot be sent",
+   "summary": "Anjal does not send programs, scripts or disk images by mail - not even inside a zip, and not even inside your organisation - because that is how most viruses travel.",
+   "steps": [
+    "Press Send. If a file is a program (.exe, .bat, a script, a Java file) or a disk image (.iso), or a zip holds one, the message is not sent and the notice names the file.",
+    "Share such files another way, such as your organisation's file share.",
+    "Office files, PDFs, pictures and ordinary zips go as usual."
+   ],
+   "tip": "Renaming a program does not help: Anjal looks inside the file, not at its name.",
+   "show": null,
+   "related": [
+    "attach",
+    "virus"
+   ],
+   "keywords": "exe program script blocked not sent attachment zip iso refused virus",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "kept-draft",
+   "part": "writing",
+   "title": "If you are signed out while writing",
+   "summary": "When your session ends while you are writing, what you wrote is kept as a draft and opens again when you sign in.",
+   "steps": [
+    "Sign in again: the draft opens where you left it, with a note that it was kept.",
+    "Files added after the last automatic save are in the earlier draft, in Drafts.",
+    "Send it, or keep writing."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "write",
+    "sign-in"
+   ],
+   "keywords": "draft lost signed out session expired timeout kept saved writing",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "try-all-again",
+   "part": "writing",
+   "title": "Send everything in the Outbox again",
+   "summary": "Mail that could not be delivered yet waits in the Outbox. Try all again sends every waiting message now.",
+   "steps": [
+    "Open Outbox from the rail.",
+    "Each message shows why it waits and when it is tried next.",
+    "Press Try all again to try every one now, or open one to try it alone or stop it."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "write",
+    "send-later"
+   ],
+   "keywords": "outbox retry resend waiting stuck not delivered try again",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "mailing-list-card",
+   "part": "reading",
+   "title": "Why you get a mailing list's mail",
+   "summary": "Mail from a list shows a card: how many came from it this month, and whether you unsubscribed. After Unsubscribe, later mail from that list goes to Junk.",
+   "steps": [
+    "Open a message from a list: the Mailing list card shows how many mails came from it this month.",
+    "Press Unsubscribe to leave the list; the card shows the day you did.",
+    "Mail from that list that still arrives goes to Junk."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "unsubscribe",
+    "block"
+   ],
+   "keywords": "mailing list newsletter why how many unsubscribe junk card",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "rule-from-mail",
+   "part": "folders",
+   "title": "Make a rule from a mail",
+   "summary": "Start a rule from a mail you have open: it is filled in for its sender, and you choose what it does.",
+   "steps": [
+    "Open the mail, press More, and choose Make a rule from this mail.",
+    "The new rule matches mail from that sender. Choose what it does: a folder, read, flag, or forward.",
+    "Press Save. Tick Apply to older mail to file what already matches."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "rules",
+    "rule-counts"
+   ],
+   "keywords": "rule from this mail filter sender automatic create",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "rule-counts",
+   "part": "folders",
+   "title": "See how often each rule matched",
+   "summary": "Each rule shows how many mails it matched in the last 30 days, so you can see which rules still work.",
+   "steps": [
+    "Open Settings, Rules.",
+    "Under each rule: Matched N times in the last 30 days.",
+    "A rule that never matches can be changed or removed."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/settings/rules",
+    "at": ".setmain",
+    "line": "Each rule shows its matches."
+   },
+   "related": [
+    "rules",
+    "rule-from-mail"
+   ],
+   "keywords": "rule count matched how often statistics unused",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "mailbox-full",
+   "part": "folders",
+   "title": "When your mailbox is full",
+   "summary": "A full mailbox cannot send, and new mail waits outside: senders' servers try again for days. Delete or archive mail, or ask for more space.",
+   "steps": [
+    "The status bar shows how full your mailbox is, in red when it is full.",
+    "Empty Trash and Junk, and delete large old mail; search has:attachment to find big messages.",
+    "Ask your administrator for more space if you need it."
+   ],
+   "tip": "Mail is not lost while you are full: the sending servers keep it and try again.",
+   "show": null,
+   "related": [
+    "archive",
+    "search"
+   ],
+   "keywords": "full mailbox quota storage space cannot send delete",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "referral-urgent",
+   "part": "patient",
+   "title": "Mark a referral urgent",
+   "summary": "The Referral template can be marked urgent. The receiver here sees it first on Today, as Referral · urgent.",
+   "steps": [
+    "Write a new message and choose the Referral template (Hospital and clinic).",
+    "Tick Urgent referral if it is.",
+    "Press Send. A colleague here sees Referral · urgent at the top of Today; a routine referral is marked Referral."
+   ],
+   "tip": "Only the referral mark and its urgency travel with the mail; nothing about the patient is added.",
+   "show": null,
+   "related": [
+    "templates",
+    "today"
+   ],
+   "keywords": "referral urgent priority today hospital clinic template",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "leaving",
+   "part": "admin",
+   "title": "When someone leaves the organisation",
+   "summary": "One page takes you through it in order: stop sign-in, an automatic reply for 90 days, forward new mail, hand the mail to a colleague, and keep it for the records.",
+   "steps": [
+    "Open Organisation, People, choose the person, and press This person is leaving.",
+    "Stop sign-in. Set the automatic reply (it names who to write to) and forward new mail to a person or shared mailbox.",
+    "Hand the mail to a colleague: their mail becomes a shared mailbox the colleague opens from the account menu. It needs your password sign-in, since it uses the organisation's recovery key.",
+    "Download the mail for the records. Each step is in the activity log, and the handover can be taken back."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/people",
+    "at": ".setmain",
+    "line": "Choose a person, then This person is leaving."
+   },
+   "related": [
+    "shared",
+    "retention"
+   ],
+   "keywords": "leaver leaving resign offboarding handover colleague forward records exit",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "produce",
+   "part": "admin",
+   "title": "Produce mail for a legal hold",
+   "summary": "For people under a legal hold, Produce makes one file of their mail - each mail as .eml, with an index and fingerprints - for a court or an investigation.",
+   "steps": [
+    "Open Organisation, Retention, and in Legal hold press Produce mail for a legal hold.",
+    "Choose the people (only those under hold) and the dates.",
+    "The file is made in the background; you are mailed when it is ready. Only you can download it, for 7 days.",
+    "Every production and download is in the activity log, and the other administrators are told."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/retention",
+    "at": ".setmain",
+    "line": "Produce mail is in Legal hold."
+   },
+   "related": [
+    "retention",
+    "originals"
+   ],
+   "keywords": "ediscovery production legal hold court export investigation",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "inactive-admin",
+   "part": "admin",
+   "title": "Accounts nobody signs in to",
+   "summary": "A person's account with no sign-in for 180 days becomes inactive (mail to it is refused) and is deleted 186 days later. You are mailed before.",
+   "steps": [
+    "A person's page shows when their account becomes inactive, and when it would be deleted.",
+    "You and the person are mailed 60, 30, 15, 7, 3 and 1 days before deletion. One sign-in stops it.",
+    "Shared mailboxes, people under a legal hold and applications' inboxes are never counted. Lifting a hold starts the clock again."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/people",
+    "at": ".setmain",
+    "line": "Choose a person to see their clock."
+   },
+   "related": [
+    "keep-active",
+    "retention"
+   ],
+   "keywords": "inactive dormant 180 days deletion reminder account cleanup",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "activity-7y",
+   "part": "admin",
+   "title": "How long the activity log is kept",
+   "summary": "Anjal keeps your organisation's activity log for at least 7 years. No entry can be changed or removed, by your administrators or by Anjal.",
+   "steps": [
+    "Open Organisation, Activity log.",
+    "Entries go back to when your organisation started, for at least 7 years.",
+    "Press Check the chain to show that no entry was changed or removed."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/log",
+    "at": ".setmain",
+    "line": "The activity log."
+   },
+   "related": [
+    "activity",
+    "retention"
+   ],
+   "keywords": "activity log retention 7 years audit keep tamper",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "print-note",
+   "part": "admin",
+   "title": "Add a note to printed mail",
+   "summary": "A line your organisation chooses - such as \"Confidential: for the addressee only\" - is printed at the foot of every printed mail.",
+   "steps": [
+    "Open Organisation, Mail rules.",
+    "Write the print note, up to one line, and press Save.",
+    "Every printed page then ends with it, after Printed by and the Message-ID."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/rules",
+    "at": ".setmain",
+    "line": "The print note is in Mail rules."
+   },
+   "related": [
+    "print"
+   ],
+   "keywords": "print note footer confidential disclaimer printed",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "encryption-admin",
+   "part": "admin",
+   "title": "Encryption for your organisation",
+   "summary": "Mail is encrypted so that only each person, and you through the organisation's recovery key, can read it. Until an administrator signs in with a password, Encryption shows On - key not set yet.",
+   "steps": [
+    "Open Organisation, Encryption.",
+    "If it says On - key not set yet, sign in with your password (not only a passkey): the organisation's key is made then.",
+    "Print the recovery sheet and confirm it; keep it with your important papers.",
+    "When someone's mail is locked after a reset, restore it here."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/encryption",
+    "at": ".setmain",
+    "line": "Encryption, the recovery sheet and restores."
+   },
+   "related": [
+    "recovery-sheet",
+    "mail-encryption",
+    "unlock-mail"
+   ],
+   "keywords": "encryption key recovery admin restore locked organisation",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "recovery-sheet",
+   "part": "admin",
+   "title": "Keep the recovery sheet safe",
+   "summary": "The recovery sheet opens your organisation's recovery key if every administrator loses their password. Print it once, confirm it, and keep it locked away.",
+   "steps": [
+    "Organisation, Encryption: press Show the recovery sheet and print it.",
+    "Type its check words to confirm you have it; until then Anjal keeps a temporary copy.",
+    "Keep it with your organisation's important papers, never in mail or on a computer."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/encryption",
+    "at": ".setmain",
+    "line": "The recovery sheet."
+   },
+   "related": [
+    "encryption-admin"
+   ],
+   "keywords": "recovery sheet paper key safe print confirm lost password",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "sending-figure",
+   "part": "admin",
+   "title": "The organisation's sending figure for the day",
+   "summary": "The Anjal operator sets how many messages your organisation may send a day, every route together: the webmail, mail apps and your applications.",
+   "steps": [
+    "Your dashboard shows today's use against the day's figure.",
+    "At 80% and at 100% the operator and you are told.",
+    "Past the figure, sending waits until tomorrow (Anjal's day), and the sender is told so."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-api-limits",
+    "dashboard"
+   ],
+   "keywords": "daily sending limit quota per day messages figure cap",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "api",
+   "part": "sending",
+   "title": "The application API for developers",
+   "summary": "Applications send mail, read what happened to it, and receive mail over HTTPS at https://<your mail host>/api/v1/. JSON in, JSON out; the full description is at /api/v1/openapi.json.",
+   "steps": [
+    "Send: POST /api/v1/messages/email with X-Api-Key and a body of from, to, subject, text and/or html (or a template). The answer is 202 with the send's id. Set Idempotency-Key: a retry with the same key and body gets the first answer, never a second mail.",
+    "Status and events: GET /api/v1/messages/{id}, GET /api/v1/events?since=<last seq>, or webhooks. A 429 says which window is full and when to try again (Retry-After).",
+    "Signing: the string is the method, the path and query, the Unix time and the hex SHA-256 of the body, joined by new lines. Sign it with your ECDSA P-256 key (SHA-256) and send Anjal-Key-Id, Anjal-Timestamp and Anjal-Signature (base64url). The inbox always needs it.",
+    "Decrypting inbox mail in Python (cryptography): key = priv.decrypt(b64(wrappedKey), OAEP(MGF1(SHA256()), SHA256(), None)); mail = AESGCM(key).decrypt(b64(iv), b64(ciphertext) + b64(tag), None).",
+    "In Node: key = crypto.privateDecrypt({key: priv, oaepHash: 'sha256'}, wrappedKey); d = crypto.createDecipheriv('aes-256-gcm', key, iv); d.setAuthTag(tag); mail = Buffer.concat([d.update(ciphertext), d.final()]).",
+    "For .NET, the Anjal.Client package does all of this: AnjalClient, InboxMessage.Decrypt and WebhookVerifier."
+   ],
+   "tip": "Never put patient details in tags or metadata: they are kept readable so that you can search them.",
+   "show": null,
+   "related": [
+    "app-api-keys",
+    "app-api-signing",
+    "app-api-inbox"
+   ],
+   "keywords": "api http rest json developer integration send status events webhook openapi idempotency signing decrypt python node",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-keys",
+   "part": "sending",
+   "title": "Make an HTTP key for an application",
+   "summary": "An HTTP key lets an application use the API. It is shown once; Anjal keeps a salted hash and its fingerprint.",
+   "steps": [
+    "Open Organisation, Sending systems, choose the application, and press Application API.",
+    "On Keys, write where the key is used and press New HTTP key. Copy it into the application now.",
+    "To change keys, make a new one, switch the application over, then press Retire on the old one: it then answers key_retired with its fingerprint."
+   ],
+   "tip": "Two keys can be live at once, so the change-over needs no downtime.",
+   "show": {
+    "path": "/org/apps",
+    "at": ".sendsys",
+    "line": "Choose an application, then Application API."
+   },
+   "related": [
+    "api",
+    "app-api-sandbox"
+   ],
+   "keywords": "http key api key ak_live create rotate retire fingerprint",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-sandbox",
+   "part": "sending",
+   "title": "Test with a sandbox key",
+   "summary": "A sandbox key (ak_test_) runs every check of a real send but sends nothing. Two addresses answer with bounces so you can test that too.",
+   "steps": [
+    "On the application's Keys, tick Sandbox key and press New HTTP key.",
+    "Sends with it are \"delivered\" two seconds later, with events and webhooks as usual.",
+    "Send to bounce@sandbox.anjal for a hard bounce, or defer@sandbox.anjal for a soft one. Sandbox sends are cleared after 7 days."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-api-keys",
+    "api"
+   ],
+   "keywords": "sandbox test key ak_test try without sending bounce",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-signing",
+   "part": "sending",
+   "title": "Ask applications to sign their requests",
+   "summary": "With signing, a stolen key is not enough: each request carries a signature made with the application's own private key, which never leaves it.",
+   "steps": [
+    "The application makes an ECDSA P-256 key pair and gives you the public half (PEM).",
+    "On the application's Signing, paste it and press Add the key. Anjal names it sk_ and shows its fingerprint.",
+    "Choose Signing required. Requests to the inbox are always signed, and so is everything from an application with the patient-data mark."
+   ],
+   "tip": "Two signing keys can be live at once while the application changes over.",
+   "show": null,
+   "related": [
+    "api",
+    "app-api-keys"
+   ],
+   "keywords": "signing signature ecdsa p-256 public key sign requests replay",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-encryption",
+   "part": "sending",
+   "title": "Upload an application's encryption key",
+   "summary": "Mail to an application is always encrypted to its own RSA key before Anjal stores it. Anjal never holds a key that opens it.",
+   "steps": [
+    "The application makes an RSA key of 3,072 bits or more and gives you the public half (PEM).",
+    "On the application's Encryption, paste it and press Add the key.",
+    "To change keys, add the new one first; new mail uses the newest. Remove the old one when the application has collected its mail."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-api-inbox",
+    "api"
+   ],
+   "keywords": "encryption rsa public key application inbox encrypted pem",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-inbox",
+   "part": "sending",
+   "title": "Give an application an inbox address",
+   "summary": "Mail to an application's inbox address is kept for it, encrypted, until it collects and acknowledges it. It is never filed as Junk.",
+   "steps": [
+    "Upload the application's encryption key first.",
+    "On the application's Inbox, type an address on one of your domains and press Add. The domain's MX must point at Anjal.",
+    "The page shows how many mails wait and the oldest. Mail is cleared 30 days after the application acknowledges it - never before.",
+    "If it stops collecting, you are mailed at 7 days, and at 30 with the operator. When its storage is full, senders are asked to try later."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-api-encryption",
+    "app-api-shared"
+   ],
+   "keywords": "application inbox receive mail address collect acknowledge lab results",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-shared",
+   "part": "sending",
+   "title": "Share an address with a person's mailbox",
+   "summary": "An address someone already has can also go to an application: each mail then goes to both, and each copy is independent.",
+   "steps": [
+    "Add the address on the application's Inbox. Anjal says who holds it and asks you to confirm.",
+    "Press Share it. The holder's copy carries a line saying the application also has it; the application's copy is encrypted to its key.",
+    "Reading or deleting one copy does nothing to the other. Stop sharing gives the address back to its holder alone."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-api-inbox"
+   ],
+   "keywords": "shared address both copies person application holder share",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-webhooks",
+   "part": "sending",
+   "title": "Add webhooks for an application's events",
+   "summary": "Anjal posts each event - delivered, bounced, new inbox mail - to the application's webhook, signed with a secret, and tries again for a day.",
+   "steps": [
+    "On the application's Webhooks, type the https:// address, tick the events (none for all) and press Add the webhook.",
+    "Copy the secret now: it is shown once. The application checks Anjal-Signature with it.",
+    "Latest deliveries lists each attempt with the answer; Send again tries one now. After 24 hours of failure the webhook is marked failing and you are mailed."
+   ],
+   "tip": "A webhook on a private or loopback address needs the Anjal operator's permission for your organisation.",
+   "show": null,
+   "related": [
+    "app-webhooks",
+    "api"
+   ],
+   "keywords": "webhook events callback signature secret retry failing delivered bounced",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-limits",
+   "part": "sending",
+   "title": "Set an application's limits and allowed addresses",
+   "summary": "Choose how many messages an application may send an hour and a day, which addresses it may send as, and where its requests may come from.",
+   "steps": [
+    "On the application's Limits, set Sends an hour and Sends a day (up to 2,000 and 20,000).",
+    "List the addresses it may send as, or @domain for any address on a domain; empty means only the address it was added with.",
+    "Allowed from: address ranges such as 10.0.0.0/8; requests from elsewhere are refused.",
+    "Use now shows this minute, this hour and today."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "sending-figure",
+    "app-api-keys"
+   ],
+   "keywords": "limit rate per hour per day allowed from cidr ip sender addresses",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-templates",
+   "part": "sending",
+   "title": "Templates for applications",
+   "summary": "An application can send from a template kept on the console: it names the template and gives the values, in the language it wants.",
+   "steps": [
+    "On an application's Templates, write a name such as signin-code, the subject, text and HTML in English, with {{code}} where a value goes.",
+    "Add the other languages; each is Not checked until a person checks it.",
+    "The application sends template: {name, language, values}. A missing value is refused naming it; the last 10 versions are kept."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "api"
+   ],
+   "keywords": "template placeholder language tamil values signin code application",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-status",
+   "part": "sending",
+   "title": "Follow what happened to an application's mail",
+   "summary": "Each send has a status gathered from every recipient, the receiving servers' replies, and events the application can read or receive.",
+   "steps": [
+    "GET /api/v1/messages/{id} gives the status: queued, deferred, delivered, bounced, failed or suppressed, each recipient's state and every attempt.",
+    "GET /api/v1/events gives every event in order; pass the last seq you saw as since.",
+    "The console's Sending systems, Messages shows the same, without the subject: it is kept only by the application."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/apps",
+    "at": ".sendsys",
+    "line": "Sending systems, Messages."
+   },
+   "related": [
+    "app-messages",
+    "api"
+   ],
+   "keywords": "status events delivered bounced deferred attempts application message",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-return-path",
+   "part": "sending",
+   "title": "A return path of your own",
+   "summary": "Each application send has its own return address, so bounces and complaints reach the application as events. With one optional record, it uses your own domain.",
+   "steps": [
+    "Anjal chooses the return domain itself: your domain when its MX points at Anjal; else bounce.<your domain> when that record exists; else Anjal's own.",
+    "To use your own, add bounce MX 10 <your mail host> (and bounce TXT v=spf1 mx -all) at your DNS host.",
+    "Organisation, Domains shows each record as Optional until it is there."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/domains",
+    "at": ".setmain",
+    "line": "Return path is an optional record."
+   },
+   "related": [
+    "sending-dns",
+    "app-api-status"
+   ],
+   "keywords": "return path bounce domain dns mx dsn complaint envelope sender",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-suppressions",
+   "part": "sending",
+   "title": "The do-not-send list through the API",
+   "summary": "Addresses that bounced hard, complained or unsubscribed are not sent to again. Applications can read the list and add to it.",
+   "steps": [
+    "GET /api/v1/suppressions?address= says whether an address is on it and why.",
+    "POST /api/v1/suppressions adds one; DELETE removes a hard bounce or one the application added.",
+    "A complaint or an unsubscribe is the recipient's own choice: only an administrator removes it, on the console."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-donotsend",
+    "api"
+   ],
+   "keywords": "suppression do not send list bounce complaint unsubscribe api",
+   "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "app-api-patient",
+   "part": "sending",
+   "title": "The patient-data mark",
+   "summary": "An application that carries patient data is marked by the Anjal operator: every request must then be signed, and the activity log keeps where each send went.",
+   "steps": [
+    "Ask the Anjal operator to set the mark, saying why; only an operator sets or removes it.",
+    "While it is set, unsigned requests are refused, and each send's recipient domains are logged.",
+    "Its inbox mail is encrypted to its key like every application's, and an address may be shared with a mailbox."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "app-api-signing",
+    "outside"
+   ],
+   "keywords": "patient data mark operator signed his lipi health",
+   "release": "rc.26",
    "org": null
   }
  ]

@@ -106,6 +106,30 @@
 
 - [Anjal.BreakGlass.Program](Anjal.BreakGlass/Program.md)
 
+## Anjal.Client
+
+- [Anjal.Client.AnjalApiException](Anjal.Client/AnjalApiException.md)
+- [Anjal.Client.AnjalClient](Anjal.Client/AnjalClient.md)
+- [Anjal.Client.AnjalEvent](Anjal.Client/AnjalEvent.md)
+- [Anjal.Client.BatchItemResult](Anjal.Client/BatchItemResult.md)
+- [Anjal.Client.Client](Anjal.Client/Client.md)
+- [Anjal.Client.DecryptedMail](Anjal.Client/DecryptedMail.md)
+- [Anjal.Client.EmailAddress](Anjal.Client/EmailAddress.md)
+- [Anjal.Client.EmailAttachment](Anjal.Client/EmailAttachment.md)
+- [Anjal.Client.InboxItem](Anjal.Client/InboxItem.md)
+- [Anjal.Client.InboxMessage](Anjal.Client/InboxMessage.md)
+- [Anjal.Client.MailFile](Anjal.Client/MailFile.md)
+- [Anjal.Client.MessageStatus](Anjal.Client/MessageStatus.md)
+- [Anjal.Client.MimeReader](Anjal.Client/MimeReader.md)
+- [Anjal.Client.ModuleInfo](Anjal.Client/ModuleInfo.md)
+- [Anjal.Client.Page`1](Anjal.Client/Page`1.md)
+- [Anjal.Client.SendRequest](Anjal.Client/SendRequest.md)
+- [Anjal.Client.SendResult](Anjal.Client/SendResult.md)
+- [Anjal.Client.Suppression](Anjal.Client/Suppression.md)
+- [Anjal.Client.TemplateChoice](Anjal.Client/TemplateChoice.md)
+- [Anjal.Client.Webhook](Anjal.Client/Webhook.md)
+- [Anjal.Client.WebhookVerifier](Anjal.Client/WebhookVerifier.md)
+
 ## Anjal.Dkim
 
 - [Anjal.Dkim.BodyCanonicalization](Anjal.Dkim/BodyCanonicalization.md)
@@ -153,6 +177,8 @@
 - [Anjal.Mailbox.IMaildirKeyDirectory](Anjal.Mailbox/IMaildirKeyDirectory.md)
 - [Anjal.Mailbox.IMaildirStore](Anjal.Mailbox/IMaildirStore.md)
 - [Anjal.Mailbox.IVirusScanner](Anjal.Mailbox/IVirusScanner.md)
+- [Anjal.Mailbox.InactiveAccounts](Anjal.Mailbox/InactiveAccounts.md)
+- [Anjal.Mailbox.InactivePolicy](Anjal.Mailbox/InactivePolicy.md)
 - [Anjal.Mailbox.LabelChange](Anjal.Mailbox/LabelChange.md)
 - [Anjal.Mailbox.LabelRecoveryReport](Anjal.Mailbox/LabelRecoveryReport.md)
 - [Anjal.Mailbox.MailDocuments](Anjal.Mailbox/MailDocuments.md)
@@ -178,6 +204,8 @@
 - [Anjal.Mailbox.RunnerFactory](Anjal.Mailbox/RunnerFactory.md)
 - [Anjal.Mailbox.ScanResult](Anjal.Mailbox/ScanResult.md)
 - [Anjal.Mailbox.ScanVerdict](Anjal.Mailbox/ScanVerdict.md)
+- [Anjal.Mailbox.SendingDay](Anjal.Mailbox/SendingDay.md)
+- [Anjal.Mailbox.SendingDayState](Anjal.Mailbox/SendingDayState.md)
 - [Anjal.Mailbox.TenantKind](Anjal.Mailbox/TenantKind.md)
 - [Anjal.Mailbox.TenantStatePolicy](Anjal.Mailbox/TenantStatePolicy.md)
 - [Anjal.Mailbox.UnlockOutcome](Anjal.Mailbox/UnlockOutcome.md)
@@ -318,6 +346,17 @@
 
 ## Anjal.Store
 
+- [Anjal.Store.AppBounceAddress](Anjal.Store/AppBounceAddress.md)
+- [Anjal.Store.AppEncryptionKey](Anjal.Store/AppEncryptionKey.md)
+- [Anjal.Store.AppEnvelope](Anjal.Store/AppEnvelope.md)
+- [Anjal.Store.AppEvent](Anjal.Store/AppEvent.md)
+- [Anjal.Store.AppInboxAddress](Anjal.Store/AppInboxAddress.md)
+- [Anjal.Store.AppRecord](Anjal.Store/AppRecord.md)
+- [Anjal.Store.AppRecords](Anjal.Store/AppRecords.md)
+- [Anjal.Store.AppSend](Anjal.Store/AppSend.md)
+- [Anjal.Store.AppSendQuery](Anjal.Store/AppSendQuery.md)
+- [Anjal.Store.AppSuppressions](Anjal.Store/AppSuppressions.md)
+- [Anjal.Store.AppWebhookDelivery](Anjal.Store/AppWebhookDelivery.md)
 - [Anjal.Store.AuditChainCheck](Anjal.Store/AuditChainCheck.md)
 - [Anjal.Store.AuditEvent](Anjal.Store/AuditEvent.md)
 - [Anjal.Store.BreakGlassLine](Anjal.Store/BreakGlassLine.md)
@@ -335,6 +374,7 @@
 - [Anjal.Store.FigureScope](Anjal.Store/FigureScope.md)
 - [Anjal.Store.FolderRow](Anjal.Store/FolderRow.md)
 - [Anjal.Store.GreylistRow](Anjal.Store/GreylistRow.md)
+- [Anjal.Store.IAppApiStore](Anjal.Store/IAppApiStore.md)
 - [Anjal.Store.IEvidenceStore](Anjal.Store/IEvidenceStore.md)
 - [Anjal.Store.IMailKeySource](Anjal.Store/IMailKeySource.md)
 - [Anjal.Store.IMailKeyStore](Anjal.Store/IMailKeyStore.md)

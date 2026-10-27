@@ -322,6 +322,34 @@ public sealed class MailKeyManager
         return null;
     }
 
+    /// <summary>
+    /// rc.26 (D-266): a mailbox's keys - its private key and its data key - opened with the organisation's
+    /// recovery key, for eDiscovery production and a leaver's records; null when they do not open.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="recoveryPrivate">The recovery private key, open in an administrator's session.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The keys, or null.</returns>
+    public async Task<UnlockedKeys?> OpenMailboxByOrgAsync(Guid mailboxId, byte[] recoveryPrivate, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(recoveryPrivate);
+        MailboxKeyRow? row = await this.keys.GetMailboxKeysAsync(mailboxId, ct).ConfigureAwait(false);
+        byte[]? priv = await this.OpenMailboxPrivateByOrgAsync(mailboxId, recoveryPrivate, ct).ConfigureAwait(false);
+        if (row is null || priv is null)
+        {
+            return null;
+        }
+        try
+        {
+            return new UnlockedKeys(priv, OpenDataKey(row, priv));
+        }
+        catch (CryptographicException)
+        {
+            CryptographicOperations.ZeroMemory(priv);
+            return null;
+        }
+    }
+
     /// <summary>A mailbox's private key opened with the organisation's recovery key (restores, shared mailboxes, legal holds).</summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="recoveryPrivate">The recovery private key.</param>

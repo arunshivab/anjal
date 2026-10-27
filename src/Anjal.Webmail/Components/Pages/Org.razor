@@ -7,6 +7,7 @@
 @inject IMessageStore Store
 @inject HostInfo Host
 @inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+@inject Anjal.Webmail.AppApi.AppApiService ApiService
 
 <PageTitle>@L["Organisation"] — Anjal</PageTitle>
 
@@ -121,6 +122,91 @@ else
             </section>
             break;
         case "people":
+            @if (Leaving is not null && selPerson is PersonView leaver && leaver.Mailbox.Id != me!.Id)
+            {
+                @* rc.26 (item 80, brief 11h; D-266): a person leaving - one page, done in order, each step recorded. *@
+                <section class="formcard orgcard leavecard" aria-label="@L["Leaving"]">
+                    <header class="orghead">
+                        <h2>@L["{name} is leaving"].Replace("{name}", NameOf(leaver.Mailbox), StringComparison.Ordinal)</h2>
+                        <a class="btn btn-s" href="/org/people?sel=@leaver.Mailbox.Id">@L["Close"]</a>
+                    </header>
+                    <p class="hint">@L["Do these in order. Each step is written to the activity log. Their mail is kept."]</p>
+                    <ol class="leavesteps">
+                        <li class="@(leaverSteps.Stopped is null ? null : "done")">
+                            <b>@L["Stop sign-in now"]</b>
+                            <span class="hint">@L["Every session ends; their password and passkeys stop working. Mail is still received."]</span>
+                            @if (leaverSteps.Stopped is DateTimeOffset stopped)
+                            {
+                                <span class="leavedone"><LipiIcon Name="check" Size="14" /> @L["Done {date}"].Replace("{date}", clock.Full(stopped), StringComparison.Ordinal)</span>
+                            }
+                            else
+                            {
+                                <form method="post" action="/org/people/@leaver.Mailbox.Id/leave-stop"><AntiforgeryToken /><button type="submit" class="btn btn-s" title="@L["End every session and stop their sign-in."]">@L["Stop sign-in"]</button></form>
+                            }
+                        </li>
+                        <li class="@(leaverSteps.Replying is null ? null : "done")">
+                            <b>@L["Automatic reply for 90 days"]</b>
+                            <form method="post" action="/org/people/@leaver.Mailbox.Id/leave-reply" class="leaveform">
+                                <AntiforgeryToken />
+                                <textarea class="inp" name="value" rows="2" maxlength="4000" aria-label="@L["The automatic reply"]">@MailboxService.LeaverReplyText(leaver.Mailbox, OrgName, me!.Address)</textarea>
+                                <button type="submit" class="btn btn-s" title="@L["Reply to everyone who writes to them, for 90 days."]">@(leaverSteps.Replying is null ? L["Turn it on"] : L["Change it"])</button>
+                            </form>
+                        </li>
+                        <li class="@(leaverSteps.Forwarding is null ? null : "done")">
+                            <b>@L["Forward new mail"]</b>
+                            @if (leaverSteps.Forwarding is not null)
+                            {
+                                <span class="leavedone"><LipiIcon Name="check" Size="14" /> @L["New mail goes to {address}"].Replace("{address}", leaverSteps.ForwardTo, StringComparison.Ordinal)</span>
+                            }
+                            <form method="post" action="/org/people/@leaver.Mailbox.Id/leave-forward" class="leaveform">
+                                <AntiforgeryToken />
+                                <select class="setsel" name="value" aria-label="@L["Forward to"]">
+                                    @foreach (PersonView p in people.Where(p => p.Mailbox.Id != leaver.Mailbox.Id && p.Status != "disabled"))
+                                    {
+                                        <option value="@p.Mailbox.Address" selected="@(p.Mailbox.Address == leaverSteps.ForwardTo)">@NameOf(p.Mailbox)</option>
+                                    }
+                                </select>
+                                <button type="submit" class="btn btn-s" title="@L["A copy of each new mail goes to this person; the original stays."]">@L["Forward"]</button>
+                            </form>
+                        </li>
+                        <li class="@(leaverSteps.HandedOver is null ? null : "done")">
+                            <b>@L["Hand their mail to a colleague"]</b>
+                            <span class="hint">@L["Their mail is encrypted and their password is gone, so it is handed over through the organisation's recovery key. The colleague opens it from their account menu."]</span>
+                            @if (leaverSteps.HandedOver is not null && leaverSteps.Colleague is Guid col && people.FirstOrDefault(p => p.Mailbox.Id == col) is PersonView colleague)
+                            {
+                                <span class="leavedone"><LipiIcon Name="check" Size="14" /> @L["Handed to {name}"].Replace("{name}", NameOf(colleague.Mailbox), StringComparison.Ordinal)</span>
+                                <form method="post" action="/org/people/@leaver.Mailbox.Id/leave-takeback"><AntiforgeryToken /><button type="submit" class="btn btn-danger-q" title="@L["The colleague can no longer open it."]">@L["Take it back"]</button></form>
+                            }
+                            else
+                            {
+                                <form method="post" action="/org/people/@leaver.Mailbox.Id/leave-handover" class="leaveform">
+                                    <AntiforgeryToken />
+                                    <select class="setsel" name="value" aria-label="@L["Colleague"]">
+                                        @foreach (PersonView p in people.Where(p => p.Mailbox.Id != leaver.Mailbox.Id && p.Status != "disabled"))
+                                        {
+                                            <option value="@(p.Mailbox.Id + "|send")">@L["{name}, may read and send"].Replace("{name}", NameOf(p.Mailbox), StringComparison.Ordinal)</option>
+                                            <option value="@(p.Mailbox.Id + "|read")">@L["{name}, may only read"].Replace("{name}", NameOf(p.Mailbox), StringComparison.Ordinal)</option>
+                                        }
+                                    </select>
+                                    <button type="submit" class="btn btn-s" title="@L["Give the colleague a copy of the key to this mail. Every administrator is told."]">@L["Hand over"]</button>
+                                </form>
+                            }
+                        </li>
+                        <li class="@(leaverSteps.Records is null ? null : "done")">
+                            <b>@L["Download for the records"]</b>
+                            <span class="hint">@L["All their mail as .eml files with an index, made through the recovery key; only you can download it, for seven days."]</span>
+                            @if (leaverSteps.Records is Guid rid && productions.FirstOrDefault(p => p.Id == rid) is Production made)
+                            {
+                                <ProductionLine P="made" Me="me!.Id" L="L" Clock="clock" />
+                            }
+                            else
+                            {
+                                <form method="post" action="/org/people/@leaver.Mailbox.Id/leave-records"><AntiforgeryToken /><button type="submit" class="btn btn-s" title="@L["Make the download now; you are mailed when it is ready."]">@L["Make the download"]</button></form>
+                            }
+                        </li>
+                    </ol>
+                </section>
+            }
             <section class="formcard orgcard">
                 <header class="orghead">
                     <h2>@(individuals ? L["Individuals"] : L["People"])</h2>
@@ -314,6 +400,12 @@ else
                             <label class="segopt"><input type="radio" name="askFiles" value="1" checked="@mailPolicy.AskBeforeFilesOutside" /><span>@L["Ask first"]</span></label>
                         </div>
                         <p class="hint">@L["Ask first: before any mail with files goes to an address outside your domains, the person is asked to check it, whatever the files are. Patient and personal information are checked either way."]</p>
+                    </div>
+                    @* rc.26 (item 80, brief 11f): a line at the foot of every printed page. *@
+                    <div class="setfield">
+                        <label class="setlbl" for="printnote">@L["Printed pages"]</label>
+                        <input class="inp" id="printnote" name="printNote" value="@mailPolicy.PrintNote" maxlength="200" placeholder="@L["For example: Confidential"]" />
+                        <p class="hint">@L["Printed at the foot of every page, with who printed it, when, and the mail's Message ID."]</p>
                     </div>
                 </div>
                 <div class="setactions"><button type="submit" class="btn btn-p">@L["Save"]</button></div>
@@ -511,8 +603,9 @@ else
                             <td><select class="setsel" name="apps" aria-label="@L["Copies passed to applications"]">@foreach (int n in CopyChoices){<option value="@n" selected="@(retention.AppCopyDays == n)">@L["Removed after {n} days"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal)</option>}</select></td></tr>
                         <tr><th scope="row">@L["Evidence (the untouched originals)"]<span>@L["Kept while the mail exists"]</span></th><td>@L["Default 3 years after deletion"]</td>
                             <td><select class="setsel" name="evidence" aria-label="@L["Evidence"]">@foreach (int n in EvidenceChoices){<option value="@n" selected="@(retention.EvidenceYears == n)">@(n == 1 ? L["1 year after deletion"] : L["{n} years after deletion"].Replace("{n}", n.ToString(Inv), StringComparison.Ordinal))</option>}</select></td></tr>
-                        <tr><th scope="row">@L["Accounts without sign-in"]<span>@L["Shown to you under People"]</span></th><td>@L["Never deleted automatically"]</td><td>@L["Fixed by Anjal"]</td></tr>
-                        <tr><th scope="row">@L["Activity log"]</th><td>@L["Kept for ever, reviewed if space runs short"]</td><td>@L["For ever"]</td></tr>
+                        @* rc.26 (item 63, POL-01 v1.1 §4, approved 26 Oct 2026): accounts nobody signs in to. *@
+                        <tr><th scope="row">@L["Accounts without sign-in"]<span>@L["Reminders to you and to the person before anything is deleted"]</span></th><td>@L["Inactive after 180 days without sign-in; deleted 186 days later"]</td><td>@L["Fixed by Anjal"]</td></tr>
+                        <tr><th scope="row">@L["Activity log"]</th><td>@L["At least 7 years; entries cannot be changed or removed"]</td><td>@L["Fixed by Anjal"]</td></tr>
                     </tbody>
                 </table>
                 <WhoGetsIt L="L" What="@L["Who should get a changed Trash or Junk setting?"]" Retention="true" />
@@ -540,6 +633,40 @@ else
                     <p class="orgempty">@L["No mailbox is held."]</p>
                 }
             </section>
+            @if (holds.Count > 0)
+            {
+                @* rc.26 (D-266, DES-16 §2.8): eDiscovery - the held people's mail for a period, through the recovery key. *@
+                <section class="formcard orgcard holdcard" id="produce">
+                    <h3>@L["Produce mail for a legal hold"]</h3>
+                    <p class="hint">@L["For a court, a regulator or an inquiry. The held people's mail of the period is opened through the organisation's recovery key and written as .eml files with an index and each mail's evidence record. Only you can download it, for seven days. Every administrator is told."]</p>
+                    <form method="post" action="/org/productions/new" class="produceform">
+                        <AntiforgeryToken />
+                        <fieldset class="producepeople">
+                            <legend class="setlbl">@L["People"]</legend>
+                            @foreach (LegalHold h in holds)
+                            {
+                                MailboxRow? held = everyone.FirstOrDefault(m => m.Id == h.MailboxId);
+                                <label class="carry"><input type="checkbox" name="person" value="@h.MailboxId" checked /> @(held is null ? h.MailboxId.ToString() : NameOf(held))</label>
+                            }
+                        </fieldset>
+                        <div class="producedates">
+                            <label class="setlbl" for="pfrom">@L["From"]</label><input class="inp" id="pfrom" name="from" type="date" />
+                            <label class="setlbl" for="pto">@L["To"]</label><input class="inp" id="pto" name="to" type="date" />
+                        </div>
+                        <label class="setlbl" for="preason">@L["Why (the request or case)"]</label>
+                        <input class="inp" id="preason" name="reason" maxlength="200" required />
+                        <div class="setactions"><button type="submit" class="btn btn-p" title="@L["Make the download now; you are mailed when it is ready."]">@L["Produce"]</button></div>
+                    </form>
+                    @foreach (Production pr in productions.Where(p => p.Kind == "hold").Take(10))
+                    {
+                        <div class="holdrow">
+                            <b>@clock.Date(pr.RequestedAt)</b>
+                            <span>@pr.Reason</span>
+                            <ProductionLine P="pr" Me="me!.Id" L="L" Clock="clock" />
+                        </div>
+                    }
+                </section>
+            }
             break;
 
         case "sending":
@@ -588,7 +715,7 @@ else
                             <tr><th scope="row">@L["Recovery sheet"]</th><td>@if (encryption.SheetConfirmedAt is DateTimeOffset confirmed) {<span class="pill pill-info">@L["Confirmed {date}"].Replace("{date}", clock.Date(confirmed), StringComparison.Ordinal)</span>} else if (encryption.SheetWaiting) {<span class="pill pill-warn">@L["Printed, not yet typed back"]</span>} else {<span class="pill pill-bad">@L["Not printed yet"]</span>}</td></tr>
                             <tr><th scope="row">@L["Mailboxes encrypted"]<span>@L["People and shared mailboxes"]</span></th><td>@encryption.WithKeys.ToString(Inv)</td></tr>
                             <tr><th scope="row">@L["Not signed in since encryption began"]<span>@L["Their mail is encrypted at their first sign-in"]</span></th><td>@(encryption.NotYet.Count == 0 ? L["None"] : string.Join(", ", encryption.NotYet.Select(NameOf)))</td></tr>
-                            <tr><th scope="row">@L["Anjal's break-glass key"]<span>@L["Only at {org}'s written request"].Replace("{org}", OrgName, StringComparison.Ordinal)</span></th><td>@if (encryption.BreakGlassOn) {<span class="pill pill-info">@L["On"]</span>} else {<span class="pill pill-mute">@L["Off"]</span>}</td></tr>
+                            <tr><th scope="row">@L["Anjal's break-glass key"]<span>@L["Only at {org}'s written request"].Replace("{org}", OrgName, StringComparison.Ordinal)</span></th><td>@if (encryption.BreakGlassOn && encryption.BreakGlassReady) {<span class="pill pill-info">@L["On"]</span>} else if (encryption.BreakGlassOn) {@* D-265 (owner, 26 Oct 2026): on, but Anjal has not set its key here yet. *@<span class="pill pill-warn">@L["On – key not set yet"]</span>} else {<span class="pill pill-mute">@L["Off"]</span>}</td></tr>
                         </tbody>
                     </table>
                     <h3 class="orgsub">@L["Waiting for a restore"]</h3>
@@ -656,6 +783,11 @@ else
             </section>
             break;
 
+        case "apps" when Api is not null && selApp is not null:
+            @* rc.26 (DES-14 §28.6): the application's API page. *@
+            <AppApiSettings App="selApp" TabText="@Api" L="L" Clock="clock" Host="@Host.Name" Domain="@(domains.FirstOrDefault()?.Domain ?? "example.in")" Revealed="revealed" Inbox="appInbox" ConfirmShare="@Share" ConfirmHolder="shareHolder" Deliveries="appDeliveries" Templates="appTemplates" Windows="appWindows" HourCeiling="appHourCeiling" DayCeiling="appDayCeiling" />
+            break;
+
         case "apps":
             @* rc.17, design review section 10: Applications became Sending systems. *@
             <SendingSystems Tenant="tenant" Apps="apps" Clock="clock" L="L" Host="@Host.Name" TabText="@TabText" PeriodText="@PeriodQuery" Status="@StatusText" AppId="@AppIdText" Q="@QText" Msg="@MsgText" Hook="@HookText" />
@@ -667,6 +799,8 @@ else
                     <h2>@L["Activity log"]</h2>
                     <a class="btn btn-s" href="@LogCsv" download><LipiIcon Name="download" Size="16" />@L["Export (CSV)"]</a>
                 </header>
+                @* rc.26 (item 80, brief 11h): the 7-year statement. *@
+                <p class="hint logkeep"><LipiIcon Name="lock" Size="14" /> @L["Anjal keeps {org}'s activity log for at least 7 years. Entries cannot be changed or removed, by your administrators or by Anjal."].Replace("{org}", OrgName, StringComparison.Ordinal)</p>
                 <form method="get" action="/org/log" class="orgfilters">
                     <span class="orgsearch"><LipiIcon Name="search" Size="16" /><input type="search" name="q" value="@Q" placeholder="@L["Find a person or action"]" aria-label="@L["Find a person or action"]" /></span>
                     <select class="setsel" name="who" aria-label="@L["Who"]" data-autosubmit>
@@ -1007,6 +1141,15 @@ else
                 {
                     <p class="asideline"><b>@L["Legal hold"]</b>: @L["nothing is deleted from this mailbox"]</p>
                 }
+                @if (inactiveClock is (DateTimeOffset inactiveAt, DateTimeOffset deletedAt))
+                {
+                    @* rc.26 (item 63, POL-01 v1.1 §4). *@
+                    <p class="asideline"><b>@L["Last sign-in"]</b>: @clock.Date(selPerson.Mailbox.LastSignInAt)</p>
+                    @if (DateTimeOffset.UtcNow >= inactiveAt)
+                    {
+                        <div class="asidecard warn"><b>@L["Inactive since {date}"].Replace("{date}", clock.Date(inactiveAt), StringComparison.Ordinal)</b><span class="asidebody">@L["Mail to them is refused. The mailbox is deleted on {date} unless they sign in."].Replace("{date}", clock.Date(deletedAt), StringComparison.Ordinal)</span></div>
+                    }
+                }
                 @if (selPerson.Status != "disabled")
                 {
                     <form method="post" action="/org/people/@selPerson.Mailbox.Id/reset"><AntiforgeryToken /><button type="submit" class="btn btn-s asidebtn">@(selPerson.Status == "invited" ? L["Make a new invitation link"] : L["Reset password"])</button></form>
@@ -1055,6 +1198,10 @@ else
                             <div class="setactions"><button type="submit" class="btn btn-danger">@L["Delete for good"]</button></div>
                         </form>
                     </details>
+                }
+                @if (selPerson.Mailbox.Id != me!.Id)
+                {
+                    <a class="btn btn-s asidebtn" href="/org/people?sel=@selPerson.Mailbox.Id&leaving=1" title="@L["Stop sign-in, reply for them, forward their mail, hand it to a colleague and keep it for the records."]">@L["This person is leaving"]</a>
                 }
                 <p class="asidetext">@L["Disabling signs them out everywhere; their mail is kept and still received. Administrators cannot read anyone's mail. Every action here is written to the activity log."]</p>
             }
@@ -1426,6 +1573,12 @@ else
                 <h2 class="asidehead">@L["Selected application"]</h2>
                 <h3 class="asidetitle">@selApp.Name</h3>
                 <p class="asidetext">@L["Sends as {address}, and only as it."].Replace("{address}", selApp.SendsAs, StringComparison.Ordinal) @(selApp.Receives.Length > 0 ? L["Receives: {what}."].Replace("{what}", selApp.Receives, StringComparison.Ordinal) : string.Empty)</p>
+                @if (selApp.Retired is null)
+                {
+                    @* rc.26 (DES-14 §28.6): the application's page for the API - keys, signing, encryption, inbox, webhooks, limits, templates. *@
+                    <a class="btn btn-p asidebtn" href="/org/apps?sel=@Uri.EscapeDataString(selApp.Id)&api=keys" title="@L["This application's keys, signing, encryption, inbox, webhooks, limits and templates."]"><LipiIcon Name="sliders" Size="16" />@L["Application API"]</a>
+                    <p class="asidetext">@L["HTTP keys, signing, encryption, inbox addresses, webhooks, limits and templates."]</p>
+                }
                 @if (revealed is { Count: > 0 } && revealed[0].Split('|') is [string user, string secret])
                 {
                     @* DEF-157 (rc.23): the secret is the key, named so; the one-time block says it is shown once and how to use it. *@
@@ -1632,6 +1785,11 @@ else
     [SupplyParameterFromQuery(Name = "import")] private string? Import { get; set; }
     [SupplyParameterFromQuery(Name = "new")] private string? New { get; set; }
     [SupplyParameterFromQuery(Name = "hold")] private string? Hold { get; set; }
+    [SupplyParameterFromQuery(Name = "leaving")] private string? Leaving { get; set; }
+    [SupplyParameterFromQuery(Name = "produce")] private string? Produce { get; set; }
+    // rc.26 (DES-14 §28.6): an application's API page, its tab, and an address waiting to be shared.
+    [SupplyParameterFromQuery(Name = "api")] private string? Api { get; set; }
+    [SupplyParameterFromQuery(Name = "share")] private string? Share { get; set; }
     [SupplyParameterFromQuery(Name = "sheet")] private string? SheetShown { get; set; }
     [SupplyParameterFromQuery(Name = "q")] private string? QText { get; set; }
     // rc.17, Sending systems: the tab, the period, and the Messages filters.
@@ -1665,6 +1823,9 @@ else
     private IReadOnlyList<PersonView> people = Array.Empty<PersonView>();
     private IReadOnlyList<MailboxRow> everyone = Array.Empty<MailboxRow>();
     private PersonView? selPerson;
+    private LeaverSteps leaverSteps = new();
+    private (DateTimeOffset Inactive, DateTimeOffset Deleted)? inactiveClock;
+    private IReadOnlyList<Production> productions = Array.Empty<Production>();
     private SignInPolicy policy = new();
     private int adminsWithoutKey;
     private IReadOnlyList<TenantDomainRow> domains = Array.Empty<TenantDomainRow>();
@@ -1678,6 +1839,13 @@ else
     private IReadOnlyList<LegalHold> holds = Array.Empty<LegalHold>();
     private IReadOnlyList<OrgApp> apps = Array.Empty<OrgApp>();
     private OrgApp? selApp;
+    private AppInboxView? appInbox;
+    private MailboxRow? shareHolder;
+    private IReadOnlyList<Anjal.Store.AppWebhookDelivery> appDeliveries = Array.Empty<Anjal.Store.AppWebhookDelivery>();
+    private IReadOnlyList<AppTemplate> appTemplates = Array.Empty<AppTemplate>();
+    private IReadOnlyList<(string Window, long Used, int Limit, DateTimeOffset Reset)> appWindows = Array.Empty<(string, long, int, DateTimeOffset)>();
+    private int appHourCeiling = MailboxService.AppHourCeiling;
+    private int appDayCeiling = MailboxService.AppDayCeiling;
     private IReadOnlyList<AuditEvent> events = Array.Empty<AuditEvent>();
     private AuditEvent? selEvent;
     private Branding branding = new();
@@ -1825,7 +1993,7 @@ else
 
     private static string RecordPill(string status) => status switch { "pass" => "pill-info", "testing" => "pill-warn", "missing" or "different" => "pill-bad", _ => "pill-mute" };
 
-    private static string RecordWord(string status) => status switch { "pass" => "Pass", "testing" => "Testing", "missing" => "Missing", "different" => "Different", _ => "Not checked" };
+    private static string RecordWord(string status) => status switch { "pass" => "Pass", "testing" => "Testing", "missing" => "Missing", "different" => "Different", "optional" => "Optional", _ => "Not checked" };
 
     private RenderFragment Compared(bool stricter) => __builder =>
     {
@@ -1920,6 +2088,12 @@ else
             case "people":
             case "shared":
                 selPerson = SelGuid is Guid g ? people.FirstOrDefault(p => p.Mailbox.Id == g) : null;
+                inactiveClock = selPerson is not null ? await Mail.InactiveClockAsync(selPerson.Mailbox) : null;
+                if (selPerson is not null && Leaving is not null)
+                {
+                    leaverSteps = await Mail.LeaverStepsAsync(tenant.Id, selPerson.Mailbox.Id);
+                    productions = await Mail.ProductionsAsync(tenant.Id);
+                }
                 if (Current == "people")
                 {
                     pendingPeople = await Mail.PendingOfAsync(tenant.Id);
@@ -1974,10 +2148,34 @@ else
             case "retention":
                 retention = await Mail.RetentionOfAsync(tenant);
                 holds = await Mail.HoldsOfAsync(tenant.Id);
+                productions = await Mail.ProductionsAsync(tenant.Id);
                 break;
             case "apps":
                 apps = await Mail.AppsOfAsync(tenant.Id);
                 selApp = apps.FirstOrDefault(a => a.Id == Sel);
+                if (Api is not null && selApp is not null)
+                {
+                    domains = await Mail.TenantDomainsAsync(tenant.Id);
+                    OpsRecord ops = await Mail.ReadTenantDocumentAsync<OpsRecord>(tenant.Id, MailboxService.OpsKind) ?? new OpsRecord();
+                    appHourCeiling = ops.AppHourCeiling > 0 ? ops.AppHourCeiling : MailboxService.AppHourCeiling;
+                    appDayCeiling = ops.AppDayCeiling > 0 ? ops.AppDayCeiling : MailboxService.AppDayCeiling;
+                    switch (Api)
+                    {
+                        case "inbox":
+                            appInbox = await Mail.AppInboxAsync(tenant, selApp);
+                            shareHolder = Share is { Length: > 0 } ? await Mail.HolderOfAsync(Share) : null;
+                            break;
+                        case "webhooks" when Store is Anjal.Store.IAppApiStore appStore:
+                            appDeliveries = await appStore.ListAppWebhookDeliveriesAsync(selApp.Id, 200);
+                            break;
+                        case "templates":
+                            appTemplates = await Mail.AppTemplatesAsync(tenant.Id);
+                            break;
+                        case "limits":
+                            appWindows = (await ApiService.WindowsAsync(selApp, DateTimeOffset.UtcNow)).Select(w => (w.Window, w.Used, w.Limit, w.Reset)).ToList();
+                            break;
+                    }
+                }
                 break;
             case "log":
                 events = await OrgLog.ForAsync(tenant, Mail, Store, Who, Kind, Days, Q, CancellationToken.None);

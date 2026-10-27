@@ -7,6 +7,8 @@ namespace Anjal.Server.Tests;
 /// <summary>DEF-002: authenticated submission must reach outside addresses and file a Sent copy.</summary>
 public sealed class SubmissionSinkTests : IDisposable
 {
+    private static readonly string[] Colleague = { "colleague@qa.test" };
+
     private readonly string root = Path.Combine(Path.GetTempPath(), "anjal-sub-" + Guid.NewGuid().ToString("N"));
     private readonly InMemoryMessageStore store = new();
     private readonly MailboxSink mailboxes;
@@ -58,6 +60,20 @@ public sealed class SubmissionSinkTests : IDisposable
 
     private async Task<IReadOnlyList<OutboundMessage>> QueuedAsync() =>
         await this.store.LeaseOutboundBatchAsync(100, DateTimeOffset.UtcNow.AddMinutes(1));
+
+    [Fact]
+    public async Task Rc26_MailToTheOutside_MustComeFromTheOrganisationsOwnAddress_SoTheDailyFigureCountsIt()
+    {
+        await this.SeedAsync();
+        DeliveryContext empty = Submitted("arun@qa.test", "doctor@hospital.example");
+        DeliveryResult nullSender = await this.sink.DeliverAsync(new DeliveryContext { EnvelopeFrom = string.Empty, EnvelopeTo = empty.EnvelopeTo, AuthenticatedUser = empty.AuthenticatedUser, RawBytes = empty.RawBytes });
+        Assert.Equal(DeliveryOutcome.PermanentFailure, nullSender.Outcome);
+        DeliveryResult foreign = await this.sink.DeliverAsync(new DeliveryContext { EnvelopeFrom = "arun@gmail.example", EnvelopeTo = empty.EnvelopeTo, AuthenticatedUser = empty.AuthenticatedUser, RawBytes = empty.RawBytes });
+        Assert.Equal(DeliveryOutcome.PermanentFailure, foreign.Outcome);
+        Assert.Empty(await this.QueuedAsync());
+        // Mail between the organisation's own people is not affected.
+        Assert.Equal(DeliveryOutcome.Accepted, (await this.sink.DeliverAsync(new DeliveryContext { EnvelopeFrom = string.Empty, EnvelopeTo = Colleague, AuthenticatedUser = "arun@qa.test", RawBytes = empty.RawBytes })).Outcome);
+    }
 
     [Fact]
     public async Task AnExternalRecipient_IsQueuedForDelivery_AndFiledInSent()

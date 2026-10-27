@@ -2,19 +2,26 @@
 
 **Namespace:** `Anjal.Store`
 
-In-memory implementation of used in tests and the inbound-end-to-end example. Thread-safe via a single lock; not optimised for high concurrency. No persistence across process restarts.
+rc.26 (DES-14 §28.1): the application API, in memory.
 
 ## Members
 
+- **AcknowledgeAppMailAsync** *(method)* - _(no description)_
+- **AddAppEventAsync** *(method)* - _(no description)_
 - **AddEvidenceAttemptAsync** *(method)* - _(no description)_
 - **AddMailboxKeysAsync** *(method)* - _(no description)_
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
 - **AddTenantKeysAsync** *(method)* - _(no description)_
 - **AddTrustedSenderAsync** *(method)* - _(no description)_
+- **AppInboxWaitingAsync** *(method)* - _(no description)_
 - **AppendAuditAsync** *(method)* - _(no description)_
 - **CancelOutboundAsync** *(method)* - _(no description)_
+- **ChangeTenantDocumentAsync** *(method)* - _(no description)_
 - **CompleteWebhookJobAsync** *(method)* - _(no description)_
+- **CountAppOutboundElsewhereAsync** *(method)* - _(no description)_
+- **CountAppSendsAsync** *(method)* - _(no description)_
 - **CountArrivalsByHourAsync** *(method)* - _(no description)_
+- **CountListMailAsync** *(method)* - _(no description)_
 - **CountMessagesAsync** *(method)* - _(no description)_
 - **CountOutboundAsync** *(method)* - _(no description)_
 - **CountOutboundByRecipientDomainAsync** *(method)* - _(no description)_
@@ -26,6 +33,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **CountWebhookJobsAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DatabaseBytesAsync** *(method)* - _(no description)_
+- **DeleteAppSendAsync** *(method)* - _(no description)_
 - **DeleteCategoryAsync** *(method)* - _(no description)_
 - **DeleteCategoryRuleAsync** *(method)* - _(no description)_
 - **DeleteDkimKeyAsync** *(method)* - _(no description)_
@@ -45,11 +53,18 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **DeleteSmtpUserAsync** *(method)* - _(no description)_
 - **DeleteTenantAsync** *(method)* - _(no description)_
 - **DeleteTenantDomainAsync** *(method)* - _(no description)_
+- **DueAppWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **EnqueueOutboundAsync** *(method)* - _(no description)_
 - **EnqueueWebhookJobAsync** *(method)* - _(no description)_
 - **EnsureFolderAsync** *(method)* - _(no description)_
+- **FindAppSendByKeyAsync** *(method)* - _(no description)_
+- **FindAppSendByMessageIdAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
 - **GetActivityAsync** *(method)* - _(no description)_
+- **GetAppEventAsync** *(method)* - _(no description)_
+- **GetAppInboxAddressAsync** *(method)* - _(no description)_
+- **GetAppSendAsync** *(method)* - _(no description)_
+- **GetAppWebhookDeliveryAsync** *(method)* - _(no description)_
 - **GetBreakGlassAsync** *(method)* - _(no description)_
 - **GetCategoryAsync** *(method)* - _(no description)_
 - **GetDkimKeyAsync** *(method)* - _(no description)_
@@ -84,6 +99,11 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
 - **LeaseWebhookJobsAsync** *(method)* - _(no description)_
 - **LinkOutboundToSentCopyAsync** *(method)* - _(no description)_
+- **ListAppEventsAsync** *(method)* - _(no description)_
+- **ListAppInboxAddressesAsync** *(method)* - _(no description)_
+- **ListAppInboxAsync** *(method)* - _(no description)_
+- **ListAppSendsAsync** *(method)* - _(no description)_
+- **ListAppWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **ListAuditAsync** *(method)* - _(no description)_
 - **ListCategoriesAsync** *(method)* - _(no description)_
 - **ListCategoryRulesAsync** *(method)* - _(no description)_
@@ -108,6 +128,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **ListMessagesSortedAsync** *(method)* - _(no description)_
 - **ListOutboundBySendersAsync** *(method)* - _(no description)_
 - **ListOutboundForSenderAsync** *(method)* - _(no description)_
+- **ListOutboundOfAppSendAsync** *(method)* - _(no description)_
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
 - **ListSenderRulesAsync** *(method)* - _(no description)_
@@ -120,19 +141,24 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **ListWaitingRestoresAsync** *(method)* - _(no description)_
 - **ListWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **ListWebhookJobsAsync** *(method)* - _(no description)_
+- **MarkAppEventDispatchedAsync** *(method)* - _(no description)_
 - **MarkEvidencePurgedAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
 - **NoteRecoveredFromJunk** *(method)* - Record that a message was moved out of Junk by the reader.
 - **OldestPendingOutboundAsync** *(method)* - _(no description)_
+- **PruneAppApiAsync** *(method)* - _(no description)_
 - **PurgeSessionKeysAsync** *(method)* - _(no description)_
 - **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
+- **RememberSignatureAsync** *(method)* - _(no description)_
+- **RemoveAppInboxAddressAsync** *(method)* - _(no description)_
 - **RemoveOutboundContentAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
 - **ReplaceOutboundRawAsync** *(method)* - _(no description)_
 - **ReplayWebhookJobAsync** *(method)* - _(no description)_
 - **RetryOutboundNowAsync** *(method)* - _(no description)_
+- **SaveAppWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SaveBreakGlassAsync** *(method)* - _(no description)_
 - **SaveGrantAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
@@ -144,7 +170,9 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **SaveTenantKeysAsync** *(method)* - _(no description)_
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SearchMessagesAsync** *(method)* - _(no description)_
+- **SetAppInboxAddressAsync** *(method)* - _(no description)_
 - **SetEvidenceOutcomeAsync** *(method)* - _(no description)_
+- **SetLastSignIn** *(method)* - Tests: set a mailbox's last sign-in to any moment.
 - **SetMailboxDocumentAsync** *(method)* - _(no description)_
 - **SetMailboxPreferencesAsync** *(method)* - _(no description)_
 - **SetMessageCategoryAsync** *(method)* - _(no description)_
@@ -154,10 +182,14 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **SetServiceRecordAsync** *(method)* - _(no description)_
 - **SetSignatureAsync** *(method)* - _(no description)_
 - **SetTenantDocumentAsync** *(method)* - _(no description)_
+- **StartAppSendAsync** *(method)* - _(no description)_
 - **StartClocksForOutboundWithoutMailboxCopyAsync** *(method)* - _(no description)_
 - **StartEvidenceClocks** *(method)* - The in-memory stand-in for the database trigger: when the last copy pointing at an evidence row is gone, its retention clock starts. Called with the gate held.
 - **StepStart** *(method)* - The start of the step a local time falls in: the hour, the day, the Monday, or the first of the month.
 - **SumFolderBytesAsync** *(method)* - _(no description)_
+- **TouchSignInAsync** *(method)* - _(no description)_
+- **UndispatchedAppEventsAsync** *(method)* - _(no description)_
+- **UpdateAppSendAsync** *(method)* - _(no description)_
 - **UpdateMessageTransportAsync** *(method)* - _(no description)_
 - **UpsertCategoryAsync** *(method)* - _(no description)_
 - **UpsertCategoryRuleAsync** *(method)* - _(no description)_
@@ -174,6 +206,7 @@ In-memory implementation of used in tests and the inbound-end-to-end example. Th
 - **UpsertTenantDomainAsync** *(method)* - _(no description)_
 - **VerifyAuditChainAsync** *(method)* - _(no description)_
 - **AllMailboxes** *(property)* - rc.25: every mailbox, for inspection in tests.
+- **AppClock** *(property)* - Tests: the clock the application API's 24-hour and 10-minute windows read; null for the real clock.
 - **Deliveries** *(property)* - The webhook deliveries currently stored. Provided for inspection in tests.
 - **EvidenceClock** *(property)* - The clock used to start retention clocks; tests may replace it.
 - **MailboxMessages** *(property)* - The mailbox message rows currently stored. Provided for inspection in tests.

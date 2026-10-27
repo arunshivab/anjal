@@ -9,6 +9,7 @@ A queued outbound message. Created by the API layer or by a webhook auto-reply r
 - **CancelledBySender** *(field)* - The reason recorded when the sender cancels a waiting message from the Outbox (rc.12).
 - **DefaultGiveUp** *(field)* - How long outgoing mail is retried by default: 5 days (v1.0.0-rc.9, DEF-068, D-53; RFC 5321 4.5.4.1 asks for at least 4 to 5 days).
 - **LeaseDuration** *(field)* - How long a lease lasts. Longer than any single delivery attempt can take with its timeouts, so a slow but live send is never taken over.
+- **AppSendId** *(property)* - rc.26 (DES-14 §28.1): the application API send this row belongs to, or null for any other mail.
 - **Attempts** *(property)* - Number of send attempts made so far.
 - **BodyRemovedAt** *(property)* - When the message's content was removed from the queue after its keep-days (rc.21.1, DEF-117, owner 16 Oct 2026): only the header block is kept, so the record of who, when and what happened stays; the untouched original stays in the evidence store. Null until then.
 - **CreatedAt** *(property)* - Time the message was enqueued.

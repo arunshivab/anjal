@@ -196,8 +196,13 @@
             break;
 
         case "webhooks":
-            @* D-171 (rc.23, DEF-119): webhooks are the operator's to set until the application API (SPEC-17, rc.25) lets an organisation set its own. *@
-            <div class="notice n-info orglead"><LipiIcon Name="info" Size="16" /><span>@L["Webhooks are set up by the Anjal operator for now. Your own webhook addresses, and HTTP keys for your applications, come with the application API."]</span></div>
+            @* rc.26 (DES-14 §8): each application's own webhooks for its events are on its API page; below are the operator's +tag routes (D-171). *@
+            <div class="notice n-info orglead"><LipiIcon Name="info" Size="16" /><span>@L["Each application's webhooks for its sending events are on its Application API page."]</span>
+                @foreach (OrgApp a in Apps.Where(x => x.Retired is null))
+                {
+                    <a class="linkbtn" href="/org/apps?sel=@Uri.EscapeDataString(a.Id)&api=webhooks">@a.Name@(a.Webhooks.Any(h => h.FailingSince is not null) ? " · " + L["failing"] : string.Empty)</a>
+                }
+            </div>
             <p class="hint orglead">@L["Mail to an application's +tag addresses is posted to its webhook, signed, and tried again for 24 hours. A delivery that failed can be replayed once the webhook is back."]</p>
             @if (hooks.Count == 0)
             {
@@ -270,7 +275,7 @@
                         {
                             <tr>
                                 <td>@e.Address</td>
-                                <td>@L[e.Reason]</td>
+                                <td>@L[e.Reason]@(e.App.Length > 0 ? " · " + (Apps.FirstOrDefault(x => x.Id == e.App)?.Name ?? e.App) : string.Empty)</td>
                                 <td class="nowrap">@clock.List(e.Added, Now) · @(e.By == DoNotSend.ByAnjal ? L["by Anjal"] : e.By)</td>
                                 <td>
                                     <form method="post" action="/org/donotsend" class="inline">

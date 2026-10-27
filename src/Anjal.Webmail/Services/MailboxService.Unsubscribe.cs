@@ -128,7 +128,9 @@ public sealed partial class MailboxService
             {
                 await this.messageStore.EnqueueOutboundAsync(new OutboundMessage { EnvelopeFrom = mailbox.Address, EnvelopeTo = address, RawBytes = raw, CreatedAt = now, NextAttemptAt = now, GiveUpAt = now + OutboundMessage.DefaultGiveUp }, ct).ConfigureAwait(false);
             }
-            await this.messageStore.AppendAuditAsync(new AuditEvent { Actor = mailbox.Address, Action = UnsubscribeAudit, Subject = address, Detail = Clip(found.Value.Row.Subject, 120) }, ct).ConfigureAwait(false);
+            // rc.26: the audit line no longer carries the mail's subject (since rc.25 Anjal must not keep it readable).
+            await this.messageStore.AppendAuditAsync(new AuditEvent { Actor = mailbox.Address, Action = UnsubscribeAudit, Subject = address, Detail = string.Empty }, ct).ConfigureAwait(false);
+            await this.RememberListLeftAsync(mailbox.Id, found.Value.Raw, ct).ConfigureAwait(false);
             return null;
         }
         if (link.Length > 0 && HeaderOf(found.Value.Raw, "List-Unsubscribe-Post").Contains("One-Click", StringComparison.OrdinalIgnoreCase))
@@ -138,7 +140,12 @@ public sealed partial class MailboxService
                 using var content = new FormUrlEncodedContent(new[] { new KeyValuePair<string, string>("List-Unsubscribe", "One-Click") });
                 using HttpResponseMessage response = await OneClick.PostAsync(new Uri(link), content, ct).ConfigureAwait(false);
                 await this.messageStore.AppendAuditAsync(new AuditEvent { Actor = mailbox.Address, Action = UnsubscribeAudit, Subject = link, Detail = ((int)response.StatusCode).ToString(CultureInfo.InvariantCulture) }, ct).ConfigureAwait(false);
-                return response.IsSuccessStatusCode ? null : "The sender's page did not accept the request. Open their link instead.";
+                if (response.IsSuccessStatusCode)
+                {
+                    await this.RememberListLeftAsync(mailbox.Id, found.Value.Raw, ct).ConfigureAwait(false);
+                    return null;
+                }
+                return "The sender's page did not accept the request. Open their link instead.";
             }
             catch (HttpRequestException)
             {
@@ -151,4 +158,69 @@ public sealed partial class MailboxService
         }
         return link.Length > 0 ? "This newsletter offers only its own page: open the link." : "This message offers no way to unsubscribe.";
     }
+
+    /// <summary>
+    /// rc.26 (item 73): what the reader's mailing-list card says about a message: the list's name,
+    /// how many mails from it came this month, the address it came to, and when the person
+    /// unsubscribed; null when the message is not from a list.
+    /// </summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The message.</param>
+    /// <param name="monthStart">The start of the person's month.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The card, or null.</returns>
+    public async Task<ListCard?> ListCardAsync(Guid mailboxId, Guid messageId, DateTimeOffset monthStart, CancellationToken ct = default)
+    {
+        (MessageRow Row, FolderRow Folder, byte[] Raw)? found = await this.ReadRawAsync(mailboxId, messageId, ct).ConfigureAwait(false);
+        (TenantRow Tenant, MailboxRow Mailbox)? context = await this.GetContextAsync(mailboxId, ct).ConfigureAwait(false);
+        if (found is null || context is null || TryParse(found.Value.Raw) is not Anjal.Mime.MimeMessage parsed)
+        {
+            return null;
+        }
+        string identity = MailboxSink.ListIdentity(parsed);
+        if (identity.Length == 0)
+        {
+            return null;
+        }
+        string mark = MailboxSink.ListMarkOf(mailboxId, identity, MailKeys.PepperFromEnvironment());
+        string listId = (parsed.Headers.Get("List-Id") ?? string.Empty).Trim();
+        int lt = listId.LastIndexOf('<');
+        string name = lt > 0 ? listId[..lt].Trim().Trim('"') : string.Empty;
+        if (name.Length == 0)
+        {
+            IReadOnlyList<Anjal.Mime.MailAddress> senders = Anjal.Mime.AddressParser.Parse(found.Value.Row.FromHeader);
+            name = senders.Count > 0 && !string.IsNullOrWhiteSpace(senders[0].DisplayName) ? senders[0].DisplayName : identity;
+        }
+        long count = await this.store.CountListMailAsync(mailboxId, mark, monthStart, ct).ConfigureAwait(false);
+        string me = context.Value.Mailbox.Address;
+        string to = (HeaderOf(found.Value.Raw, "To") + "," + HeaderOf(found.Value.Raw, "Cc")).Contains(me, StringComparison.OrdinalIgnoreCase)
+            ? me
+            : Anjal.Mime.AddressParser.Parse(found.Value.Row.ToHeader).Select(a => a.Address).FirstOrDefault() ?? me;
+        DateTimeOffset? left = null;
+        if (await this.ReadDocumentAsync<Dictionary<string, DateTimeOffset>>(mailboxId, MailboxSink.ListsLeftKind, ct).ConfigureAwait(false) is { } lists && lists.TryGetValue(mark, out DateTimeOffset when))
+        {
+            left = when;
+        }
+        return new ListCard(Clip(name, 80), Math.Max(1, count), to, left);
+    }
+
+    // rc.26 (item 73): later mail from this list goes to Junk.
+    private async Task RememberListLeftAsync(Guid mailboxId, byte[] raw, CancellationToken ct)
+    {
+        string identity = MailboxSink.ListIdentity(TryParse(raw));
+        if (identity.Length == 0)
+        {
+            return;
+        }
+        Dictionary<string, DateTimeOffset> lists = await this.ReadDocumentAsync<Dictionary<string, DateTimeOffset>>(mailboxId, MailboxSink.ListsLeftKind, ct).ConfigureAwait(false) ?? new Dictionary<string, DateTimeOffset>(StringComparer.Ordinal);
+        lists[MailboxSink.ListMarkOf(mailboxId, identity, MailKeys.PepperFromEnvironment())] = DateTimeOffset.UtcNow;
+        await this.WriteDocumentAsync(mailboxId, MailboxSink.ListsLeftKind, lists, ct).ConfigureAwait(false);
+    }
 }
+
+/// <summary>rc.26 (item 73): the reader's mailing-list card.</summary>
+/// <param name="Name">The list's name.</param>
+/// <param name="ThisMonth">Mails from it this month.</param>
+/// <param name="SentTo">The address it came to.</param>
+/// <param name="Left">When the person unsubscribed; null when they have not.</param>
+public sealed record ListCard(string Name, long ThisMonth, string SentTo, DateTimeOffset? Left);

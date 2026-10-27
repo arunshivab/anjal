@@ -136,6 +136,8 @@ public sealed class ServerSmtpAuthenticator : Anjal.Smtp.ISmtpAuthenticator
                 mailbox.PasswordPbkdf2 = Anjal.Smtp.Pbkdf2Hasher.Hash(password);
                 await this.mailboxStore.UpsertMailboxAsync(mailbox, ct).ConfigureAwait(false);
             }
+            // rc.26 (item 63): a mail app signing in counts for the inactive-account clock.
+            await this.mailboxStore.TouchSignInAsync(mailbox.Id, System.DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
             return new Anjal.Smtp.AuthenticatedUser
             {
                 Username = mailbox.Address,

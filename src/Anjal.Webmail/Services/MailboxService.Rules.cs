@@ -415,4 +415,11 @@ public sealed partial class MailboxService
         await this.messageStore.AppendAuditAsync(new AuditEvent { Actor = mailbox.Address, Action = MailboxSink.ForwardAudit, Subject = target, Detail = Clip(parsed.Subject, 120) }, ct).ConfigureAwait(false);
         return true;
     }
+
+    /// <summary>rc.26 (item 80): the rules' match counts document (see <see cref="MailboxSink.RuleMatches"/>).</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The document, or null.</returns>
+    public Task<string?> RuleCountsAsync(Guid mailboxId, CancellationToken ct = default) =>
+        this.store.GetMailboxDocumentAsync(mailboxId, MailboxSink.RuleCountsKind, ct);
 }

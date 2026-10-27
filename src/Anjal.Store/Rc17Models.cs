@@ -16,6 +16,15 @@ public sealed class DoNotSendEntry
 
     /// <summary>Who added it: an administrator's address, or "anjal" when the server did.</summary>
     public string By { get; set; } = string.Empty;
+
+    /// <summary>rc.26 (DES-14 §19): the application the entry is for; empty for every application of the organisation.</summary>
+    public string App { get; set; } = string.Empty;
+
+    /// <summary>rc.26 (DES-14 §19): hard_bounce, complaint, unsubscribe or manual; empty on an entry made before rc.26 (see <see cref="AppSuppressions.CodeOf"/>).</summary>
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>rc.26: the API send that caused it, or null.</summary>
+    public System.Guid? SendId { get; set; }
 }
 
 /// <summary>An organisation's do-not-send list, kept as the organisation's "do-not-send" document.</summary>
@@ -58,7 +67,31 @@ public static class DoNotSend
     public static async Task<DoNotSendDocument> ReadAsync(IMailboxStore store, System.Guid tenantId, CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(store);
-        string? json = await store.GetTenantDocumentAsync(tenantId, Kind, ct).ConfigureAwait(false);
+        return Parse(await store.GetTenantDocumentAsync(tenantId, Kind, ct).ConfigureAwait(false));
+    }
+
+    /// <summary>
+    /// rc.26: change an organisation's list as one step (read, change, write), so that two changes at
+    /// once - a bounce report on the mail server and an unsubscribe on the webmail - never lose one.
+    /// </summary>
+    /// <param name="store">The store.</param>
+    /// <param name="tenantId">The organisation.</param>
+    /// <param name="change">Changes the list; returns true to save it. It must not wait on anything.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when the list was saved.</returns>
+    public static Task<bool> ChangeAsync(IMailboxStore store, System.Guid tenantId, System.Func<DoNotSendDocument, bool> change, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(store);
+        System.ArgumentNullException.ThrowIfNull(change);
+        return store.ChangeTenantDocumentAsync(tenantId, Kind, json =>
+        {
+            DoNotSendDocument doc = Parse(json);
+            return change(doc) ? JsonSerializer.Serialize(doc, Json) : null;
+        }, ct);
+    }
+
+    private static DoNotSendDocument Parse(string? json)
+    {
         if (string.IsNullOrWhiteSpace(json))
         {
             return new DoNotSendDocument();
@@ -211,7 +244,7 @@ public static class DoNotSend
         }
         if (reason is not null)
         {
-            doc.Entries.Add(new DoNotSendEntry { Address = to, Reason = reason, Added = now, By = ByAnjal });
+            doc.Entries.Add(new DoNotSendEntry { Address = to, Reason = reason, Added = now, By = ByAnjal, Code = "hard_bounce" });
         }
         await WriteAsync(store, sender.TenantId, doc, ct).ConfigureAwait(false);
         return reason;

@@ -14,7 +14,7 @@ namespace Anjal.Webmail.Tests;
 /// </summary>
 public sealed class Rc14OrganisationTests : IDisposable
 {
-    private static readonly string[] RecordKinds = { "MX", "SPF", "DKIM", "DMARC", "MTA-STS", "TLS reports" };
+    private static readonly string[] RecordKinds = { "MX", "SPF", "DKIM", "DMARC", "MTA-STS", "TLS reports", "Return path", "Return path SPF" };
 
     private readonly string root = Path.Combine(Path.GetTempPath(), "anjal-rc14-" + Guid.NewGuid().ToString("N"));
     private readonly InMemoryMessageStore store = new();

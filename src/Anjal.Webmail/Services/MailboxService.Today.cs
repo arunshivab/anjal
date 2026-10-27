@@ -8,7 +8,7 @@ namespace Anjal.Webmail.Services;
 /// <param name="Message">The message.</param>
 /// <param name="Who">The sender's name, or address when there is no name.</param>
 /// <param name="Address">The sender's address.</param>
-/// <param name="Reason">"answer", "to" or "often" for Needs you; null otherwise.</param>
+/// <param name="Reason">"answer", "to", "often", "referral" or "referral-urgent" (rc.26) for Needs you; null otherwise.</param>
 /// <param name="AnswersSubject">For an answer: the subject of the person's own message it answers.</param>
 /// <param name="AnswersAt">For an answer: when the person sent that message.</param>
 /// <param name="Expected">For an answer: the person had marked their message "Expect a reply".</param>
@@ -132,6 +132,13 @@ public sealed partial class MailboxService
                 continue;
             }
 
+            // rc.26 (item 76): a referral needs the person; an urgent one goes first.
+            if (m.Referral is "urgent" or "routine")
+            {
+                needs.Add(new TodayRow(m, who, address, m.Referral == "urgent" ? "referral-urgent" : "referral", null, null, false));
+                continue;
+            }
+
             if (await this.IsListOrNotificationAsync(context.Value.Tenant, context.Value.Mailbox, m, address, ct).ConfigureAwait(false))
             {
                 lists.Add(new TodayRow(m, who, address, null, null, null, false));
@@ -176,6 +183,8 @@ public sealed partial class MailboxService
             usual = (await this.HabitsAsync(mailboxId, clock, now, ct).ConfigureAwait(false)).MedianReply;
         }
 
+        // rc.26 (item 76): "Referral · urgent" ahead of other mail that needs the person (the order is otherwise kept).
+        needs = needs.OrderBy(r => r.Reason == "referral-urgent" ? 0 : 1).ToList();
         return new TodayView
         {
             NeedsYou = needs,

@@ -108,6 +108,29 @@ public interface IMailboxStore
     System.Threading.Tasks.Task SetTenantDocumentAsync(System.Guid tenantId, string kind, string json, System.Threading.CancellationToken ct = default);
 
     /// <summary>
+    /// rc.26: change one of an organisation's documents with no other change in between - read, change,
+    /// write as one step, across both processes (the PostgreSQL store holds a lock for the document
+    /// while <paramref name="change"/> runs). <paramref name="change"/> gets the document as stored
+    /// (null when there is none) and returns the new one, or null to leave it as it is.
+    /// </summary>
+    /// <param name="tenantId">The organisation.</param>
+    /// <param name="kind">The kind.</param>
+    /// <param name="change">The change; it must not wait on anything.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when the document was written.</returns>
+    async System.Threading.Tasks.Task<bool> ChangeTenantDocumentAsync(System.Guid tenantId, string kind, System.Func<string?, string?> change, System.Threading.CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(change);
+        string? next = change(await this.GetTenantDocumentAsync(tenantId, kind, ct).ConfigureAwait(false));
+        if (next is null)
+        {
+            return false;
+        }
+        await this.SetTenantDocumentAsync(tenantId, kind, next, ct).ConfigureAwait(false);
+        return true;
+    }
+
+    /// <summary>
     /// How many messages arrived in every mailbox, hour by hour, since a
     /// moment (rc.14, the Anjal console's service health). Hours with none
     /// are left out.
@@ -419,4 +442,19 @@ public interface IMailboxStore
     /// <param name="ruleId">The rule.</param>
     /// <param name="ct">Cancellation.</param>
     System.Threading.Tasks.Task<bool> DeleteMailboxSenderRuleAsync(System.Guid mailboxId, System.Guid ruleId, System.Threading.CancellationToken ct = default);
+
+    /// <summary>rc.26 (item 73): how many of a mailbox's messages came from one list (its mark) since a moment.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="listMark">The list's mark.</param>
+    /// <param name="since">Since.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The count.</returns>
+    System.Threading.Tasks.Task<long> CountListMailAsync(System.Guid mailboxId, string listMark, System.DateTimeOffset since, System.Threading.CancellationToken ct = default);
+
+    /// <summary>rc.26 (item 63): note a sign-in - webmail, passkey or port 587 - for the inactive-account clock.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="at">When.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    System.Threading.Tasks.Task TouchSignInAsync(System.Guid mailboxId, System.DateTimeOffset at, System.Threading.CancellationToken ct = default);
 }

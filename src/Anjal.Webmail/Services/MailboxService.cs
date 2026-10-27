@@ -109,6 +109,9 @@ public sealed class MessageView
 /// <summary>Input for composing a new message.</summary>
 public sealed class ComposeRequest
 {
+    /// <summary>rc.26 (item 76): "routine" or "urgent" when this is a referral; empty otherwise.</summary>
+    public string Referral { get; set; } = string.Empty;
+
     /// <summary>To header value (one or more addresses).</summary>
     public string To { get; set; } = string.Empty;
 
@@ -725,6 +728,11 @@ public sealed partial class MailboxService
 
         byte[] raw = BuildMessage(mailbox, request, to, cc);
         DateTimeOffset now = DateTimeOffset.UtcNow;
+        // rc.26 (item 85, D-173): programs, scripts and disk images are not sent, inside or outside.
+        if (Anjal.Mailbox.AttachmentPolicy.RefusedInside(TryParse(raw)) is string refused)
+        {
+            return "Not sent: " + refused + ". Share them another way.";
+        }
 
         // v1.0.0-rc.9 (DEF-076, D-59): keep the message as composed before anything
         // is delivered or queued; if it cannot be kept, it is not sent.
@@ -767,7 +775,8 @@ public sealed partial class MailboxService
         var external = new List<MailAddress>();
         foreach (MailAddress rcpt in recipients)
         {
-            if (await sink.ResolveAsync(rcpt.Address, ct).ConfigureAwait(false) is not null)
+            // rc.26: an application's inbox address here is delivered here too.
+            if (await sink.ResolveAsync(rcpt.Address, ct).ConfigureAwait(false) is not null || await sink.IsApplicationAddressAsync(rcpt.Address, ct).ConfigureAwait(false))
             {
                 if (!local.Contains(rcpt.Address, StringComparer.OrdinalIgnoreCase))
                 {
@@ -791,6 +800,15 @@ public sealed partial class MailboxService
         if (fullHere.Count > 0)
         {
             return "Not sent: the mailbox of " + string.Join(", ", fullHere) + " is full. Send it later, or without them.";
+        }
+        // rc.26 (item 99, D-219): the organisation's sends per day, every route together.
+        if (external.Count > 0 && await Anjal.Mailbox.SendingDay.RefusedAsync(this.store, this.messageStore, tenant.Id, external.Count, now, ct).ConfigureAwait(false) is string overToday)
+        {
+            if (evidenceId is Guid notQueued && this.Evidence is not null)
+            {
+                await this.Evidence.CompleteInboundAsync(notQueued, accepted: false, ct).ConfigureAwait(false);
+            }
+            return "Not sent: " + overToday + ".";
         }
         if (local.Count > 0)
         {
@@ -1029,6 +1047,12 @@ public sealed partial class MailboxService
             {
                 msg.Headers.Add("Cc", FormatAddresses(cc));
             }
+        }
+        // rc.26 (item 76): a referral says so, and how urgent it is - nothing else.
+        if (request.Referral is "routine" or "urgent")
+        {
+            msg.Headers.Add(Anjal.Mailbox.MailboxSink.ReferralHeader, "1");
+            msg.Headers.Add(Anjal.Mailbox.MailboxSink.ReferralUrgencyHeader, request.Referral);
         }
         // Reply linkage is emitted only when it is a well-formed message id.
         // It arrives from a hidden form field, so it is attacker-controlled;

@@ -7,6 +7,7 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 ## Members
 
 - **PreviewOf** *(method)* - The first 160 characters of a text, never splitting a character in two.
+- **AcknowledgedAt** *(property)* - rc.26 (DES-14 §14): when an application acknowledged this mail of its inbox; null until then.
 - **Answered** *(property)* - Maildir "R" flag - the message has been replied to.
 - **BodyText** *(property)* - The message's readable text, for search (see Anjal.Mailbox.MessageText). Written when the message is stored; listing queries do not read it back, so it is empty on rows loaded for display.
 - **CategoryId** *(property)* - The category this message carries, or null.
@@ -18,11 +19,13 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 - **FromHeader** *(property)* - The raw From header value.
 - **HasAttachments** *(property)* - True when the message has at least one attachment part.
 - **Id** *(property)* - Identifier assigned by the store.
+- **ListMark** *(property)* - rc.26 (item 73): the mailing list the message came from, as a keyed mark (an HMAC of its List-Id with the mailbox and the pepper) - a list's identity without its readable name; empty for mail that is not from a list.
 - **MailboxId** *(property)* - The owning mailbox.
 - **MaildirFile** *(property)* - Path of the Maildir file relative to the folder's Maildir directory, e.g. new/1726560000.M123456P4242Q7.host.
 - **MessageId** *(property)* - The Message-ID header value with angle brackets stripped, or empty.
 - **Preview** *(property)* - The first 160 characters of the readable text, for the preview line in a message list (rc.11). Filled when messages are read for display; the whole text is never loaded for a list.
 - **ReceivedAt** *(property)* - Time the message was delivered to the folder.
+- **Referral** *(property)* - rc.26 (item 76): "urgent" or "routine" for a referral (its X-Anjal-Referral-Urgency header); empty otherwise.
 - **Seen** *(property)* - Maildir "S" flag - the message has been read.
 - **SizeBytes** *(property)* - Size of the Maildir file in bytes.
 - **SpamChecked** *(property)* - Whether the message went through the incoming checks: true for mail from outside that was scored, false for mail from a signed-in account and for copies of the user's own mail, null when not recorded (messages stored before v1.0.0-rc.5). Only when this is true does a of 0 mean "checked and clean".

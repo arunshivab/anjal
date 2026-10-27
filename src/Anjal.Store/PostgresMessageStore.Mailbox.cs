@@ -12,9 +12,9 @@ public sealed partial class PostgresMessageStore
     private const string TenantColumns = "id, slug, display_name, enabled, spam_threshold, created_at, unencrypted_folder, evidence_retention_days, postmaster_mailbox";
     private const string SenderRuleColumns = "id, tenant_id, pattern, action, created_at";
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
-    private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme, time_zone, language, density, layout, rail_folded, date_format, week_start, page_size, new_mail_sound, welcome_done, rail_chosen, zoom";
+    private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme, time_zone, language, density, layout, rail_folded, date_format, week_start, page_size, new_mail_sound, welcome_done, rail_chosen, zoom, kind, last_sign_in_at";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
-    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id, CASE WHEN body_text LIKE 'e1.QU5KRQE%' THEN snippet ELSE left(body_text, 160) END";
+    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id, CASE WHEN body_text LIKE 'e1.QU5KRQE%' THEN snippet ELSE left(body_text, 160) END, list_mark, referral, acknowledged_at";
 
     /// <inheritdoc/>
     public async Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
@@ -187,8 +187,8 @@ RETURNING " + TenantDomainColumns + ";";
         // Password: only replaced when a non-empty hash is supplied.
         // used_bytes: never overwritten by an upsert.
         const string sql = @"
-INSERT INTO mailboxes (tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, theme)
-VALUES (@tenant_id, lower(@local_part), lower(@domain), @password, @display_name, @enabled, @quota, CASE WHEN @theme = '' THEN 'anjal-light' ELSE @theme END)
+INSERT INTO mailboxes (tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, theme, kind)
+VALUES (@tenant_id, lower(@local_part), lower(@domain), @password, @display_name, @enabled, @quota, CASE WHEN @theme = '' THEN 'anjal-light' ELSE @theme END, @kind)
 ON CONFLICT (local_part, domain) DO UPDATE
     SET tenant_id       = EXCLUDED.tenant_id,
         password_pbkdf2 = CASE WHEN EXCLUDED.password_pbkdf2 = '' THEN mailboxes.password_pbkdf2 ELSE EXCLUDED.password_pbkdf2 END,
@@ -208,6 +208,7 @@ RETURNING " + MailboxColumns + ";";
         cmd.Parameters.AddWithValue("display_name", mailbox.DisplayName);
         cmd.Parameters.AddWithValue("enabled", mailbox.Enabled);
         cmd.Parameters.AddWithValue("quota", mailbox.QuotaBytes);
+        cmd.Parameters.AddWithValue("kind", string.IsNullOrEmpty(mailbox.Kind) ? MailboxRow.PersonKind : mailbox.Kind);
         // Empty means "keep the stored theme" on update; the SQL CASE decides.
         // On insert an empty theme becomes "anjal-light", the default (rc.15).
         cmd.Parameters.AddWithValue("theme", mailbox.Theme ?? string.Empty);
@@ -256,7 +257,7 @@ RETURNING " + MailboxColumns + ";";
     /// <inheritdoc/>
     public async Task<IReadOnlyList<MailboxRow>> ListMailboxesAsync(System.Guid? tenantId = null, CancellationToken ct = default)
     {
-        const string sql = "SELECT " + MailboxColumns + " FROM mailboxes WHERE (@tenant_id IS NULL OR tenant_id = @tenant_id) ORDER BY domain, local_part;";
+        const string sql = "SELECT " + MailboxColumns + " FROM mailboxes WHERE (@tenant_id IS NULL OR tenant_id = @tenant_id) AND kind <> 'application' ORDER BY domain, local_part;";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
         cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("tenant_id", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = tenantId });
@@ -346,8 +347,8 @@ RETURNING " + FolderColumns + ";";
         StoredText text = MessageCipher.Seal(message.Subject, message.BodyText, await this.MailboxPublicKeyAsync(message.MailboxId, ct).ConfigureAwait(false));
 
         const string sql = @"
-INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, snippet, spam_checked, transport_encrypted, transport_tls, evidence_id)
-VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @snippet, @spam_checked, @transport_encrypted, @transport_tls, @evidence_id)
+INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, snippet, spam_checked, transport_encrypted, transport_tls, evidence_id, list_mark, referral)
+VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @snippet, @spam_checked, @transport_encrypted, @transport_tls, @evidence_id, @list_mark, @referral)
 RETURNING " + MessageColumns + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -365,6 +366,8 @@ RETURNING " + MessageColumns + ";";
         cmd.Parameters.AddWithValue("has_attachments", message.HasAttachments);
         cmd.Parameters.AddWithValue("body_text", text.BodyText);
         cmd.Parameters.AddWithValue("snippet", text.Snippet);
+        cmd.Parameters.AddWithValue("list_mark", message.ListMark);
+        cmd.Parameters.AddWithValue("referral", message.Referral);
         cmd.Parameters.AddWithValue("seen", message.Seen);
         cmd.Parameters.AddWithValue("flagged", message.Flagged);
         cmd.Parameters.AddWithValue("answered", message.Answered);
@@ -783,6 +786,8 @@ RETURNING " + MailboxSenderRuleColumns + ";";
         WelcomeDone = r.GetBoolean(21),
         RailChosen = r.GetBoolean(22),
         Zoom = r.GetInt32(23),
+        Kind = r.GetString(24),
+        LastSignInAt = r.GetFieldValue<System.DateTimeOffset>(25),
     };
 
     /// <inheritdoc/>
@@ -847,6 +852,9 @@ UPDATE mailboxes
         TransportTls = r.IsDBNull(20) ? null : r.GetString(20),
         EvidenceId = r.IsDBNull(21) ? null : r.GetGuid(21),
         Preview = r.IsDBNull(22) ? string.Empty : MessageCipher.Open(r.GetString(22)),
+        ListMark = r.GetString(23),
+        Referral = r.GetString(24),
+        AcknowledgedAt = r.IsDBNull(25) ? null : r.GetFieldValue<System.DateTimeOffset>(25),
     };
 
     // ================= Categories (v0.15.0) =================
