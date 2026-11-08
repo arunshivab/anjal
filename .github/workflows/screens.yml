@@ -100,7 +100,7 @@ jobs:
 
       - name: Keep the reports
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: screen-checks-${{ matrix.group }}
           path: |
