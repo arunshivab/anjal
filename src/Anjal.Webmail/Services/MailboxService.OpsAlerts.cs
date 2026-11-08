@@ -86,6 +86,50 @@ public sealed partial class MailboxService
         return sb.ToString();
     }
 
+    /// <summary>
+    /// rc.27 (MOM-10; DES-16 §15 point 6): "Spam this week" per organisation - refused at the door for its
+    /// domains, put in its Junk folders, and moved back by its people with "Not junk". Counts only.
+    /// </summary>
+    /// <param name="orgs">The organisations.</param>
+    /// <param name="since">From when.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The lines, or empty when nothing happened.</returns>
+    public async Task<string> OrgSpamWeekTextAsync(IReadOnlyList<OrgSummary> orgs, DateTimeOffset since, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(orgs);
+        Dictionary<string, Dictionary<string, long>> days = await this.ServiceRecordAsync<Dictionary<string, Dictionary<string, long>>>("refusals-by-domain", ct).ConfigureAwait(false) ?? new();
+        string from = since.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var refused = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        foreach ((string day, Dictionary<string, long> counts) in days.Where(d => string.CompareOrdinal(d.Key, from) >= 0))
+        {
+            foreach ((string key, long n) in counts.Where(c => c.Key.StartsWith(Anjal.Smtp.DomainCounters.SpamRefused + "|", StringComparison.Ordinal)))
+            {
+                string domain = key[(key.IndexOf('|', StringComparison.Ordinal) + 1)..];
+                refused[domain] = refused.GetValueOrDefault(domain) + n;
+            }
+        }
+        var sb = new StringBuilder();
+        foreach (OrgSummary o in orgs)
+        {
+            long r = o.Domains.Sum(d => refused.GetValueOrDefault(d));
+            long junked = 0;
+            long notJunk = 0;
+            foreach (MailboxRow m in await this.store.ListMailboxesAsync(o.Tenant.Id, ct).ConfigureAwait(false))
+            {
+                if (await this.GetFolderAsync(m.Id, Anjal.Mailbox.MailboxSink.JunkFolder, ct).ConfigureAwait(false) is FolderRow junk)
+                {
+                    junked += (await this.store.ListMessagesAsync(m.Id, junk.Id, 2000, 0, ct).ConfigureAwait(false)).Count(x => x.ReceivedAt >= since);
+                }
+                notJunk += (await this.RescuedSinceAsync(m.Id, since, ct).ConfigureAwait(false)).Count;
+            }
+            if (r + junked + notJunk > 0)
+            {
+                sb.Append(CultureInfo.InvariantCulture, $"{o.Tenant.DisplayName}: refused {r:N0}, put in Junk {junked:N0}, \"Not junk\" {notJunk:N0}\r\n");
+            }
+        }
+        return sb.Length == 0 ? string.Empty : "\r\nBy organisation\r\n" + sb.ToString();
+    }
+
     /// <summary>The service record keeping each help article's "No" count at the last Monday summary (rc.26, item 78).</summary>
     public const string HelpNoWeekKind = "help-feedback-week";
 
@@ -269,6 +313,7 @@ public sealed partial class MailboxService
             string text = SummaryText(tiles, hours, orgs);
             // rc.26 (item 64, D-167): "Spam this week", a section of the same mail, not a second one.
             text += SpamWeekText(await this.RefusalsSinceAsync(now.AddDays(-7), ct).ConfigureAwait(false));
+            text += await this.OrgSpamWeekTextAsync(orgs, now.AddDays(-7), ct).ConfigureAwait(false);
             // rc.26 (item 78): the help articles answered "No" since the last summary.
             Dictionary<string, int[]> helped = await HelpFeedback.ReadAsync(this.messageStore, ct).ConfigureAwait(false);
             Dictionary<string, int> lastWeek = await this.ServiceRecordAsync<Dictionary<string, int>>(HelpNoWeekKind, ct).ConfigureAwait(false) ?? new Dictionary<string, int>(StringComparer.Ordinal);

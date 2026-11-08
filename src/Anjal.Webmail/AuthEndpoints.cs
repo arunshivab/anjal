@@ -691,7 +691,8 @@ internal static class AuthEndpoints
         string path = request.Path.Value ?? string.Empty;
         if (HttpMethods.IsPost(request.Method))
         {
-            return true;
+            // rc.27: an open desk reply renewing its "is replying" mark is not the person doing something.
+            return path != "/desk/replying";
         }
         return !path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)
             && !path.StartsWith("/auth/", StringComparison.OrdinalIgnoreCase)
@@ -777,6 +778,8 @@ internal static class AuthEndpoints
 
     private static bool ReadOnlyAllows(string path) =>
         path.StartsWith("/shared/", StringComparison.Ordinal) || path.StartsWith("/settings", StringComparison.Ordinal)
+        // rc.27 (D-304): a read-only member of a desk may assign (unless the desk says otherwise) and leave notes; the desk checks the rest.
+        || path == "/desk/act" || path == "/desk/open"
         || path.StartsWith("/auth/", StringComparison.Ordinal) || path == "/sign-out" || path.StartsWith("/contacts", StringComparison.Ordinal)
         || (path.StartsWith("/message/", StringComparison.Ordinal) && (path.EndsWith("/read", StringComparison.Ordinal) || path.EndsWith("/flag", StringComparison.Ordinal)));
 

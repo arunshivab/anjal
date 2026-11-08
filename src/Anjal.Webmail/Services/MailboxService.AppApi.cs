@@ -197,9 +197,10 @@ public sealed partial class MailboxService
     /// <param name="perDay">Sends a day.</param>
     /// <param name="allowedFrom">CIDR ranges, one per line.</param>
     /// <param name="signingRequired">True for "Signing required".</param>
+    /// <param name="giveUpHours">rc.27 (item 72.8): hours to keep trying, one of <see cref="Anjal.Mailbox.AppGiveUp.Choices"/>; null to leave it.</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>The error, or null.</returns>
-    public async Task<string?> SaveAppApiSettingsAsync(TenantRow tenant, string appId, string senders, int perHour, int perDay, string allowedFrom, bool signingRequired, CancellationToken ct = default)
+    public async Task<string?> SaveAppApiSettingsAsync(TenantRow tenant, string appId, string senders, int perHour, int perDay, string allowedFrom, bool signingRequired, int? giveUpHours = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tenant);
         ArgumentNullException.ThrowIfNull(senders);
@@ -243,6 +244,10 @@ public sealed partial class MailboxService
         {
             return "At most 20 ranges.";
         }
+        if (giveUpHours is int g && !Anjal.Mailbox.AppGiveUp.Choices.Contains(g))
+        {
+            return "Choose how long to keep trying from the list.";
+        }
         return await this.ChangeAppAsync(tenant.Id, appId, app =>
         {
             app.AllowedSenders = list;
@@ -250,6 +255,10 @@ public sealed partial class MailboxService
             app.PerDay = perDay;
             app.AllowedFrom = ranges;
             app.SigningRequired = signingRequired;
+            if (giveUpHours is int hours)
+            {
+                app.GiveUpHours = hours;
+            }
             return null;
         }, ct).ConfigureAwait(false);
     }
@@ -833,4 +842,50 @@ public sealed partial class MailboxService
         }
         return lines;
     }
+
+    /// <summary>
+    /// rc.27 (SPEC-17 F-02): the operator's table of applications, every organisation - live keys, sends
+    /// today, the last send and failing webhooks. Counts and names only, never what was sent.
+    /// </summary>
+    /// <param name="dayStart">The start of today.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>One row per application, by organisation.</returns>
+    public async Task<IReadOnlyList<OpsAppRow>> OpsAppsAsync(DateTimeOffset dayStart, CancellationToken ct = default)
+    {
+        var rows = new List<OpsAppRow>();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        foreach (TenantRow t in await this.store.ListTenantsAsync(ct).ConfigureAwait(false))
+        {
+            foreach (OrgApp app in await this.AppsOfAsync(t.Id, ct).ConfigureAwait(false))
+            {
+                if (app.Retired is not null)
+                {
+                    continue;
+                }
+                int keys = app.Keys.Count(k => k.EndsAt is null || k.EndsAt > now) + app.HttpKeys.Count(k => !k.Sandbox && k.Retired is null && (k.Expires is null || k.Expires > now));
+                IReadOnlyList<AppSend> sends = this.messageStore is IAppApiStore api
+                    ? await api.ListAppSendsAsync(app.Id, new AppSendQuery { Since = dayStart, Limit = 20000 }, ct).ConfigureAwait(false)
+                    : Array.Empty<AppSend>();
+                var live = sends.Where(s => !s.Sandbox && s.LastEvent != "batch").ToList();
+                DateTimeOffset? last = live.Count > 0 ? live.Max(s => s.CreatedAt) : null;
+                if (last is null && this.messageStore is IAppApiStore api2)
+                {
+                    last = (await api2.ListAppSendsAsync(app.Id, new AppSendQuery { Limit = 5 }, ct).ConfigureAwait(false)).Where(s => !s.Sandbox && s.LastEvent != "batch").Select(s => (DateTimeOffset?)s.CreatedAt).FirstOrDefault();
+                }
+                rows.Add(new OpsAppRow(t.DisplayName, app.Name, keys, live.Count, last, app.Webhooks.Count, app.Webhooks.Count(w => w.FailingSince is not null)));
+            }
+        }
+        return rows.OrderBy(r => r.Organisation, StringComparer.CurrentCultureIgnoreCase).ThenBy(r => r.Application, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
 }
+
+/// <summary>rc.27 (SPEC-17 F-02): one application in the operator's table.</summary>
+/// <param name="Organisation">Its organisation.</param>
+/// <param name="Application">Its name.</param>
+/// <param name="LiveKeys">Its SMTP and HTTP keys in use (sandbox keys not counted).</param>
+/// <param name="SendsToday">Its live sends since the start of today.</param>
+/// <param name="LastSend">Its last live send.</param>
+/// <param name="Webhooks">Its webhooks.</param>
+/// <param name="FailingWebhooks">Of which failing.</param>
+public sealed record OpsAppRow(string Organisation, string Application, int LiveKeys, int SendsToday, DateTimeOffset? LastSend, int Webhooks, int FailingWebhooks);
+

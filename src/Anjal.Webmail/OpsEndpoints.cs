@@ -184,6 +184,34 @@ internal static class OpsEndpoints
             await audit.RecordAsync(me.Address, "ops.drill.recorded", drill.Date, Client(http), (drill.Passed ? "passed" : "failed") + (drill.Note.Length > 0 ? "; " + drill.Note : string.Empty)).ConfigureAwait(false);
             return Results.Redirect("/ops/health?saved=drill");
         }).RequireAuthorization().AddEndpointFilter(Program.RequireAntiforgery);
+
+        // rc.27 (item 79, D-312): the monthly screen-reader check, recorded like the restore drill.
+        app.MapPost("/ops/reader-check", async (HttpContext http, [FromForm] string? date, [FromForm] string? reader, [FromForm] string? browser, [FromForm] string? result, [FromForm] string? findings, MailboxService svc, AuditTrail audit, CancellationToken ct) =>
+        {
+            if (await OperatorAsync(http, svc, ct).ConfigureAwait(false) is not { } me)
+            {
+                return Results.NotFound();
+            }
+            if (!DateTime.TryParseExact(date ?? string.Empty, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateTime day)
+                || day > DateTime.UtcNow.Date.AddDays(1) || day < DateTime.UtcNow.Date.AddYears(-2))
+            {
+                return Results.Redirect("/ops/health?saved=reader-date");
+            }
+            string text = (findings ?? string.Empty).Trim();
+            var check = new ReaderCheck
+            {
+                Date = day.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+                Reader = reader is "NVDA" or "VoiceOver" or "TalkBack" or "JAWS" ? reader : "NVDA",
+                Browser = (browser ?? string.Empty).Trim() is { Length: > 0 and <= 40 } b ? b : "Chrome",
+                Passed = result == "passed",
+                Findings = text.Length > 500 ? text[..500] : text,
+                By = me.Address,
+                RecordedAt = DateTimeOffset.UtcNow,
+            };
+            await svc.RecordReaderCheckAsync(check, ct).ConfigureAwait(false);
+            await audit.RecordAsync(me.Address, "ops.reader-check.recorded", check.Date, Client(http), check.Reader + " with " + check.Browser + ": " + (check.Passed ? "every step worked" : "findings") + (check.Findings.Length > 0 ? "; " + check.Findings : string.Empty)).ConfigureAwait(false);
+            return Results.Redirect("/ops/health?saved=reader");
+        }).RequireAuthorization().AddEndpointFilter(Program.RequireAntiforgery);
     }
 
     /// <summary>The signed-in person's own mailbox, when they are an operator.</summary>

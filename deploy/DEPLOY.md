@@ -1680,6 +1680,29 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.26 to rc.27** (shared desks, the dark envelope, high contrast and the other accessibility work,
+the ten small items, DES-17 v1.2): the first server goes from rc.24 straight to rc.27 (D-248); these
+steps are part of that upgrade, after the rc.25 and rc.26 steps below. Backup first (section 11).
+
+1. The usual install, and `schema.sql` once: three new tables (`desk_items`, `desk_events`,
+   `desk_notes`) and `messages.written_by` and `draft_empty` - 43 tables in all. No new setting.
+2. Restart. Every shared mailbox is now a desk: mail arriving in it is Not assigned until someone
+   takes it. Nothing has to be made.
+3. **The working week** (D-315): Organisation > Shared mailboxes > Working week. Read it first - it
+   shows Monday to Saturday, 09:00 to 18:00 in the organisation's time zone, which is the default
+   and needs no change; save only if the organisation works other days or hours. Each desk's
+   assigning, reply time (1 working day unless changed) and own week are on its panel there.
+4. Each person who works a desk chooses under Settings > Mail > From desks what pops up; mail
+   assigned to them or mentioning them is the default.
+5. Once a month the operator does the screen-reader check (Anjal console > Service health) and
+   records it there.
+
+**Check** (counts only):
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 43
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from desk_items"   # 0 until mail arrives at a shared mailbox
+```
+
 **rc.25 to rc.26** (the application API, DES-14 §28; a person leaving, eDiscovery, inactive
 mailboxes and the other people's items): the first server goes from rc.25 straight to rc.27 (D-248);
 these steps are part of that upgrade, in this order. Backup first (section 11).
@@ -1704,7 +1727,7 @@ these steps are part of that upgrade, in this order. Backup first (section 11).
    vm$ curl -s https://mail.anjal.co.in/api/v1/openapi.json | head -c 200
    ```
 4. **The `sangamid` organisation** (item 88c): OPS-14 - the organisation, its domain proved, its
-   DNS set (MX, SPF, DKIM, DMARC), then under Organisation > Applications the application `Sangam`
+   DNS set (MX, SPF, DKIM, DMARC), then under Sending systems the application `Sangam`
    with its sending addresses, an HTTP key (shown once: hand it to Sangam's operator by the route
    OPS-15 gives) and its Allowed from ranges. Sangam is told the API's address and the points in the
    message of item 88e.
@@ -1716,7 +1739,7 @@ these steps are part of that upgrade, in this order. Backup first (section 11).
 
 **Check** (counts only):
 ```
-vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 40
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 40 (43 once rc.27's schema is in)
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from app_sends"   # 0 until an application sends
 ```
 

@@ -7,7 +7,9 @@ rc.15 (items 59 and 61): what the mail server keeps for the dashboards. A refuse
 ## Members
 
 - **RefusalCounters** *(field)* - The counters added up per day, with the words the operator's dashboard shows.
+- **RefusalsByDomainKind** *(field)* - rc.27: the kind of the service record holding the per-domain counts per day ("kind|domain").
 - **RefusalsKind** *(field)* - The kind of the service record holding the refusal counts per day.
 - **AddAsync** *(method)* - Add counts to a day's totals in the refusals record.
+- **AddAsync** *(method)* - Add counts to a day's totals in one of the records of counts per day.
 - **RefusalRecorder** *(method)* - The listener for refused submissions: when the user name is a key the service made (an application's), the refusal goes to the activity log as smtp.submission.refused. Other names - guesses - are only counted.
 - **RunRefusalCountsAsync** *(method)* - Every ten minutes, add what the refusal counters gained to today's totals in the service record (kept for 400 days). A restart starts the counters at nought again; nothing is counted twice.

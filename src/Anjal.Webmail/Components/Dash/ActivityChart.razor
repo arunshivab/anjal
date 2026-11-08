@@ -1,26 +1,42 @@
-@* DES-11 D8 (owner, 10 Oct 2026): the last 30 days of the whole service, four lines on one
-   scale - received, sent, refused by the mail server, bounced - each day opening that day's
-   figures. Every number is repeated in a plain table for screen readers. *@
+@* DES-11 D8 (owner, 10 Oct 2026): the last 30 days of the whole service - received, sent, refused by
+   the mail server, bounced - each day opening that day's figures. Every number is repeated in a plain
+   table for screen readers. rc.27: four charts, not four lines on one scale. *@
 <div class="tlegend alegend">
     <span><i class="al-r"></i>@L["Received"] @Total(d => d.Received)</span>
     <span><i class="al-s"></i>@L["Sent"] @Total(d => d.Sent)</span>
     <span><i class="al-x"></i>@L["Refused"] @Total(d => d.Refused)</span>
     <span><i class="al-b"></i>@L["Bounced"] @Total(d => d.Bounced)</span>
 </div>
+@* rc.27 (item 72.7, brief 7): four small charts stacked, each on its own scale, aligned by day, so a
+   small line is not flattened by a big one; each line has its own dash pattern and its last value at its end. *@
 <div class="achart" aria-hidden="true">
-    <svg class="alines" viewBox="0 0 @(Days.Count * 10) 100" preserveAspectRatio="none" focusable="false">
-        <polyline class="al-r" points="@Points(d => d.Received)"></polyline>
-        <polyline class="al-s" points="@Points(d => d.Sent)"></polyline>
-        <polyline class="al-x" points="@Points(d => d.Refused)"></polyline>
-        <polyline class="al-b" points="@Points(d => d.Bounced)"></polyline>
-    </svg>
-    <div class="acols">
-        @for (int i = 0; i < Days.Count; i++)
+    <div class="anames">
+        @foreach ((string cls, string word, Func<ActivityDay, long> _) in Series)
         {
-            ActivityDay d = Days[i];
-            <a class="acol" href="@Link(d)" tabindex="-1" title="@Title(d)">
-                <span class="alabel">@(Show(i) ? d.Day.ToString("d MMM", Inv) : " ")</span>
-            </a>
+            <span class="aname"><i class="@cls"></i>@L[word]</span>
+        }
+    </div>
+    <div class="aplot">
+        @foreach ((string cls, string _, Func<ActivityDay, long> pick) in Series)
+        {
+            <svg class="aline" viewBox="0 0 @(Days.Count * 10) 40" preserveAspectRatio="none" focusable="false">
+                <polyline class="@cls" points="@Points(pick)"></polyline>
+            </svg>
+        }
+        <div class="acols">
+            @for (int i = 0; i < Days.Count; i++)
+            {
+                ActivityDay d = Days[i];
+                <a class="acol" href="@Link(d)" tabindex="-1" title="@Title(d)">
+                    <span class="alabel">@(Show(i) ? d.Day.ToString("d MMM", Inv) : " ")</span>
+                </a>
+            }
+        </div>
+    </div>
+    <div class="aends">
+        @foreach ((string _, string _, Func<ActivityDay, long> pick) in Series)
+        {
+            <span class="aend">@(Days.Count == 0 ? "0" : pick(Days[^1]).ToString("N0", Inv))</span>
         }
     </div>
 </div>
@@ -51,13 +67,23 @@
     /// <summary>The page's words.</summary>
     [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
 
-    private long Peak => Math.Max(1, Days.Count == 0 ? 0 : Days.Max(d => Math.Max(Math.Max(d.Received, d.Sent), Math.Max(d.Refused, d.Bounced))));
+    private static readonly (string Cls, string Word, Func<ActivityDay, long> Pick)[] Series =
+    {
+        ("al-r", "Received", d => d.Received),
+        ("al-s", "Sent", d => d.Sent),
+        ("al-x", "Refused", d => d.Refused),
+        ("al-b", "Bounced", d => d.Bounced),
+    };
 
     private string Total(Func<ActivityDay, long> pick) => Days.Sum(pick).ToString("N0", Inv);
 
-    // Each day's point sits in the middle of its column; 100 is the top, kept 4 from the edges.
-    private string Points(Func<ActivityDay, long> pick) => string.Join(" ", Days.Select((d, i) =>
-        (i * 10 + 5).ToString(Inv) + "," + (96 - (pick(d) * 92.0 / Peak)).ToString("0.##", Inv)));
+    // Each day's point sits in the middle of its column; each chart has its own top (its own largest day),
+    // kept 4 from the edges of its 40.
+    private string Points(Func<ActivityDay, long> pick)
+    {
+        long peak = Math.Max(1, Days.Count == 0 ? 0 : Days.Max(pick));
+        return string.Join(" ", Days.Select((d, i) => (i * 10 + 5).ToString(Inv) + "," + (36 - (pick(d) * 32.0 / peak)).ToString("0.##", Inv)));
+    }
 
     private string Title(ActivityDay d) => d.Day.ToString("d MMM yyyy", Inv) + ": "
         + L["received"] + " " + d.Received.ToString("N0", Inv) + ", " + L["sent"] + " " + d.Sent.ToString("N0", Inv) + ", "

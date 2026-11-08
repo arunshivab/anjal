@@ -302,6 +302,10 @@ public sealed partial class MailboxService
             SizeBytes = written.SizeBytes,
             Seen = true,
             SpamChecked = false,
+            // rc.27 (item 72.10): who edited it last, when not the mailbox's own person; and whether it is empty,
+            // decided here because the server cannot read a draft afterwards (D-309).
+            WrittenBy = request.WrittenBy,
+            DraftEmpty = string.Equals(folderName, "Drafts", StringComparison.Ordinal) && await this.IsEmptyComposeAsync(mailbox.Id, request, ct).ConfigureAwait(false),
         }, ct).ConfigureAwait(false);
         await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
 
@@ -377,6 +381,7 @@ public sealed partial class MailboxService
             References = parsed.Headers.Get("References") ?? string.Empty,
             Sender = EncodedWordDecoder.Decode(parsed.Headers.Get("Sender") ?? string.Empty),
             Referral = Anjal.Mailbox.MailboxSink.ReferralOf(parsed),
+            WrittenBy = loaded.Value.Row.WrittenBy,
         };
         return request;
     }

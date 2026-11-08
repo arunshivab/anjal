@@ -21,7 +21,8 @@ jobs:
   screens:
     name: screens (${{ matrix.group }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    # rc.27: pressing every button alone took 72 of its 75 minutes in rc.26, so reach has 120.
+    timeout-minutes: ${{ matrix.minutes || 75 }}
     strategy:
       fail-fast: false
       matrix:
@@ -34,10 +35,16 @@ jobs:
           # console pages (the buttons group was cancelled at 75 minutes), so it runs on its own.
           - group: reach
             checks: "reach"
+            minutes: 120
           - group: layout
             checks: "shrink,clip,steady,live,lineup"
           - group: look
-            checks: "align,same,sizes,scrollbars"
+            checks: "align,same,sizes,scrollbars,zoom,contrast"
+          # rc.27 (item 75, D-310, D-328): Hindi runs the word-cut check and fails like English; Tamil
+          # is listed (not failed) until the owner's shorter words are in the word sheet.
+          - group: languages
+            langs: "hi"
+            listed: "ta"
     services:
       postgres:
         image: postgres:16
@@ -84,7 +91,12 @@ jobs:
 
       - name: Check every screen
         working-directory: tools/ui
-        run: node check.js --only ${{ matrix.checks }}
+        run: node check.js --only ${{ matrix.checks || 'clip' }}${{ matrix.langs && format(' --lang {0} --strict', matrix.langs) || '' }}
+
+      - name: List the words still to be shortened
+        if: always() && matrix.listed
+        working-directory: tools/ui
+        run: node check.js --only clip --lang ${{ matrix.listed }}
 
       - name: Keep the reports
         if: always()

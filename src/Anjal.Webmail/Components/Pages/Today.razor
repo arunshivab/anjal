@@ -86,7 +86,7 @@ else
             </form>
         </header>
         <DashTabs Current="today" Waiting="waitingCount" L="L" />
-        @if (view.Unread == 0)
+        @if (view.Unread == 0 && assigned.Count == 0)
         {
             @* [5c] All caught up. *@
             <section class="dcard tdcaught">
@@ -128,6 +128,31 @@ else
                             @foreach (TodayRow r in view.Woken)
                             {
                                 <TodayRowView R="r" L="L" Clock="clock" Href="@OpenLink(r.Message.Id)" Back="DoneBack" />
+                            }
+                        </ul>
+                    }
+                    @if (assigned.Count > 0)
+                    {
+                        @* rc.27 (DES-17 §2.9): desk mail assigned to the person and owing a reply - overdue first. *@
+                        <p class="tdgroup tdassigned"><LipiIcon Name="users" Size="14" /><b>@L["Assigned to you"] · @assigned.Count</b><span>@L["mail on your desks waiting for your reply"]</span></p>
+                        <ul class="tdrows">
+                            @foreach (AssignedRow a in assigned)
+                            {
+                                <li class="tdrow @(a.State.Overdue ? "late" : null)">
+                                    <form method="post" action="/desk/open" class="tdrow-form">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="desk" value="@a.DeskId" />
+                                        <input type="hidden" name="message" value="@a.Message.Id" />
+                                        <button type="submit" class="tdrow-open" data-needs-server>
+                                            <span class="u-av desk-av" aria-hidden="true">@DeskInitials(a.Desk)</span>
+                                            <span class="tdrow-main">
+                                                <span class="tdrow-top"><b>@AssignedWho(a.Message)</b><span class="tdtag tag-assigned">@L["Assigned to you · {desk}"].Replace("{desk}", a.Desk, StringComparison.Ordinal)</span>@if (a.State.Overdue) { <span class="tdtag tag-late"><LipiIcon Name="clock" Size="11" />@L["Reply overdue"]</span> }<span class="tdrow-subj">@(string.IsNullOrWhiteSpace(a.Message.Subject) ? L["(no subject)"] : a.Message.Subject)</span></span>
+                                                <span class="tdrow-prev">@(a.State.Due is DateTimeOffset due ? L["Reply due by {time}"].Replace("{time}", clock.Full(due), StringComparison.Ordinal) : string.Empty)</span>
+                                            </span>
+                                            <time title="@clock.Full(a.Message.ReceivedAt)">@clock.List(a.Message.ReceivedAt, DateTimeOffset.UtcNow)</time>
+                                        </button>
+                                    </form>
+                                </li>
                             }
                         </ul>
                     }
@@ -359,6 +384,21 @@ else
         return s.Length > 0 ? s : L["(no subject)"];
     }
 
+    // rc.27 (DES-17 §2.9): "Assigned to you".
+    private IReadOnlyList<AssignedRow> assigned = Array.Empty<AssignedRow>();
+
+    private static string DeskInitials(string name)
+    {
+        string[] parts = name.Split(new[] { ' ', '.', '@' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 0 ? "?" : parts.Length == 1 ? parts[0][..Math.Min(2, parts[0].Length)].ToUpperInvariant() : (parts[0][..1] + parts[1][..1]).ToUpperInvariant();
+    }
+
+    private static string AssignedWho(MessageRow m)
+    {
+        var parsed = Anjal.Mime.AddressParser.Parse(Anjal.Mime.EncodedWordDecoder.Decode(m.FromHeader));
+        return parsed.Count > 0 ? (parsed[0].DisplayName.Length > 0 ? parsed[0].DisplayName : parsed[0].Address) : m.EnvelopeFrom;
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         loaded = false;
@@ -382,6 +422,7 @@ else
             return;
         }
         view = await Mail.TodayAsync(mailbox, clock, now);
+        assigned = await Mail.AssignedToYouAsync(WebmailAuthService.PersonIdOf(user) ?? mailbox);
         firstName = MailboxService.FirstName(context.Mailbox.DisplayName, context.Mailbox.Address);
         waitingCount = (await Mail.NoReplyMessagesAsync(mailbox, now)).Count;
         draftCount = (await Mail.ListFoldersAsync(mailbox)).FirstOrDefault(f => f.Name == "Drafts")?.Count ?? 0;

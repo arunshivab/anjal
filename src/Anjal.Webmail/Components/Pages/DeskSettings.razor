@@ -1,0 +1,59 @@
+@page "/desk/settings"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Notes
+
+@* rc.27 (DES-17 §2.13): a desk's settings for its managers, from inside the desk. *@
+<PageTitle>@L["Desk settings"] — Anjal</PageTitle>
+<section class="formcard setcard desksetpage">
+    @if (desk is null || info is null)
+    {
+        <h1>@L["Desk settings"]</h1>
+        <p class="hint">@L["Open a desk you manage first, from the account menu."]</p>
+    }
+    else
+    {
+        <h1>@L["Desk settings"] · @(desk.DisplayName.Length > 0 ? desk.DisplayName : desk.Address)</h1>
+        @if (error is not null)
+        {
+            <p class="notice n-err" role="alert"><LipiIcon Name="warning" Size="15" /><span>@L[error]</span></p>
+        }
+        @if (Saved is not null)
+        {
+            <p class="notice n-info" role="status"><LipiIcon Name="check" Size="15" /><span>@L["Saved."]</span></p>
+        }
+        <DeskSettingsForm DeskId="desk.Id" Info="info" OrgWeek="orgWeek" Back="/desk/settings" L="L" />
+        <p class="hint"><a href="/folder/INBOX">@L["Back to the desk"]</a></p>
+    }
+</section>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    [SupplyParameterFromQuery(Name = "e")] private string? ErrorNote { get; set; }
+    [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private MailboxRow? desk;
+    private SharedMailbox? info;
+    private WorkWeek orgWeek = new();
+    private string? error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        error = AuthEndpoints.ReadNote(Notes, ErrorNote);
+        if (WebmailAuthService.PersonIdOf(user) is Guid person && WebmailAuthService.ActingOf(user) is Guid deskId
+            && await Mail.SharedRightCachedAsync(person, deskId) == "manage" && await Mail.GetMailboxAnyAsync(deskId) is MailboxRow d)
+        {
+            desk = d;
+            info = await Mail.SharedInfoAsync(d);
+            orgWeek = await Mail.WorkWeekAsync(d.TenantId);
+        }
+    }
+}

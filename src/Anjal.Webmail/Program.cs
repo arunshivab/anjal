@@ -645,6 +645,7 @@ public static class Program
         OrgEndpoints.Map(app);
         OrgAppApiEndpoints.Map(app);
         OrgEncryptionEndpoints.Map(app);
+        DeskEndpoints.Map(app);
         app.MapDraftKeeping();
         OpsEndpoints.Map(app);
 
@@ -1125,6 +1126,8 @@ public static class Program
             ReadCarry(http.Request.Form, request);
             // rc.14: from a shared mailbox set to send "on behalf", the person is named as the Sender.
             request.Sender = await svc.SenderForAsync(WebmailAuthService.PersonIdOf(http.User), mailboxId.Value, ct).ConfigureAwait(false);
+            // rc.27 (DES-17 §2.12, item 72.10): a desk's mail and drafts name the member who wrote them.
+            request.WrittenBy = WebmailAuthService.PersonIdOf(http.User) is Guid writtenBy && writtenBy != mailboxId.Value ? writtenBy : null;
             // rc.22 (item 41): sending from an extra address the administrator allowed.
             string fromChosen = http.Request.Form["from"].ToString().Trim().ToLowerInvariant();
             if (fromChosen.Length > 0 && (await svc.SendAsAddressesAsync(mailboxId.Value, ct).ConfigureAwait(false)).Contains(fromChosen, StringComparer.Ordinal))
@@ -1138,8 +1141,14 @@ public static class Program
             }
 
             // rc.22 (item 50, mockup 24): patient information on its way outside the organisation - ask once.
+            // rc.27 (item 72.4, brief 6k): the warning, and the person's choice to send anyway, go to the activity log.
+            if (http.Request.Form["patientOk"] == "1" && await svc.PatientWarningAsync(mailboxId.Value, request, ct).ConfigureAwait(false) is { Count: > 0 } confirmed)
+            {
+                await svc.LogPatientWarningAsync(http.User.Identity?.Name ?? string.Empty, confirmed, sentAnyway: true, ct).ConfigureAwait(false);
+            }
             if (http.Request.Form["patientOk"] != "1" && await svc.PatientWarningAsync(mailboxId.Value, request, ct).ConfigureAwait(false) is { Count: > 0 } signs)
             {
+                await svc.LogPatientWarningAsync(http.User.Identity?.Name ?? string.Empty, signs, sentAnyway: false, ct).ConfigureAwait(false);
                 Guid? held = await svc.SaveDraftAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
                 return Results.Redirect((held is Guid h ? $"/draft/{h}" : "/compose" + ComposeQuery(string.Empty, request).Replace("?error=&", "?", StringComparison.Ordinal)) + (held is null ? "&" : "?") + "patient=" + Uri.EscapeDataString(string.Join("; ", signs)));
             }
@@ -1249,6 +1258,8 @@ public static class Program
             ReadCarry(http.Request.Form, request);
             // rc.14: from a shared mailbox set to send "on behalf", the person is named as the Sender.
             request.Sender = await svc.SenderForAsync(WebmailAuthService.PersonIdOf(http.User), mailboxId.Value, ct).ConfigureAwait(false);
+            // rc.27 (DES-17 §2.12, item 72.10): a desk's mail and drafts name the member who wrote them.
+            request.WrittenBy = WebmailAuthService.PersonIdOf(http.User) is Guid writtenBy && writtenBy != mailboxId.Value ? writtenBy : null;
             // rc.22 (item 41): sending from an extra address the administrator allowed.
             string fromChosen = http.Request.Form["from"].ToString().Trim().ToLowerInvariant();
             if (fromChosen.Length > 0 && (await svc.SendAsAddressesAsync(mailboxId.Value, ct).ConfigureAwait(false)).Contains(fromChosen, StringComparer.Ordinal))
@@ -1899,23 +1910,29 @@ public static class Program
         }).RequireAuthorization();
 
         // rc.22 (item 35, mockup 19): desktop notifications.
-        app.MapPost("/settings/notify", async (HttpContext http, [FromForm] string? on, [FromForm] string? scope, [FromForm] string? quietFrom, [FromForm] string? quietTo, [FromForm] string? quietAway, [FromForm] string? quietAwaySent, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/settings/notify", async (HttpContext http, [FromForm] string? on, [FromForm] string? scope, [FromForm] string? quietFrom, [FromForm] string? quietTo, [FromForm] string? quietAway, [FromForm] string? quietAwaySent, [FromForm] string? desks, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Redirect("/sign-in");
             }
-            await svc.SetDesktopNotifyAsync(mailboxId.Value, on is "1" or "on", scope ?? "needs", quietFrom ?? string.Empty, quietTo ?? string.Empty, quietAwaySent == "1" ? quietAway == "1" : null, ct).ConfigureAwait(false);
+            await svc.SetDesktopNotifyAsync(mailboxId.Value, on is "1" or "on", scope ?? "needs", quietFrom ?? string.Empty, quietTo ?? string.Empty, quietAwaySent == "1" ? quietAway == "1" : null, desks, ct).ConfigureAwait(false);
             return Results.Redirect(LocalPath.Safe(back));
         }).RequireAuthorization();
 
-        app.MapGet("/api/latest", async (HttpContext http, MailboxService svc, CancellationToken ct) =>
+        app.MapGet("/api/latest", async (HttpContext http, [FromQuery] string? desk, MailboxService svc, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
             {
                 return Results.Unauthorized();
+            }
+            // rc.27 (DES-17 §2.10): a desk pop-up says only "Desk mail" and opens the desk at the mail.
+            if (desk == "1")
+            {
+                string? open = await svc.DeskPopUpAsync(WebmailAuthService.PersonIdOf(http.User) ?? mailboxId.Value, WebmailAuthService.ClockOf(http.User), ct).ConfigureAwait(false);
+                return open is null ? Results.Json(new { }) : Results.Json(new { open });
             }
             // rc.26 (item 80, brief 11g): only the id, and only when the person's choice lets it pop up.
             Guid? popUp = await svc.NotifyForAsync(mailboxId.Value, WebmailAuthService.PersonIdOf(http.User) ?? mailboxId.Value, WebmailAuthService.ClockOf(http.User), ct).ConfigureAwait(false);
@@ -2079,7 +2096,9 @@ public static class Program
                 return Results.Unauthorized();
             }
             (long unread, DateTimeOffset? newest) = await svc.InboxStateAsync(mailboxId.Value, ct).ConfigureAwait(false);
-            return Results.Json(new { unread, newest = newest?.ToUnixTimeMilliseconds() ?? 0 });
+            // rc.27 (DES-17 §2.10): a number that rises when desk mail is assigned to the person or mentions them.
+            long desk = await svc.DeskStampAsync(WebmailAuthService.PersonIdOf(http.User) ?? mailboxId.Value, ct).ConfigureAwait(false);
+            return Results.Json(new { unread, newest = newest?.ToUnixTimeMilliseconds() ?? 0, desk });
         }).RequireAuthorization();
 
         // Owner, 9 Oct 2026 (B): the live channel. One tab per browser listens (app.js 5c); it is
@@ -2104,6 +2123,9 @@ public static class Program
             DateTimeOffset written = started;
             DateTimeOffset checkedAt = started;
             string last = string.Empty;
+            long desk = 0;
+            DateTimeOffset deskAt = DateTimeOffset.MinValue;
+            Guid deskPerson = WebmailAuthService.PersonIdOf(http.User) ?? mailboxId.Value;
             try
             {
                 while (!ct.IsCancellationRequested && DateTimeOffset.UtcNow - started < LiveStreamLife)
@@ -2118,7 +2140,12 @@ public static class Program
                         }
                     }
                     (long unread, DateTimeOffset? newest) = await svc.InboxStateAsync(mailboxId.Value, ct).ConfigureAwait(false);
-                    string state = System.Text.Json.JsonSerializer.Serialize(new { unread, newest = newest?.ToUnixTimeMilliseconds() ?? 0 });
+                    if (now - deskAt > TimeSpan.FromSeconds(10))
+                    {
+                        desk = await svc.DeskStampAsync(deskPerson, ct).ConfigureAwait(false);
+                        deskAt = now;
+                    }
+                    string state = System.Text.Json.JsonSerializer.Serialize(new { unread, newest = newest?.ToUnixTimeMilliseconds() ?? 0, desk });
                     if (state != last)
                     {
                         await http.Response.WriteAsync("event: state\ndata: " + state + "\n\n", ct).ConfigureAwait(false);

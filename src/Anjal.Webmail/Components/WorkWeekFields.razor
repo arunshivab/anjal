@@ -1,0 +1,54 @@
+@* rc.27 (D-315): the working week's fields - days, hours and the time zone - for the organisation's
+   week and a desk's own. *@
+<fieldset class="weekfields" disabled="@Disabled">
+    <legend class="setlbl">@L["Working days"]</legend>
+    <span class="weekdays">
+        @foreach (int d in Order)
+        {
+            <label class="daychip"><input type="checkbox" name="day" value="@d" checked="@Week.Days.Contains(d)" /><span>@L[DayNames[d]]</span></label>
+        }
+    </span>
+    <span class="weekhours">
+        <label class="setlbl" for="@Prefix-from">@L["From"]</label>
+        <input class="inp inp-time" id="@Prefix-from" name="from" type="time" value="@Week.From" required />
+        <label class="setlbl" for="@Prefix-until">@L["Until"]</label>
+        <input class="inp inp-time" id="@Prefix-until" name="until" type="time" value="@Week.To" required />
+    </span>
+    @if (ShowZone)
+    {
+        <label class="setlbl" for="@Prefix-zone">@L["Time zone"]</label>
+        <select id="@Prefix-zone" name="zone" class="setsel">
+            @foreach ((string id, string label) in ZonedClock.Choices(DateTimeOffset.UtcNow))
+            {
+                <option value="@id" selected="@(id == Week.TimeZone)">@label</option>
+            }
+        </select>
+    }
+    else
+    {
+        <input type="hidden" name="zone" value="@Week.TimeZone" />
+    }
+</fieldset>
+
+@code {
+    private static readonly int[] Order = { 1, 2, 3, 4, 5, 6, 0 };
+    private static readonly string[] DayNames = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+
+    /// <summary>The week shown.</summary>
+    [Parameter, EditorRequired] public WorkWeek Week { get; set; } = new();
+
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>Makes the fields' ids unique on the page.</summary>
+    [Parameter] public string Prefix { get; set; } = "week";
+
+    /// <summary>True to show the fields greyed (the desk follows the organisation's week).</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>
+    /// False for a desk's own week: it keeps the organisation's time zone, and the panel is too narrow for
+    /// the zone's names (the screen check, 28 Oct).
+    /// </summary>
+    [Parameter] public bool ShowZone { get; set; } = true;
+}

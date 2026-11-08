@@ -264,7 +264,8 @@ public sealed partial class MailboxService
                     RawBytes = raw,
                     CreatedAt = now,
                     NextAttemptAt = at,
-                    GiveUpAt = at + OutboundMessage.DefaultGiveUp,
+                    // rc.27 (item 72.8): the application's own "Give up after".
+                    GiveUpAt = at + Anjal.Mailbox.AppGiveUp.Of(app.GiveUpHours),
                     AppSendId = record.Id,
                 }, ct).ConfigureAwait(false);
             }

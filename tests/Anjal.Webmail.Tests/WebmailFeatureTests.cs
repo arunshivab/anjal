@@ -411,7 +411,7 @@ public class ThemeClaimTests
     [Fact]
     public void Themes_AreTheHouseColourAndTwelveColours_EachLightDarkAndFollowingTheDevice()
     {
-        Assert.Equal(63, MailboxService.Themes.Count); // DES-11 D4: Anjal, the house colour, and twenty named colours, each light, dark and following the device
+        Assert.Equal(66, MailboxService.Themes.Count); // DES-11 D4: Anjal, the house colour, and twenty named colours, each light, dark and following the device; rc.27 (item 79): and high contrast
         Assert.Contains("teal-light", MailboxService.Themes);
         Assert.Contains("graphite-auto", MailboxService.Themes);
         Assert.Equal(MailboxRow.DefaultTheme, MailboxService.Themes[0]);

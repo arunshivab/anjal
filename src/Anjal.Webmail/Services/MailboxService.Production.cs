@@ -261,12 +261,22 @@ public sealed partial class MailboxService
                         }
                     }
                 }
+                // rc.27 (D-317): a desk's notes are part of the organisation's record and go with its mail.
+                foreach (MailboxRow person in people)
+                {
+                    string? notes = await this.DeskNotesCsvAsync(person.Id, ct).ConfigureAwait(false);
+                    if (notes is not null)
+                    {
+                        await WriteTextAsync(zip, SafeName(person.Address) + "/desk-notes.csv", notes, ct).ConfigureAwait(false);
+                    }
+                }
                 await WriteTextAsync(zip, "index.csv", index.ToString(), ct).ConfigureAwait(false);
                 await WriteTextAsync(zip, "README.txt",
                     "Anjal production for " + tenant.DisplayName + ", made " + DateTimeOffset.UtcNow.UtcDateTime.ToString("d MMM yyyy HH:mm", CultureInfo.InvariantCulture) + " UTC\r\n\r\n"
                     + "Reason: " + production.Reason + "\r\n"
                     + "Period: " + (production.From?.UtcDateTime.ToString("d MMM yyyy", CultureInfo.InvariantCulture) ?? "the beginning") + " to " + (production.To?.UtcDateTime.ToString("d MMM yyyy", CultureInfo.InvariantCulture) ?? "now") + "\r\n\r\n"
                     + "<person>/<folder>/*.eml   every mail of the period, as stored (open with any mail program)\r\n"
+                    + "<desk>/desk-notes.csv     a desk's notes for its members (never sent): when, who wrote it, the subject it was about, the text\r\n"
                     + "index.csv                 one line per mail: who, folder, when, from, to, subject, Message-ID, the file, its SHA-256,\r\n"
                     + "                          and its evidence record (the untouched original's SHA-256 and when it was captured; the daily\r\n"
                     + "                          evidence manifest of that day proves it was kept unchanged)\r\n", ct).ConfigureAwait(false);

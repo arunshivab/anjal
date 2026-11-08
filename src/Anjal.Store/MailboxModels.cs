@@ -186,11 +186,12 @@ public sealed class MailboxRow
     public const string DefaultTheme = "anjal-light";
 
     // DES-11 D4 (owner, 10 Oct 2026, "All are good... Add all of them"): eight more, 21 colours in all.
-    private static readonly string[] Colours = { "anjal", "teal", "ocean", "indigo", "violet", "plum", "forest", "olive", "crimson", "rust", "saffron", "slate", "graphite", "rose", "navy", "coffee", "emerald", "maroon", "sky", "lavender", "gold" };
+    // rc.27 (item 79, brief 10e): Contrast - black and white, 7:1 text - offered second, after the house colour.
+    private static readonly string[] Colours = { "anjal", "contrast", "teal", "ocean", "indigo", "violet", "plum", "forest", "olive", "crimson", "rust", "saffron", "slate", "graphite", "rose", "navy", "coffee", "emerald", "maroon", "sky", "lavender", "gold" };
 
     private static readonly string[] Modes = { "light", "dark", "auto" };
 
-    /// <summary>The house colour, Anjal, then the twenty named colours, in the order Settings shows them.</summary>
+    /// <summary>The house colour, Anjal, then Contrast (rc.27), then the twenty named colours, in the order Settings shows them.</summary>
     public static IReadOnlyList<string> ThemeColours => Colours;
 
     /// <summary>The theme modes: light, dark, or following the device's own setting.</summary>
@@ -356,6 +357,12 @@ public sealed class MessageRow
 
     /// <summary>rc.26 (DES-14 §14): when an application acknowledged this mail of its inbox; null until then.</summary>
     public System.DateTimeOffset? AcknowledgedAt { get; set; }
+
+    /// <summary>rc.27 (DES-17 §2.12, item 72.10): the person who wrote a desk's mail or last edited a draft, when it was not the mailbox's own person; null otherwise.</summary>
+    public System.Guid? WrittenBy { get; set; }
+
+    /// <summary>rc.27 (D-309): a draft saved with nothing in it - no recipient, subject, text or file - decided in the writer's session, since the server cannot read a draft.</summary>
+    public bool DraftEmpty { get; set; }
 
     /// <summary>Identifier assigned by the store.</summary>
     public System.Guid Id { get; set; }

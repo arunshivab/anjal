@@ -14,7 +14,11 @@ public sealed partial class PostgresMessageStore
     private const string TenantDomainColumns = "id, tenant_id, domain, verified, created_at";
     private const string MailboxColumns = "id, tenant_id, local_part, domain, password_pbkdf2, display_name, enabled, quota_bytes, used_bytes, created_at, updated_at, theme, time_zone, language, density, layout, rail_folded, date_format, week_start, page_size, new_mail_sound, welcome_done, rail_chosen, zoom, kind, last_sign_in_at";
     private const string FolderColumns = "id, mailbox_id, name, created_at";
-    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id, CASE WHEN body_text LIKE 'e1.QU5KRQE%' THEN snippet ELSE left(body_text, 160) END, list_mark, referral, acknowledged_at";
+    private const string MessageColumns = "id, mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, received_at, category_id, has_attachments, spam_checked, transport_encrypted, transport_tls, evidence_id, CASE WHEN body_text LIKE 'e1.QU5KRQE%' THEN snippet ELSE left(body_text, 160) END, list_mark, referral, acknowledged_at, written_by, draft_empty";
+
+    // rc.27: where a query that adds ", body_text" after MessageColumns finds it - the column after the
+    // last of MessageColumns. Every such reader uses this, so a new column cannot shift it unseen.
+    private const int BodyAfterColumns = 28;
 
     /// <inheritdoc/>
     public async Task<TenantRow> UpsertTenantAsync(TenantRow tenant, CancellationToken ct = default)
@@ -347,8 +351,8 @@ RETURNING " + FolderColumns + ";";
         StoredText text = MessageCipher.Seal(message.Subject, message.BodyText, await this.MailboxPublicKeyAsync(message.MailboxId, ct).ConfigureAwait(false));
 
         const string sql = @"
-INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, snippet, spam_checked, transport_encrypted, transport_tls, evidence_id, list_mark, referral)
-VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @snippet, @spam_checked, @transport_encrypted, @transport_tls, @evidence_id, @list_mark, @referral)
+INSERT INTO messages (mailbox_id, folder_id, maildir_file, envelope_from, message_id, from_header, to_header, subject, date_header, size_bytes, seen, flagged, answered, spam_score, category_id, has_attachments, body_text, snippet, spam_checked, transport_encrypted, transport_tls, evidence_id, list_mark, referral, written_by, draft_empty)
+VALUES (@mailbox_id, @folder_id, @maildir_file, @envelope_from, @message_id, @from_header, @to_header, @subject, @date_header, @size_bytes, @seen, @flagged, @answered, @spam_score, @category_id, @has_attachments, @body_text, @snippet, @spam_checked, @transport_encrypted, @transport_tls, @evidence_id, @list_mark, @referral, @written_by, @draft_empty)
 RETURNING " + MessageColumns + ";";
         await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = new NpgsqlCommand(sql, conn);
@@ -368,6 +372,8 @@ RETURNING " + MessageColumns + ";";
         cmd.Parameters.AddWithValue("snippet", text.Snippet);
         cmd.Parameters.AddWithValue("list_mark", message.ListMark);
         cmd.Parameters.AddWithValue("referral", message.Referral);
+        cmd.Parameters.Add(new NpgsqlParameter<System.Guid?>("written_by", NpgsqlTypes.NpgsqlDbType.Uuid) { TypedValue = message.WrittenBy });
+        cmd.Parameters.AddWithValue("draft_empty", message.DraftEmpty);
         cmd.Parameters.AddWithValue("seen", message.Seen);
         cmd.Parameters.AddWithValue("flagged", message.Flagged);
         cmd.Parameters.AddWithValue("answered", message.Answered);
@@ -855,6 +861,8 @@ UPDATE mailboxes
         ListMark = r.GetString(23),
         Referral = r.GetString(24),
         AcknowledgedAt = r.IsDBNull(25) ? null : r.GetFieldValue<System.DateTimeOffset>(25),
+        WrittenBy = r.IsDBNull(26) ? null : r.GetGuid(26),
+        DraftEmpty = r.GetBoolean(27),
     };
 
     // ================= Categories (v0.15.0) =================

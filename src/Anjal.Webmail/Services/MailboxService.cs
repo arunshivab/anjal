@@ -169,6 +169,9 @@ public sealed class ComposeRequest
     /// </summary>
     public string Sender { get; set; } = string.Empty;
 
+    /// <summary>rc.27 (DES-17 §2.12): the person writing, when it is not the mailbox's own (a desk's member); null otherwise.</summary>
+    public Guid? WrittenBy { get; set; }
+
     /// <summary>rc.22 (item 41): an extra address the person sends from instead of their own; empty for their own.</summary>
     public string FromAddress { get; set; } = string.Empty;
 }
@@ -848,6 +851,11 @@ public sealed partial class MailboxService
         // rc.14: a shared mailbox may be set to keep no copy of what is sent from it.
         if ((await this.SharedInfoAsync(mailbox, ct).ConfigureAwait(false))?.KeepSentCopy == false)
         {
+            // rc.27 (DES-17 §2.12): the desk's history still names who wrote it.
+            if (request.WrittenBy is Guid noCopyWriter)
+            {
+                await this.NoteDeskReplyAsync(mailbox.Id, noCopyWriter, request.Subject, request.To, request.InReplyTo, null, ct).ConfigureAwait(false);
+            }
             if (evidenceId is Guid noCopy && this.Evidence is not null)
             {
                 await this.Evidence.CompleteInboundAsync(noCopy, accepted: true, ct).ConfigureAwait(false);
@@ -881,8 +889,14 @@ public sealed partial class MailboxService
             SizeBytes = written.SizeBytes,
             Seen = true,
             SpamChecked = false,
+            WrittenBy = request.WrittenBy,
         }, ct).ConfigureAwait(false);
         await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
+        // rc.27 (DES-17 §2.12): a reply from a desk - nothing is owed until the next mail, and the history names the writer.
+        if (request.WrittenBy is Guid writer)
+        {
+            await this.NoteDeskReplyAsync(mailbox.Id, writer, request.Subject, request.To, request.InReplyTo, sentRow.Id, ct).ConfigureAwait(false);
+        }
 
         // v1.0.0-rc.8: the queued rows' outgoing evidence belongs to this Sent copy,
         // so deleting the Sent copy starts that evidence's retention clock.

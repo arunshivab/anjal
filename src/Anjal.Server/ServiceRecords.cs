@@ -12,6 +12,9 @@ public static class ServiceRecords
     /// <summary>The kind of the service record holding the refusal counts per day.</summary>
     public const string RefusalsKind = "refusals";
 
+    /// <summary>rc.27: the kind of the service record holding the per-domain counts per day ("kind|domain").</summary>
+    public const string RefusalsByDomainKind = "refusals-by-domain";
+
     /// <summary>The counters added up per day, with the words the operator's dashboard shows.</summary>
     public static readonly System.Collections.Generic.IReadOnlyList<string> RefusalCounters = new[]
     {
@@ -53,6 +56,7 @@ public static class ServiceRecords
         System.ArgumentNullException.ThrowIfNull(store);
         System.ArgumentNullException.ThrowIfNull(log);
         var last = new System.Collections.Generic.Dictionary<string, long>(System.StringComparer.Ordinal);
+        var lastByDomain = new System.Collections.Generic.Dictionary<string, long>(System.StringComparer.Ordinal);
         while (!ct.IsCancellationRequested)
         {
             try
@@ -80,6 +84,21 @@ public static class ServiceRecords
                 {
                     await AddAsync(store, System.DateTimeOffset.UtcNow, gained, ct).ConfigureAwait(false);
                 }
+                // rc.27: the per-domain counts, kept 60 days.
+                var gainedByDomain = new System.Collections.Generic.Dictionary<string, long>(System.StringComparer.Ordinal);
+                foreach (System.Collections.Generic.KeyValuePair<string, long> c in Anjal.Smtp.DomainCounters.Snapshot())
+                {
+                    long before = lastByDomain.TryGetValue(c.Key, out long b) ? b : 0;
+                    if (c.Value > before)
+                    {
+                        gainedByDomain[c.Key] = c.Value - before;
+                    }
+                    lastByDomain[c.Key] = c.Value;
+                }
+                if (gainedByDomain.Count > 0)
+                {
+                    await AddAsync(store, System.DateTimeOffset.UtcNow, gainedByDomain, RefusalsByDomainKind, 60, ct).ConfigureAwait(false);
+                }
             }
 #pragma warning disable CA1031 // Counting is best effort; the mail server never stops for it.
             catch (System.Exception ex) when (ex is not System.OperationCanceledException)
@@ -96,11 +115,23 @@ public static class ServiceRecords
     /// <param name="gained">What to add, by counter.</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>A task.</returns>
-    public static async System.Threading.Tasks.Task AddAsync(Anjal.Store.IMessageStore store, System.DateTimeOffset at, System.Collections.Generic.IReadOnlyDictionary<string, long> gained, System.Threading.CancellationToken ct = default)
+    public static System.Threading.Tasks.Task AddAsync(Anjal.Store.IMessageStore store, System.DateTimeOffset at, System.Collections.Generic.IReadOnlyDictionary<string, long> gained, System.Threading.CancellationToken ct = default) =>
+        AddAsync(store, at, gained, RefusalsKind, 400, ct);
+
+    /// <summary>Add counts to a day's totals in one of the records of counts per day.</summary>
+    /// <param name="store">The store.</param>
+    /// <param name="at">When (its day in the server's own time zone).</param>
+    /// <param name="gained">What to add, by name.</param>
+    /// <param name="kind">The record.</param>
+    /// <param name="keepDays">How many days it keeps.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public static async System.Threading.Tasks.Task AddAsync(Anjal.Store.IMessageStore store, System.DateTimeOffset at, System.Collections.Generic.IReadOnlyDictionary<string, long> gained, string kind, int keepDays, System.Threading.CancellationToken ct = default)
     {
         System.ArgumentNullException.ThrowIfNull(store);
         System.ArgumentNullException.ThrowIfNull(gained);
-        string? json = await store.GetServiceRecordAsync(RefusalsKind, ct).ConfigureAwait(false);
+        System.ArgumentNullException.ThrowIfNull(kind);
+        string? json = await store.GetServiceRecordAsync(kind, ct).ConfigureAwait(false);
         var days = (json is null ? null : System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.SortedDictionary<string, System.Collections.Generic.Dictionary<string, long>>>(json))
             ?? new System.Collections.Generic.SortedDictionary<string, System.Collections.Generic.Dictionary<string, long>>(System.StringComparer.Ordinal);
         string day = at.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
@@ -113,11 +144,11 @@ public static class ServiceRecords
         {
             totals[g.Key] = (totals.TryGetValue(g.Key, out long t) ? t : 0) + g.Value;
         }
-        while (days.Count > 400)
+        while (days.Count > keepDays)
         {
             days.Remove(System.Linq.Enumerable.First(days.Keys));
         }
-        await store.SetServiceRecordAsync(RefusalsKind, System.Text.Json.JsonSerializer.Serialize(days), ct).ConfigureAwait(false);
+        await store.SetServiceRecordAsync(kind, System.Text.Json.JsonSerializer.Serialize(days), ct).ConfigureAwait(false);
     }
 
     private static async System.Threading.Tasks.Task RecordAsync(Anjal.Store.IMessageStore store, Anjal.Smtp.SubmissionRefusal refusal, System.Action<string> log)

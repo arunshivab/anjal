@@ -54,18 +54,18 @@ internal static class OrgAppApiEndpoints
             return Back(id, "keys", dp, error);
         }).RequireAuthorization();
 
-        app.MapPost("/org/apps/{id}/api-settings", async (HttpContext http, string id, [FromForm] string? senders, [FromForm] int perHour, [FromForm] int perDay, [FromForm] string? allowedFrom, [FromForm] string? signing,
+        app.MapPost("/org/apps/{id}/api-settings", async (HttpContext http, string id, [FromForm] string? senders, [FromForm] int perHour, [FromForm] int perDay, [FromForm] string? allowedFrom, [FromForm] string? signing, [FromForm] int? giveUp,
             MailboxService svc, AuditTrail audit, IDataProtectionProvider dp, CancellationToken ct) =>
         {
             if (await OrgEndpoints.AdminAsync(http, svc, ct).ConfigureAwait(false) is not { } a)
             {
                 return Results.NotFound();
             }
-            string? error = await svc.SaveAppApiSettingsAsync(a.Tenant, id, senders ?? string.Empty, perHour, perDay, allowedFrom ?? string.Empty, signing == "1", ct).ConfigureAwait(false);
+            string? error = await svc.SaveAppApiSettingsAsync(a.Tenant, id, senders ?? string.Empty, perHour, perDay, allowedFrom ?? string.Empty, signing == "1", giveUp, ct).ConfigureAwait(false);
             if (error is null)
             {
                 await audit.RecordAsync(a.Me.Address, "org.app.api-settings", await NameAsync(svc, a.Tenant, id, ct).ConfigureAwait(false), Client(http),
-                    string.Create(CultureInfo.InvariantCulture, $"{perHour} an hour, {perDay} a day; senders: {Flat(senders)}; allowed from: {Flat(allowedFrom)}")).ConfigureAwait(false);
+                    string.Create(CultureInfo.InvariantCulture, $"{perHour} an hour, {perDay} a day; give up after {giveUp ?? Anjal.Mailbox.AppGiveUp.DefaultHours} h; senders: {Flat(senders)}; allowed from: {Flat(allowedFrom)}")).ConfigureAwait(false);
             }
             return Back(id, "limits", dp, error, error is null ? "saved" : null);
         }).RequireAuthorization();

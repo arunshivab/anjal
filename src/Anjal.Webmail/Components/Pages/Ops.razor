@@ -178,7 +178,8 @@ else
                             <td><a class="rowlink" href="/ops/orgs?sel=@o.Tenant.Id"><b>@NameOf(o)</b><span>@string.Join(", ", o.Domains)</span></a></td>
                             <td>@o.People</td>
                             <td>@if (o.Domains.Count == 0) {<span class="pill pill-mute">-</span>} else if (o.DkimMissing.Count > 0) {<span class="pill pill-warn">@L["DKIM missing"]</span>} else {<span class="pill pill-info">@(o.Domains.Count == 1 ? L["1 domain, keyed"] : L["{n} domains, keyed"].Replace("{n}", o.Domains.Count.ToString(Inv), StringComparison.Ordinal))</span>}</td>
-                            <td>@Layout.MainLayout.Size(o.UsedBytes) @L["of"] @Layout.MainLayout.Size(o.GivenBytes)</td>
+                            @* rc.27 (item 72.1, D-316): the meter, as everywhere. *@
+                            <td><StorageMeter Used="o.UsedBytes" Limit="o.GivenBytes" L="L" /></td>
                             <td><span class="pill @StatusPill(o.Status)">@L[StatusWord(o.Status)]</span></td>
                         </tr>
                     }
@@ -219,6 +220,26 @@ else
                     <div class="sskpi"><span>@L["Sent by applications today"]</span><b>@tv.Accepted.ToString("N0", Inv)</b><small>@(tv.Organisations == 1 ? L["from 1 organisation"] : L["from {n} organisations"].Replace("{n}", tv.Organisations.ToString(Inv), StringComparison.Ordinal))</small></div>
                     <div class="sskpi @FirstTryTone(tv)"><span>@L["Delivered on the first try"]</span><b>@(tv.Delivered == 0 ? "–" : Sizes.Percent(tv.FirstTry, tv.Delivered).ToString(Inv) + "%")</b><small>@L["{n} delivered today"].Replace("{n}", tv.Delivered.ToString("N0", Inv), StringComparison.Ordinal)</small></div>
                 </div>
+                @* rc.27 (SPEC-17 F-02): every organisation's applications at a glance. *@
+                <h3 class="charthead">@L["Applications, every organisation"]</h3>
+                @if (opsApps.Count == 0)
+                {
+                    <p class="hint">@L["No organisation has an application yet."]</p>
+                }
+                else
+                {
+                    <table class="orgtable sstable">
+                        <thead><tr><th scope="col">@L["Organisation"]</th><th scope="col">@L["Application"]</th><th scope="col" class="num">@L["Keys in use"]</th><th scope="col" class="num">@L["Sends today"]</th><th scope="col">@L["Last send"]</th><th scope="col">@L["Webhooks"]</th></tr></thead>
+                        <tbody>
+                            @foreach (OpsAppRow r in opsApps)
+                            {
+                                <tr><td>@r.Organisation</td><td><b>@r.Application</b></td><td class="num">@r.LiveKeys.ToString(Inv)</td><td class="num">@r.SendsToday.ToString("N0", Inv)</td>
+                                    <td>@(r.LastSend is DateTimeOffset ls ? clock.List(ls, DateTimeOffset.UtcNow) : "–")</td>
+                                    <td>@if (r.Webhooks == 0) { <text>–</text> } else if (r.FailingWebhooks > 0) { <span class="pill pill-bad"><LipiIcon Name="warning" Size="11" />@L["{n} failing"].Replace("{n}", r.FailingWebhooks.ToString(Inv), StringComparison.Ordinal)</span> } else { <span class="pill pill-info">@L["working"]</span> }</td></tr>
+                            }
+                        </tbody>
+                    </table>
+                }
                 <h3 class="charthead">@L["Receiving servers that slow us down"]</h3>
                 @if (tv.Slow.Count == 0)
                 {
@@ -534,6 +555,36 @@ else
                 <textarea id="dnote" class="inp" name="note" rows="2" maxlength="300" placeholder="@L["What was restored, or what failed"]"></textarea>
                 <button type="submit" class="btn btn-s asidebtn">@L["Record the drill"]</button>
             </form>
+            @* rc.27 (item 79, D-312): the monthly screen-reader check, recorded like the drill. *@
+            <h3 class="asidetitle">@L["Screen-reader check"]</h3>
+            <p class="asidetext">@(readerChecks.Count == 0 ? L["None recorded yet. Once a month, someone does these ten things with a screen reader alone."] : ReaderLine(readerChecks[0]))</p>
+            @if (MailboxService.NextReaderCheckDue(readerChecks) is DateTime readerDue)
+            {
+                <p class="asidetext @(readerDue < Today ? "lv-warn" : null)"><b>@L["Next due"]</b>: @clock.Date(new DateTimeOffset(readerDue.AddHours(12), TimeSpan.Zero))</p>
+            }
+            <details class="asidedetails">
+                <summary class="linkbtn">@L["The ten steps"]</summary>
+                <ol class="asidesteps">
+                    @foreach (string step in ReaderCheck.Steps)
+                    {
+                        <li>@L[step]</li>
+                    }
+                </ol>
+            </details>
+            <form method="post" action="/ops/reader-check" class="asideform">
+                <AntiforgeryToken />
+                <label class="setlbl" for="rdate">@L["Day it was done (year-month-day)"]</label>
+                <input id="rdate" class="inp" type="text" inputmode="numeric" name="date" required maxlength="10" pattern="\d{4}-\d{2}-\d{2}" placeholder="@Today.ToString("yyyy-MM-dd", Inv)" />
+                <label class="setlbl" for="rreader">@L["Screen reader"]</label>
+                <select id="rreader" class="setsel" name="reader">@foreach (string r in ScreenReaders){<option>@r</option>}</select>
+                <label class="setlbl" for="rbrowser">@L["Browser"]</label>
+                <input id="rbrowser" class="inp" name="browser" maxlength="40" placeholder="@BrowserExample" />
+                <label class="setlbl" for="rresult">@L["Result"]</label>
+                <select id="rresult" class="setsel" name="result"><option value="passed">@L["Every step worked"]</option><option value="failed">@L["Something did not work"]</option></select>
+                <label class="setlbl" for="rfind">@L["What did not work"]</label>
+                <textarea id="rfind" class="inp" name="findings" rows="2" maxlength="500"></textarea>
+                <button type="submit" class="btn btn-s asidebtn">@L["Record the check"]</button>
+            </form>
             break;
     }
     </aside>
@@ -542,6 +593,9 @@ else
 }
 
 @code {
+    // rc.27 (SPEC-17 F-02).
+    private IReadOnlyList<OpsAppRow> opsApps = Array.Empty<OpsAppRow>();
+
     /// <summary>The section in the address, e.g. /ops/health.</summary>
     [Parameter] public string? Section { get; set; }
 
@@ -639,6 +693,8 @@ else
         "released" => L["Delivered to the person's mailbox."],
         "stillheld" => L["The scanner is still not answering; the message stays held."],
         "drill" => L["Restore drill recorded."],
+        "reader" => L["Screen-reader check recorded."],
+        "reader-date" => L["Choose the day the check was done."],
         "alerts" => L["Alert mails saved."],
         "drill-date" => L["Choose the day the drill was done."],
         "self" => L["You cannot suspend your own organisation."],
@@ -662,6 +718,14 @@ else
     private IReadOnlyList<DashLine> securityLines = Array.Empty<DashLine>();
     private IReadOnlyList<DashLine> backupLines = Array.Empty<DashLine>();
     private IReadOnlyList<RestoreDrill> drills = Array.Empty<RestoreDrill>();
+
+    // rc.27 (D-312).
+    private IReadOnlyList<ReaderCheck> readerChecks = Array.Empty<ReaderCheck>();
+
+    private string ReaderLine(ReaderCheck c) =>
+        L[c.Passed ? "Last check {date} with {reader}: every step worked." : "Last check {date} with {reader}: something did not work."]
+            .Replace("{date}", clock.Date(new DateTimeOffset(DateTime.ParseExact(c.Date, "yyyy-MM-dd", Inv).AddHours(12), TimeSpan.Zero)), StringComparison.Ordinal)
+            .Replace("{reader}", c.Reader, StringComparison.Ordinal);
     private bool canMakeKeys;
 
     private static string PlanOf(OrgSummary o) => o.Plan?.Plan ?? "none";
@@ -926,6 +990,7 @@ else
         {
             DateTimeOffset nowT = DateTimeOffset.UtcNow;
             trans = await Mail.TransactionalAsync(MailboxService.AtLocal(clock, clock.Local(nowT).Date), nowT);
+            opsApps = await Mail.OpsAppsAsync(MailboxService.AtLocal(clock, clock.Local(nowT).Date));
         }
         // DEF-169 (rc.24): the side list says how the scanner is on every page of the console, so it is asked
         // on every page - before, it was asked only on the virus page and the list said "not answering" elsewhere.
@@ -938,6 +1003,7 @@ else
         {
             alertMode = await Mail.AlertModeAsync();
             drills = await Mail.DrillsAsync();
+            readerChecks = await Mail.ReaderChecksAsync();
             (tiles, hours) = await Mail.HealthAsync(OpsEndpoints.RootOf(Maildir), DateTimeOffset.UtcNow);
             healthWord = tiles.Any(t => t.Level == "bad") ? "Needs attention" : tiles.Any(t => t.Level == "warn") ? "Some things to look at" : "All systems normal";
         }
@@ -946,4 +1012,8 @@ else
             healthWord = "Tiles, alerts, the last 24 hours";
         }
     }
+
+    // rc.27 (item 79): the screen readers the monthly check is done with, and an example browser - names, not words.
+    private static readonly string[] ScreenReaders = { "NVDA", "VoiceOver", "TalkBack", "JAWS" };
+    private const string BrowserExample = "Chrome";
 }

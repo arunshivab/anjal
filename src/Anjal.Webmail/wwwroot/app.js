@@ -632,15 +632,22 @@
     });
     // rc.16 (design review 5b.5): a control with a keyboard shortcut names it in its tip,
     // "Archive · e"; the row's flag too.
+    // rc.27 (item 72.2): the map comes from the shortcut panel's own list (data-kbmap); these three if it is missing.
     var keys = { archive: "e", "delete": "#", flag: "s" };
+    try {
+      var sb = $("[data-statusbar]");
+      var fromPage = sb && sb.getAttribute("data-kbmap") ? JSON.parse(sb.getAttribute("data-kbmap")) : null;
+      if (fromPage) { keys = fromPage; }
+    } catch (e) { /* keep the three */ }
     $$("[data-kb], .mrow button.fav").forEach(function (b) {
       var key = keys[b.getAttribute("data-kb") || "flag"];
       if (!key || b.hasAttribute("data-tipkey")) { return; }
       var t = b.getAttribute("data-tip") || b.getAttribute("title") || b.getAttribute("aria-label") || (b.textContent || "").trim();
       if (!t) { return; }
-      if (!b.getAttribute("aria-label") && !(b.textContent || "").trim()) { b.setAttribute("aria-label", t); }
+      // The title goes, so it becomes the name: the visible word may be hidden (the folded rail's Compose).
+      if (!b.getAttribute("aria-label")) { b.setAttribute("aria-label", t); }
       b.setAttribute("data-tip", t + " · " + key);
-      b.setAttribute("aria-keyshortcuts", key === "#" ? "Shift+3" : key);
+      b.setAttribute("aria-keyshortcuts", key === "#" ? "Shift+3" : key === "/" ? "Slash" : key);
       b.setAttribute("data-tipkey", "");
       b.removeAttribute("title");
     });
@@ -2468,6 +2475,7 @@
     var known = null;
     var lastUnread = null;
     var latest = null;
+    var knownDesk = null;
     var audio = null;
     var leader = !(navigator.locks && navigator.locks.request);
     var channel = window.BroadcastChannel ? new BroadcastChannel("anjal-live-" + me) : null;
@@ -2593,6 +2601,11 @@
         known = state.newest;
       }
       lastUnread = state.unread;
+      // rc.27 (DES-17 §2.10): desk mail assigned to the person, or a mention, pops up "Desk mail".
+      if (typeof state.desk === "number") {
+        if (knownDesk !== null && state.desk > knownDesk && leader && !fromLeader) { deskPopUp(); }
+        knownDesk = state.desk;
+      }
     }
 
     // rc.22 (item 35): the desktop pop-up for new mail, from the tab that listens, when the person
@@ -2615,6 +2628,36 @@
           var n = new Notification("Anjal", { body: body, tag: "anjal-new", renotify: true, icon: anjalIcon() });
           var open = burst.n > 1 ? "/folder/INBOX" : "/message/" + m.id;
           n.onclick = function () { window.focus(); window.location.href = open; n.close(); };
+        })
+        .catch(function () { /* nothing to show */ });
+    }
+    function deskPopUp() {
+      var scope = bar.getAttribute("data-notify") || "";
+      if (!scope || !("Notification" in window) || Notification.permission !== "granted" || document.visibilityState === "visible" && document.hasFocus()) { return; }
+      fetch("/api/latest?desk=1", { cache: "no-store", headers: { "X-Requested-With": "anjal" } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (m) {
+          if (!m || !m.open || m.open.charAt(0) !== "/") { return; }
+          var n = new Notification("Anjal", { body: bar.getAttribute("data-word-deskmail") || "Desk mail", tag: "anjal-desk", renotify: true, icon: anjalIcon() });
+          // Opening a desk changes the session's mailbox, so it is a form post with this page's
+          // antiforgery token (review, 28 Oct) - never a link another site could send.
+          n.onclick = function () {
+            window.focus();
+            n.close();
+            var q = new URLSearchParams(m.open.split("?")[1] || "");
+            var token = $("input[name=__RequestVerificationToken]");
+            if (!token || !q.get("desk") || !q.get("message")) { return; }
+            var f = document.createElement("form");
+            f.method = "post";
+            f.action = "/desk/open";
+            [["__RequestVerificationToken", token.value], ["desk", q.get("desk")], ["message", q.get("message")]].forEach(function (kv) {
+              var i = document.createElement("input");
+              i.type = "hidden"; i.name = kv[0]; i.value = kv[1];
+              f.appendChild(i);
+            });
+            document.body.appendChild(f);
+            f.submit();
+          };
         })
         .catch(function () { /* nothing to show */ });
     }
@@ -2672,6 +2715,26 @@
     var timer = window.setInterval(check, 30000);
     window.addEventListener("pagehide", function () { window.clearInterval(timer); if (stream) { stream.close(); } });
     check();
+  }());
+
+  // rc.27 (DES-17 §2.7): while a reply from a desk is open, the desk's other members see "… is replying".
+  // Renewed every 30 seconds; said to stop when the page goes. These calls never count as activity.
+  (function () {
+    var form = $("form[data-compose][data-desk-replying]");
+    if (!form) { return; }
+    var id = form.getAttribute("data-desk-replying");
+    var token = form.querySelector("input[name=__RequestVerificationToken]");
+    function say(on) {
+      var body = new FormData();
+      body.append("message", id);
+      body.append("on", on ? "1" : "0");
+      if (token) { body.append("__RequestVerificationToken", token.value); }
+      if (!on && navigator.sendBeacon) { navigator.sendBeacon("/desk/replying", body); return; }
+      fetch("/desk/replying", { method: "POST", body: body, credentials: "same-origin", headers: { "X-Requested-With": "anjal" } }).catch(function () { /* the mark lapses by itself */ });
+    }
+    say(true);
+    var every = window.setInterval(function () { say(true); }, 30000);
+    window.addEventListener("pagehide", function () { window.clearInterval(every); say(false); });
   }());
 
   // rc.13 (Mail settings): "Play it now" plays the chime whatever the setting.

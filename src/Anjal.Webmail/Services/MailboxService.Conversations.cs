@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
 using Anjal.Mime;
 using Anjal.Store;
 
@@ -35,18 +34,9 @@ public sealed partial class MailboxService
 
     private readonly ConcurrentDictionary<Guid, (DateTimeOffset Built, IReadOnlyDictionary<string, IReadOnlyList<ConversationItem>> Index)> conversations = new();
 
-    [GeneratedRegex(@"^\s*((re|fw|fwd|aw|wg|sv|vs|antw|tr)\s*(\[\d+\])?\s*:\s*)+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 200)]
-    private static partial Regex ReplyPrefixRegex();
-
     /// <summary>A subject without its reply and forward prefixes, case and spacing folded: the conversation's key.</summary>
     /// <param name="subject">The subject.</param>
-    public static string ConversationKey(string? subject)
-    {
-        string s = EncodedWordDecoder.Decode(subject ?? string.Empty);
-        s = ReplyPrefixRegex().Replace(s, string.Empty);
-        s = Regex.Replace(s, @"\s+", " ", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200)).Trim();
-        return s.ToLowerInvariant();
-    }
+    public static string ConversationKey(string? subject) => Anjal.Mailbox.DeskMarks.ConversationKey(subject);
 
     /// <summary>The conversation a message belongs to, oldest first (only itself when alone or untitled).</summary>
     /// <param name="mailboxId">The mailbox.</param>

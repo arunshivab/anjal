@@ -309,6 +309,8 @@ internal static class OrgEndpoints
                     await sessions.EndOthersAsync(id, null, ct).ConfigureAwait(false);
                     await svc.ForgetTrustedDevicesAsync(id, ct).ConfigureAwait(false);
                     await svc.NoteLeaverStepAsync(a.Tenant.Id, id, s => s.Stopped = DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                    // rc.27 (DES-17 §2.14): the leaver's desk mail goes back to Not assigned.
+                    await svc.ReturnDeskItemsAsync(id, null, ct).ConfigureAwait(false);
                     back = "/org/people?sel=" + id + "&leaving=1";
                     logged = "org.leaver.stopped";
                     break;
@@ -1066,6 +1068,22 @@ internal static class OrgLog
         ["org.rules"] = "Changed the mail rules",
         ["org.addresses"] = "Changed extra or group addresses",
         ["webmail.shared.opened"] = "Opened a shared mailbox",
+        // rc.27: shared desks (DES-17 §2.17), the working week, the patient warning (item 72.4), empty drafts (D-309).
+        ["desk.assigned"] = "Assigned desk mail",
+        ["desk.unassigned"] = "Took desk mail off everyone",
+        ["desk.taken"] = "Took desk mail",
+        ["desk.done"] = "Marked desk mail done",
+        ["desk.reopened"] = "Reopened desk mail",
+        ["desk.returned"] = "Desk mail given back",
+        ["desk.replied"] = "Replied from a desk",
+        ["desk.note.added"] = "Added a desk note",
+        ["desk.note.withdrawn"] = "Withdrew a desk note",
+        ["desk.settings.changed"] = "Changed a desk's settings",
+        ["org.workweek.changed"] = "Changed the working week",
+        ["webmail.patient-warning.shown"] = "Was warned: patient information going outside",
+        ["webmail.patient-warning.sent"] = "Sent patient information outside after the warning",
+        ["drafts.empty.removed"] = "Removed empty drafts",
+        ["app.api.new-address"] = "An application key was used from a new address",
         ["webmail.offline.on"] = "Turned on offline mail",
         ["webmail.offline.off"] = "Turned off offline mail",
         ["org.person.invited"] = "Invited a person",

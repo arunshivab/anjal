@@ -1,8 +1,8 @@
-# OwnReceived_0
+# SpaceRegex_1
 
 **Namespace:** `System.Text.RegularExpressions.Generated`
 
-Custom -derived type for the OwnReceived method.
+Custom -derived type for the SpaceRegex method.
 
 ## Members
 

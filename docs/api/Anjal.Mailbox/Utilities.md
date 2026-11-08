@@ -11,7 +11,11 @@ Helper methods used by generated -derived implementations.
 - **s_defaultTimeout** *(field)* - Default timeout value set in , or if none was set.
 - **s_hasTimeout** *(field)* - Whether is non-infinite.
 - **s_indexOfString_by_OrdinalIgnoreCase** *(field)* - Supports searching for the string "by".
+- **s_whitespace** *(field)* - Supports searching for characters in or not in "\t\n\v\f\r \u0085 \u2028\u2029 ".
 - **IsBoundaryWordChar** *(method)* - Determines whether the specified index is a boundary word character.
 - **IsPreWordCharBoundary** *(method)* - Determines whether the specified index is a boundary.
+- **StackPop** *(method)* - Pops 2 values from the backtracking stack.
+- **StackPush** *(method)* - Pushes 1 value onto the backtracking stack.
 - **StackPush** *(method)* - Pushes 2 values onto the backtracking stack.
+- **StackPush** *(method)* - Pushes 3 values onto the backtracking stack.
 - **WordCharBitmap** *(property)* - Gets a bitmap for whether each character 0 through 127 is in [\w]

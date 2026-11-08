@@ -1,0 +1,28 @@
+@* rc.27 (item 72.1, D-306, D-316): one storage meter everywhere - a bar against the limit and the words
+   beside it ("1.2 GB of 5 GB"); amber from 80%, red from 90%; words only when there is no limit. *@
+<span class="smeter @Level" title="@Words">
+    @if (Limit > 0)
+    {
+        <span class="quotabar" role="img" aria-label="@L["{n}% used"].Replace("{n}", Percent.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)"><i style="width:@(Math.Max(1, Percent))%"></i></span>
+    }
+    <span class="smeter-t">@Words</span>
+</span>
+
+@code {
+    /// <summary>Bytes used.</summary>
+    [Parameter] public long Used { get; set; }
+
+    /// <summary>The limit in bytes; 0 for none.</summary>
+    [Parameter] public long Limit { get; set; }
+
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    private int Percent => Limit <= 0 ? 0 : Math.Min(100, Sizes.Percent(Used, Limit));
+
+    private string? Level => Limit <= 0 ? null : Percent >= 90 ? "bad" : Percent >= 80 ? "warn" : null;
+
+    private string Words => Limit > 0
+        ? L["{used} of {limit}"].Replace("{used}", Anjal.Webmail.Components.Layout.MainLayout.Size(Used), StringComparison.Ordinal).Replace("{limit}", Anjal.Webmail.Components.Layout.MainLayout.Size(Limit), StringComparison.Ordinal)
+        : Anjal.Webmail.Components.Layout.MainLayout.Size(Used);
+}

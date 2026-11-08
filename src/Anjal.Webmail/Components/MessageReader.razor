@@ -3,6 +3,7 @@
 @attribute [Authorize]
 @inject MailboxService Mail
 @inject Words Words
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider DeskNotes
 
 <PageTitle>@(view?.Subject ?? L["Message"]) — Anjal</PageTitle>
 
@@ -46,13 +47,18 @@ else
             </a>
         </div>
         @* The letter: subject and body only, nothing above the subject (item 42). *@
-        <article class="letter" aria-label="@L["Message"]">
+        <article class="letter" id="openmail" tabindex="-1" aria-label="@L["Message"]">
             <h1 class="lsubj">@(string.IsNullOrWhiteSpace(view.Subject) ? L["(no subject)"] : view.Subject)</h1>
             @* D-104 (owner, 5 Oct): the category shows under the subject - the one
                exception to "subject and body only" - and is changed in the envelope. *@
             @if (view.Row.CategoryId is Guid currentCat && categories.FirstOrDefault(c => c.Row.Id == currentCat) is CategoryView shown)
             {
                 <p class="readcat"><span class="chip slot-@shown.Row.Slot"><i></i>@shown.Row.Name</span></p>
+            }
+            @if (otherReplying is (string replyingName, DateTimeOffset replyingSince))
+            {
+                @* rc.27 (DES-17 §2.7): another member of the desk is writing a reply now. *@
+                <p class="notice n-info deskpresence" role="status"><LipiIcon Name="edit" Size="14" /><span>@L["{name} is replying (since {time})."].Replace("{name}", replyingName, StringComparison.Ordinal).Replace("{time}", clock.Time(replyingSince), StringComparison.Ordinal)</span></p>
             }
             @* rc.24 (item 68, brief 10a and 10f): the conversation around the open mail - the earlier mails folded
                into rows above it, the later ones below, each with its letter; who answered whom from the headers only. *@
@@ -288,6 +294,47 @@ else
                     </div>
                 </form>
             }
+            @if (desk is not null)
+            {
+                @* rc.27 (DES-17 §2.8): notes for the desk, under the letter - never sent, sealed like the mail. *@
+                <section class="desknotes" aria-label="@L["Notes for the desk"]">
+                    <h2 class="dn-head"><LipiIcon Name="comment" Size="14" />@L["Notes for the desk"] <span class="dn-never">@L["never sent"]</span></h2>
+                    @foreach (DeskNote n in desk.Notes)
+                    {
+                        <div class="dn-note @(n.WithdrawnAt is null ? null : "dn-gone")">
+                            <p class="dn-by"><b>@n.Writer</b> · <time datetime="@n.At.ToString("o", System.Globalization.CultureInfo.InvariantCulture)">@clock.List(n.At, DateTimeOffset.UtcNow)</time></p>
+                            @if (n.WithdrawnAt is DateTimeOffset gone)
+                            {
+                                <p class="dn-text">@L["Note withdrawn by {name} · {time}"].Replace("{name}", n.Writer, StringComparison.Ordinal).Replace("{time}", clock.List(gone, DateTimeOffset.UtcNow), StringComparison.Ordinal)</p>
+                            }
+                            else
+                            {
+                                <p class="dn-text">@(n.Text ?? L["This note cannot be read here."])</p>
+                                @if (n.WriterId == desk.Me)
+                                {
+                                    <form method="post" action="/desk/act" class="inline">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="message" value="@Id" />
+                                        <input type="hidden" name="action" value="withdraw" />
+                                        <input type="hidden" name="text" value="@n.Id" />
+                                        <input type="hidden" name="back" value="@Back" />
+                                        <button type="submit" class="linkbtn dn-withdraw" data-needs-server title="@L["Withdraw this note; the history keeps that it was written."]">@L["Withdraw"]</button>
+                                    </form>
+                                }
+                            }
+                        </div>
+                    }
+                    <form method="post" action="/desk/act" class="dn-form">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="message" value="@Id" />
+                        <input type="hidden" name="action" value="note" />
+                        <input type="hidden" name="back" value="@Back" />
+                        <label class="sr-only" for="desknote-@Id">@L["Add a note for the desk"]</label>
+                        <textarea id="desknote-@Id" name="text" rows="2" maxlength="@MailboxService.DeskNoteMax" required placeholder="@L["Add a note for the desk. Type @ and a name to tell them."]" data-mention-names="@string.Join("|", desk.Members.Select(m => m.Name))"></textarea>
+                        <button type="submit" class="btn btn-s btn-sm" data-needs-server>@L["Add note"]</button>
+                    </form>
+                </section>
+            }
             @* rc.15 (owner, 7 Oct): answer where reading ends, as well as in the envelope. *@
             @if (!IsScheduled && QuickReply is null)
             {
@@ -306,9 +353,21 @@ else
                             </div>
                         </details>
                     }
+                    else if (otherReplying is (string busyName, DateTimeOffset _))
+                    {
+                        @* rc.27 (DES-17 §2.7): ask before a second member replies. *@
+                        <details class="pmenu replycheck deskask">
+                            <summary class="eb eb-p" title="@ReplyTip"><LipiIcon Name="undo" Size="15" />@ReplyWord</summary>
+                            <div class="pmenu-body pmenu-up">
+                                <p class="pm-note"><b>@L["{name} is replying."].Replace("{name}", busyName, StringComparison.Ordinal)</b></p>
+                                <a class="btn btn-s btn-sm" href="@ReplyLink("reply")">@L["Reply anyway"]</a>
+                                <a class="btn btn-p btn-sm" href="@Back">@L["Leave it to {name}"].Replace("{name}", busyName, StringComparison.Ordinal)</a>
+                            </div>
+                        </details>
+                    }
                     else
                     {
-                        <a class="eb eb-p" href="@ReplyLink("reply")" title="@ReplyTip"><LipiIcon Name="undo" Size="15" />@ReplyWord</a>
+                        <a class="eb eb-p" href="@ReplyLink("reply")" title="@ReplyTip" data-kb="reply"><LipiIcon Name="undo" Size="15" />@ReplyWord</a>
                     }
                     @if (ReplyAllNeedsCheck)
                     {
@@ -328,9 +387,9 @@ else
                     }
                     else
                     {
-                        <a class="eb" href="@ReplyLink("replyall")" data-replyall title="@L["Answer the sender and everyone else it went to."]">@ReplyAllWord</a>
+                        <a class="eb" href="@ReplyLink("replyall")" data-replyall data-kb="replyall" title="@L["Answer the sender and everyone else it went to."]">@ReplyAllWord</a>
                     }
-                    <a class="eb" href="@ReplyLink("forward")"><LipiIcon Name="redo" Size="15" />@L["Forward"]</a>
+                    <a class="eb" href="@ReplyLink("forward")" data-kb="forward"><LipiIcon Name="redo" Size="15" />@L["Forward"]</a>
                 </div>
             }
             <div class="phoneactions">
@@ -594,6 +653,84 @@ else
                 </section>
             }
 
+            @if (desk is not null)
+            {
+                @* rc.27 (DES-17 §2.4): the Desk block - who has it, where it stands, what happened. *@
+                <section class="ecard edesk" aria-label="@L["Desk"]">
+                    <h2 class="ehead"><LipiIcon Name="users" Size="13" /> @L["Desk"]</h2>
+                    @if (deskError is not null)
+                    {
+                        <p class="ederr" role="alert"><LipiIcon Name="warning" Size="13" />@L[deskError]</p>
+                    }
+                    <div class="edrow">
+                        <span class="elabel">@L["Assigned to"]</span>
+                        @if (desk.CanAssign && desk.State.State != "done")
+                        {
+                            <form method="post" action="/desk/act" class="inline edassign">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="message" value="@Id" />
+                                <input type="hidden" name="action" value="assign" />
+                                <input type="hidden" name="back" value="@Back" />
+                                <select name="to" class="setsel" aria-label="@L["Assigned to"]" data-autosubmit>
+                                    <option value="" selected="@(desk.State.AssigneeId is null)">@L["Nobody"]</option>
+                                    @foreach (DeskMember m in desk.Members.Where(x => x.MaySend))
+                                    {
+                                        <option value="@m.Id" selected="@(desk.State.AssigneeId == m.Id)">@(m.Id == desk.Me ? L["Me"] + " (" + m.Name + ")" : m.Name)</option>
+                                    }
+                                </select>
+                                <noscript><button type="submit" class="btn btn-q btn-sm">@L["Apply"]</button></noscript>
+                            </form>
+                        }
+                        else
+                        {
+                            <span class="edval">@(desk.State.AssigneeId is null ? L["Nobody"] : desk.State.Assignee)</span>
+                        }
+                    </div>
+                    <div class="edrow">
+                        <span class="elabel">@L["Status"]</span>
+                        <span class="edval deskmark ds-@desk.State.State" data-desk-state="@desk.State.State">@DeskStateWord(desk.State)
+                            @if (desk.State.Due is DateTimeOffset due)
+                            {
+                                <span class="@(desk.State.Overdue ? "eddue late" : "eddue")">@((desk.State.Overdue ? L["Reply overdue since {time}"] : L["Reply due by {time}"]).Replace("{time}", clock.Full(due), StringComparison.Ordinal))</span>
+                            }
+                        </span>
+                    </div>
+                    <div class="edacts">
+                        @if (desk.CanFinish)
+                        {
+                            <form method="post" action="/desk/act" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="message" value="@Id" />
+                                <input type="hidden" name="action" value="@(desk.State.State == "done" ? "reopen" : "done")" />
+                                <input type="hidden" name="back" value="@Back" />
+                                <button type="submit" class="eb @(desk.State.State == "done" ? null : "eb-p")" data-needs-server><LipiIcon Name="@(desk.State.State == "done" ? "undo" : "check")" Size="14" /><span>@(desk.State.State == "done" ? L["Reopen"] : L["Mark done"])</span></button>
+                            </form>
+                        }
+                        @if (desk.CanTake)
+                        {
+                            <form method="post" action="/desk/act" class="inline">
+                                <AntiforgeryToken />
+                                <input type="hidden" name="message" value="@Id" />
+                                <input type="hidden" name="action" value="take" />
+                                <input type="hidden" name="back" value="@Back" />
+                                <button type="submit" class="eb" data-needs-server><LipiIcon Name="user" Size="14" /><span>@L["Take it"]</span></button>
+                            </form>
+                        }
+                    </div>
+                    @if (desk.History.Count > 0)
+                    {
+                        <details class="econvd edhist">
+                            <summary><span class="elabel">@L["History"]</span> <span><u>@MailboxService.Count(desk.History.Count)</u></span></summary>
+                            <ol class="edhistlist">
+                                @foreach (DeskLine line in desk.History)
+                                {
+                                    <li><span>@HistoryWords(line)</span> <time datetime="@line.At.ToString("o", System.Globalization.CultureInfo.InvariantCulture)">@clock.List(line.At, DateTimeOffset.UtcNow)</time></li>
+                                }
+                            </ol>
+                        </details>
+                    }
+                </section>
+            }
             @if (view.Attachments.Count > 0)
             {
                 @* 2c: "Enclosed · N" after a dashed fold; each file has a tag for its type. *@
@@ -991,6 +1128,33 @@ else
 
     /// <summary>rc.22 (item 51): set after Unsubscribe was pressed, to say so.</summary>
     [Parameter] public string? Unsubscribed { get; set; }
+
+    // rc.27 (DES-17 §2.4, §2.7, §2.8): the Desk block, notes, and another member replying.
+    private DeskPanel? desk;
+    private (string Name, DateTimeOffset Since)? otherReplying;
+    private string? deskError;
+
+    private string DeskStateWord(DeskState d) => d.State switch
+    {
+        "open" => L["Open"],
+        "waiting" => L["Waiting: the desk replied"],
+        "done" => L["Done"],
+        _ => L["Not assigned"],
+    };
+
+    private string HistoryWords(DeskLine line) => line.Kind switch
+    {
+        "assigned" => L["{name} assigned it to {other}"].Replace("{name}", line.Actor, StringComparison.Ordinal).Replace("{other}", line.Other, StringComparison.Ordinal),
+        "unassigned" => L["{name} took it off everyone"].Replace("{name}", line.Actor, StringComparison.Ordinal),
+        "taken" => L["{name} took it"].Replace("{name}", line.Actor, StringComparison.Ordinal),
+        "returned" => L["Returned: {other} left the desk"].Replace("{other}", line.Other, StringComparison.Ordinal),
+        "replied" => L["{name} replied"].Replace("{name}", line.Actor, StringComparison.Ordinal),
+        "done" => L["{name} marked it done"].Replace("{name}", line.Actor, StringComparison.Ordinal),
+        "reopened" => line.Actor.Length > 0 ? L["{name} reopened it"].Replace("{name}", line.Actor, StringComparison.Ordinal) : L["Mail arrived: reopened"],
+        "note" => L["{name} added a note"].Replace("{name}", line.Actor, StringComparison.Ordinal),
+        "note-withdrawn" => L["{name} withdrew a note"].Replace("{name}", line.Actor, StringComparison.Ordinal),
+        _ => line.Kind,
+    };
 
     // rc.26 (item 73): "After my leave" while an automatic reply with an end date is on.
     private static readonly (string Preset, string Word)[] SnoozeWords = { ("today", "Later today"), ("tomorrow", "Tomorrow"), ("weekend", "This weekend"), ("week", "Next week"), ("leave", "After my leave") };
@@ -1458,6 +1622,17 @@ else
             }
             thread = threaded;
             unsubscribe = opened.Folder.Name is "Sent" or "Drafts" ? null : await Mail.UnsubscribeOfAsync(mailboxId.Value, Id);
+            // rc.27 (DES-17 §2.4): on a desk, its block; and whether another member is replying now.
+            desk = null;
+            otherReplying = null;
+            deskError = null;
+            if (WebmailAuthService.PersonIdOf((await AuthState).User) is Guid reader && reader != mailboxId.Value
+                && opened.Folder.Name is not ("Drafts" or MailboxService.ScheduledFolder or "Trash"))
+            {
+                desk = await Mail.DeskPanelAsync(mailboxId.Value, reader, opened.Row);
+                otherReplying = desk is null ? null : await Mail.OtherReplyingAsync(mailboxId.Value, reader, opened.Row);
+                deskError = desk is null ? null : AuthEndpoints.ReadNote(DeskNotes, Http?.Request.Query["deskerr"].ToString());
+            }
             leaveEnd = await Mail.LeaveEndAsync(mailboxId.Value);
             DateTimeOffset monthStart = MailboxService.AtLocal(clock, new DateTime(clock.Local(DateTimeOffset.UtcNow).Year, clock.Local(DateTimeOffset.UtcNow).Month, 1));
             listCard = opened.Folder.Name is "Sent" or "Drafts" ? null : await Mail.ListCardAsync(mailboxId.Value, Id, monthStart);

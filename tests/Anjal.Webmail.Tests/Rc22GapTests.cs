@@ -202,12 +202,14 @@ public sealed class Rc22GapTests : IAsyncLifetime, IDisposable
         Assert.Null(await this.svc.SaveAwayAsync(this.arun.Id, new AwayReply { On = true, From = now.AddHours(-1), Until = now.AddDays(2), Subject = "Away", Text = "Back Friday." }));
         string inbox = await client.GetStringAsync("folder/INBOX");
         Assert.Contains("/settings/away", inbox, StringComparison.Ordinal);
-        Assert.Contains("Your away reply is on until", inbox, StringComparison.Ordinal);
+        // rc.27 (item 72.3): the line is on every page now, not only the Inbox.
+        Assert.Contains("Automatic replies are on until", inbox, StringComparison.Ordinal);
+        Assert.Contains("Automatic replies are on until", await client.GetStringAsync("contacts"), StringComparison.Ordinal);
         string settings = await client.GetStringAsync("settings/away");
         HttpResponseMessage off = await Post(client, "settings/away", Token(settings), ("back", "/settings/away"));   // no "on": Turn off
         Assert.Equal(HttpStatusCode.Redirect, off.StatusCode);
         Assert.Null(await this.svc.AwayActiveAsync(this.arun.Id));
-        Assert.DoesNotContain("Your away reply is on", await client.GetStringAsync("folder/INBOX"), StringComparison.Ordinal);
+        Assert.DoesNotContain("Automatic replies are on", await client.GetStringAsync("folder/INBOX"), StringComparison.Ordinal);
     }
 
     [Fact]

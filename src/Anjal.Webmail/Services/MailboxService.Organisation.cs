@@ -681,21 +681,41 @@ public sealed partial class MailboxService
         {
             return "That person is not in this organisation.";
         }
-        if (right is null)
-        {
-            info.Members.Remove(personId);
-        }
-        else if (SharedMailbox.Rights.Contains(right))
-        {
-            info.Members[personId] = right;
-        }
-        else
+        if (right is not null && !SharedMailbox.Rights.Contains(right))
         {
             return "Choose read only, read and send, or manage.";
         }
-        await this.WriteTenantDocumentAsync(tenant.Id, SharedKind, all, ct).ConfigureAwait(false);
+        // rc.27 (review, 28 Oct): changed in one step under the database's lock, as the desk's own
+        // settings are, so a right given here never undoes a desk setting saved at the same moment.
+        bool written = await this.store.ChangeTenantDocumentAsync(tenant.Id, SharedKind, json =>
+        {
+            Dictionary<Guid, SharedMailbox> now = string.IsNullOrWhiteSpace(json) ? new() : System.Text.Json.JsonSerializer.Deserialize<Dictionary<Guid, SharedMailbox>>(json, DocumentJson) ?? new();
+            if (!now.TryGetValue(sharedId, out SharedMailbox? current))
+            {
+                return null;
+            }
+            if (right is null)
+            {
+                current.Members.Remove(personId);
+            }
+            else
+            {
+                current.Members[personId] = right;
+            }
+            return System.Text.Json.JsonSerializer.Serialize(now, DocumentJson);
+        }, ct).ConfigureAwait(false);
+        this.tenantDocs.TryRemove((tenant.Id, SharedKind), out _);
+        if (!written)
+        {
+            return "That is not a shared mailbox.";
+        }
         // A right taken away applies on the person's very next request.
         this.rights.TryRemove((personId, sharedId), out _);
+        // rc.27 (DES-17 §2.14): someone who can no longer reply from the desk gives its mail back.
+        if (right is null or "read")
+        {
+            await this.ReturnDeskItemsAsync(personId, sharedId, ct).ConfigureAwait(false);
+        }
         return null;
     }
 

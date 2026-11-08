@@ -798,7 +798,7 @@ public sealed partial class MailboxSink : Anjal.Smtp.IMessageSink
                         storedFile = this.maildir.SetFlags(tenant.Slug, mailbox.Address, folder.Name, written.RelativePath, seen: ruled.MarkRead, flagged: ruled.Flag, answered: false) ?? written.RelativePath;
                     }
 
-                    await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
+                    Anjal.Store.MessageRow deliveredRow = await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
                     {
                         MailboxId = mailbox.Id,
                         FolderId = folder.Id,
@@ -823,6 +823,20 @@ public sealed partial class MailboxSink : Anjal.Smtp.IMessageSink
                         ListMark = listMark,
                         Referral = ctx.AuthenticatedUser is not null || AuthResultsOf(parsed)["dmarc"].StartsWith("pass", System.StringComparison.Ordinal) ? ReferralOf(parsed) : string.Empty,
                     }, ct).ConfigureAwait(false);
+
+                    // rc.27 (DES-17 §2.2): mail arriving in a desk's Inbox starts its conversation's item, or
+                    // reopens a done one with the same person; a reply is owed from now.
+                    if (string.Equals(folder.Name, Anjal.Store.FolderRow.Inbox, System.StringComparison.Ordinal) && this.store is Anjal.Store.IDeskStore desks
+                        && !string.Equals(ctx.EnvelopeFrom, mailbox.Address, System.StringComparison.OrdinalIgnoreCase)
+                        && DeskMarks.IsDesk(await this.store.GetTenantDocumentAsync(tenant.Id, DeskMarks.SharedKind, ct).ConfigureAwait(false), mailbox.Id))
+                    {
+                        string mark = DeskMarks.ThreadMark(mailbox.Id, parsed?.Subject, DeskMarks.OtherParty(mailbox.Address, parsed?.Headers.Get("From"), parsed?.Headers.Get("To")), deliveredRow.Id, this.AddressPepper);
+                        (Anjal.Store.DeskItemRow item, bool reopened) = await desks.NoteDeskArrivalAsync(mailbox.Id, mark, deliveredRow.Id, deliveredRow.ReceivedAt, ct).ConfigureAwait(false);
+                        if (reopened)
+                        {
+                            await desks.AddDeskEventAsync(new Anjal.Store.DeskEventRow { ItemId = item.Id, At = deliveredRow.ReceivedAt, Kind = "reopened" }, ct).ConfigureAwait(false);
+                        }
+                    }
 
                     // v1.0.0-rc.8: the evidence is kept at least as long as this tenant requires.
                     if (ctx.EvidenceId is System.Guid evidenceId && this.store is Anjal.Store.IEvidenceStore evidenceStore)

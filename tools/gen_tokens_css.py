@@ -58,7 +58,13 @@ CONTRAST_PAIRS = [
 # the theme's accent - accent-soft by day; by night a dark envelope tuned so its labels (warning),
 # its "outside" marks (danger) and its words (ink) keep their contrast. Worked out from each
 # theme's own colours, so every theme has one.
-ENVELOPE_PAIRS = [("ink", "env-bg", 4.5), ("ink-muted", "env-bg", 4.5), ("warning", "env-bg", 4.5), ("danger", "env-bg", 4.5)]
+ENVELOPE_PAIRS = [("ink", "env-bg", 4.5), ("ink-muted", "env-bg", 4.5), ("warning", "env-bg", 4.5), ("danger", "env-bg", 4.5),
+                  # rc.27 (item 71, brief 6c): the edge against the envelope, and the file tags' words on their tags.
+                  ("env-edge", "env-bg", 3.0), ("danger", "label-1-soft", 4.5), ("ink", "env-row", 4.5)]
+
+# rc.27 (item 71): the brief's own night envelope for the house colour (6c); every other dark theme
+# keeps the envelope worked out from its own accent and surface.
+ENVELOPE_OVERRIDES = {"anjal-dark": {"env-bg": "#2A2618", "env-flap": "#342E1D"}}
 
 
 def mix(a, b, t):
@@ -73,8 +79,13 @@ def envelope(values, tid):
     accent, soft = values["accent"][tid], values["accent-soft"][tid]
     paper = values["surface-100"][tid]
     if dark:
-        return {"env-bg": mix(accent, paper, 0.12), "env-flap": mix(accent, paper, 0.18),
-                "env-edge": accent, "env-row": values["surface-200"][tid]}
+        env = {"env-bg": mix(accent, paper, 0.12), "env-flap": mix(accent, paper, 0.18),
+               "env-edge": accent, "env-row": values["surface-200"][tid]}
+        env.update(ENVELOPE_OVERRIDES.get(tid, {}))
+        # A theme whose accent is dark (Saffron's is teal) gives its night envelope the amber edge instead.
+        if ratio(env["env-edge"], env["env-bg"]) < 3.0:
+            env["env-edge"] = values["warning"][tid]
+        return env
     return {"env-bg": soft, "env-flap": mix(accent, soft, 0.16), "env-edge": accent, "env-row": "#FFFFFF"}
 
 
@@ -83,6 +94,11 @@ def luminance(hex_colour):
     channels = [int(h[i:i + 2], 16) / 255 for i in (0, 2, 4)]
     lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
     return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def ratio(fg, bg):
+    a, b = luminance(fg), luminance(bg)
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
 
 
 def contrast_problems(themes, colours):
@@ -94,6 +110,9 @@ def contrast_problems(themes, colours):
     for theme in themes:
         tid = theme["id"]
         for fg, bg, minimum in CONTRAST_PAIRS + ENVELOPE_PAIRS:
+            # The flap's edge is a mark by night only; by day it is the envelope's own colour, a decoration.
+            if (fg, bg) == ("env-edge", "env-bg") and not tid.endswith("-dark"):
+                continue
             a, b = luminance(values[fg][tid]), luminance(values[bg][tid])
             ratio = (max(a, b) + 0.05) / (min(a, b) + 0.05)
             if ratio < minimum:

@@ -16,7 +16,8 @@ function measure() {
   // sender's letter, labels, the folder rail, a box's own clear button, the parts of a strip of
   // choices (the strip is measured), colour and background tiles, the eye inside a password box,
   // and anything inside a menu or a chip.
-  const skip = '.linkbtn, .sorth, .fav, .chip, .chip-x, .rail-item, .rail-compose, .seg a, .seg button, .seg .iconbtn, .pmi, .pwreveal, [role=menu] *, .rte-tile, .rte-sw, .rte-em, .rte-tilebox, .toggle, .cfile, textarea';
+  // rc.27: Today's "Assigned to you" rows open a desk by a form, so each is a button - a row of the list, sized as one.
+  const skip = '.linkbtn, .sorth, .fav, .chip, .chip-x, .rail-item, .rail-compose, .seg a, .seg button, .seg .iconbtn, .pmi, .pwreveal, [role=menu] *, .rte-tile, .rte-sw, .rte-em, .rte-tilebox, .toggle, .cfile, textarea, button.tdrow-open';
   const els = [...new Set(document.querySelectorAll(sel))].filter((e) => {
     const q = e.getBoundingClientRect();
     const cs = getComputedStyle(e);

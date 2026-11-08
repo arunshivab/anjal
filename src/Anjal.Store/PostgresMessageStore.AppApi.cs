@@ -457,7 +457,7 @@ LIMIT @limit;";
         while (await r.ReadAsync(ct).ConfigureAwait(false))
         {
             MessageRow row = ReadMailboxMessage(r);
-            row.BodyText = r.GetString(26);
+            row.BodyText = r.GetString(BodyAfterColumns);
             result.Add(row);
         }
         return result;

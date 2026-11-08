@@ -16,7 +16,7 @@
         <ComposeForm DraftId="WriteDraft" Back="@PageLink(pageIndex)" />
     </section>
 }
-<section class="listcol">
+<section class="listcol" id="maillist" tabindex="-1">
 <div class="listhead">
     <div class="lh-row">
         <h1>@FolderLabel</h1>
@@ -83,6 +83,20 @@
     <div class="lh-row lh-find">
         <SearchBox Folders="folders" L="L" />
     </div>
+    @if (deskRight is not null && Name == FolderRow.Inbox)
+    {
+        @* rc.27 (DES-17 §2.3): a desk's tabs - who has what. *@
+        <nav class="desktabs" aria-label="@L["Desk"]">
+            @foreach (string t in DeskState.Tabs)
+            {
+                <a class="desktab @(t == DeskTab ? "on" : null)" href="@DeskTabLink(t)" aria-current="@(t == DeskTab ? "page" : null)">@TabWord(t)@if (t != "all" && deskCounts.TryGetValue(t, out int c) && c > 0) { <span class="desktab-n">@c</span> }</a>
+            }
+            @if (deskRight == "manage")
+            {
+                <a class="desktab desktab-set" href="/desk/settings" title="@L["Desk settings"]" aria-label="@L["Desk settings"]"><LipiIcon Name="settings" Size="14" /></a>
+            }
+        </nav>
+    }
     <SortHeadings L="L" Folder="@Name" Sort="@sort" Outgoing="IsOutgoing" Back="@SortBack" />
 </div>
 
@@ -103,20 +117,7 @@
 {
     <div class="notice-wrap"><div class="notice n-err"><LipiIcon Name="warning" Size="16" /><span>@notice</span></div></div>
 }
-@if (awayOn is not null && Name == FolderRow.Inbox)
-{
-    @* rc.22 (item 30): the yellow line while the away reply is on. *@
-    <div class="notice-wrap"><div class="notice n-warn">
-        <LipiIcon Name="clock" Size="16" />
-        <span>@(awayOn.Until is DateTimeOffset until ? L["Your away reply is on until {date}."].Replace("{date}", clock.Full(until), StringComparison.Ordinal) : L["Your away reply is on."])</span>
-        <form method="post" action="/settings/away" class="inline act">
-            <AntiforgeryToken />
-            <input type="hidden" name="back" value="/folder/INBOX" />
-            <button type="submit" class="btn btn-s btn-sm" data-needs-server>@L["Turn it off"]</button>
-        </form>
-        <a class="btn btn-q btn-sm" href="/settings/away">@L["Change"]</a>
-    </div></div>
-}
+@* rc.27 (item 72.3): the automatic reply's line moved from the Inbox to every page (MainLayout's status bar). *@
 @if (heldCount > 0 && Name == FolderRow.Inbox)
 {
     @* rc.22 (item 39, mockup 22): mail held because the virus scanner is down. *@
@@ -315,7 +316,7 @@ else
                 <a class="btn btn-s btn-sm" href="/search?scope=all&amp;sort=size">@L["Show biggest mail"]</a>
             </div>
         }
-        @if (items is null || items.Count == 0)
+        @if ((items is null || items.Count == 0) && overdueRows.Count == 0)
         {
             @* rc.16, design review 5b.3 and [6i]: an empty folder says what goes there and the next step. *@
             (string icon, string title, string what, string? next, string? nextHref) = EmptyState();
@@ -348,6 +349,20 @@ else
                         }
                     </section>
                 }
+                @if (overdueRows.Count > 0)
+                {
+                    @* rc.27 (DES-17 §2.3, §2.6): mail past its reply time leads the desk's list. *@
+                    <section class="mgroup msection deskoverdue" aria-label="@L["Reply overdue"]">
+                        <h2 class="mgroup-day msection-head"><span><LipiIcon Name="clock" Size="13" /> @L["Reply overdue"]</span></h2>
+                        @foreach (MessageRow m in overdueRows)
+                        {
+                            <MessageListRow M="m" L="L" Clock="clock" FolderName="@Name" Threshold="threshold" Trusted="trusted" Conversation="@ConversationOf(m)"
+                                            Mark="@MarkOf(m)" Category="@(m.CategoryId is Guid cid ? Lookup(cid) : null)" Who="@Sender(m)" Desk="@DeskOf(m)"
+                                            Selectable="true" ShowFlag="ShowFlag" OpenLink="@OpenLink(m)" BackLink="@BackLink" IsOpen="@RowOpen(m)"
+                                            QuickUrl="@($"/folder/{Uri.EscapeDataString(Name)}/bulk")" />
+                        }
+                    </section>
+                }
                 @if (sectionViews.Count > 0)
                 {
                     <h2 class="mgroup-day msection-head"><span>@L["Everything else"]</span></h2>
@@ -361,8 +376,8 @@ else
                         }
                         @foreach (MessageRow m in group)
                         {
-                            <MessageListRow M="m" L="L" Clock="clock" FolderName="@Name" Threshold="threshold" Trusted="trusted" Sends="@SendsLabel(m)" Conversation="@(grouping?.Count(m) ?? 1)"
-                                            Mark="@MarkOf(m)" Category="@(m.CategoryId is Guid cid ? Lookup(cid) : null)" Who="@(IsOutgoing ? Recipient(m) : Sender(m))"
+                            <MessageListRow M="m" L="L" Clock="clock" FolderName="@Name" Threshold="threshold" Trusted="trusted" Sends="@SendsLabel(m)" Conversation="@ConversationOf(m)"
+                                            Mark="@MarkOf(m)" Category="@(m.CategoryId is Guid cid ? Lookup(cid) : null)" Who="@(IsOutgoing ? Recipient(m) : Sender(m))" Desk="@DeskOf(m)" Note="@NoteOf(m)"
                                             Outgoing="IsOutgoing" Selectable="true" ShowFlag="ShowFlag" OpenLink="@OpenLink(m)" BackLink="@BackLink" IsOpen="@RowOpen(m)"
                                             QuickUrl="@($"/folder/{Uri.EscapeDataString(Name)}/bulk")" />
                         }
@@ -442,6 +457,48 @@ else
     [SupplyParameterFromQuery(Name = "readonly")] private string? ReadOnlyText { get; set; }
     [SupplyParameterFromQuery(Name = "sharedclosed")] private string? SharedClosed { get; set; }
     [SupplyParameterFromQuery(Name = "wait")] private int? Wait { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] private string? TabQuery { get; set; }
+
+    // rc.27 (DES-17 §2.3): a desk's tab, its states and counts; who wrote a desk's mail or last edited a draft.
+    private string DeskTab => TabQuery is not null && DeskState.Tabs.Contains(TabQuery) ? TabQuery : "all";
+    private string? deskRight;
+    private Guid meId;
+    private IReadOnlyDictionary<Guid, DeskState> deskStates = new Dictionary<Guid, DeskState>();
+    private Dictionary<string, int> deskCounts = new();
+    private IReadOnlyList<MessageRow> overdueRows = Array.Empty<MessageRow>();
+    private IReadOnlyDictionary<Guid, string> writers = new Dictionary<Guid, string>();
+
+    private DeskState? DeskOf(MessageRow m) => deskStates.TryGetValue(m.Id, out DeskState? d) ? d : null;
+
+    // How many mails a row's conversation holds: a desk's by its own conversations, else the list's grouping.
+    private Dictionary<Guid, int> deskConversations = new();
+
+    private int ConversationOf(MessageRow m) => deskConversations.TryGetValue(m.Id, out int n) ? n : grouping?.Count(m) ?? 1;
+
+    private string DeskTabLink(string t) => "/folder/INBOX" + (t == "all" ? string.Empty : "?tab=" + t);
+
+    private string TabWord(string t) => t switch
+    {
+        "unassigned" => L["Not assigned"],
+        "mine" => L["Mine"],
+        "open" => L["Open"],
+        "done" => L["Done"],
+        _ => L["All"],
+    };
+
+    private string? NoteOf(MessageRow m)
+    {
+        if (Name == "Drafts")
+        {
+            string when = clock.List(m.ReceivedAt, DateTimeOffset.UtcNow);
+            return m.WrittenBy is Guid w && w != meId && writers.TryGetValue(w, out string? who)
+                ? L["Edited by {name} · {time}"].Replace("{name}", who, StringComparison.Ordinal).Replace("{time}", when, StringComparison.Ordinal)
+                : L["Edited {time}"].Replace("{time}", when, StringComparison.Ordinal);
+        }
+        return Name == "Sent" && m.WrittenBy is Guid by && writers.TryGetValue(by, out string? name)
+            ? L["Written by {name}"].Replace("{name}", name, StringComparison.Ordinal)
+            : null;
+    }
 
     private int HeldSeconds => Math.Clamp(Wait ?? (int)MailboxService.UndoWindow.TotalSeconds, 1, 30);
     [SupplyParameterFromQuery(Name = "preview")] private string? PreviewText { get; set; }
@@ -474,7 +531,6 @@ else
         : null;
 
     private IReadOnlyList<string> notices = Array.Empty<string>();
-    private Anjal.Mailbox.AwayReply? awayOn;
     private int heldCount;
     private bool OfferDmarcRule;
     private ConversationGrouping? grouping;
@@ -585,6 +641,17 @@ else
     // rc.16 (design review 5b.3, [6i]): what an empty folder is for, and what to do next.
     private (string Icon, string Title, string What, string? Next, string? NextHref) EmptyState()
     {
+        if (deskRight is not null && DeskTab != "all")
+        {
+            // rc.27: a desk tab with nothing in it.
+            return ("check", DeskTab switch
+            {
+                "unassigned" => L["Everything here has someone."],
+                "mine" => L["Nothing is waiting for you here."],
+                "open" => L["Nothing is open."],
+                _ => L["Nothing done in the newest mail."],
+            }, L["Tabs show the desk's newest 500 conversations in the Inbox."], L["All"], "/folder/INBOX");
+        }
         if (Show == "unread")
         {
             return ("check", L["No unread messages."], L["Everything here has been read."], L["Show all"], "/folder/" + Uri.EscapeDataString(Name));
@@ -621,7 +688,7 @@ else
 
     private string BackLink => PageLink(pageIndex);
 
-    private string PageLink(int p) => $"/folder/{Uri.EscapeDataString(Name)}?page={p}" + (Show == "all" ? string.Empty : "&show=" + Show);
+    private string PageLink(int p) => $"/folder/{Uri.EscapeDataString(Name)}?page={p}" + (Show == "all" ? string.Empty : "&show=" + Show) + (DeskTab == "all" ? string.Empty : "&tab=" + DeskTab);
 
     /// <summary>Drafts open in compose; otherwise as the layout says (item 45): beside the list, alone, or on their own page.</summary>
     private string OpenLink(MessageRow m) =>
@@ -689,7 +756,6 @@ else
         notices = await Mail.TakeNoticesAsync(mailboxId.Value);
         if (Name == FolderRow.Inbox)
         {
-            awayOn = await Mail.AwayActiveAsync(mailboxId.Value);
             heldCount = await Mail.HeldCountAsync(mailboxId.Value);
             woken = await Mail.WokenAsync(mailboxId.Value);
             if (pageIndex == 0 && Show == "all" && OpenId is null)
@@ -745,9 +811,12 @@ else
         mailboxFull = context?.Mailbox is MailboxRow owner && (await Mail.StorageStateAsync(owner)).Full;
         sort = await Mail.SortForAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value, Name);
         (items, total) = await Mail.ListSortedAsync(mailboxId.Value, folder.Id, Show, sort, IsOutgoing, pageIndex, pageSize);
+        meId = WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value;
+        deskRight = meId != mailboxId.Value ? await Mail.SharedRightCachedAsync(meId, mailboxId.Value) : null;
         // rc.24 (item 68, brief 10a): with "Group by conversation" (the default) each conversation is
-        // listed once, at its newest mail in this folder. Not for Drafts, Scheduled or the Outbox.
-        grouping = Name is not ("Drafts" or "Outbox" or MailboxService.ScheduledFolder)
+        // listed once, at its newest mail in this folder. Not for Drafts, Scheduled or the Outbox; and
+        // not for a desk's Inbox, whose conversations are also told apart by the person outside (D-318).
+        grouping = Name is not ("Drafts" or "Outbox" or MailboxService.ScheduledFolder) && !(deskRight is not null && Name == FolderRow.Inbox)
             && (await Mail.GetMailSettingsAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value)).GroupByConversation
             ? await Mail.ConversationGroupingAsync(mailboxId.Value, folder.Name)
             : null;
@@ -770,6 +839,53 @@ else
         if (grouping is not null)
         {
             items = items.Where(grouping.Leads).ToList();
+        }
+        // rc.27 (DES-17 §2.3): on a desk, each row's state; a tab other than All lists the Inbox's
+        // conversations in that state (the newest 500), a page at a time.
+        if (deskRight is not null && Name is not ("Drafts" or "Sent" or MailboxService.ScheduledFolder or "Trash" or Anjal.Mailbox.MailboxSink.JunkFolder))
+        {
+            if (Name == FolderRow.Inbox)
+            {
+                (IReadOnlyList<MessageRow> recent, long _) = await Mail.ListSortedAsync(mailboxId.Value, folder.Id, "all", MailboxService.NewestFirst, false, 0, 500);
+                // One row per desk conversation (subject and the person outside), at its newest mail.
+                var markOf = new Dictionary<Guid, string>();
+                if (context?.Mailbox is MailboxRow deskBox && await Mail.DeskReadableAsync(deskBox))
+                {
+                    foreach (MessageRow r in recent)
+                    {
+                        markOf[r.Id] = Mail.DeskMark(deskBox, r) ?? r.Id.ToString();
+                    }
+                }
+                var byConversation = recent.GroupBy(r => markOf.TryGetValue(r.Id, out string? k) ? k : r.Id.ToString()).ToList();
+                var leadIds = byConversation.Select(g => g.First().Id).ToHashSet();
+                deskConversations = byConversation.ToDictionary(g => g.First().Id, g => g.Count());
+                IReadOnlyList<MessageRow> leads = recent.Where(r => leadIds.Contains(r.Id)).ToList();
+                items = items.Where(r => !markOf.ContainsKey(r.Id) || leadIds.Contains(r.Id)).ToList();
+                IReadOnlyDictionary<Guid, DeskState> all = await Mail.DeskStatesAsync(mailboxId.Value, leads);
+                deskCounts = DeskState.Tabs.ToDictionary(t => t, t => all.Values.Count(d => d.In(t, meId)));
+                if (DeskTab != "all")
+                {
+                    var chosen = leads.Where(m => all.TryGetValue(m.Id, out DeskState? d) && d.In(DeskTab, meId)).ToList();
+                    total = chosen.Count;
+                    items = chosen.Skip(pageIndex * pageSize).Take(pageSize).ToList();
+                }
+                deskStates = all.Concat((await Mail.DeskStatesAsync(mailboxId.Value, items.Where(m => !all.ContainsKey(m.Id)))))
+                    .GroupBy(kv => kv.Key).ToDictionary(g => g.Key, g => g.First().Value);
+                if (DeskTab != "done")
+                {
+                    overdueRows = items.Where(m => deskStates.TryGetValue(m.Id, out DeskState? d) && d.Overdue).ToList();
+                    var overdueIds = overdueRows.Select(m => m.Id).ToHashSet();
+                    items = items.Where(m => !overdueIds.Contains(m.Id)).ToList();
+                }
+            }
+            else
+            {
+                deskStates = await Mail.DeskStatesAsync(mailboxId.Value, items);
+            }
+        }
+        if (Name is "Drafts" or "Sent")
+        {
+            writers = await Mail.NamesOfAsync(items.Where(m => m.WrittenBy is not null).Select(m => m.WrittenBy!.Value));
         }
         // The reader marks the open message read after the list has loaded; show it read here too.
         bool openedNow = false;

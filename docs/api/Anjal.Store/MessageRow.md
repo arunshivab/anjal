@@ -12,6 +12,7 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 - **BodyText** *(property)* - The message's readable text, for search (see Anjal.Mailbox.MessageText). Written when the message is stored; listing queries do not read it back, so it is empty on rows loaded for display.
 - **CategoryId** *(property)* - The category this message carries, or null.
 - **DateHeader** *(property)* - The raw Date header value, or empty.
+- **DraftEmpty** *(property)* - rc.27 (D-309): a draft saved with nothing in it - no recipient, subject, text or file - decided in the writer's session, since the server cannot read a draft.
 - **EnvelopeFrom** *(property)* - SMTP envelope MAIL FROM.
 - **EvidenceId** *(property)* - The evidence copy this message came from (v1.0.0-rc.8), or null for mail from before rc.8.
 - **Flagged** *(property)* - Maildir "F" flag - the message is flagged/starred.
@@ -34,3 +35,4 @@ Metadata for one message stored in a mailbox folder. The message body lives only
 - **ToHeader** *(property)* - The raw To header value.
 - **TransportEncrypted** *(property)* - Whether mail from outside reached this server encrypted: true when the sending server used TLS, false when it did not, null for mail from a signed-in account, copies of the user's own mail and messages stored before v1.0.0-rc.7.
 - **TransportTls** *(property)* - The TLS version and cipher suite the sending server used, for example TLSv1.3 TLS_AES_256_GCM_SHA384; null when not encrypted or not recorded.
+- **WrittenBy** *(property)* - rc.27 (DES-17 §2.12, item 72.10): the person who wrote a desk's mail or last edited a draft, when it was not the mailbox's own person; null otherwise.

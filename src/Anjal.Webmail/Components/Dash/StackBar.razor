@@ -11,7 +11,8 @@
         double w = 100.0 * p.Count / whole;
         @if (w >= 0.3)
         {
-            <a class="stack-part st-@(i % 6)" href="@p.Link" style="width:@w.ToString("0.###", inv)%" title="@p.Name · @Show(p.Count)"></a>
+            @* rc.27 (item 79): a part wide enough carries its own name, so the bar reads without the colours. *@
+            <a class="stack-part st-@(i % 6)" href="@p.Link" style="width:@w.ToString("0.###", inv)%" title="@p.Name · @Show(p.Count)">@if (w >= 14) { <span class="stack-name">@p.Name</span> }</a>
         }
     }
 </div>
