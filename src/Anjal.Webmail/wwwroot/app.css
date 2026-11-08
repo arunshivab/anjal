@@ -4486,6 +4486,10 @@ button.tdrow-open { width: 100%; border: 0; background: none; color: inherit; fo
 .orgtable td.cellone { white-space: nowrap; }
 .orgtable .smeter { flex-direction: column; align-items: flex-start; gap: 2px; }
 .orgtable .smeter .quotabar { width: 56px; }
+/* rc.27 fix 2: on the runner the shared table was 5px wider than its card at 1366 with the rail open (the
+   clip check, 8 Nov). A long address may break, and "overdue" sits under the count, so it fits with room. */
+.sharedtable td:first-child b { overflow-wrap: anywhere; }
+.sharedtable .cellpill { display: flex; width: max-content; margin: 2px 0 0; }
 /* The desk's "Assigned to" takes the block's whole width, under its label (the word-cut check, 28 Oct). */
 .edesk .edrow:has(.edassign) { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .edesk .edassign { display: block; min-width: 0; }

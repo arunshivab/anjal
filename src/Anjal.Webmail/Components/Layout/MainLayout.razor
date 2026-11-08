@@ -429,8 +429,8 @@ else
                     data-word-updated="@L["Updated {time}"]" data-word-offline="@L["Offline: showing mail as of {time}"]"
                     data-word-needs-server="@L["Needs a connection. Try again when you are back online."]"
                     data-word-new="@L["{n} new messages just arrived."]">
-                <span class="lite" data-connectivity data-online="@L["Connected"]" data-offline="@L["Offline"]"><i></i><span class="slot" data-slot-a="@L["Connected"]" data-slot-b="@L["Offline"]">@L["Connected"]</span></span>
-                <span class="st-sub" data-updated>@L["Updated {time}"].Replace("{time}", clock.Time(now), StringComparison.Ordinal)</span>
+                @* rc.27 fix 2: the automatic-reply line and the shared-mailbox notice come first, before the
+                   light and "Updated", so the time changing never moves them (the live check on the runner, 8 Nov). *@
                 @if (away is not null)
                 {
                     @* rc.27 (item 72.3, brief 3a): on every page while the automatic reply is on, with the way to turn it off. *@
@@ -463,6 +463,8 @@ else
                         <button type="submit" class="linkbtn">@L["Back to my mailbox"]</button>
                     </form>
                 }
+                <span class="lite" data-connectivity data-online="@L["Connected"]" data-offline="@L["Offline"]"><i></i><span class="slot" data-slot-a="@L["Connected"]" data-slot-b="@L["Offline"]">@L["Connected"]</span></span>
+                <span class="st-sub" data-updated>@L["Updated {time}"].Replace("{time}", clock.Time(now), StringComparison.Ordinal)</span>
                 @* Design review 4.5: the status bar keeps the connection and the time it last looked,
                    a storage meter, the draft state while writing, and "? Shortcuts". *@
                 <span class="st-grow"></span>
