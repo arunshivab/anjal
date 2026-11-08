@@ -40,6 +40,12 @@
     private IEnumerable<(string Label, string Tip)> Pairs() => new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [L["Archive"]] = L["Keep it, out of the Inbox. Find it in Archive or by search."],
+            // rc.27 (the screen checks with a desk seeded): the desk's buttons.
+            [L["Back to my mailbox"]] = L["Leave the desk and go back to your own mail."],
+            [L["Take it"]] = L["Make this conversation yours; the desk sees you have it."],
+            [L["Mark done"]] = L["Nothing more to do; it opens again if the sender writes."],
+            [L["Add note"]] = L["Keep this note with the mail for the desk; it is never sent."],
+            [L["All"]] = L["Show everything again."],
             [L["Reply all"]] = L["Answer the sender and everyone else it went to."],
             [L["Flag"]] = L["Mark it to come back to."],
             [L["Remove flag"]] = L["Take the mark off."],
@@ -151,6 +157,8 @@
     private IEnumerable<(string Label, string Tip)> AdminPairs() => new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [L["Import list (CSV)"]] = L["Invite many people at once from a CSV file."],
+            [L["Add people"]] = L["Give the chosen person these rights to the shared mailbox."],
+            [L["Delete for good"]] = L["Erase it and its mail now. This cannot be undone."],
             [L["Invite people"]] = L["Make mailboxes for new people and send each an invitation."],
             [L["Download all records"]] = L["Save all the records shown here as one text file."],
             [L["Add a domain"]] = L["Receive and send mail at another domain your organisation owns."],
@@ -188,6 +196,8 @@
             [L["Add an organisation"]] = L["Set up a new organisation on this Anjal service."],
             [L["Send it now"]] = L["Send the summary to the operators now."],
             [L["Record the drill"]] = L["Keep this restore drill in the service's record; the next is due six months after it."],
+            [L["Record the check"]] = L["Keep this screen-reader check in the service's record; the next is due a month after it."],
+            [L["The ten steps"]] = L["Show the ten things to do with the screen reader alone."],
             [L["Change limits"]] = L["Change this organisation's status, people allowed and storage."],
             [L["Message the administrator"]] = L["Write to this organisation's administrator."],
             [L["Add"]] = L["Add it now."],

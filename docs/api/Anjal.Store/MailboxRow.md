@@ -32,7 +32,7 @@ A mailbox: a receiving identity local_part@domain belonging to a tenant. The mai
 - **RailFolded** *(property)* - True when the rail shows icons only (rc.11).
 - **TenantId** *(property)* - The owning tenant.
 - **Theme** *(property)* - Webmail theme for this mailbox: a colour and a mode, such as teal-light, teal-dark or teal-auto. Stored per mailbox, not per browser.
-- **ThemeColours** *(property)* - The house colour, Anjal, then the twenty named colours, in the order Settings shows them.
+- **ThemeColours** *(property)* - The house colour, Anjal, then Contrast (rc.27), then the twenty named colours, in the order Settings shows them.
 - **ThemeModes** *(property)* - The theme modes: light, dark, or following the device's own setting.
 - **TimeZone** *(property)* - IANA time zone every date is shown in (rc.11). Saved through .
 - **UpdatedAt** *(property)* - When the mailbox was created or last updated.

@@ -43,7 +43,10 @@ module.exports = {
           for (const url of screens) {
             if (!(await L.visit(w, url, 250))) { continue; }
             const { out: f, said } = await w.page.evaluate(frame);
-            for (const [k, p] of Object.entries(f)) {
+            // A desk's screens (rc.27) have their own rail: they keep their places among themselves.
+            const inDesk = /[?&]in=desk/.test(url) || url.startsWith('/shared/open');
+            for (const [k0, p] of Object.entries(f)) {
+              const k = (inDesk ? 'desk ' : '') + k0;
               checked++;
               // Folded and open, each rail icon keeps the same place; the status bar too.
               if (ref[k] === undefined) { ref[k] = { p, url, state, said }; continue; }

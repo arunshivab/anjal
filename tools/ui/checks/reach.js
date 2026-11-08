@@ -38,15 +38,17 @@ module.exports = {
     const done = new Set();
     let clicks = 0;
     try {
-      // 1. Every link.
+      // 1. Every link, asked for while its screen is still the one open (rc.27: a desk's links
+      //    answer only while the desk is open, and the person's own only while it is not).
       const links = new Set();
       for (const u of screens) {
         if (!(await L.visit(w, u, 100))) { continue; }
-        (await w.page.$$eval('a[href]', (as) => as.map((a) => a.getAttribute('href')))).forEach((h) => { if (h && h.startsWith('/') && !/sign-out|\/auth\//i.test(h)) { links.add(h.split('#')[0]); } });
-      }
-      for (const h of links) {
-        const r = await w.page.request.get(L.base + h, { maxRedirects: 5 }).catch(() => null);
-        if (!r || r.status() >= 400) { found.push(`link ${h}: ${r ? 'answers ' + r.status() : 'does not answer'}`); }
+        const here = [];
+        (await w.page.$$eval('a[href]', (as) => as.map((a) => a.getAttribute('href')))).forEach((h) => { if (h && h.startsWith('/') && !/sign-out|\/auth\//i.test(h)) { const k = (w.inDesk ? 'desk ' : '') + h.split('#')[0]; if (!links.has(k)) { links.add(k); here.push(h.split('#')[0]); } } });
+        for (const h of here) {
+          const r = await w.page.request.get(L.base + h, { maxRedirects: 5 }).catch(() => null);
+          if (!r || r.status() >= 400) { found.push(`link ${h}: ${r ? 'answers ' + r.status() : 'does not answer'}`); }
+        }
       }
       // 2. Every button, once per kind of screen: what a screen holds is read once, and the page
       //    is opened again only for a button not pressed before.

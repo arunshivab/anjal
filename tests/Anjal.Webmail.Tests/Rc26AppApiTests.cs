@@ -144,6 +144,35 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task Rc27_GiveUpIsTheApplications_ANewAddressIsMarked_AndTheOperatorSeesTheApplication()
+    {
+        // rc.27 (item 72.8, D-314): an application gives up after its own time - 5 days unless chosen.
+        HttpClient c = this.Client();
+        Assert.Equal(HttpStatusCode.Accepted, (await Send(c, this.liveKey, Body(Outside), "give-up-1")).StatusCode);
+        OutboundMessage first = Assert.Single(this.store.Outbound);
+        Assert.Equal(TimeSpan.FromHours(120), first.GiveUpAt - first.CreatedAt);
+        Assert.NotNull(await this.svc.SaveAppApiSettingsAsync(this.sgh, this.appId, "no-reply@sgh.in", 60, 1000, string.Empty, false, giveUpHours: 3));
+        Assert.Null(await this.svc.SaveAppApiSettingsAsync(this.sgh, this.appId, "no-reply@sgh.in", 60, 1000, string.Empty, false, giveUpHours: 4));
+        Assert.Equal(HttpStatusCode.Accepted, (await Send(c, this.liveKey, Body(Ravi), "give-up-2")).StatusCode);
+        OutboundMessage second = this.store.Outbound.Single(o => o.EnvelopeTo == "ravi@gmail.test");
+        Assert.Equal(TimeSpan.FromHours(4), second.GiveUpAt - second.CreatedAt);
+        // The SMTP route reads the same choice from the organisation's applications.
+        Assert.Equal(TimeSpan.FromHours(120), Anjal.Mailbox.AppGiveUp.ForKey(null, "his"));
+        Assert.Equal(TimeSpan.FromHours(4), Anjal.Mailbox.AppGiveUp.ForKey("[{\"Keys\":[{\"Username\":\"his-1\"}],\"GiveUpHours\":4}]", "HIS-1"));
+        Assert.Equal(TimeSpan.FromHours(120), Anjal.Mailbox.AppGiveUp.ForKey("[{\"Keys\":[{\"Username\":\"his-1\"}],\"GiveUpHours\":7}]", "his-1"));
+
+        // rc.27 (SPEC-17 D-03): the key's first use from an address is marked once, not on every request.
+        Assert.Single(await this.store.ListAuditAsync(200), e => e.Action == "app.api.new-address");
+
+        // rc.27 (SPEC-17 F-02): the operator's table of applications across organisations.
+        OpsAppRow row = Assert.Single(await this.svc.OpsAppsAsync(DateTimeOffset.UtcNow.AddHours(-1)));
+        Assert.Equal("Sri Ganesh Hospital", row.Organisation);
+        Assert.Equal(2, row.LiveKeys); // its SMTP key and its live HTTP key; the sandbox key is not counted
+        Assert.Equal(2, row.SendsToday);
+        Assert.NotNull(row.LastSend);
+    }
+
+    [Fact]
     public async Task Idempotency_TheSameKeyAndBodyReplays_ADifferentBodyIsAMismatch()
     {
         HttpClient c = this.Client();

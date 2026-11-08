@@ -60,6 +60,18 @@ public sealed class MailSettings
         set => this.notifyScope = value is "inbox" or "answers" ? value : "needs";
     }
 
+    private string deskNotify = "assigned";
+
+    /// <summary>
+    /// rc.27 (D-273, DES-17 §2.10): pop-ups from desks - "assigned" (only mail assigned to me or
+    /// mentioning me, the default), "all" (every new mail on my desks) or "none".
+    /// </summary>
+    public string DeskNotify
+    {
+        get => this.deskNotify;
+        set => this.deskNotify = value is "all" or "none" ? value : "assigned";
+    }
+
     /// <summary>rc.26 (item 80): quiet hours - no pop-ups from this time ("HH:mm", the person's clock); empty for none.</summary>
     public string QuietFrom { get; set; } = string.Empty;
 
@@ -162,9 +174,10 @@ public sealed partial class MailboxService
     /// <param name="quietFrom">Quiet hours from ("HH:mm"), or empty.</param>
     /// <param name="quietTo">Quiet hours to ("HH:mm"), or empty.</param>
     /// <param name="quietAway">Quiet while the automatic reply is on.</param>
+    /// <param name="desks">rc.27: "assigned", "all" or "none"; null to leave it.</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>A task.</returns>
-    public async Task SetDesktopNotifyAsync(Guid mailboxId, bool on, string scope, string? quietFrom = null, string? quietTo = null, bool? quietAway = null, CancellationToken ct = default)
+    public async Task SetDesktopNotifyAsync(Guid mailboxId, bool on, string scope, string? quietFrom = null, string? quietTo = null, bool? quietAway = null, string? desks = null, CancellationToken ct = default)
     {
         MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);
         // rc.26 (item 80): "Nothing" is the switch off.
@@ -179,6 +192,10 @@ public sealed partial class MailboxService
         if (quietAway is bool qa)
         {
             s.QuietWhileAway = qa;
+        }
+        if (desks is not null)
+        {
+            s.DeskNotify = desks;
         }
         await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
     }

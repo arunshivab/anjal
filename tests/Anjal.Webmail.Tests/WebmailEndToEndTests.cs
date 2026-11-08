@@ -483,7 +483,7 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         Assert.Contains("2 unread", list, System.StringComparison.Ordinal);
         string three = await this.client.GetStringAsync($"folder/INBOX?page=0&open={m.Id}");
         Assert.Contains("class=\"fview layout-three has-open\"", three, System.StringComparison.Ordinal);
-        Assert.Contains("<section class=\"listcol\">", three, System.StringComparison.Ordinal);
+        Assert.Contains("<section class=\"listcol\" id=\"maillist\" tabindex=\"-1\">", three, System.StringComparison.Ordinal); // rc.27: the skip link's target
         Assert.Contains("<article class=\"letter\"", three, System.StringComparison.Ordinal);
         Assert.Contains("class=\"mrow open\" aria-current=\"true\" data-message=\"" + m.Id, three, System.StringComparison.Ordinal);
         Assert.Contains("1 unread", three, System.StringComparison.Ordinal);
@@ -516,7 +516,7 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         // rc.11 part A9 (SPEC-11 items 36, 40, 41, 45; D-92).
         await this.LoginAsync();
         string appearance = await this.client.GetStringAsync("settings/appearance");
-        Assert.Equal(21, Regex.Count(appearance, "type=\"radio\" name=\"colour\"")); // DES-11 D4: 21 colours
+        Assert.Equal(22, Regex.Count(appearance, "type=\"radio\" name=\"colour\"")); // DES-11 D4: 21 colours; rc.27 (item 79): and high contrast
         Assert.Matches("value=\"anjal\" checked", appearance);
         Assert.Contains("Changes apply at once. Only you see them.", appearance, System.StringComparison.Ordinal);
 

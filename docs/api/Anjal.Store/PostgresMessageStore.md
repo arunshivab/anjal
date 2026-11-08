@@ -9,6 +9,8 @@ rc.26 (DES-14 §28.1): the application API's tables - see tools/sql/schema.sql.
 - **#ctor** *(method)* - Create the store with a PostgreSQL connection string.
 - **AcknowledgeAppMailAsync** *(method)* - _(no description)_
 - **AddAppEventAsync** *(method)* - _(no description)_
+- **AddDeskEventAsync** *(method)* - _(no description)_
+- **AddDeskNoteAsync** *(method)* - _(no description)_
 - **AddEvidenceAttemptAsync** *(method)* - _(no description)_
 - **AddMailboxKeysAsync** *(method)* - _(no description)_
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
@@ -68,6 +70,7 @@ rc.26 (DES-14 §28.1): the application API's tables - see tools/sql/schema.sql.
 - **GetAppWebhookDeliveryAsync** *(method)* - _(no description)_
 - **GetBreakGlassAsync** *(method)* - _(no description)_
 - **GetCategoryAsync** *(method)* - _(no description)_
+- **GetDeskItemAsync** *(method)* - _(no description)_
 - **GetDkimKeyAsync** *(method)* - _(no description)_
 - **GetEvidenceAsync** *(method)* - _(no description)_
 - **GetInboundByIdAsync** *(method)* - _(no description)_
@@ -78,6 +81,7 @@ rc.26 (DES-14 §28.1): the application API's tables - see tools/sql/schema.sql.
 - **GetMailboxDocumentAsync** *(method)* - _(no description)_
 - **GetMailboxKeysAsync** *(method)* - _(no description)_
 - **GetMessageByIdAsync** *(method)* - _(no description)_
+- **GetOrAddDeskItemAsync** *(method)* - _(no description)_
 - **GetOutboundByIdAsync** *(method)* - _(no description)_
 - **GetOutboundEvidenceLinkAsync** *(method)* - _(no description)_
 - **GetOutboundTlsPolicyAsync** *(method)* - _(no description)_
@@ -105,10 +109,16 @@ rc.26 (DES-14 §28.1): the application API's tables - see tools/sql/schema.sql.
 - **ListAppInboxAsync** *(method)* - _(no description)_
 - **ListAppSendsAsync** *(method)* - _(no description)_
 - **ListAppWebhookDeliveriesAsync** *(method)* - _(no description)_
+- **ListAssignedDeskItemsAsync** *(method)* - _(no description)_
 - **ListAuditAsync** *(method)* - _(no description)_
 - **ListCategoriesAsync** *(method)* - _(no description)_
 - **ListCategoryRulesAsync** *(method)* - _(no description)_
+- **ListDeskEventsAsync** *(method)* - _(no description)_
+- **ListDeskEventsSinceAsync** *(method)* - _(no description)_
+- **ListDeskItemsAsync** *(method)* - _(no description)_
+- **ListDeskNotesAsync** *(method)* - _(no description)_
 - **ListDkimKeysAsync** *(method)* - _(no description)_
+- **ListEmptyDraftsAsync** *(method)* - _(no description)_
 - **ListEvidenceAttemptsAsync** *(method)* - _(no description)_
 - **ListEvidenceCapturedAsync** *(method)* - _(no description)_
 - **ListEvidenceDueAsync** *(method)* - _(no description)_
@@ -147,6 +157,8 @@ rc.26 (DES-14 §28.1): the application API's tables - see tools/sql/schema.sql.
 - **MarkEvidencePurgedAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
+- **NoteDeskArrivalAsync** *(method)* - _(no description)_
+- **NoteDeskReplyAsync** *(method)* - _(no description)_
 - **OldestPendingOutboundAsync** *(method)* - _(no description)_
 - **PruneAppApiAsync** *(method)* - _(no description)_
 - **PurgeSessionKeysAsync** *(method)* - _(no description)_
@@ -174,6 +186,8 @@ rc.26 (DES-14 §28.1): the application API's tables - see tools/sql/schema.sql.
 - **SaveWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SearchMessagesAsync** *(method)* - _(no description)_
 - **SetAppInboxAddressAsync** *(method)* - _(no description)_
+- **SetDeskAssigneeAsync** *(method)* - _(no description)_
+- **SetDeskDoneAsync** *(method)* - _(no description)_
 - **SetEvidenceOutcomeAsync** *(method)* - _(no description)_
 - **SetMailboxDocumentAsync** *(method)* - _(no description)_
 - **SetMailboxPreferencesAsync** *(method)* - _(no description)_
@@ -205,4 +219,5 @@ rc.26 (DES-14 §28.1): the application API's tables - see tools/sql/schema.sql.
 - **UpsertTenantAsync** *(method)* - _(no description)_
 - **UpsertTenantDomainAsync** *(method)* - _(no description)_
 - **VerifyAuditChainAsync** *(method)* - _(no description)_
+- **WithdrawDeskNoteAsync** *(method)* - _(no description)_
 - **Secrets** *(property)* - Seals DKIM private keys before they are written and opens them when read. Null stores and returns them as given (development, or before a KEK is configured); existing plaintext rows are re-sealed the next time they are saved.

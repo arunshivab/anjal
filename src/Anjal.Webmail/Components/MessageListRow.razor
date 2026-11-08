@@ -39,6 +39,28 @@
                 @* DEF-159 (rc.23): after the subject, so every subject starts in the same place. rc.22: "Snoozed" when it came back from snooze; "Virus removed" when a file was taken out. *@
                 <span class="pill @(Mark == "Virus removed" ? "pill-bad" : "pill-info") rowmark">@L[Mark]</span>
             }
+            @if (Desk is not null)
+            {
+                @* rc.27 (DES-17 §2.3): on a desk, who has it and where it stands - an icon and a word, never colour
+                   alone - in one cell of its own, so every subject still starts at the same place (the lineup check). *@
+                <span class="deskcell">
+                    @if (Desk.Overdue)
+                    {
+                        <span class="pill pill-warn deskdue" data-desk-overdue><LipiIcon Name="clock" Size="11" />@L["Reply overdue"]</span>
+                    }
+                    <span class="deskmark ds-@Desk.State" data-desk-state="@Desk.State" title="@DeskTitle">
+                        @if (Desk.AssigneeId is not null)
+                        {
+                            <span class="initials deskwho" aria-hidden="true">@Initials(Desk.Assignee)</span>
+                        }
+                        <span>@DeskWord</span>
+                    </span>
+                    @if (Desk.Replying is not null)
+                    {
+                        <span class="deskpen" role="img" title="@L["{name} is replying"].Replace("{name}", Desk.Replying, StringComparison.Ordinal)" aria-label="@L["{name} is replying"].Replace("{name}", Desk.Replying, StringComparison.Ordinal)"><LipiIcon Name="edit" Size="12" /></span>
+                    }
+                </span>
+            }
             @if (ShowFlag)
             {
                 <button type="submit" class="fav @(M.Flagged ? "on" : "")"
@@ -57,6 +79,11 @@
                 <span class="score @(high ? "s-hi" : "s-mid")" title="@L["Checked on arrival: spam score {n}"].Replace("{n}", n, StringComparison.Ordinal)">@((high ? L["Junk risk {n}"] : L["Spam {n}"]).Replace("{n}", n, StringComparison.Ordinal))</span>
             }
         </div>
+        @if (Note is not null)
+        {
+            @* rc.27 (DES-17 §2.12, item 72.10): who wrote a desk's mail; who and when a draft was last edited. *@
+            <div class="mline3 mnote"><LipiIcon Name="edit" Size="11" />@Note</div>
+        }
         @if (Sends is not null)
         {
             <div class="mline3 msends"><span class="sendpill"><LipiIcon Name="clock" Size="12" />@Sends</span></div>
@@ -94,7 +121,35 @@
 @code {
     private string QuickAction => QuickUrl + (QuickUrl!.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "one=" + M.Id;
 
-    private string RowClass => "mrow" + (M.Seen ? string.Empty : " unread") + (IsOpen ? " open" : string.Empty);
+    private string RowClass => "mrow" + (M.Seen ? string.Empty : " unread") + (IsOpen ? " open" : string.Empty) + (Desk?.Overdue == true ? " overdue" : string.Empty);
+
+    private string DeskWord => Desk?.State switch
+    {
+        "open" => Desk.Assignee.Length > 0 ? Desk.Assignee : L["Open"],
+        "waiting" => L["Waiting"],
+        "done" => L["Done"],
+        _ => L["Not assigned"],
+    };
+
+    private string DeskTitle => Desk?.State switch
+    {
+        "open" => L["Open: {name} has it"].Replace("{name}", Desk.Assignee, StringComparison.Ordinal),
+        "waiting" => L["Waiting: the desk replied"],
+        "done" => L["Done"],
+        _ => L["Not assigned"],
+    } + (Desk?.Due is DateTimeOffset due ? " · " + L["Reply due by {time}"].Replace("{time}", Clock.Full(due), StringComparison.Ordinal) : string.Empty);
+
+    private static string Initials(string name)
+    {
+        string[] parts = name.Split(new[] { ' ', '.', '@' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 0 ? "?" : parts.Length == 1 ? parts[0][..1].ToUpperInvariant() : (parts[0][..1] + parts[1][..1]).ToUpperInvariant();
+    }
+
+    /// <summary>rc.27: the row's desk state, on a desk's list; null elsewhere.</summary>
+    [Parameter] public DeskState? Desk { get; set; }
+
+    /// <summary>rc.27: a line under the row - who wrote it, or who edited a draft and when; null for none.</summary>
+    [Parameter] public string? Note { get; set; }
 
     /// <summary>The message.</summary>
     [Parameter, EditorRequired] public MessageRow M { get; set; } = new();

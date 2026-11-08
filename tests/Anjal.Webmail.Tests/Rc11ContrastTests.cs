@@ -40,7 +40,7 @@ public class Rc11ContrastTests
                 }
             }
         }
-        Assert.Equal(42, themes); // DES-11 D4 (owner, 10 Oct 2026): 21 colours, each light and dark
+        Assert.Equal(44, themes); // DES-11 D4 (owner, 10 Oct 2026): 21 colours, each light and dark; rc.27 (item 79): and high contrast, 22
         Assert.Empty(failures);
     }
 

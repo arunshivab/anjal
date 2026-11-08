@@ -63,6 +63,37 @@ public sealed class RestoreDrill
     public DateTimeOffset RecordedAt { get; set; }
 }
 
+/// <summary>rc.27 (item 79, D-312): the monthly screen-reader check, as the operator records it.</summary>
+public sealed class ReaderCheck
+{
+    /// <summary>The ten steps, in order, each tried with the screen reader alone.</summary>
+    public static readonly IReadOnlyList<string> Steps = new[]
+    {
+        "Sign in", "Read a mail", "Reply to it", "Attach a file", "Search", "Today", "A desk's mail", "Settings", "The console", "Sign out",
+    };
+
+    /// <summary>The day it was done, yyyy-MM-dd.</summary>
+    public string Date { get; set; } = string.Empty;
+
+    /// <summary>The screen reader: NVDA, VoiceOver, TalkBack or JAWS.</summary>
+    public string Reader { get; set; } = string.Empty;
+
+    /// <summary>The browser it was used with.</summary>
+    public string Browser { get; set; } = string.Empty;
+
+    /// <summary>True when every step worked.</summary>
+    public bool Passed { get; set; }
+
+    /// <summary>What did not work.</summary>
+    public string Findings { get; set; } = string.Empty;
+
+    /// <summary>Who did it.</summary>
+    public string By { get; set; } = string.Empty;
+
+    /// <summary>When it was recorded.</summary>
+    public DateTimeOffset RecordedAt { get; set; }
+}
+
 /// <summary>How much of the service's mail a big receiver took (rc.15, item 61).</summary>
 /// <param name="Name">"Gmail", "Microsoft" or "Yahoo".</param>
 /// <param name="Sent">Accepted.</param>
@@ -254,6 +285,38 @@ public sealed partial class MailboxService
         List<RestoreDrill> all = await this.ServiceRecordAsync<List<RestoreDrill>>(DrillsKind, ct).ConfigureAwait(false) ?? new List<RestoreDrill>();
         all.Add(drill);
         await this.messageStore.SetServiceRecordAsync(DrillsKind, JsonSerializer.Serialize(all.TakeLast(100).ToList()), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>rc.27 (D-312): the service record of the monthly screen-reader checks.</summary>
+    public const string ReaderChecksKind = "reader-checks";
+
+    /// <summary>The screen-reader checks recorded, newest first.</summary>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The checks.</returns>
+    public async Task<IReadOnlyList<ReaderCheck>> ReaderChecksAsync(CancellationToken ct = default) =>
+        (await this.ServiceRecordAsync<List<ReaderCheck>>(ReaderChecksKind, ct).ConfigureAwait(false) ?? new List<ReaderCheck>())
+            .OrderByDescending(d => d.Date, StringComparer.Ordinal).ThenByDescending(d => d.RecordedAt).ToList();
+
+    /// <summary>Record a screen-reader check (the operator, from the Service health page).</summary>
+    /// <param name="check">The check.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public async Task RecordReaderCheckAsync(ReaderCheck check, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(check);
+        List<ReaderCheck> all = await this.ServiceRecordAsync<List<ReaderCheck>>(ReaderChecksKind, ct).ConfigureAwait(false) ?? new List<ReaderCheck>();
+        all.Add(check);
+        await this.messageStore.SetServiceRecordAsync(ReaderChecksKind, JsonSerializer.Serialize(all.TakeLast(60).ToList()), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>When the next screen-reader check is due: a month after the last; null when none is recorded.</summary>
+    /// <param name="checks">The checks.</param>
+    /// <returns>The day.</returns>
+    public static DateTime? NextReaderCheckDue(IReadOnlyList<ReaderCheck> checks)
+    {
+        ArgumentNullException.ThrowIfNull(checks);
+        ReaderCheck? last = checks.OrderByDescending(d => d.Date, StringComparer.Ordinal).FirstOrDefault();
+        return last is not null && DateTime.TryParseExact(last.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime day) ? day.AddMonths(1) : null;
     }
 
     /// <summary>When the next restore drill is due: six months after the last that passed; null when none is recorded.</summary>

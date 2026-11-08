@@ -184,6 +184,13 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
         }
 
         System.DateTimeOffset now = this.clock();
+        // rc.27 (item 72.8, D-314): mail sent with an application's SMTP key gives up after the application's own time.
+        System.TimeSpan giveUp = Anjal.Store.OutboundMessage.DefaultGiveUp;
+        if (external.Count > 0 && ctx.AuthenticatedUser is string user && this.outbound is Anjal.Store.IMailboxStore apps
+            && await SenderTenantAsync(apps, user, at >= 0 ? ctx.EnvelopeFrom[(at + 1)..] : string.Empty, ct).ConfigureAwait(false) is System.Guid appTenant)
+        {
+            giveUp = Anjal.Mailbox.AppGiveUp.ForKey(await apps.GetTenantDocumentAsync(appTenant, "apps", ct).ConfigureAwait(false), user);
+        }
         var queued = new System.Collections.Generic.List<System.Guid>();
         foreach (string rcpt in external)
         {
@@ -194,7 +201,7 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
                 RawBytes = ctx.RawBytes,
                 CreatedAt = now,
                 NextAttemptAt = now,
-                GiveUpAt = now + Anjal.Store.OutboundMessage.DefaultGiveUp,
+                GiveUpAt = now + giveUp,
             }, ct).ConfigureAwait(false);
             queued.Add(row.Id);
         }

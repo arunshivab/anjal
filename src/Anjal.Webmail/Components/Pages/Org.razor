@@ -559,18 +559,32 @@ else
                     <h2>@L["Shared mailboxes"]</h2>
                     <a class="btn btn-p" href="/org/shared?new=1"><LipiIcon Name="plus" Size="16" />@L["New shared mailbox"]</a>
                 </header>
-                <p class="hint orglead">@L["A shared mailbox has no password of its own. People open it beside their own mailbox, with the rights given here."]</p>
-                <table class="orgtable">
-                    <thead><tr><th>@L["Address"]</th><th>@L["Name"]</th><th>@L["People"]</th><th>@L["Sending"]</th><th>@L["Mail"]</th></tr></thead>
+                <p class="hint orglead">@L["A shared mailbox has no password of its own. People open it beside their own mailbox, with the rights given here. Used by a team, it is a desk: mail is assigned, replied to and marked done."]</p>
+                @* rc.27 (D-315): the organisation's working week, for every desk's "reply due by". *@
+                <details class="orgweek" open="@(Saved == "week")">
+                    <summary><LipiIcon Name="clock" Size="15" /><b>@L["Working week"]</b> <span class="hint">@WeekWords(orgWeek)</span></summary>
+                    <form method="post" action="/org/work-week" class="asideform orgweekform">
+                        <AntiforgeryToken />
+                        <WorkWeekFields Week="orgWeek" L="L" Prefix="orgweek" />
+                        <p class="hint">@L["A desk's reply time counts only these hours. A desk may set its own week."]</p>
+                        <div class="setactions"><button type="submit" class="btn btn-s">@L["Save"]</button></div>
+                    </form>
+                </details>
+                <table class="orgtable sharedtable">
+                    @* rc.27: six columns, so the table fits in every language (the Hindi screen check, 28 Oct): the
+                       name under the address, overdue beside open; how it sends is on its panel. *@
+                    <thead><tr><th>@L["Address"]</th><th>@L["People"]</th><th>@L["Mail"]</th><th>@L["Open"]</th><th>@L["Usual reply time"]</th><th>@L["Storage"]</th></tr></thead>
                     <tbody>
                     @foreach ((MailboxRow box, SharedMailbox info, long unread) in shared)
                     {
                         <tr class="@(SelGuid == box.Id ? "on" : null)">
-                            <td><a class="rowlink" href="/org/shared?sel=@box.Id"><b>@box.Address</b></a></td>
-                            <td>@box.DisplayName</td>
-                            <td>@(info.Members.Count == 1 ? L["1 person"] : L["{n} people"].Replace("{n}", info.Members.Count.ToString(Inv), StringComparison.Ordinal))</td>
-                            <td><span class="pill pill-mute">@(info.SendMode == "behalf" ? L["On behalf"] : L["Send as"])</span></td>
-                            <td>@(unread == 0 ? "0" : L["{n} unread"].Replace("{n}", unread.ToString(Inv), StringComparison.Ordinal))</td>
+                            <td><a class="rowlink" href="/org/shared?sel=@box.Id"><b>@box.Address</b></a>@if (box.DisplayName.Length > 0) { <span class="cellsub">@box.DisplayName</span> }</td>
+                            <td class="cellone">@(info.Members.Count == 1 ? L["1 person"] : L["{n} people"].Replace("{n}", info.Members.Count.ToString(Inv), StringComparison.Ordinal))</td>
+                            <td class="cellone">@(unread == 0 ? "0" : L["{n} unread"].Replace("{n}", unread.ToString(Inv), StringComparison.Ordinal))</td>
+                            @{ DeskFigures fig = deskFigures.TryGetValue(box.Id, out DeskFigures? f) ? f : new DeskFigures(0, 0, null); }
+                            <td>@fig.Open.ToString(Inv)@if (fig.Overdue > 0) { <span class="pill pill-warn cellpill"><LipiIcon Name="clock" Size="11" />@L["{n} overdue"].Replace("{n}", fig.Overdue.ToString(Inv), StringComparison.Ordinal)</span> }</td>
+                            <td>@(fig.UsualReplyMinutes is int mins ? ReplyWords(mins) : "—")</td>
+                            <td>@if (deskStorage.TryGetValue(box.Id, out StorageState? st)) { <StorageMeter Used="st.Used" Limit="st.OwnLimit" L="L" /> }</td>
                         </tr>
                     }
                     </tbody>
@@ -785,7 +799,7 @@ else
 
         case "apps" when Api is not null && selApp is not null:
             @* rc.26 (DES-14 §28.6): the application's API page. *@
-            <AppApiSettings App="selApp" TabText="@Api" L="L" Clock="clock" Host="@Host.Name" Domain="@(domains.FirstOrDefault()?.Domain ?? "example.in")" Revealed="revealed" Inbox="appInbox" ConfirmShare="@Share" ConfirmHolder="shareHolder" Deliveries="appDeliveries" Templates="appTemplates" Windows="appWindows" HourCeiling="appHourCeiling" DayCeiling="appDayCeiling" />
+            <AppApiSettings App="selApp" TabText="@Api" L="L" Clock="clock" Host="@Host.Name" Domain="@(domains.FirstOrDefault()?.Domain ?? "example.in")" Revealed="revealed" Inbox="appInbox" ConfirmShare="@Share" ConfirmHolder="shareHolder" Deliveries="appDeliveries" Sends="appSends" Which="@Which" Templates="appTemplates" Windows="appWindows" HourCeiling="appHourCeiling" DayCeiling="appDayCeiling" />
             break;
 
         case "apps":
@@ -1124,7 +1138,8 @@ else
                 @* Owner, 8 Oct 2026: Send one each only for the people the organisation chooses. *@
                 <p class="asideline"><b>@L["Send one each"]</b>: @(mergePeople.Contains(selPerson.Mailbox.Id) ? L["allowed"] : L["not allowed"])</p>
                 @* DES-11 D2: the person's use against their own limit (if any); "over" when a lowered plan or limit left them above it. *@
-                <p class="asideline"><b>@L["Storage"]</b>: @Layout.MainLayout.Size(selPerson.Mailbox.UsedBytes) @(selPerson.Mailbox.QuotaBytes > 0 ? L["of"] + " " + Layout.MainLayout.Size(selPerson.Mailbox.QuotaBytes) : L["from the shared total"])
+                @* rc.27 (item 72.1, D-316): the meter, as everywhere. *@
+                <p class="asideline"><b>@L["Storage"]</b>: <StorageMeter Used="selPerson.Mailbox.UsedBytes" Limit="selPerson.Mailbox.QuotaBytes" L="L" />@if (selPerson.Mailbox.QuotaBytes <= 0) { <span class="hint"> @L["from the shared total"]</span> }
                     @if (selPerson.Mailbox.QuotaBytes > 0 && selPerson.Mailbox.UsedBytes > selPerson.Mailbox.QuotaBytes)
                     {
                         <span class="pill pill-bad" title="@L["Above its limit: it keeps its mail, and receives nothing until it is back under."]">@L["over"]</span>
@@ -1357,6 +1372,10 @@ else
                 <h2 class="asidehead">@L["Selected mailbox"]</h2>
                 <h3 class="asidetitle">@s.Mailbox.Address</h3>
                 <p class="asidetext">@SharedSummary(s)</p>
+                @if (deskStorage.TryGetValue(s.Mailbox.Id, out StorageState? selStore))
+                {
+                    <p class="asidetext"><span class="setlbl">@L["Storage"]</span><StorageMeter Used="selStore.Used" Limit="selStore.OwnLimit" L="L" /></p>
+                }
                 <ul class="memberlist">
                     @foreach ((Guid pid, string right) in s.Info.Members.OrderBy(kv => NameOf(everyone.FirstOrDefault(m => m.Id == kv.Key)), StringComparer.OrdinalIgnoreCase))
                     {
@@ -1400,6 +1419,8 @@ else
                     <label class="mtoggle"><input type="checkbox" name="keep" value="1" checked="@s.Info.KeepSentCopy" data-autosubmit role="switch" /><span class="toggle" aria-hidden="true"><i></i></span><span>@L["Keep a copy of sent mail in this mailbox"]</span></label>
                     <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
                 </form>
+                @* rc.27 (DES-17 §2.13): the desk's own settings. *@
+                <DeskSettingsForm DeskId="s.Mailbox.Id" Info="s.Info" OrgWeek="orgWeek" Back="@("/org/shared?sel=" + s.Mailbox.Id)" L="L" />
                 @* DEF-135, DEF-163 (rc.23): a shared mailbox can be deleted; what happens to its mail is said first. *@
                 <details class="confirm asideconfirm">
                     <summary class="btn btn-danger-q asidebtn">@L["Delete this shared mailbox"]</summary>
@@ -1789,6 +1810,10 @@ else
     [SupplyParameterFromQuery(Name = "produce")] private string? Produce { get; set; }
     // rc.26 (DES-14 §28.6): an application's API page, its tab, and an address waiting to be shared.
     [SupplyParameterFromQuery(Name = "api")] private string? Api { get; set; }
+
+    // rc.27 (SPEC-17 F-01, D-04): an application's recent sends, live or sandbox.
+    [SupplyParameterFromQuery(Name = "which")] private string? Which { get; set; }
+    private IReadOnlyList<Anjal.Store.AppSend> appSends = Array.Empty<Anjal.Store.AppSend>();
     [SupplyParameterFromQuery(Name = "share")] private string? Share { get; set; }
     [SupplyParameterFromQuery(Name = "sheet")] private string? SheetShown { get; set; }
     [SupplyParameterFromQuery(Name = "q")] private string? QText { get; set; }
@@ -1833,6 +1858,25 @@ else
     private Dictionary<string, string> pending = new();
     private IReadOnlyList<DnsRecordCheck> records = Array.Empty<DnsRecordCheck>();
     private IReadOnlyList<(MailboxRow Mailbox, SharedMailbox Info, long Unread)> shared = Array.Empty<(MailboxRow, SharedMailbox, long)>();
+
+    // rc.27 (DES-17 §2.6, §2.13; D-315; item 72.1).
+    private WorkWeek orgWeek = new();
+    private readonly Dictionary<Guid, DeskFigures> deskFigures = new();
+    private readonly Dictionary<Guid, StorageState> deskStorage = new();
+
+    private string ReplyWords(int minutes) => minutes < 60
+        ? L["{n} min"].Replace("{n}", minutes.ToString(Inv), StringComparison.Ordinal)
+        : minutes < 60 * 24 ? L["{n} h"].Replace("{n}", (minutes / 60).ToString(Inv), StringComparison.Ordinal)
+        : L["{n} days"].Replace("{n}", (minutes / (60 * 24)).ToString(Inv), StringComparison.Ordinal);
+
+    private string WeekWords(WorkWeek w)
+    {
+        string[] names = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+        var days = w.Days.OrderBy(d => d == 0 ? 7 : d).ToList();
+        bool run = days.Count > 1 && days.Zip(days.Skip(1), (a, b) => (b == 0 ? 7 : b) - (a == 0 ? 7 : a)).All(x => x == 1);
+        string dayText = days.Count == 0 ? string.Empty : run ? L[names[days[0]]] + "–" + L[names[days[^1]]] : string.Join(", ", days.Select(d => L[names[d]]));
+        return dayText + " " + w.From + "–" + w.To;
+    }
     private (MailboxRow Mailbox, SharedMailbox Info, long Unread)? selShared;
     private RetentionPolicy retention = new();
     private EncryptionView encryption = new();
@@ -2111,6 +2155,13 @@ else
                 {
                     shared = await Mail.SharedListAsync(tenant.Id);
                     selShared = shared.FirstOrDefault(s => s.Mailbox.Id == SelGuid) is { Mailbox: not null } found ? found : null;
+                    // rc.27 (DES-17 §2.6, §2.13; item 72.1): each desk's figures and storage, and the working week.
+                    orgWeek = await Mail.WorkWeekAsync(tenant.Id);
+                    foreach ((MailboxRow box, SharedMailbox info, long _) in shared)
+                    {
+                        deskFigures[box.Id] = await Mail.DeskFiguresAsync(box, info);
+                        deskStorage[box.Id] = await Mail.StorageStateAsync(box);
+                    }
                 }
                 break;
             case "signin":
@@ -2167,6 +2218,9 @@ else
                             break;
                         case "webhooks" when Store is Anjal.Store.IAppApiStore appStore:
                             appDeliveries = await appStore.ListAppWebhookDeliveriesAsync(selApp.Id, 200);
+                            break;
+                        case "sends" when Store is Anjal.Store.IAppApiStore sendStore:
+                            appSends = (await sendStore.ListAppSendsAsync(selApp.Id, new Anjal.Store.AppSendQuery { Limit = 500 })).Where(s => s.LastEvent != "batch").ToList();
                             break;
                         case "templates":
                             appTemplates = await Mail.AppTemplatesAsync(tenant.Id);

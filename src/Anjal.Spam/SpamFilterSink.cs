@@ -277,6 +277,11 @@ public sealed class SpamFilterSink : IMessageSink
         if (this.Action == SpamAction.Reject && verdict.Score >= this.RejectThreshold)
         {
             Counters.Increment("anjal_spam_rejected_total");
+            // rc.27: and per recipient domain, for each organisation's line in the Monday summary.
+            foreach (string domain in ctx.EnvelopeTo.Select(r => r.LastIndexOf('@') is int at && at > 0 ? r[(at + 1)..] : string.Empty).Where(d => d.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                DomainCounters.Increment(DomainCounters.SpamRefused, domain);
+            }
             return new DeliveryResult
             {
                 Outcome = DeliveryOutcome.PermanentFailure,

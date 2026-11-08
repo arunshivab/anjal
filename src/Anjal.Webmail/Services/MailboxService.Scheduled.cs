@@ -501,6 +501,12 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
             {
                 Console.WriteLine("[app-api] " + line);
             }
+            // rc.27 (item 72.10, D-309): drafts saved empty and untouched for 30 days.
+            int emptyDrafts = await this.mail.RemoveEmptyDraftsAsync(ct).ConfigureAwait(false);
+            if (emptyDrafts > 0)
+            {
+                Console.WriteLine($"[drafts] {emptyDrafts} empty draft(s) older than 30 days removed.");
+            }
         }
 #pragma warning disable CA1031 // The daily work is tried again within the hour; sending never waits for it.
         catch (Exception ex) when (ex is not OperationCanceledException)

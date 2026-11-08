@@ -116,7 +116,9 @@
                 <div class="sskpis three">
                     <div class="sskpi @(view.Waiting > 0 && view.Oldest is DateTimeOffset w && DateTimeOffset.UtcNow - w > TimeSpan.FromDays(7) ? "k-warn" : "k-ok")"><span>@L["Waiting"]</span><b>@view.Waiting.ToString("N0", Inv)</b></div>
                     <div class="sskpi k-ink"><span>@L["Oldest"]</span><b>@(view.Oldest is DateTimeOffset o ? DaysText(o) : "-")</b></div>
-                    <div class="sskpi k-ink"><span>@L["Storage"]</span><b>@Sizes.Text(view.UsedBytes)</b><small>@L["of {size}"].Replace("{size}", Sizes.Text(view.QuotaBytes), StringComparison.Ordinal)</small></div>
+                    <div class="sskpi k-ink"><span>@L["Storage"]</span><b>@Sizes.Text(view.UsedBytes)</b><small>@L["of {size}"].Replace("{size}", Sizes.Text(view.QuotaBytes), StringComparison.Ordinal)</small>
+                        @* rc.27 (item 72.1, D-316): against its own quota (D-276). *@
+                        <StorageMeter Used="view.UsedBytes" Limit="view.QuotaBytes" L="L" /></div>
                 </div>
                 <table class="orgtable sstable">
                     <thead><tr><th scope="col">@L["Address"]</th><th scope="col">@L["Also delivered to"]</th><th scope="col">@L["Added"]</th><th scope="col"><span class="sr-only">@L["Actions"]</span></th></tr></thead>
@@ -223,6 +225,37 @@
             }
             break;
 
+        case "sends":
+            @* rc.27 (SPEC-17 F-01, D-04; DES-14 §29 point 11): its recent sends - live and sandbox apart - with
+               where they went and how they ended. No subject is kept for an application's send (DES-14 §28.2). *@
+            <nav class="desktabs" aria-label="@L["Sends"]">
+                <a class="desktab @(Which != "sandbox" ? "on" : null)" href="@(Link("sends"))" aria-current="@(Which != "sandbox" ? "page" : null)">@L["Live"] <span class="desktab-n">@Sends.Count(s => !s.Sandbox).ToString(Inv)</span></a>
+                <a class="desktab @(Which == "sandbox" ? "on" : null)" href="@(Link("sends") + "&which=sandbox")" aria-current="@(Which == "sandbox" ? "page" : null)">@L["Sandbox"] <span class="desktab-n">@Sends.Count(s => s.Sandbox).ToString(Inv)</span></a>
+            </nav>
+            var shown = Sends.Where(s => s.Sandbox == (Which == "sandbox")).Take(200).ToList();
+            @if (shown.Count == 0)
+            {
+                <p class="orgempty">@(Which == "sandbox" ? L["No sandbox sends yet."] : L["No sends yet."])</p>
+            }
+            else
+            {
+                <table class="orgtable sstable">
+                    <thead><tr><th scope="col">@L["When"]</th><th scope="col">@L["To"]</th><th scope="col">@L["Template"]</th><th scope="col">@L["Last event"]</th></tr></thead>
+                    <tbody>
+                        @foreach (Anjal.Store.AppSend s in shown)
+                        {
+                            <tr>
+                                <td>@Clock.List(s.CreatedAt, DateTimeOffset.UtcNow)</td>
+                                <td>@SendDomains(s)</td>
+                                <td>@(s.Template.Length > 0 ? s.Template : "—")</td>
+                                <td><span class="pill @SendPill(s.LastEvent)">@(s.LastEvent.Length > 0 ? s.LastEvent : "message.queued")</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <p class="hint">@L["The newest 200. Each send's full history is in the API (GET /api/v1/messages/{id})."]</p>
+            }
+            break;
         case "limits":
             <form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/api-settings" class="asideform">
                 <AntiforgeryToken />
@@ -234,6 +267,15 @@
                     <div><label class="setlbl" for="perhour">@L["Sends an hour"]</label><input id="perhour" class="inp inp-s" type="number" name="perHour" min="1" max="@HourCeiling" value="@App.PerHour" /></div>
                     <div><label class="setlbl" for="perday">@L["Sends a day"]</label><input id="perday" class="inp inp-s" type="number" name="perDay" min="1" max="@DayCeiling" value="@App.PerDay" /></div>
                 </div>
+                @* rc.27 (item 72.8, D-314): how long Anjal keeps trying to deliver this application's mail. *@
+                <label class="setlbl" for="giveup">@L["Give up after"]</label>
+                <select id="giveup" class="setsel" name="giveUp">
+                    @foreach (int h in Anjal.Mailbox.AppGiveUp.Choices)
+                    {
+                        <option value="@h" selected="@(App.GiveUpHours == h)">@L[GiveUpWord(h)]</option>
+                    }
+                </select>
+                <span class="hint">@L["A mail not delivered by then is given up and reported as failed. A reminder that is late is no use; a report can wait."]</span>
                 <span class="hint">@L["Anjal also allows at most 60 a minute and 50 recipients a message. Up to {hour} an hour and {day} a day."].Replace("{hour}", HourCeiling.ToString("N0", Inv), StringComparison.Ordinal).Replace("{day}", DayCeiling.ToString("N0", Inv), StringComparison.Ordinal)</span>
                 <label class="setlbl" for="allowedfrom">@L["Allowed from (address ranges, one a line)"]</label>
                 <textarea id="allowedfrom" class="inp mono" name="allowedFrom" rows="3" placeholder="10.0.0.0/8">@string.Join("\n", App.AllowedFrom)</textarea>
@@ -357,6 +399,16 @@
 </section>
 
 @code {
+    // rc.27 (item 72.8): the choices in words.
+    private static string GiveUpWord(int hours) => hours switch
+    {
+        1 => "1 hour",
+        4 => "4 hours",
+        24 => "1 day",
+        48 => "2 days",
+        _ => "5 days (the usual)",
+    };
+
     // Technical examples, not words to translate.
     private const string PemHint = "-----BEGIN PUBLIC KEY-----";
 
@@ -374,6 +426,7 @@
         ("inbox", "email", "Inbox"),
         ("webhooks", "webhook", "Webhooks"),
         ("limits", "sliders", "Limits"),
+        ("sends", "list-view", "Sends"),
         ("templates", "email-template", "Templates"),
     };
 
@@ -406,6 +459,25 @@
 
     /// <summary>The mailbox that holds the address.</summary>
     [Parameter] public MailboxRow? ConfirmHolder { get; set; }
+
+    /// <summary>rc.27: its recent sends, live and sandbox.</summary>
+    [Parameter] public IReadOnlyList<Anjal.Store.AppSend> Sends { get; set; } = Array.Empty<Anjal.Store.AppSend>();
+
+    /// <summary>rc.27: "sandbox" to list the sandbox sends.</summary>
+    [Parameter] public string? Which { get; set; }
+
+    // Where a send went: the recipients' domains, so the console does not list patients' addresses.
+    private static string SendDomains(Anjal.Store.AppSend s) => s.To.Count == 0 ? "—"
+        : string.Join(", ", s.To.Select(a => a.Contains('@', StringComparison.Ordinal) ? a[(a.LastIndexOf('@') + 1)..] : a).Distinct(StringComparer.OrdinalIgnoreCase).Take(3))
+          + (s.To.Count > 1 ? " (" + s.To.Count.ToString(Inv) + ")" : string.Empty);
+
+    private static string SendPill(string lastEvent) => lastEvent switch
+    {
+        "message.delivered" => "pill-info",
+        "message.bounced" or "message.failed" or "message.complained" => "pill-bad",
+        "message.delayed" => "pill-warn",
+        _ => "pill-mute",
+    };
 
     /// <summary>The latest webhook deliveries.</summary>
     [Parameter] public IReadOnlyList<AppWebhookDelivery> Deliveries { get; set; } = Array.Empty<AppWebhookDelivery>();

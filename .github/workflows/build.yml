@@ -29,3 +29,11 @@ jobs:
 
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
+
+      # rc.27 (D-311): the suite again on Indian time. An HTTP key's end date failed on the
+      # owner's computer (D-295) and passed here, because CI runs in UTC.
+      - name: Test on Indian time
+        if: runner.os == 'Linux'
+        env:
+          TZ: Asia/Kolkata
+        run: dotnet test --no-build --configuration Release --verbosity normal

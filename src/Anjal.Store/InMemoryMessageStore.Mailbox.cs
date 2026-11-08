@@ -770,6 +770,8 @@ public sealed partial class InMemoryMessageStore
         this.folders.RemoveAll(f => f.MailboxId == mailboxId);
         // rc.26: the mailbox's keys go with it, as the database's ON DELETE CASCADE does.
         this.RemoveMailboxKeys(mailboxId);
+        // rc.27: a desk's items go with it; an assignee who goes leaves the item unassigned.
+        this.RemoveDeskOf(mailboxId);
     }
 
     private static int CompareFolders(FolderRow a, FolderRow b)
@@ -901,6 +903,8 @@ public sealed partial class InMemoryMessageStore
         ListMark = m.ListMark,
         Referral = m.Referral,
         AcknowledgedAt = m.AcknowledgedAt,
+        WrittenBy = m.WrittenBy,
+        DraftEmpty = m.DraftEmpty,
     };
 
     // ================= Categories (v0.15.0) =================

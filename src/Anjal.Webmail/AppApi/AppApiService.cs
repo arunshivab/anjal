@@ -195,7 +195,13 @@ public sealed partial class AppApiService : IDisposable
         {
             return (null, Error(new AppApiFailure(415, "unsupported_media_type", "Send the body as application/json."), requestId));
         }
-        if (f.Key.LastUsed is not DateTimeOffset used || now - used > TimeSpan.FromHours(1))
+        // rc.27 (SPEC-17 D-03): a key used from an address it has not used in 30 days is marked in the activity log.
+        bool newAddress = !(f.Key.SeenFrom.TryGetValue(client, out DateTimeOffset seen) && now - seen < NewAddressAfter);
+        if (newAddress)
+        {
+            await this.messages.AppendAuditAsync(new AuditEvent { Actor = "app:" + f.App.Name, Action = "app.api.new-address", Subject = client, Detail = f.Key.Fingerprint, RemoteAddress = client }, ct).ConfigureAwait(false);
+        }
+        if (newAddress || f.Key.LastUsed is not DateTimeOffset used || now - used > TimeSpan.FromHours(1))
         {
             string keyId = f.Key.Id;
             await this.mail.ChangeAppAsync(f.Tenant.Id, f.App.Id, a =>
@@ -203,12 +209,20 @@ public sealed partial class AppApiService : IDisposable
                 if (a.HttpKeys.Find(k => k.Id == keyId) is AppHttpKey k)
                 {
                     k.LastUsed = now;
+                    k.SeenFrom[client] = now;
+                    foreach (string old in k.SeenFrom.OrderByDescending(x => x.Value).Skip(20).Select(x => x.Key).ToList())
+                    {
+                        k.SeenFrom.Remove(old);
+                    }
                 }
                 return null;
             }, ct).ConfigureAwait(false);
         }
         return (new AppCaller(f.Tenant, f.App, f.Key, requestId, client, body), null);
     }
+
+    /// <summary>rc.27 (SPEC-17 D-03): an address not used for this long counts as new again.</summary>
+    public static readonly TimeSpan NewAddressAfter = TimeSpan.FromDays(30);
 
     private static bool IsKeyShape(string key) =>
         key.Length == 40 && (key.StartsWith("ak_live_", StringComparison.Ordinal) || key.StartsWith("ak_test_", StringComparison.Ordinal))

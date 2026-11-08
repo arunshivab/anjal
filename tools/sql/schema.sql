@@ -784,3 +784,52 @@ CREATE TABLE IF NOT EXISTS app_inbox_addresses (
     added_at           TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS messages_acknowledged_idx ON messages (mailbox_id, received_at) WHERE acknowledged_at IS NULL;
+
+-- v1.0.0-rc.27 (DES-17 §2): shared desks. A desk is a shared mailbox used by a team; one row per
+-- conversation. thread_key is a keyed hash of the conversation's subject and the person outside the
+-- desk (an HMAC keyed from ANJAL_KEY_PEPPER, like the address marks of DES-15 §7.6; D-318), so the
+-- conversation is found again on arrival without its words or the address being stored. pending_since is when the oldest mail the desk
+-- has not answered arrived (null when the desk wrote last): with assignee_id and done_at it gives the
+-- state - Not assigned, Open, Waiting, Done - and the time a reply is due.
+CREATE TABLE IF NOT EXISTS desk_items (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    desk_id          UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    thread_key       TEXT NOT NULL,
+    root_message_id  UUID,
+    assignee_id      UUID REFERENCES mailboxes(id) ON DELETE SET NULL,
+    done_at          TIMESTAMPTZ,
+    pending_since    TIMESTAMPTZ,
+    last_reply_at    TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (desk_id, thread_key)
+);
+CREATE INDEX IF NOT EXISTS desk_items_assignee_idx ON desk_items (assignee_id) WHERE assignee_id IS NOT NULL AND done_at IS NULL;
+
+-- A desk item's history, append-only: who did what and when; never the mail's words.
+CREATE TABLE IF NOT EXISTS desk_events (
+    id        BIGSERIAL PRIMARY KEY,
+    item_id   UUID NOT NULL REFERENCES desk_items(id) ON DELETE CASCADE,
+    at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    actor_id  UUID,
+    kind      TEXT NOT NULL,
+    detail    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS desk_events_item_idx ON desk_events (item_id, at);
+
+-- Notes for the desk, never sent (DES-17 §2.8): the text sealed to the desk's key like its mail.
+CREATE TABLE IF NOT EXISTS desk_notes (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    item_id       UUID NOT NULL REFERENCES desk_items(id) ON DELETE CASCADE,
+    at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    writer_id     UUID,
+    body          TEXT NOT NULL,
+    mentions      TEXT NOT NULL DEFAULT '',
+    withdrawn_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS desk_notes_item_idx ON desk_notes (item_id, at);
+
+-- rc.27: who wrote a desk's mail or last edited a draft (DES-17 §2.12); a draft saved empty (D-309).
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS written_by UUID;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS draft_empty BOOLEAN NOT NULL DEFAULT false;
+CREATE INDEX IF NOT EXISTS messages_draft_empty_idx ON messages (received_at) WHERE draft_empty;

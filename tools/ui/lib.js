@@ -89,6 +89,15 @@ async function signIn(page) {
   }
 }
 
+// Submit a form of the page and wait until the server has answered it and the page has loaded.
+async function posted(page, path, selector) {
+  await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith(path) && r.request().method() === 'POST', { timeout: 30000 }),
+    page.$eval(selector, (f) => f.requestSubmit()),
+  ]).catch(() => null);
+  await page.waitForLoadState('load').catch(() => null);
+}
+
 // Go to a screen in window w and let its script settle. Returns false when the screen could not be
 // opened.
 async function visit(w, url, settle) {
@@ -97,6 +106,34 @@ async function visit(w, url, settle) {
     w.page = await newPage(w.browser, w.size);
   }
   w.last = url;
+  // rc.27: "/shared/open?id=<desk>&open=<mail>" stands for opening the desk from the account menu (a
+  // form post - a desk is never opened by a link) and then the mail in it.
+  // The desk's own screens carry "in=desk"; any other screen is seen from the person's own mailbox, so
+  // a session left in the desk is taken back first (a check may go through the list more than once).
+  const desk = /^\/shared\/open\?id=([0-9a-f-]{36})(?:&open=([0-9a-f-]{36}))?$/.exec(url);
+  if (desk) {
+    if (w.inDesk !== desk[1]) {
+      if (!(await visit(w, '/folder/INBOX', 100))) {
+        return false;
+      }
+      const sel = `form[action="/shared/open"]:has(input[name=id][value="${desk[1]}"])`;
+      if (!(await w.page.$(sel))) {
+        return false;
+      }
+      await posted(w.page, '/shared/open', sel);
+      w.inDesk = desk[1];
+    }
+    return visit(w, '/folder/INBOX?in=desk' + (desk[2] ? '&open=' + desk[2] : ''), settle);
+  }
+  if (w.inDesk && !/[?&]in=desk/.test(url)) {
+    const back = w.inDesk;
+    w.inDesk = null;
+    if (await visit(w, '/folder/INBOX?in=desk', 100) && (await w.page.$('form[action="/shared/close"]'))) {
+      await posted(w.page, '/shared/close', 'form[action="/shared/close"]');
+    } else {
+      w.inDesk = back;
+    }
+  }
   try {
     const res = await w.page.goto(base + url, { timeout: 20000 });
     w.status = res ? res.status() : 0;
@@ -173,6 +210,30 @@ async function findScreens(w, limit, keep) {
   return found;
 }
 
+// rc.27 (DES-17 §2): a desk's own screens - its tabs, a mail with the Desk block and notes, its
+// settings. Opening a desk changes which mailbox the session looks at, so these come last in the
+// list: the first ("/shared/open?id=…", see visit) moves each check's session into the desk for the rest of it.
+async function deskScreens(w) {
+  if (!(await visit(w, '/folder/INBOX', 250))) {
+    return [];
+  }
+  const desk = await w.page.$eval('form[action="/shared/open"] input[name=id]', (i) => i.value).catch(() => null);
+  if (!desk) {
+    return [];
+  }
+  await Promise.all([w.page.waitForURL(/\/folder\//, { timeout: 30000 }), w.page.$eval('form[action="/shared/open"]', (f) => f.requestSubmit())]);
+  await visit(w, '/folder/INBOX', 250);
+  const ids = await w.page.$$eval('#maillist a[href*="open="]', (a) => a.map((x) => new URL(x.href).searchParams.get('open')));
+  await Promise.all([w.page.waitForURL(/\/folder\//, { timeout: 30000 }), w.page.$eval('form[action="/shared/close"]', (f) => f.requestSubmit())]).catch(() => null);
+  if (ids.length === 0) {
+    return [];
+  }
+  const list = ['/shared/open?id=' + desk + '&open=' + ids[0], '/folder/INBOX?in=desk', '/folder/INBOX?tab=mine&in=desk', '/folder/INBOX?tab=unassigned&in=desk', '/folder/INBOX?tab=done&in=desk'];
+  ids.slice(1, 2).forEach((id) => list.push('/folder/INBOX?open=' + id + '&in=desk'));
+  list.push('/desk/settings?in=desk');
+  return list;
+}
+
 // The screens list is found once per run and kept, so every check looks at the same screens.
 let screens = null;
 async function allScreens() {
@@ -182,6 +243,7 @@ async function allScreens() {
   const s = await open(SMALL);
   try {
     screens = await findScreens(s);
+    screens = screens.concat(await deskScreens(s));
   } finally {
     await s.close();
   }

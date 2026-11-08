@@ -11,6 +11,20 @@ const RULES = [
   'aria-progressbar-name', 'aria-tooltip-name', 'aria-dialog-name', 'document-title', 'html-has-lang',
 ];
 
+// rc.27 (item 79, brief 10e): a state is never shown by colour alone - every pill, tag and state
+// mark has a word (or, when it has no words, a name a screen reader reads).
+function wordless() {
+  const out = [];
+  for (const e of document.querySelectorAll('.pill, .tdtag, .deskmark, .chip, .score, .pill-bad, .pill-warn')) {
+    const r = e.getBoundingClientRect();
+    if (r.width < 2 || getComputedStyle(e).visibility === 'hidden') { continue; }
+    if (!(e.textContent || '').trim() && !e.getAttribute('aria-label') && !e.getAttribute('title')) {
+      out.push(['state-without-words', e.className.toString().trim().split(/\s+/).slice(0, 2).join('.'), e.outerHTML.slice(0, 110)]);
+    }
+  }
+  return out;
+}
+
 module.exports = {
   name: 'names',
   title: 'Every control has a name (UX-09)',
@@ -36,6 +50,7 @@ module.exports = {
             const r = await window.axe.run(document, { runOnly: { type: 'rule', values: rules }, resultTypes: ['violations'] });
             return r.violations.flatMap((x) => x.nodes.map((n) => [x.id, n.target.join(' '), (n.html || '').slice(0, 110)]));
           }, RULES);
+          v.push(...(await w.page.evaluate(wordless)));
           for (const [rule, target, html] of v) {
             const key = rule + '|' + html;
             if (!found.has(key)) {

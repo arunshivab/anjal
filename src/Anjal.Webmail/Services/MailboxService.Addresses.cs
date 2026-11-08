@@ -233,4 +233,38 @@ public sealed partial class MailboxService
         }
         return all;
     }
+
+    /// <summary>
+    /// rc.27 (item 72.4, brief 6k): the patient warning in the activity log - when it was shown, and
+    /// when the person chose to send anyway: what Anjal noticed and where it was going (domains only),
+    /// never the mail's words or its files' names.
+    /// </summary>
+    /// <param name="actor">Who.</param>
+    /// <param name="signs">What <see cref="PatientWarningAsync"/> found.</param>
+    /// <param name="sentAnyway">True for "Send anyway".</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public async Task LogPatientWarningAsync(string actor, IReadOnlyList<string> signs, bool sentAnyway, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(signs);
+        if (signs.Count < 2)
+        {
+            return;
+        }
+        string domains = string.Join(", ", signs[1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(a => a.Contains('@', StringComparison.Ordinal) ? a[(a.LastIndexOf('@') + 1)..] : a).Distinct(StringComparer.OrdinalIgnoreCase));
+        // A file's name can itself be patient information (review, 28 Oct): the log says "a file", never which.
+        string noticed = string.Join(", ", (signs[0] == "files" ? Array.Empty<string>() : signs.Skip(2))
+            .Select(x => x.StartsWith("a file named ", StringComparison.Ordinal) ? "a file" : x)
+            .GroupBy(x => x, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.Count() > 1 ? g.Key + " ×" + g.Count().ToString(System.Globalization.CultureInfo.InvariantCulture) : g.Key));
+        await this.messageStore.AppendAuditAsync(new AuditEvent
+        {
+            Actor = actor,
+            Action = sentAnyway ? "webmail.patient-warning.sent" : "webmail.patient-warning.shown",
+            Subject = domains,
+            Detail = signs[0] + (noticed.Length > 0 ? ": " + noticed : string.Empty),
+        }, ct).ConfigureAwait(false);
+    }
 }
+

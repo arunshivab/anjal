@@ -51,6 +51,11 @@
    "icon": "monitoring"
   },
   {
+   "id": "desks",
+   "title": "Shared mailboxes",
+   "icon": "box"
+  },
+  {
    "id": "admin",
    "title": "For administrators",
    "icon": "department-master"
@@ -1048,12 +1053,14 @@
    "steps": [
     "Open Organisation, Shared mailboxes.",
     "Add one, then give people read only, read and send, or manage.",
-    "People open it from the rail; it always opens on its Inbox."
+    "People open it from the account menu under their initials; it always opens on its Inbox."
    ],
    "tip": null,
    "show": null,
    "related": [
-    "invite"
+    "invite",
+    "desk",
+    "desk-settings"
    ],
    "keywords": "shared mailbox reception team inbox delegate",
    "release": "rc.14",
@@ -2458,6 +2465,116 @@
    ],
    "keywords": "patient data mark operator signed his lipi health",
    "release": "rc.26",
+   "org": null
+  },
+  {
+   "id": "desk",
+   "part": "desks",
+   "title": "What a desk is",
+   "summary": "A shared mailbox that a team answers together is a desk: each conversation has one person, and everyone sees who has it, what is waiting and what is done.",
+   "steps": [
+    "Open the desk from the account menu under your initials. Its Inbox has tabs: All, Not assigned, Mine, Open and Done, each with its count.",
+    "Mail whose reply is late is listed first, under Overdue.",
+    "Open a mail: the Desk block in its envelope says who has it and whether a reply is due, with the buttons to take it, assign it or mark it done.",
+    "When the desk replies, the mail waits for the sender. When the sender writes again, it opens again, even if it was done."
+   ],
+   "tip": "Settings, Mail, From desks chooses which desk mail pops up for you: only mail assigned to you or mentioning you, every new mail, or nothing.",
+   "show": null,
+   "related": [
+    "desk-assign",
+    "desk-notes",
+    "shared"
+   ],
+   "keywords": "desk shared mailbox team reception queue tabs assigned open done waiting",
+   "release": "rc.27",
+   "org": null
+  },
+  {
+   "id": "desk-assign",
+   "part": "desks",
+   "title": "Take or assign desk mail",
+   "summary": "Take a mail for yourself, or give it to a colleague on the desk. Only members who may send from the desk can have mail.",
+   "steps": [
+    "Open the mail and press Take it, or choose a person under Assigned to.",
+    "The person is told, and Today lists it for them under Assigned to you.",
+    "If a colleague is already writing a reply, Reply says so: press Leave it to them, or Reply anyway.",
+    "Press Mark done when nothing more is needed; Reopen brings it back. Mail of someone who leaves the desk comes back as Not assigned."
+   ],
+   "tip": "A desk may let only members who may send assign mail; ask whoever manages it.",
+   "show": null,
+   "related": [
+    "desk",
+    "desk-due",
+    "today"
+   ],
+   "keywords": "assign take give colleague owner mine done reopen replying collision",
+   "release": "rc.27",
+   "org": null
+  },
+  {
+   "id": "desk-notes",
+   "part": "desks",
+   "title": "Write notes for the desk",
+   "summary": "Notes sit beside a desk mail for the desk's members only. They are never sent to the sender.",
+   "steps": [
+    "Open the mail and write in Notes for the desk, then press Add note.",
+    "To tell a colleague, type @ and their name: they are told, as if the mail were assigned to them.",
+    "A note can be withdrawn by whoever wrote it. The History keeps that it was written and withdrawn.",
+    "Notes are kept with the mail for the organisation's records, under the same lock as the mail."
+   ],
+   "tip": null,
+   "show": null,
+   "related": [
+    "desk",
+    "desk-assign"
+   ],
+   "keywords": "note internal comment mention @ colleague private history withdraw",
+   "release": "rc.27",
+   "org": null
+  },
+  {
+   "id": "desk-due",
+   "part": "desks",
+   "title": "Reply due by, and overdue mail",
+   "summary": "Each desk has a reply time, 1 working day unless it is changed. Each mail says when its reply is due, counting only working hours.",
+   "steps": [
+    "The Desk block shows Reply due by and the time. Past it, the mail is Reply overdue and moves to Overdue at the top of the Inbox.",
+    "Working hours are the organisation's working week - Monday to Saturday, 09:00 to 18:00, unless it set its own - or the desk's own week.",
+    "Organisation, Shared mailboxes shows each desk's open and overdue mail, and its usual reply time."
+   ],
+   "tip": "A desk with No target shows no due time.",
+   "show": null,
+   "related": [
+    "desk-settings",
+    "desk"
+   ],
+   "keywords": "reply due overdue late target sla working hours week time",
+   "release": "rc.27",
+   "org": null
+  },
+  {
+   "id": "desk-settings",
+   "part": "desks",
+   "title": "Set a desk's assigning, reply time and week",
+   "summary": "Administrators, and the desk's managers, choose who may assign its mail, how soon a reply is due and which working week it counts.",
+   "steps": [
+    "Administrators: open Organisation, Shared mailboxes and choose the desk. Managers: open the desk and press the settings button beside its tabs.",
+    "Who may assign mail: Any member, or Members who may send.",
+    "Reply due within: 2 or 4 working hours, 1 or 2 working days, or No target.",
+    "Working week: the organisation's, or its own days and hours. The organisation's week is set under Working week on the same page, and each change is in the activity log."
+   ],
+   "tip": null,
+   "show": {
+    "path": "/org/shared",
+    "at": ".setmain",
+    "line": "Choose a desk to see its settings; the working week is above the list."
+   },
+   "related": [
+    "desk-due",
+    "shared"
+   ],
+   "keywords": "desk settings assign rights reply time target working week days hours manager",
+   "release": "rc.27",
    "org": null
   }
  ]

@@ -103,4 +103,26 @@ echo $! > "$WORK/webmail.pid"
 wait_for "http://127.0.0.1:$WEB_PORT/sign-in" "The webmail" "$WORK/webmail.log"
 # 5. Two applications with a test message each, so Sending systems is checked with data (rc.17).
 (cd "$ROOT/tools/ui" && ANJAL_UI_BASE="http://127.0.0.1:$WEB_PORT" ANJAL_UI_ADDRESS="$ADDRESS" ANJAL_UI_PASSWORD="$PASSWORD" node seed-apps.js)
+# 6. rc.27: a desk with two mails, one taken with a note, so the desk screens are checked with data.
+#    The senders are in .example, which never exists (RFC 2606), like the sample mail's: example.net
+#    and example.org publish DMARC p=reject, so on a runner with real DNS the server rightly refused them (CI, 8 Nov).
+UI_ENV=(ANJAL_UI_BASE="http://127.0.0.1:$WEB_PORT" ANJAL_UI_ADDRESS="$ADDRESS" ANJAL_UI_PASSWORD="$PASSWORD")
+(cd "$ROOT/tools/ui" && env "${UI_ENV[@]}" node seed-desk.js make)
+DESK="reception@${ADDRESS#*@}"
+python3 - "$SMTP_PORT" "$DESK" <<'PY'
+import smtplib, sys
+from email.message import EmailMessage
+from email.utils import formatdate
+for i, (who, subject) in enumerate([("Meena Rao <meena@family.example>", "Appointment for my father next week"),
+                                    ("Suresh K <suresh@city-clinic.example>", "Reports from last month's visit")]):
+    m = EmailMessage()
+    m["From"], m["To"], m["Subject"] = who, sys.argv[2], subject
+    m["Message-ID"] = f"<desk-seed-{i}@family.example>"
+    m["Date"] = formatdate(localtime=True)
+    m.set_content("Hello,\n\nCould you let me know what to bring?\n\nThank you.")
+    with smtplib.SMTP("127.0.0.1", int(sys.argv[1]), local_hostname="mail.family.example") as s:
+        s.send_message(m)
+PY
+sleep 3
+(cd "$ROOT/tools/ui" && env "${UI_ENV[@]}" node seed-desk.js work)
 echo "ready: http://127.0.0.1:$WEB_PORT  ($ADDRESS)"

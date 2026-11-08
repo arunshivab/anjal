@@ -261,6 +261,54 @@ public sealed class SharedMailbox
 
     /// <summary>Each person's mailbox and right.</summary>
     public Dictionary<Guid, string> Members { get; set; } = new();
+
+    /// <summary>The reply-time targets a desk may choose (rc.27, D-304): none, 2 or 4 working hours, 1 or 2 working days.</summary>
+    public static readonly IReadOnlyList<string> ReplyTargets = new[] { "none", "2h", "4h", "1d", "2d" };
+
+    /// <summary>rc.27 (D-304): who may assign the desk's mail - "any" member (the default) or only members who may "send".</summary>
+    public string AssignBy { get; set; } = "any";
+
+    /// <summary>rc.27 (D-304): how soon a reply is due - one of <see cref="ReplyTargets"/>; one working day by default.</summary>
+    public string ReplyTarget { get; set; } = "1d";
+
+    /// <summary>rc.27 (D-315): the desk's own working week, or null to follow the organisation's.</summary>
+    public WorkWeek? OwnWeek { get; set; }
+}
+
+/// <summary>
+/// rc.27 (D-315): when an organisation works, for a desk's "reply due by". Monday to Saturday,
+/// 09:00 to 18:00, by default; each organisation sets its own and a desk may set another.
+/// </summary>
+public sealed class WorkWeek
+{
+    /// <summary>The working days, 0 for Sunday to 6 for Saturday.</summary>
+    public List<int> Days { get; set; } = new() { 1, 2, 3, 4, 5, 6 };
+
+    /// <summary>When the day starts, HH:mm.</summary>
+    public string From { get; set; } = "09:00";
+
+    /// <summary>When the day ends, HH:mm.</summary>
+    public string To { get; set; } = "18:00";
+
+    /// <summary>The time zone the hours are in.</summary>
+    public string TimeZone { get; set; } = MailboxPreferences.DefaultTimeZone;
+
+    /// <summary>What is wrong with it, or null.</summary>
+    /// <returns>The error, or null.</returns>
+    public string? Problem()
+    {
+        if (this.Days.Count == 0 || this.Days.Any(d => d is < 0 or > 6))
+        {
+            return "Choose at least one working day.";
+        }
+        if (!TimeOnly.TryParseExact(this.From, "HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out TimeOnly from)
+            || !TimeOnly.TryParseExact(this.To, "HH:mm", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out TimeOnly to)
+            || to <= from)
+        {
+            return "The working day must end after it starts.";
+        }
+        return null;
+    }
 }
 
 /// <summary>A key an application sends with (rc.14): an SMTP account that may send as one address.</summary>
@@ -353,6 +401,9 @@ public sealed class OrgApp
 
     /// <summary>When the inbox's "not collecting" warnings went: 7 and 30 (days), so each goes once.</summary>
     public List<int> InboxWarned { get; set; } = new();
+
+    /// <summary>rc.27 (item 72.8, D-314): how many hours Anjal keeps trying to deliver its mail (<see cref="Anjal.Mailbox.AppGiveUp.Choices"/>).</summary>
+    public int GiveUpHours { get; set; } = Anjal.Mailbox.AppGiveUp.DefaultHours;
 }
 
 /// <summary>rc.26 (DES-14 §2): an HTTP key of an application. The key itself is shown once and kept only as a salted hash.</summary>
@@ -384,6 +435,9 @@ public sealed class AppHttpKey
 
     /// <summary>When it was last used.</summary>
     public DateTimeOffset? LastUsed { get; set; }
+
+    /// <summary>rc.27 (SPEC-17 D-03): the addresses it was used from and when last, at most 20; a new one is marked in the activity log.</summary>
+    public Dictionary<string, DateTimeOffset> SeenFrom { get; set; } = new(StringComparer.Ordinal);
 }
 
 /// <summary>rc.26 (DES-14 §8): a webhook of an application.</summary>

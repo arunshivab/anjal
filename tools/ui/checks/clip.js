@@ -20,7 +20,8 @@ function check() {
     if (worst && (!sel || worst[0] !== sel.text)) { out.push(['choice box: an option would be cut when chosen', name(s), `"${worst[0]}" needs ${Math.round(worst[1])}px, has ${Math.round(room)}px`]); }
   }
   for (const e of document.querySelectorAll('button, summary, a.btn, a.pbtn, a.eb, a.linkbtn, a.pill, a.chip, a.tchip, .seg a, label.segopt, a.rail-item, a.pmi, button.pmi, a.eback, .lh-pills a, a.authbtn')) {
-    if (!vis(e)) { continue; }
+    // rc.27: a Today row is a whole list row made a button; its subject ends in … like any list row.
+    if (!vis(e) || e.matches('button.tdrow-open')) { continue; }
     const r = e.getBoundingClientRect(); const rng = document.createRange(); let worst = 0; let what = '';
     // rc.20 (owner, 14 Oct 2026, "Sign in again" with its words on the button's edges): a button with
     // a fill or a border keeps its words at least 4px in from each side.
@@ -95,6 +96,16 @@ function check() {
   // Sending systems with the rail open; nothing above looked at tiles).
   for (const b of document.querySelectorAll('.sskpi, .keyfig, .cfig, .healthtile, .figure')) { if (vis(b) && b.scrollWidth > b.clientWidth + 1) { out.push(['tile: words or a number spill out', name(b), `${b.scrollWidth - b.clientWidth}px too wide`]); } }
   for (const b of document.querySelectorAll('.setmain, .formcard')) { if (vis(b) && b.scrollWidth > b.clientWidth + 1) { out.push(['box: something in it is wider than the box', name(b), `${b.scrollWidth - b.clientWidth}px too wide`]); } }
+  // rc.27 (MOM-11 §6 point 4): a row of choices - radio buttons, tick boxes, segments - stays inside its
+  // column. rc.26's "Only answers to my mail" ran past the Settings column and nothing above noticed.
+  for (const lab of document.querySelectorAll('label')) {
+    if (!vis(lab) || !lab.querySelector('input[type=radio], input[type=checkbox]')) { continue; }
+    const col = lab.closest('.setfield, .asideform, .formcard, .pmenu-body, fieldset, form');
+    if (!col || !vis(col)) { continue; }
+    const r = lab.getBoundingClientRect(); const c = col.getBoundingClientRect();
+    const over = Math.max(r.right - c.right, c.left - r.left);
+    if (over > 1.5) { out.push(['row of choices: runs past its column', name(lab), `"${lab.textContent.trim().slice(0, 40)}" goes ${Math.round(over)}px past ${name(col)}`]); }
+  }
   return out;
 }
 

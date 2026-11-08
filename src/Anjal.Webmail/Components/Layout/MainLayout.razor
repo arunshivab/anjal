@@ -17,7 +17,19 @@ else
 <AuthorizeView>
     <Authorized>
         <div class="@FrameClass" data-offline-mail="@(offlineMail ? "on" : "off")" data-offline-words="@(offlineMail ? OfflineWords : null)">
-            <a class="skip" href="#main">@L["Skip to content"]</a>
+            @* rc.27 (item 79, brief 10e): on a mail list, straight to the list and to the open mail. *@
+            @if (OnPath("/folder"))
+            {
+                <a class="skip" href="#maillist">@L["Skip to the mail list"]</a>
+                @if (Nav.Uri.Contains("open=", StringComparison.Ordinal))
+                {
+                    <a class="skip" href="#openmail">@L["Skip to the open mail"]</a>
+                }
+            }
+            else
+            {
+                <a class="skip" href="#main">@L["Skip to content"]</a>
+            }
             <div class="frame-body">
                 <nav class="rail @(Folded ? "folded" : RailAuto ? "auto" : "")" aria-label="@L["Folders"]">
                     <div class="rail-head">
@@ -43,7 +55,7 @@ else
                     </form>
                     </div>
                     <div class="rail-composewrap">
-                        <a class="rail-compose" href="/compose" title="@L["Compose"]"><LipiIcon Name="edit" Size="18" /><span class="rl">@L["Compose"]</span></a>
+                        <a class="rail-compose" href="/compose" title="@L["Compose"]" data-kb="compose"><LipiIcon Name="edit" Size="18" /><span class="rl">@L["Compose"]</span></a>
                         @* rc.15 (item 62, owner 7 Oct): the Compose button's arrow - start from a template, or in the small window.
                            rc.15.1 (DEF-095): not while a sign-in step is pending; nothing is written until it is done. *@
                         @if (signInDemand is null)
@@ -110,7 +122,8 @@ else
                                 <AntiforgeryToken />
                                 <input type="hidden" name="id" value="@box.Id" />
                                 <button type="submit" class="rail-item @(acting?.Id == box.Id ? "on" : "")" title="@box.Address" aria-current="@(acting?.Id == box.Id ? "true" : null)">
-                                    <LipiIcon Name="users" Size="18" />
+                                    @* rc.27 (item 72.9, brief 11b): a desk has square initials - a place, not a person. *@
+                                    <span class="initials desk-initials" aria-hidden="true">@DeskInitialsOf(box)</span>
                                     <span class="rl">@(box.DisplayName.Length > 0 ? box.DisplayName : box.LocalPart)</span>
                                     @if (unread > 0)
                                     {
@@ -139,6 +152,26 @@ else
                         <summary class="rail-item rail-me" title="@DisplayName" aria-label="@L["Your account"]"><span class="initials" aria-hidden="true">@Initials</span><span class="rl">@DisplayName</span></summary>
                         <div class="pmenu-body accountmenu" role="menu">
                             <p class="acct-who"><b>@DisplayName</b><span>@context.User.Identity?.Name</span></p>
+                            @if (sharedBoxes.Count > 0)
+                            {
+                                @* rc.27 (brief 11b): the person's own mailbox and their desks, with unread counts. *@
+                                <p class="pm-head">@L["Desks"]</p>
+                                @if (acting is not null && person is not null)
+                                {
+                                    <form method="post" action="/shared/close" class="inline acct-switch">
+                                        <AntiforgeryToken />
+                                        <button type="submit" class="pmi" role="menuitem" title="@person.Address"><span class="initials acct-initials" aria-hidden="true">@InitialsOf(person)</span><span class="acct-addr">@L["My mail"]</span></button>
+                                    </form>
+                                }
+                                @foreach ((MailboxRow box, string right, long unread) in sharedBoxes)
+                                {
+                                    <form method="post" action="/shared/open" class="inline acct-switch">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="id" value="@box.Id" />
+                                        <button type="submit" class="pmi @(acting?.Id == box.Id ? "on" : null)" role="menuitem" title="@box.Address" aria-current="@(acting?.Id == box.Id ? "true" : null)"><span class="initials acct-initials desk-initials" aria-hidden="true">@DeskInitialsOf(box)</span><span class="acct-addr">@(box.DisplayName.Length > 0 ? box.DisplayName : box.LocalPart)</span>@if (unread > 0) {<span class="pill pill-info acct-unread">@(unread == 1 ? L["1 new"] : L["{n} new"].Replace("{n}", unread.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</span>}</button>
+                                    </form>
+                                }
+                            }
                             @if (lastSignIn is not null)
                             {
                                 <a class="pmi st-last" role="menuitem" href="/settings/security" title="@L["Your sign-in before this one, from {device}. Not you? Open Security to sign other devices out."].Replace("{device}", lastSignIn.Device, StringComparison.Ordinal)"><LipiIcon Name="clock" Size="15" />@LastSignInText</a>
@@ -239,7 +272,7 @@ else
                         <form method="post" action="/shared/open" class="pfolder-form">
                             <AntiforgeryToken />
                             <input type="hidden" name="id" value="@box.Id" />
-                            <button type="submit" class="pfolder"><LipiIcon Name="users" Size="18" /><span>@box.Address</span>@if (unread > 0) { <span class="n">@unread</span> }</button>
+                            <button type="submit" class="pfolder"><span class="initials desk-initials" aria-hidden="true">@DeskInitialsOf(box)</span><span>@box.Address</span>@if (unread > 0) { <span class="n">@unread</span> }</button>
                         </form>
                     }
                     @if (isAdmin)
@@ -261,16 +294,6 @@ else
                 </div>
             </div>
             @* Item 5 and D-105: the welcome screen, once; then the tour, or skip. *@
-            @if (acting is not null)
-            {
-                @* rc.14: whose mail this is, always in view while a shared mailbox is open. *@
-                <form method="post" action="/shared/close" class="actingbar" role="status">
-                    <AntiforgeryToken />
-                    <LipiIcon Name="users" Size="16" />
-                    <span>@L["You are in {address}, with {right}."].Replace("{address}", acting.Address, StringComparison.Ordinal).Replace("{right}", L[RightWord(actingRight)], StringComparison.Ordinal)</span>
-                    <button type="submit" class="linkbtn">@L["Back to my mailbox"]</button>
-                </form>
-            }
             @* rc.15.1 (DEF-095): never while a sign-in step is pending (a longer password, or
                two-step the organisation requires) - the person does that first, then is welcomed. *@
             @if (person is not null && !person.WelcomeDone && !OnTwoStepSetup && signInDemand is null)
@@ -402,10 +425,44 @@ else
                     <button type="button" class="btn btn-danger-q btn-sm" data-approve="refuse">@L["No"]</button>
                 </div>
             </template>
-            <footer class="statusbar" data-statusbar data-me="@mailbox?.Id" data-shared="@(Shared ? "1" : "0")" data-tz="@clock.ZoneId" data-hours="@clock.Hours" data-sound="@((person?.NewMailSound ?? true) ? "1" : "0")" data-notify="@(notifyScope)" data-word-newmail="@L["New mail"]" data-word-newmails="@L["{n} new mails"]" data-idle-limit="@((int)SessionRegistry.IdleLimit(Shared).TotalSeconds)"
+            <footer class="statusbar" data-statusbar data-me="@mailbox?.Id" data-shared="@(Shared ? "1" : "0")" data-tz="@clock.ZoneId" data-hours="@clock.Hours" data-sound="@((person?.NewMailSound ?? true) ? "1" : "0")" data-notify="@(notifyScope)" data-word-newmail="@L["New mail"]" data-word-newmails="@L["{n} new mails"]" data-word-deskmail="@L["Desk mail"]" data-kbmap="@KbMap" data-idle-limit="@((int)SessionRegistry.IdleLimit(Shared).TotalSeconds)"
                     data-word-updated="@L["Updated {time}"]" data-word-offline="@L["Offline: showing mail as of {time}"]"
                     data-word-needs-server="@L["Needs a connection. Try again when you are back online."]"
                     data-word-new="@L["{n} new messages just arrived."]">
+                @* rc.27 fix 2: the automatic-reply line and the shared-mailbox notice come first, before the
+                   light and "Updated", so the time changing never moves them (the live check on the runner, 8 Nov). *@
+                @if (away is not null)
+                {
+                    @* rc.27 (item 72.3, brief 3a): on every page while the automatic reply is on, with the way to turn it off. *@
+                    <span class="st-away" role="status" data-away-banner>
+                        <LipiIcon Name="clock" Size="13" />
+                        <span>@(away.Until is DateTimeOffset until ? L["Automatic replies are on until {date}"].Replace("{date}", clock.Date(until), StringComparison.Ordinal) : L["Automatic replies are on"])</span>
+                        <details class="pmenu st-awaymenu">
+                            <summary class="linkbtn" title="@L["Turn off the automatic reply. Its message is kept for next time."]">@L["Turn off"]</summary>
+                            <div class="pmenu-body pmenu-up">
+                                <p class="pm-note">@L["Turn off the automatic reply? Its message is kept for next time."]</p>
+                                <form method="post" action="/settings/away" class="inline">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="back" value="@PathNow" />
+                                    <button type="submit" class="btn btn-p btn-sm" data-needs-server>@L["Turn it off"]</button>
+                                </form>
+                                <a class="btn btn-s btn-sm" href="/settings/away">@L["Change"]</a>
+                            </div>
+                        </details>
+                    </span>
+                }
+                @if (acting is not null)
+                {
+                    @* rc.14: whose mail this is, always in view while a shared mailbox is open. rc.27: in the status
+                       bar, like the automatic-reply line - as a floating bar it covered the list's scroll bar once
+                       desks were checked (the scrollbars check, 28 Oct). *@
+                    <form method="post" action="/shared/close" class="st-acting" role="status">
+                        <AntiforgeryToken />
+                        <span class="initials desk-initials" aria-hidden="true">@DeskInitialsOf(acting)</span>
+                        <span title="@acting.Address">@L["You are in {address}, with {right}."].Replace("{address}", acting.Address, StringComparison.Ordinal).Replace("{right}", L[RightWord(actingRight)], StringComparison.Ordinal)</span>
+                        <button type="submit" class="linkbtn">@L["Back to my mailbox"]</button>
+                    </form>
+                }
                 <span class="lite" data-connectivity data-online="@L["Connected"]" data-offline="@L["Offline"]"><i></i><span class="slot" data-slot-a="@L["Connected"]" data-slot-b="@L["Offline"]">@L["Connected"]</span></span>
                 <span class="st-sub" data-updated>@L["Updated {time}"].Replace("{time}", clock.Time(now), StringComparison.Ordinal)</span>
                 @* Design review 4.5: the status bar keeps the connection and the time it last looked,
@@ -530,6 +587,19 @@ else
     });
 
     /// <summary>The approved shortcuts board, group by group (item 38).</summary>
+    // rc.27 (item 72.2): the buttons that have a shortcut name it in their tip, from this one map, so the
+    // panel and the tips can never disagree. Each data-kb name is the shortcut's line in the panel.
+    private static string? kbMap;
+
+    private static readonly (string Kb, string What)[] KbNames =
+    {
+        ("archive", "Archive"), ("delete", "Delete"), ("flag", "Flag"), ("reply", "Reply"), ("replyall", "Reply all"), ("forward", "Forward"), ("compose", "Compose"), ("search", "Search"),
+    };
+
+    private static string KbMap => kbMap ??= System.Text.Json.JsonSerializer.Serialize(KbNames.ToDictionary(
+        k => k.Kb,
+        k => string.Join(" ", ShortcutGroups.SelectMany(g => g.Keys).First(x => x.What == k.What).Keys)));
+
     private static readonly (string Group, (string What, string[] Keys)[] Keys)[] ShortcutGroups =
     {
         ("Move around", new[] { ("Next / previous message", new[] { "j", "k" }), ("Open", new[] { "Enter" }), ("Back, or leave focus", new[] { "Esc" }), ("Go to Inbox", new[] { "g", "i" }), ("Search", new[] { "/" }) }),
@@ -646,6 +716,7 @@ else
             isOperator = Operators.Is(person?.Address);
             offlineMail = (await Mail.OfflineMailAsync(me, shared)).On;
             MailSettings ms = await Mail.GetMailSettingsAsync(me);
+            away = await Mail.AwayActiveAsync(me);
             notifyScope = ms.DesktopNotify && !shared ? ms.NotifyScope : string.Empty;
             if (!shared && Http.HttpContext is { } ctx)
             {
@@ -663,11 +734,23 @@ else
     private IReadOnlyList<(MailboxRow Mailbox, long Unread)> otherAccounts = Array.Empty<(MailboxRow, long)>();
     private string notifyScope = string.Empty;
 
+    // rc.27 (item 72.3): the person's automatic reply while it is on.
+    private Anjal.Mailbox.AwayReply? away;
+
     private static string InitialsOf(MailboxRow m)
     {
         string name = m.DisplayName.Trim().Length > 0 ? m.DisplayName.Trim() : m.LocalPart;
         string[] parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         return parts.Length >= 2 ? (char.ToUpperInvariant(parts[0][0]).ToString() + char.ToUpperInvariant(parts[^1][0])) : name.Length > 0 ? char.ToUpperInvariant(name[0]).ToString() : "?";
+    }
+
+    // rc.27 (item 72.9): a desk's two letters - "Reception" RE, "Lab results" LR.
+    private static string DeskInitialsOf(MailboxRow m)
+    {
+        string name = m.DisplayName.Trim().Length > 0 ? m.DisplayName.Trim() : m.LocalPart;
+        string[] parts = name.Split(new[] { ' ', '-', '_', '.' }, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2 ? (char.ToUpperInvariant(parts[0][0]).ToString() + char.ToUpperInvariant(parts[1][0]))
+            : name.Length >= 2 ? name[..2].ToUpperInvariant() : name.Length == 1 ? name.ToUpperInvariant() : "?";
     }
 
     private bool OnOutbox => Nav.Uri.Contains("/outbox", StringComparison.OrdinalIgnoreCase);

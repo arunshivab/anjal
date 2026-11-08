@@ -17,7 +17,7 @@
 else if (Docked)
 {
     <form method="post" action="/compose" enctype="multipart/form-data" data-compose data-taborder="#to, #cc, #bcc, .csubject, #dsubj, [data-rte-editor], textarea[name=body]:not([hidden]), [data-send], .pcsend" data-docked class="@(ReplyId is null ? "cdock cdock-new" : "cdock")" aria-label="@Title"
-          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson" data-keep="@keepToken"
+          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson" data-keep="@keepToken" data-desk-replying="@deskReplying"
           data-word-hint="@L["Up and Down to move, Tab or Enter to choose. Chosen addresses are not offered again."]"
           data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
           data-word-sendeach="@L["Send {n} separate messages"]">
@@ -100,7 +100,7 @@ else if (Docked)
 else
 {
     <form method="post" action="/compose" enctype="multipart/form-data" data-compose data-taborder="#to, #cc, #bcc, .csubject, #dsubj, [data-rte-editor], textarea[name=body]:not([hidden]), [data-send], .pcsend" class="cform"
-          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson" data-keep="@keepToken"
+          data-org-domains="@string.Join(",", orgDomains)" data-org-name="@orgName" data-names="@NamesJson" data-keep="@keepToken" data-desk-replying="@deskReplying"
           data-word-hint="@L["Up and Down to move, Tab or Enter to choose. Chosen addresses are not offered again."]"
           data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
           data-word-sendeach="@L["Send {n} separate messages"]">
@@ -372,6 +372,8 @@ else
     /// <summary>For the docked panel: the message being answered.</summary>
     [Parameter] public Guid? ReplyId { get; set; }
 
+    private string? deskReplying;
+
     /// <summary>For the docked panel: reply, replyall or forward.</summary>
     [Parameter] public string? ReplyKind { get; set; }
 
@@ -476,6 +478,13 @@ else
         if (mailboxId is null)
         {
             return;
+        }
+        // rc.27 (DES-17 §2.7): a reply from a desk tells the other members "is replying" while it is open.
+        deskReplying = null;
+        if (WebmailAuthService.ActingOf(user) is Guid deskId && deskId == mailboxId.Value && (Reply ?? ReplyAll) is Guid answering
+            && WebmailAuthService.PersonIdOf(user) is Guid writer && await Mail.SharedRightCachedAsync(writer, deskId) is "send" or "manage")
+        {
+            deskReplying = answering.ToString();
         }
 
         (TenantRow Tenant, MailboxRow Mailbox)? context = await Mail.GetContextAsync(mailboxId.Value);

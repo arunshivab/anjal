@@ -10,6 +10,19 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.27** (28 October 2026) - Shared desks and accessibility (DES-17 v1.2). Every shared
+mailbox is a desk: each conversation with a person outside is one piece of work - Not assigned,
+Open with one member, Waiting after the desk's reply, Done - with tabs, a Desk block in the
+envelope (assign, take, mark done, history), notes for the desk that are never sent and are sealed
+like the mail, "is replying" before a second reply, "Assigned to you" on Today, a reply-due time in
+the organisation's working week (Monday to Saturday, 09:00 to 18:00 unless it sets its own) and the
+desk's figures on Organisation > Shared mailboxes. For everyone: a high-contrast theme, forced-colour
+rules, patterns and end values on charts, skip links to the list and the open mail, the shortcut
+letters on every button that has one, the automatic-reply line on every page, storage meters in four
+more places, who wrote and who edited a desk's mail, empty drafts removed after 30 days, and a give-up
+time per application. The screen checks gain contrast in every theme, text at 200% and a Tamil and
+Hindi job. The database gains three tables; run `tools/sql/schema.sql` (DEPLOY.md section 13d).
+
 **v1.0.0-rc.26** (27 October 2026) - The application API (DES-14 §28) and the people's rc.26 items.
 Applications such as Lipi send through `/api/v1` with an HTTP key (sandbox keys `ak_test_` send
 nothing), optional request signing (required for patient data), Allowed from ranges, per-hour and

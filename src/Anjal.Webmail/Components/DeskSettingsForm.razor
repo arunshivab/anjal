@@ -1,0 +1,62 @@
+@* rc.27 (D-304, D-315; DES-17 §2.13): a desk's settings - who may assign, how soon a reply is due,
+   and its working week (the organisation's, or its own). *@
+<form method="post" action="/desk/settings/@DeskId" class="asideform desksettings">
+    <AntiforgeryToken />
+    <input type="hidden" name="back" value="@Back" />
+    <span class="setlbl">@L["Desk"]</span>
+    <label class="setlbl" for="dassign-@DeskId">@L["Who may assign mail"]</label>
+    <select id="dassign-@DeskId" name="assignBy" class="setsel">
+        <option value="any" selected="@(Info.AssignBy != "send")">@L["Any member"]</option>
+        <option value="send" selected="@(Info.AssignBy == "send")">@L["Members who may send"]</option>
+    </select>
+    <label class="setlbl" for="dtarget-@DeskId">@L["Reply due within"]</label>
+    <select id="dtarget-@DeskId" name="target" class="setsel">
+        @foreach (string t in SharedMailbox.ReplyTargets)
+        {
+            <option value="@t" selected="@(Info.ReplyTarget == t)">@L[TargetWord(t)]</option>
+        }
+    </select>
+    <span class="setlbl">@L["Working week"]</span>
+    <label class="radioline"><input type="radio" name="week" value="org" checked="@(Info.OwnWeek is null)" /> @L["The organisation's: {week}"].Replace("{week}", WeekWords(OrgWeek), StringComparison.Ordinal)</label>
+    <label class="radioline"><input type="radio" name="week" value="own" checked="@(Info.OwnWeek is not null)" /> @L["Its own"]</label>
+    <WorkWeekFields Week="@(Info.OwnWeek ?? OrgWeek)" L="L" Prefix="@("dweek-" + DeskId.ToString("N")[..8])" ShowZone="false" />
+    <div class="setactions"><button type="submit" class="btn btn-s">@L["Save"]</button></div>
+</form>
+
+@code {
+    /// <summary>The desk.</summary>
+    [Parameter, EditorRequired] public Guid DeskId { get; set; }
+
+    /// <summary>Its settings.</summary>
+    [Parameter, EditorRequired] public SharedMailbox Info { get; set; } = new();
+
+    /// <summary>The organisation's week.</summary>
+    [Parameter] public WorkWeek OrgWeek { get; set; } = new();
+
+    /// <summary>Where saving returns.</summary>
+    [Parameter] public string Back { get; set; } = "/folder/INBOX";
+
+    /// <summary>The person's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>A reply target in words.</summary>
+    /// <param name="t">The target.</param>
+    /// <returns>The words (to look up).</returns>
+    public static string TargetWord(string t) => t switch
+    {
+        "2h" => "2 working hours",
+        "4h" => "4 working hours",
+        "1d" => "1 working day",
+        "2d" => "2 working days",
+        _ => "No target",
+    };
+
+    private string WeekWords(WorkWeek w)
+    {
+        string[] names = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
+        var days = w.Days.OrderBy(d => d == 0 ? 7 : d).ToList();
+        bool run = days.Count > 1 && days.Zip(days.Skip(1), (a, b) => (b == 0 ? 7 : b) - (a == 0 ? 7 : a)).All(x => x == 1);
+        string dayText = run ? L[names[days[0]]] + "–" + L[names[days[^1]]] : string.Join(", ", days.Select(d => L[names[d]]));
+        return dayText + " " + w.From + "–" + w.To;
+    }
+}
