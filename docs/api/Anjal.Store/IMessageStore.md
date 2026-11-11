@@ -46,6 +46,7 @@ Persistence interface for the Anjal mail server. Implementations include an in-m
 - **ListRoutingRulesAsync** *(method)* - List all routing rules in insertion order.
 - **ListSettingsAsync** *(method)* - The stored settings of one scope, by key.
 - **ListSmtpUsersAsync** *(method)* - List all configured SMTP users. Hashes ARE populated; callers handling API responses must redact the hash field.
+- **ListUnsealedQueuedOutboundAsync** *(method)* - rc.28 (D-264, DES-18 §11): queued messages still waiting (or being sent) that were stored before the queue was sealed (rc.25), oldest first; seals each.
 - **ListWebhookDeliveriesAsync** *(method)* - rc.17 (design review [7d]): the recorded attempts to post these inbound messages to their webhooks, newest first.
 - **ListWebhookJobsAsync** *(method)* - rc.17 (design review [7d]): notifications to addresses at these domains created since a time, newest first.
 - **MarkOutboundResultAsync** *(method)* - Record the result of an outbound send attempt. Updates status, increments the attempt counter, sets next-attempt-at for retries, and writes the last-error text.

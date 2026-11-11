@@ -217,22 +217,89 @@ else
 
             @if (Previewed is AttachmentView pv && MailboxService.PreviewType(pv) is string ptype)
             {
-                @* UX-06: the attachment in the letter area, with the way back. *@
-                <div class="pvbar">
-                    <a class="btn btn-s" href="@Back"><LipiIcon Name="chevron-left" Size="15" />@L["Back to the letter"]</a>
+                @* UX-06: the attachment in the letter area, with the way back. rc.28 (DES-18 §10, R10 [10b]/[10c]):
+                   the mail's other files beside it, the previous and next file (also ← and →), and for an
+                   image fit, actual size, zoom and turn; an archive is listed, never unpacked. *@
+                (AttachmentView? before, AttachmentView? after) = Neighbours(pv);
+                <div class="pvbar" data-viewer>
+                    <a class="btn btn-s" href="@Back" data-viewer-close><LipiIcon Name="chevron-left" Size="15" />@L["Back to the letter"]</a>
                     <b class="pvname">@pv.FileName</b>
                     <span class="lh-grow"></span>
+                    @if (ptype.StartsWith("image/", StringComparison.Ordinal))
+                    {
+                        <span class="pvtools" role="group" aria-label="@L["Picture"]">
+                            <button type="button" class="iconbtn" data-img="fit" aria-label="@L["Fit"]" title="@L["Fit"]"><LipiIcon Name="fit-page" Size="16" /></button>
+                            <button type="button" class="iconbtn" data-img="full" aria-label="@L["Actual size"]" title="@L["Actual size"]"><LipiIcon Name="actual-size" Size="16" /></button>
+                            <button type="button" class="iconbtn" data-img="out" aria-label="@L["Zoom out"]" title="@L["Zoom out"]"><LipiIcon Name="minus" Size="16" /></button>
+                            <button type="button" class="iconbtn" data-img="in" aria-label="@L["Zoom in"]" title="@L["Zoom in"]"><LipiIcon Name="plus" Size="16" /></button>
+                            <button type="button" class="iconbtn" data-img="turn" aria-label="@L["Turn"]" title="@L["Turn"]"><LipiIcon Name="refresh" Size="16" /></button>
+                        </span>
+                    }
+                    @if (before is not null)
+                    {
+                        <a class="iconbtn" href="@PreviewLink(before.Index)" rel="prev" data-viewer-prev aria-label="@L["Previous file"]" title="@L["Previous file"]"><LipiIcon Name="chevron-left" Size="16" /></a>
+                    }
+                    @if (after is not null)
+                    {
+                        <a class="iconbtn" href="@PreviewLink(after.Index)" rel="next" data-viewer-next aria-label="@L["Next file"]" title="@L["Next file"]"><LipiIcon Name="chevron-right" Size="16" /></a>
+                    }
                     <a class="iconbtn" href="/message/@Id/attachment/@pv.Index" title="@L["Download"]" aria-label="@L["Download"]"><LipiIcon Name="download" Size="16" /></a>
                 </div>
-                <div class="pvbody">
-                    @if (ptype == "application/pdf")
+                <div class="pvwrap">
+                    @if (view.Attachments.Count > 1)
                     {
-                        <iframe class="pvpdf" src="/message/@Id/attachment/@pv.Index/preview" title="@pv.FileName"></iframe>
+                        <nav class="pvstrip" aria-label="@L["The mail's files"]">
+                            @foreach (AttachmentView f in view.Attachments)
+                            {
+                                (string ftag, string fkind) = FileTag.Of(f.FileName, f.ContentType);
+                                bool shows = MailboxService.PreviewType(f) is not null;
+                                <a class="pvfile @(f.Index == pv.Index ? "on" : null)" href="@(shows ? PreviewLink(f.Index) : $"/message/{Id}/attachment/{f.Index}")" aria-current="@(f.Index == pv.Index ? "true" : null)" title="@f.FileName">
+                                    <span class="ftag ftag-@fkind" aria-hidden="true">@ftag</span><span class="fn">@f.FileName</span>
+                                </a>
+                            }
+                        </nav>
                     }
-                    else
-                    {
-                        <img class="pvimg" src="/message/@Id/attachment/@pv.Index/preview" alt="@pv.FileName" />
-                    }
+                    <div class="pvbody">
+                        @if (ptype == "application/pdf")
+                        {
+                            <iframe class="pvpdf" src="/message/@Id/attachment/@pv.Index/preview" title="@pv.FileName"></iframe>
+                        }
+                        else if (ptype == MailboxService.ZipType)
+                        {
+                            <section class="pvzip" aria-label="@L["Inside the archive"]">
+                                @if (zip is null || zip.Refused is not null)
+                                {
+                                    <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@ZipRefusal(zip?.Refused)</span></p>
+                                }
+                                else if (zip.Locked)
+                                {
+                                    <p class="notice n-info readnotice"><LipiIcon Name="lock" Size="16" /><span>@L["Locked with a password: Anjal cannot look inside it."]</span></p>
+                                }
+                                else
+                                {
+                                    <p class="hint">@L["{n} files, {size} unpacked. Programs are blocked and cannot be taken out."].Replace("{n}", zip.Entries.Count(e => !e.Folder).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{size}", MainLayout.Size(zip.Expanded), StringComparison.Ordinal)</p>
+                                    <table class="ziptable">
+                                        <thead><tr><th scope="col">@L["Name"]</th><th scope="col">@L["Size"]</th><th scope="col">@L["Changed"]</th><th scope="col"><span class="sr-only">@L["Download"]</span></th></tr></thead>
+                                        <tbody>
+                                        @foreach (ZipEntryView e in zip.Entries)
+                                        {
+                                            <tr class="@(e.Blocked ? "zblocked" : null)">
+                                                <td><span class="zname" style="--depth: @e.Depth">@if (e.Folder) {<LipiIcon Name="folder" Size="14" />}@e.Name</span></td>
+                                                <td class="num">@(e.Folder ? string.Empty : MainLayout.Size(e.Size))</td>
+                                                <td>@clock.Date(e.Modified)</td>
+                                                <td>@if (e.Blocked) {<span class="pill pill-bad">@L["Blocked"]</span>} else if (!e.Folder) {<a class="iconbtn" href="/message/@Id/attachment/@pv.Index/zip/@e.Index" aria-label="@L["Download"] @e.Name" title="@L["Download"]"><LipiIcon Name="download" Size="15" /></a>}</td>
+                                            </tr>
+                                        }
+                                        </tbody>
+                                    </table>
+                                }
+                            </section>
+                        }
+                        else
+                        {
+                            <img class="pvimg" src="/message/@Id/attachment/@pv.Index/preview" alt="@pv.FileName" data-viewer-img />
+                        }
+                    </div>
                 </div>
             }
             else
@@ -653,6 +720,51 @@ else
                 </section>
             }
 
+            @if (secureReply)
+            {
+                @* rc.28 (DES-19 §5): a reply through a secure link - the address was proven by a code. *@
+                <section class="ecard eslinks" aria-label="@L["Secure link"]" data-secure-reply>
+                    <h2 class="ehead"><LipiIcon Name="lock" Size="13" /> @L["Replied through a secure link"]</h2>
+                    <p class="eslink"><span class="esstate">@L["Verified: the code was mailed to this address."]</span></p>
+                </section>
+            }
+            @if (secureLinks.Count > 0)
+            {
+                @* rc.28 (DES-19 §6): one line per outside person sent a secure link. *@
+                <section class="ecard eslinks" aria-label="@L["Secure link"]" data-secure-links>
+                    <h2 class="ehead"><LipiIcon Name="lock" Size="13" /> @L["Secure link"]</h2>
+                    @if (linkError is not null)
+                    {
+                        <p class="ederr" role="alert"><LipiIcon Name="warning" Size="13" />@L.Say(linkError)</p>
+                    }
+                    @foreach (SecureLinkRow link in secureLinks)
+                    {
+                        DateTimeOffset now = DateTimeOffset.UtcNow;
+                        <div class="eslink">
+                            <b>@link.Recipient</b>
+                            <span class="esstate">@SecureLine(link)</span>
+                            @if (link.IsOpenAt(now))
+                            {
+                                <span class="esstate">@L["Ends {date}"].Replace("{date}", clock.Date(link.ExpiresAt), StringComparison.Ordinal)</span>
+                            }
+                            else
+                            {
+                                <span class="esended">@(link.LockedAt is not null ? L["Stopped after wrong codes"] : link.StoppedAt is not null ? L["Stopped"] : L["Ended"])</span>
+                            }
+                            <span class="esacts">
+                                @if (link.IsOpenAt(now))
+                                {
+                                    <form method="post" action="/securelink/@link.Id/stop"><AntiforgeryToken /><input type="hidden" name="back" value="@SecureBack" /><button type="submit" class="btn btn-s btn-sm">@L["Stop the link"]</button></form>
+                                }
+                                @if (link.SentCopyId is not null)
+                                {
+                                    <form method="post" action="/securelink/@link.Id/again"><AntiforgeryToken /><input type="hidden" name="back" value="@SecureBack" /><button type="submit" class="btn btn-s btn-sm">@L["Send a new link"]</button></form>
+                                }
+                            </span>
+                        </div>
+                    }
+                </section>
+            }
             @if (desk is not null)
             {
                 @* rc.27 (DES-17 §2.4): the Desk block - who has it, where it stands, what happened. *@
@@ -1164,6 +1276,24 @@ else
 
     private AttachmentView? Previewed => Preview is int i && view is not null ? view.Attachments.FirstOrDefault(a => a.Index == i) : null;
 
+    // rc.28 (DES-18 §10): the archive being looked at, listed by the server; null when none is.
+    private ZipView? zip;
+
+    // rc.28: the files before and after this one that can be shown here.
+    private (AttachmentView? Before, AttachmentView? After) Neighbours(AttachmentView current)
+    {
+        List<AttachmentView> shown = view is null ? new() : view.Attachments.Where(a => MailboxService.PreviewType(a) is not null).ToList();
+        int at = shown.FindIndex(a => a.Index == current.Index);
+        return (at > 0 ? shown[at - 1] : null, at >= 0 && at + 1 < shown.Count ? shown[at + 1] : null);
+    }
+
+    private string ZipRefusal(string? why) => why switch
+    {
+        ZipView.TooMany => L["This archive holds too many files to list here. Download it to look inside."],
+        ZipView.TooLarge or ZipView.TooPacked => L["This archive would be far larger unpacked than it looks, so Anjal does not open it. Download it only if you trust the sender."],
+        _ => L["This archive cannot be read. Download it to look inside."],
+    };
+
     private string PreviewLink(int index) => Back + (Back.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "preview=" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private string ReplyLink(string kind) => DockBase is not null ? $"{DockBase}&{kind}={Id}" : $"/compose?{kind}={Id}";
@@ -1440,6 +1570,20 @@ else
     private ZonedClock clock = ZonedClock.Default;
     [CascadingParameter] private HttpContext? Http { get; set; }
 
+    // rc.28 (DES-19): the secure links of a sent mail, a reply through one, and an error from their buttons.
+    private IReadOnlyList<SecureLinkRow> secureLinks = Array.Empty<SecureLinkRow>();
+    private bool secureReply;
+    private string? linkError;
+
+    private string SecureBack => "/folder/" + Uri.EscapeDataString(view?.Folder.Name ?? "Sent") + "?open=" + Id;
+
+    // "Mailed 9 Nov · Code asked · Opened · Replied" - the latest step the person reached.
+    private string SecureLine(SecureLinkRow link) =>
+        link.RepliedAt is DateTimeOffset r ? L["Replied {when}"].Replace("{when}", clock.List(r, DateTimeOffset.UtcNow), StringComparison.Ordinal)
+        : link.OpenedAt is DateTimeOffset o ? L["Opened {when}"].Replace("{when}", clock.List(o, DateTimeOffset.UtcNow), StringComparison.Ordinal)
+        : link.LastCodeAt is DateTimeOffset c ? L["Code asked {when}"].Replace("{when}", clock.List(c, DateTimeOffset.UtcNow), StringComparison.Ordinal)
+        : L["Not opened yet"];
+
     // DEF-146 (rc.23): the strip opens the envelope on this page (with <base href="/">, a bare #envelope went to Today).
     private string EnvelopeHref => (Http?.Request.Path.Value ?? string.Empty) + (Http?.Request.QueryString.Value ?? string.Empty) + "#envelope";
 
@@ -1584,6 +1728,10 @@ else
         // first, and this call works on its own copy, so neither call reads a view the other has cleared.
         MessageView? opened = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
         view = opened;
+        // rc.28 (DES-18 §10): an archive opened in the viewer is listed now, on the server.
+        zip = Previewed is AttachmentView shownFile && MailboxService.PreviewType(shownFile) == MailboxService.ZipType
+            ? await Mail.ZipViewAsync(mailboxId.Value, Id, shownFile.Index)
+            : null;
         // DEF-066: opening marked the message read; the left pane recounts now.
         if (Layout is not null)
         {
@@ -1633,6 +1781,10 @@ else
                 otherReplying = desk is null ? null : await Mail.OtherReplyingAsync(mailboxId.Value, reader, opened.Row);
                 deskError = desk is null ? null : AuthEndpoints.ReadNote(DeskNotes, Http?.Request.Query["deskerr"].ToString());
             }
+            // rc.28 (DES-19 §5, §6): the secure links a sent mail made, and a reply that came through one.
+            secureLinks = opened.Folder.Name == "Sent" ? await Mail.SecureLinksOfAsync(mailboxId.Value, opened.Row.MessageId) : Array.Empty<SecureLinkRow>();
+            secureReply = opened.SecureReplyLink.Length > 0 && opened.Row.TransportTls == MailboxService.SecureReplyTransport && await Mail.IsSecureReplyAsync(mailboxId.Value, opened.SecureReplyLink, opened.From);
+            linkError = secureLinks.Count > 0 ? AuthEndpoints.ReadNote(DeskNotes, Http?.Request.Query["linkerr"].ToString()) : null;
             leaveEnd = await Mail.LeaveEndAsync(mailboxId.Value);
             DateTimeOffset monthStart = MailboxService.AtLocal(clock, new DateTime(clock.Local(DateTimeOffset.UtcNow).Year, clock.Local(DateTimeOffset.UtcNow).Month, 1));
             listCard = opened.Folder.Name is "Sent" or "Drafts" ? null : await Mail.ListCardAsync(mailboxId.Value, Id, monthStart);

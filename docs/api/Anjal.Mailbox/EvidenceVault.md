@@ -13,5 +13,6 @@ The files of the evidence store (v1.0.0-rc.8, ANJAL-DES-01): root/YYYY/MM/DD/<id
 - **ReadAsync** *(method)* - Read an evidence file.
 - **Sha256Hex** *(method)* - SHA-256 of bytes, lower-case hex.
 - **WriteAsync** *(method)* - Write a new evidence file. Throws if it cannot be written, or if it already exists.
+- **WriteResealedAsync** *(method)* - rc.28 (D-264, DES-18 §11): write the sealed copy of an original kept before rc.25, beside it in its day's folder as <id>.r1.eml; written once, like every evidence file.
 - **DefaultRoot** *(property)* - The default evidence root when nothing is configured: /var/lib/anjal/evidence on Unix, %LOCALAPPDATA%\Anjal\evidence on Windows.
 - **Root** *(property)* - The evidence root.

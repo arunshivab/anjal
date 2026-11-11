@@ -72,9 +72,9 @@ public sealed class Rc27ItemsTests : IAsyncLifetime, IDisposable
     public async Task PatientWarning_IsLogged_WithWhatWasNoticedAndTheDomains_NeverTheWords()
     {
         // rc.27 (item 72.4): what Anjal noticed (kinds and counts) and the outside domains.
-        await this.Svc.LogPatientWarningAsync("arun@anjal.co.in", ThreeOutside, sentAnyway: true);
-        await this.Svc.LogPatientWarningAsync("arun@anjal.co.in", OneOutside, sentAnyway: false);
-        await this.Svc.LogPatientWarningAsync("arun@anjal.co.in", NoAddress, sentAnyway: true);
+        await this.Svc.LogPatientWarningAsync("arun@anjal.co.in", ThreeOutside, MailboxService.PatientSent);
+        await this.Svc.LogPatientWarningAsync("arun@anjal.co.in", OneOutside, MailboxService.PatientShown);
+        await this.Svc.LogPatientWarningAsync("arun@anjal.co.in", NoAddress, MailboxService.PatientSent);
         IReadOnlyList<AuditEvent> log = await this.store.ListAuditAsync(50);
         AuditEvent sent = Assert.Single(log, e => e.Action == "webmail.patient-warning.sent");
         Assert.Equal("gmail.test, city-lab.test", sent.Subject);

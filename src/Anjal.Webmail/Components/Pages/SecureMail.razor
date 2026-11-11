@@ -1,0 +1,161 @@
+@page "/s/{Token}"
+@layout MainLayout
+@attribute [AllowAnonymous]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider DataProtection
+
+<PageTitle>@L["Secure mail"] — Anjal</PageTitle>
+<HeadContent><meta name="robots" content="noindex, nofollow" /><meta name="referrer" content="no-referrer" /></HeadContent>
+
+@* rc.28 (DES-19 §4): a mail kept on Anjal for one outside person. The link alone shows nothing of it:
+   a code mailed to the person's own address opens it for 30 minutes. *@
+@if (mail is not null && sl is not null)
+{
+    <div class="slpage">
+        <header class="slbar">
+            <span class="mark-tile slmark" aria-hidden="true"><svg viewBox="0 0 148 148" width="28" height="28"><rect width="148" height="148" rx="34" class="mt-tile"></rect><path d="M18 30 L74 78 L130 30" class="mt-flap"></path></svg></span>
+            <b>@sl.Organisation</b>
+            <span class="slgrow"></span>
+            <span class="slseal"><LipiIcon Name="lock" Size="15" />@L["Secure mail: shown only to you, for 30 minutes"]</span>
+        </header>
+        <main class="slcard" id="main">
+            <h1 class="slsubject">@(mail.Subject.Length > 0 ? mail.Subject : L["(no subject)"])</h1>
+            <dl class="slhead">
+                <dt>@L["From"]</dt><dd>@mail.From</dd>
+                <dt>@L["To"]</dt><dd>@mail.To</dd>
+                @if (mail.Cc.Length > 0)
+                {
+                    <dt>@L["Cc"]</dt><dd>@mail.Cc</dd>
+                }
+                <dt>@L["Date"]</dt><dd>@mail.Date</dd>
+            </dl>
+            @if (ErrorText is string error)
+            {
+                <div class="notice n-err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+            }
+            <iframe class="slbody" sandbox="" referrerpolicy="no-referrer" title="@L["Message body"]" srcdoc="@Srcdoc"></iframe>
+            @if (mail.Files.Count > 0)
+            {
+                <section class="slfiles" aria-label="@L["The mail's files"]">
+                    <h2>@L["Files"]</h2>
+                    <ul>
+                        @foreach ((AttachmentView file, bool blocked) in mail.Files)
+                        {
+                            <li>
+                                <LipiIcon Name="attachment" Size="15" /><span class="slfname">@file.FileName</span><span class="slfsize">@Layout.MainLayout.Size(file.SizeBytes)</span>
+                                @if (blocked)
+                                {
+                                    <span class="sltag">@L["Blocked"]</span>
+                                }
+                                else
+                                {
+                                    <a class="btn btn-s btn-sm" href="/s/@Token/file/@file.Index" download>@L["Download"]</a>
+                                }
+                            </li>
+                        }
+                    </ul>
+                </section>
+            }
+            <form method="post" action="/s/@Token/reply" enctype="multipart/form-data" class="slreply">
+                <AntiforgeryToken />
+                <label for="slreplytext"><b>@L["Reply to {name}"].Replace("{name}", sl.SenderName, StringComparison.Ordinal)</b></label>
+                <textarea id="slreplytext" name="text" rows="6" maxlength="20000" class="inp"></textarea>
+                <div class="slreplyrow">
+                    <input type="file" name="files" multiple aria-label="@L["Attach files"]" />
+                    <span class="slgrow"></span>
+                    <button type="submit" class="btn btn-p">@L["Send reply"]</button>
+                </div>
+                <p class="authnote">@L["Your reply goes to {name} through Anjal, as safely as this mail came to you."].Replace("{name}", sl.SenderName, StringComparison.Ordinal)</p>
+            </form>
+        </main>
+    </div>
+}
+else
+{
+    <AuthFrame L="L" Org="org">
+        <h1 class="authtitle">@L["Secure mail"]</h1>
+        @if (sl is null || !sl.Link.IsOpenAt(DateTimeOffset.UtcNow))
+        {
+            <div class="err" role="alert" data-securelink-ended><LipiIcon Name="warning" Size="16" /><span>@L["This link has ended."] @(sl is null ? string.Empty : L["Ask {name} to send it again."].Replace("{name}", sl.SenderName, StringComparison.Ordinal))</span></div>
+        }
+        else if (Replied == "1")
+        {
+            <div class="note n-ok" role="status"><LipiIcon Name="check" Size="16" /><span>@L["Your reply was sent to {name}."].Replace("{name}", sl.SenderName, StringComparison.Ordinal)</span></div>
+            <p class="authnote">@L["To read the mail again, ask for a new code."]</p>
+            <form method="post" action="/s/@Token/code" class="authfields">
+                <AntiforgeryToken />
+                <button type="submit" class="authbtn btn-s">@L["Mail me a new code"]</button>
+            </form>
+        }
+        else
+        {
+            <p class="authlead">@L["{name} ({address}) sent you a mail through Anjal, kept safe on Anjal's server."].Replace("{name}", sl.SenderName, StringComparison.Ordinal).Replace("{address}", sl.SenderAddress, StringComparison.Ordinal)</p>
+            @if (ErrorText is string error)
+            {
+                <div class="err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+            }
+            @if (Sent == "1")
+            {
+                @if (Left is string left && int.TryParse(left, out int tries))
+                {
+                    <div class="err" role="alert" data-securelink-wrong><LipiIcon Name="warning" Size="16" /><span>@(tries > 0 ? L["That code is not right. {n} tries left."].Replace("{n}", tries.ToString(System.Globalization.CultureInfo.CurrentCulture), StringComparison.Ordinal) : L["Too many wrong codes: this link has stopped. {name} has been told."].Replace("{name}", sl.SenderName, StringComparison.Ordinal))</span></div>
+                }
+                <p class="authnote">@L["We mailed a code to {address}. It works for 10 minutes."].Replace("{address}", sl.Masked, StringComparison.Ordinal)</p>
+                <form method="post" action="/s/@Token/open" class="authfields">
+                    <AntiforgeryToken />
+                    <label class="authlbl" for="slcode">@L["Code"]</label>
+                    <div class="authinpwrap"><input id="slcode" class="authinp-in mono" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="7" pattern="[0-9 ]{6,7}" required autofocus placeholder="123 456" /></div>
+                    <button type="submit" class="authbtn">@L["Open the mail"]</button>
+                </form>
+                <form method="post" action="/s/@Token/code" class="authfields">
+                    <AntiforgeryToken />
+                    <button type="submit" class="linkbtn">@L["Mail me a new code"]</button>
+                </form>
+            }
+            else
+            {
+                <p class="authnote">@L["Anjal will mail a 6-digit code to {address}. Type it here to open the mail."].Replace("{address}", sl.Masked, StringComparison.Ordinal)</p>
+                <form method="post" action="/s/@Token/code" class="authfields">
+                    <AntiforgeryToken />
+                    <button type="submit" class="authbtn">@L["Mail me the code"]</button>
+                </form>
+            }
+            <p class="authnote">@L["The link works until {date}."].Replace("{date}", sl.Link.ExpiresAt.ToString("d MMMM yyyy", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</p>
+        }
+    </AuthFrame>
+}
+
+@code {
+    [Parameter] public string Token { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "sent")] private string? Sent { get; set; }
+    [SupplyParameterFromQuery(Name = "left")] private string? Left { get; set; }
+    [SupplyParameterFromQuery(Name = "err")] private string? Err { get; set; }
+    [SupplyParameterFromQuery(Name = "replied")] private string? Replied { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private OrganisationIdentity? org;
+    private SecureLinkPage? sl;
+    private SecureMailView? mail;
+
+    private string? ErrorText => AuthEndpoints.ReadNote(DataProtection, Err);
+
+    protected override async Task OnInitializedAsync()
+    {
+        L = AuthWords.For(Http.HttpContext, Words);
+        org = await Mail.OrganisationForHostAsync(Http.HttpContext?.Request.Host.Host);
+        sl = await Mail.SecureLinkPageAsync(Token);
+        if (sl is not null && Http.HttpContext is { } http && sl.Link.IsOpenAt(DateTimeOffset.UtcNow) && SecureLinkEndpoints.InVisit(http, DataProtection, sl.Link.Id))
+        {
+            mail = await Mail.OpenSecureMailAsync(Token);
+        }
+    }
+
+    private string Srcdoc =>
+        "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\">" +
+        "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:\">" +
+        "<style>body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;font-size:15px;line-height:1.65;margin:16px 4px;color:#1d2928;background:#fff;word-wrap:break-word}" +
+        "p{margin:0 0 .9em}img{max-width:100%}pre{white-space:pre-wrap;font-family:inherit;margin:0}a{color:#0b5d8f}</style></head><body>" +
+        (mail?.BodyHtml ?? string.Empty) + "</body></html>";
+}

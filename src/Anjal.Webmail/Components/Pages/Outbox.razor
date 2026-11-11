@@ -2,6 +2,7 @@
 @attribute [Authorize]
 @inject MailboxService Mail
 @inject Words Words
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider DataProtection
 
 @* rc.12 (item 9, the board ListOutbox): mail still being delivered to someone
    outside. Each row is one recipient Anjal is still trying; when every
@@ -19,6 +20,14 @@
         @if (Cancelled is not null)
         {
             <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="check" Size="16" /><span>@L["Cancelled for that recipient. Your copy stays in Sent."]</span></div></div>
+        }
+        @if (Secured is not null)
+        {
+            <div class="notice-wrap"><div class="notice n-ok"><LipiIcon Name="lock" Size="16" /><span>@L["Sent as a secure link. The mail left the Outbox; your copy stays in Sent."]</span></div></div>
+        }
+        @if (AuthEndpoints.ReadNote(DataProtection, Err) is string outboxError)
+        {
+            <div class="notice-wrap"><div class="notice n-err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(outboxError)</span></div></div>
         }
         @if (Retrying is not null)
         {
@@ -86,6 +95,14 @@
                             <AntiforgeryToken />
                             <button type="submit" class="eb" data-needs-server>@L["Try now"]</button>
                         </form>
+                        @if (maySecure)
+                        {
+                            @* rc.28 (DES-19 §2.3, brief 11c): the mail to this person as a secure link instead. *@
+                            <form method="post" action="/outbox/@shown.Id/secure" class="inline">
+                                <AntiforgeryToken />
+                                <button type="submit" class="eb" data-needs-server title="@L["They get a link instead of the mail, and a code by mail to open it. The mail leaves the Outbox."]"><LipiIcon Name="lock" Size="15" />@L["Send as a secure link"]</button>
+                            </form>
+                        }
                         <details class="pmenu confirm">
                             <summary class="eb eb-danger">@L["Cancel for {name}"].Replace("{name}", shown.To, StringComparison.Ordinal)</summary>
                             <form method="post" action="/outbox/@shown.Id/cancel" class="pmenu-body">
@@ -106,6 +123,9 @@
     [SupplyParameterFromQuery(Name = "open")] private string? OpenText { get; set; }
     [SupplyParameterFromQuery(Name = "cancelled")] private string? Cancelled { get; set; }
     [SupplyParameterFromQuery(Name = "retrying")] private string? Retrying { get; set; }
+    [SupplyParameterFromQuery(Name = "secured")] private string? Secured { get; set; }
+    [SupplyParameterFromQuery(Name = "err")] private string? Err { get; set; }
+    private bool maySecure;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private Lexicon L = new("en", new Dictionary<string, string>());
@@ -158,6 +178,7 @@
         if (mailboxId is not null)
         {
             items = await Mail.ListOutboxAsync(mailboxId.Value);
+            maySecure = await Mail.MaySendSecureLinksAsync(mailboxId.Value);
         }
     }
 }

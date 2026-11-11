@@ -15,7 +15,7 @@ async function submit(p, selector, wait) {
 // envelope's buttons may be scrolled out of view on a laptop screen).
 async function posted(p, path, selector) {
   await Promise.all([
-    p.waitForResponse((r) => r.url().endsWith(path) && r.request().method() === 'POST', { timeout: 30000 }),
+    p.waitForResponse((r) => r.url().endsWith(path) && r.request().method() === 'POST', { timeout: 90000 }),
     p.$eval(selector, (b) => b.form.requestSubmit(b)),
   ]);
   await p.waitForLoadState('load');
@@ -47,10 +47,23 @@ async function posted(p, path, selector) {
       return;
     }
     if (part === 'work') {
-      await L.visit(w, '/folder/INBOX', 400);
-      await Promise.all([p.waitForURL(/\/folder\//, { timeout: 30000 }), p.$eval('form[action="/shared/open"]', (f) => f.requestSubmit())]);
-      await L.visit(w, '/folder/INBOX', 600);
-      const open = await p.$$eval('#maillist a[href*="open="]', (a) => a.map((x) => x.getAttribute('href')));
+      // The desk's key reaches a member when an administrator next opens the organisation console
+      // (rc.25); open it first, so the desk is readable however the mail and the keys were timed.
+      // The desk's keys are made in the background as its first mail arrives, so the console may be
+      // opened before there is a key to hand on: try again for a while (screen checks, 9 Nov).
+      let open = [];
+      for (let tries = 0; tries < 15 && open.length < 2; tries++) {
+        await L.visit(w, '/org', 600);
+        await L.visit(w, '/folder/INBOX', 400);
+        await Promise.all([p.waitForURL(/\/(folder|unlock)/, { timeout: 30000 }), p.$eval('form[action="/shared/open"]', (f) => f.requestSubmit())]);
+        await L.visit(w, '/folder/INBOX', 600);
+        const desk = await p.$('form[action="/shared/close"]');
+        open = desk ? await p.$$eval('#maillist a[href*="open="]', (a) => a.map((x) => x.getAttribute('href'))) : [];
+        if (open.length < 2) {
+          if (desk) { await p.$eval('form[action="/shared/close"]', (f) => f.requestSubmit()); await p.waitForLoadState('load'); }
+          await p.waitForTimeout(2000);
+        }
+      }
       if (open.length < 2) { throw new Error(`expected 2 mails in the desk, found ${open.length}`); }
       await L.visit(w, open[0], 600);
       await posted(p, '/desk/act', 'form[action="/desk/act"]:has(input[name=action][value=take]) button[type=submit]');

@@ -568,9 +568,40 @@ public sealed partial class MailboxService
             (_, ".jpg" or ".jpeg") or ("image/jpeg", _) => "image/jpeg",
             (_, ".gif") or ("image/gif", _) => "image/gif",
             (_, ".webp") or ("image/webp", _) => "image/webp",
+            (_, ".bmp") or ("image/bmp", _) => "image/bmp",
             (_, ".pdf") or ("application/pdf", _) => "application/pdf",
+            // rc.28 (DES-18 §10): an archive is listed in the viewer, never served as itself.
+            (_, ".zip") or ("application/zip" or "application/x-zip-compressed", _) => ZipType,
             _ => null,
         };
+    }
+
+    /// <summary>rc.28 (DES-18 §10): the preview type of a ZIP - listed by the server, never served inline.</summary>
+    public const string ZipType = "application/zip";
+
+    /// <summary>rc.28 (DES-18 §10, R10 [10c]): what is inside a ZIP attachment, or null when there is no such file.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The mail.</param>
+    /// <param name="index">The attachment.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The listing.</returns>
+    public async Task<ZipView?> ZipViewAsync(Guid mailboxId, Guid messageId, int index, CancellationToken ct = default)
+    {
+        (AttachmentView View, byte[] Bytes)? found = await this.GetAttachmentAsync(mailboxId, messageId, index, ct).ConfigureAwait(false);
+        return found is null || PreviewType(found.Value.View) != ZipType ? null : ZipListing.Read(found.Value.Bytes);
+    }
+
+    /// <summary>rc.28 (DES-18 §10): one file from inside a ZIP attachment, for its Download; null when it is not given out.</summary>
+    /// <param name="mailboxId">The mailbox.</param>
+    /// <param name="messageId">The mail.</param>
+    /// <param name="index">The attachment.</param>
+    /// <param name="entry">The entry's place in the archive.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Its name and bytes.</returns>
+    public async Task<(string Name, byte[] Bytes)?> ZipEntryAsync(Guid mailboxId, Guid messageId, int index, int entry, CancellationToken ct = default)
+    {
+        (AttachmentView View, byte[] Bytes)? found = await this.GetAttachmentAsync(mailboxId, messageId, index, ct).ConfigureAwait(false);
+        return found is null || PreviewType(found.Value.View) != ZipType ? null : ZipListing.Entry(found.Value.Bytes, entry);
     }
 
     /// <summary>The carry index that means "the whole message, as an .eml attachment" (rc.12, item 23).</summary>

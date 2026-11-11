@@ -40,6 +40,9 @@
     private IEnumerable<(string Label, string Tip)> Pairs() => new Dictionary<string, string>(StringComparer.Ordinal)
         {
             [L["Archive"]] = L["Keep it, out of the Inbox. Find it in Archive or by search."],
+            // rc.28 (D-331, D-332).
+            [L["Change the mail"]] = L["Go back to the mail to change it; the activity log notes that you did."],
+            [L["Larger letters"]] = L["Show the sheet in large letters, to copy it by hand."],
             // rc.27 (the screen checks with a desk seeded): the desk's buttons.
             [L["Back to my mailbox"]] = L["Leave the desk and go back to your own mail."],
             [L["Take it"]] = L["Make this conversation yours; the desk sees you have it."],

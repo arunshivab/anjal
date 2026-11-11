@@ -301,5 +301,39 @@ public sealed partial class InMemoryMessageStore
         PurgedAt = e.PurgedAt,
         PurgeReason = e.PurgeReason,
         SentMessageId = e.SentMessageId,
+        ResealedFromSha256 = e.ResealedFromSha256,
+        ResealedAt = e.ResealedAt,
     };
+
+    /// <inheritdoc/>
+    public Task<bool> ResealEvidenceAsync(System.Guid id, string path, long sizeBytes, string sha256, System.DateTimeOffset at, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(path);
+        System.ArgumentNullException.ThrowIfNull(sha256);
+        lock (this.gate)
+        {
+            if (!this.evidence.TryGetValue(id, out EvidenceRow? e) || e.ResealedAt is not null)
+            {
+                return Task.FromResult(false);
+            }
+            e.ResealedFromSha256 = e.Sha256;
+            e.Sha256 = sha256;
+            e.Path = path;
+            e.SizeBytes = sizeBytes;
+            e.ResealedAt = at;
+            return Task.FromResult(true);
+        }
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<System.Guid>> ListUnsealedQueuedOutboundAsync(int limit, CancellationToken ct = default)
+    {
+        lock (this.gate)
+        {
+            IReadOnlyList<System.Guid> ids = this.outbound
+                .Where(o => o.Status is OutboundStatus.Pending or OutboundStatus.Sending && o.RawBytes.Length > 0 && !OutboundCipher.IsSealed(o.RawBytes))
+                .Take(limit).Select(o => o.Id).ToList();
+            return Task.FromResult(ids);
+        }
+    }
 }

@@ -1394,6 +1394,50 @@ public sealed partial class MailboxSink : Anjal.Smtp.IMessageSink
         await this.FileSentCopyWithEvidenceAsync(address, rawBytes, evidenceId: null, ct).ConfigureAwait(false) is not null;
 
     /// <summary>
+    /// rc.28 (DES-20 §4): keep a message in one of a mailbox's folders as it is, with no rules, scoring
+    /// or replies (a mail app's message held back in Drafts).
+    /// </summary>
+    /// <param name="address">The mailbox's address.</param>
+    /// <param name="folderName">The folder.</param>
+    /// <param name="rawBytes">The message.</param>
+    /// <param name="seen">Whether it is marked read.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The message's id, or null when the address is not a mailbox here.</returns>
+    public async System.Threading.Tasks.Task<System.Guid?> FileIntoFolderAsync(string address, string folderName, byte[] rawBytes, bool seen, System.Threading.CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(address);
+        System.ArgumentNullException.ThrowIfNull(folderName);
+        System.ArgumentNullException.ThrowIfNull(rawBytes);
+        if (await this.ResolveAsync(address, ct).ConfigureAwait(false) is not (Anjal.Store.TenantRow tenant, Anjal.Store.MailboxRow mailbox))
+        {
+            return null;
+        }
+        Anjal.Mime.MimeMessage? parsed = this.ParseQuietly(rawBytes);
+        Anjal.Store.FolderRow folder = await this.store.EnsureFolderAsync(mailbox.Id, folderName, ct).ConfigureAwait(false);
+        MaildirWriteResult written = await this.maildir.WriteAsync(tenant.Slug, mailbox.Address, folder.Name, rawBytes, ct).ConfigureAwait(false);
+        string? path = seen ? this.maildir.SetFlags(tenant.Slug, mailbox.Address, folder.Name, written.RelativePath, seen: true, flagged: false, answered: false) : null;
+        Anjal.Store.MessageRow saved = await this.store.SaveMessageAsync(new Anjal.Store.MessageRow
+        {
+            MailboxId = mailbox.Id,
+            FolderId = folder.Id,
+            MaildirFile = path ?? written.RelativePath,
+            EnvelopeFrom = mailbox.Address,
+            MessageId = parsed?.MessageId ?? string.Empty,
+            FromHeader = parsed?.Headers.Get("From") ?? mailbox.Address,
+            ToHeader = parsed?.Headers.Get("To") ?? string.Empty,
+            Subject = parsed?.Subject ?? string.Empty,
+            DateHeader = parsed?.Date ?? string.Empty,
+            SizeBytes = written.SizeBytes,
+            Seen = seen,
+            SpamChecked = false,
+            HasAttachments = HasAttachment(parsed?.Body),
+            BodyText = MessageText.Extract(parsed),
+        }, ct).ConfigureAwait(false);
+        await this.store.AddMailboxUsageAsync(mailbox.Id, written.SizeBytes, ct).ConfigureAwait(false);
+        return saved.Id;
+    }
+
+    /// <summary>
     /// <see cref="FileSentCopyAsync"/>, also linking the copy to the evidence of
     /// the submission as received (v1.0.0-rc.8), and returning the copy's id.
     /// </summary>

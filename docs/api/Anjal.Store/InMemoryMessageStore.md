@@ -8,17 +8,26 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 
 - **AcknowledgeAppMailAsync** *(method)* - _(no description)_
 - **AddAppEventAsync** *(method)* - _(no description)_
+- **AddAppPasswordAsync** *(method)* - _(no description)_
+- **AddChatMemberAsync** *(method)* - _(no description)_
+- **AddChatMessageAsync** *(method)* - _(no description)_
+- **AddChatRoomAsync** *(method)* - _(no description)_
 - **AddDeskEventAsync** *(method)* - _(no description)_
 - **AddDeskNoteAsync** *(method)* - _(no description)_
 - **AddEvidenceAttemptAsync** *(method)* - _(no description)_
+- **AddImportJobAsync** *(method)* - _(no description)_
 - **AddMailboxKeysAsync** *(method)* - _(no description)_
 - **AddMailboxUsageAsync** *(method)* - _(no description)_
+- **AddSecureLinkAsync** *(method)* - _(no description)_
+- **AddSecureLinkCodeAsync** *(method)* - _(no description)_
 - **AddTenantKeysAsync** *(method)* - _(no description)_
 - **AddTrustedSenderAsync** *(method)* - _(no description)_
 - **AppInboxWaitingAsync** *(method)* - _(no description)_
 - **AppendAuditAsync** *(method)* - _(no description)_
+- **AssignImapUidsAsync** *(method)* - _(no description)_
 - **CancelOutboundAsync** *(method)* - _(no description)_
 - **ChangeTenantDocumentAsync** *(method)* - _(no description)_
+- **ClaimImportJobAsync** *(method)* - _(no description)_
 - **CompleteWebhookJobAsync** *(method)* - _(no description)_
 - **CountAppOutboundElsewhereAsync** *(method)* - _(no description)_
 - **CountAppSendsAsync** *(method)* - _(no description)_
@@ -32,6 +41,7 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **CountReceivedByTenantAsync** *(method)* - _(no description)_
 - **CountSearchAsync** *(method)* - _(no description)_
 - **CountUnreadAsync** *(method)* - _(no description)_
+- **CountUnreadChatsAsync** *(method)* - _(no description)_
 - **CountWebhookJobsAsync** *(method)* - _(no description)_
 - **CreateTagGrantAsync** *(method)* - _(no description)_
 - **DatabaseBytesAsync** *(method)* - _(no description)_
@@ -59,8 +69,10 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **EnqueueOutboundAsync** *(method)* - _(no description)_
 - **EnqueueWebhookJobAsync** *(method)* - _(no description)_
 - **EnsureFolderAsync** *(method)* - _(no description)_
+- **ExpireChoosingImportJobsAsync** *(method)* - _(no description)_
 - **FindAppSendByKeyAsync** *(method)* - _(no description)_
 - **FindAppSendByMessageIdAsync** *(method)* - _(no description)_
+- **FindDirectChatAsync** *(method)* - _(no description)_
 - **GetActiveTagGrantAsync** *(method)* - _(no description)_
 - **GetActivityAsync** *(method)* - _(no description)_
 - **GetAppEventAsync** *(method)* - _(no description)_
@@ -69,9 +81,11 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **GetAppWebhookDeliveryAsync** *(method)* - _(no description)_
 - **GetBreakGlassAsync** *(method)* - _(no description)_
 - **GetCategoryAsync** *(method)* - _(no description)_
+- **GetChatRoomAsync** *(method)* - _(no description)_
 - **GetDeskItemAsync** *(method)* - _(no description)_
 - **GetDkimKeyAsync** *(method)* - _(no description)_
 - **GetEvidenceAsync** *(method)* - _(no description)_
+- **GetImportJobAsync** *(method)* - _(no description)_
 - **GetInboundByIdAsync** *(method)* - _(no description)_
 - **GetLatestEvidenceManifestAsync** *(method)* - _(no description)_
 - **GetMailFiguresAsync** *(method)* - _(no description)_
@@ -84,9 +98,12 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **GetOutboundByIdAsync** *(method)* - _(no description)_
 - **GetOutboundEvidenceLinkAsync** *(method)* - _(no description)_
 - **GetOutboundTlsPolicyAsync** *(method)* - _(no description)_
+- **GetPresenceAsync** *(method)* - _(no description)_
 - **GetPublicKeysAsync** *(method)* - _(no description)_
 - **GetRestoreRequestAsync** *(method)* - _(no description)_
 - **GetRoutingRuleAsync** *(method)* - _(no description)_
+- **GetSecureLinkAsync** *(method)* - _(no description)_
+- **GetSecureLinkByTokenAsync** *(method)* - _(no description)_
 - **GetServiceRecordAsync** *(method)* - _(no description)_
 - **GetSessionKeysAsync** *(method)* - _(no description)_
 - **GetSignatureAsync** *(method)* - _(no description)_
@@ -102,16 +119,21 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **IsLocalDomainAsync** *(method)* - _(no description)_
 - **LeaseOutboundBatchAsync** *(method)* - _(no description)_
 - **LeaseWebhookJobsAsync** *(method)* - _(no description)_
+- **LeaveChatAsync** *(method)* - _(no description)_
 - **LinkOutboundToSentCopyAsync** *(method)* - _(no description)_
 - **ListAppEventsAsync** *(method)* - _(no description)_
 - **ListAppInboxAddressesAsync** *(method)* - _(no description)_
 - **ListAppInboxAsync** *(method)* - _(no description)_
+- **ListAppPasswordsAsync** *(method)* - _(no description)_
 - **ListAppSendsAsync** *(method)* - _(no description)_
 - **ListAppWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **ListAssignedDeskItemsAsync** *(method)* - _(no description)_
 - **ListAuditAsync** *(method)* - _(no description)_
 - **ListCategoriesAsync** *(method)* - _(no description)_
 - **ListCategoryRulesAsync** *(method)* - _(no description)_
+- **ListChatMembersAsync** *(method)* - _(no description)_
+- **ListChatMessagesAsync** *(method)* - _(no description)_
+- **ListChatRoomsAsync** *(method)* - _(no description)_
 - **ListDeskEventsAsync** *(method)* - _(no description)_
 - **ListDeskEventsSinceAsync** *(method)* - _(no description)_
 - **ListDeskItemsAsync** *(method)* - _(no description)_
@@ -127,6 +149,7 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **ListGrantsForHolderAsync** *(method)* - _(no description)_
 - **ListGrantsOfAsync** *(method)* - _(no description)_
 - **ListGreylistAsync** *(method)* - _(no description)_
+- **ListImportJobsAsync** *(method)* - _(no description)_
 - **ListLocalDomainsAsync** *(method)* - _(no description)_
 - **ListMailboxSenderRulesAsync** *(method)* - _(no description)_
 - **ListMailboxesAsync** *(method)* - _(no description)_
@@ -136,11 +159,14 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **ListMessagesByIdsAsync** *(method)* - _(no description)_
 - **ListMessagesBySeenAsync** *(method)* - _(no description)_
 - **ListMessagesSortedAsync** *(method)* - _(no description)_
+- **ListOpenImportJobsAsync** *(method)* - _(no description)_
 - **ListOutboundBySendersAsync** *(method)* - _(no description)_
 - **ListOutboundForSenderAsync** *(method)* - _(no description)_
 - **ListOutboundOfAppSendAsync** *(method)* - _(no description)_
 - **ListOutboundTlsPoliciesAsync** *(method)* - _(no description)_
 - **ListRoutingRulesAsync** *(method)* - _(no description)_
+- **ListSecureLinkCodesAsync** *(method)* - _(no description)_
+- **ListSecureLinksForMessageAsync** *(method)* - _(no description)_
 - **ListSenderRulesAsync** *(method)* - _(no description)_
 - **ListSettingsAsync** *(method)* - _(no description)_
 - **ListSmtpUsersAsync** *(method)* - _(no description)_
@@ -148,10 +174,12 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **ListTenantDomainsAsync** *(method)* - _(no description)_
 - **ListTenantsAsync** *(method)* - _(no description)_
 - **ListTrustedSendersAsync** *(method)* - _(no description)_
+- **ListUnsealedQueuedOutboundAsync** *(method)* - _(no description)_
 - **ListWaitingRestoresAsync** *(method)* - _(no description)_
 - **ListWebhookDeliveriesAsync** *(method)* - _(no description)_
 - **ListWebhookJobsAsync** *(method)* - _(no description)_
 - **MarkAppEventDispatchedAsync** *(method)* - _(no description)_
+- **MarkChatReadAsync** *(method)* - _(no description)_
 - **MarkEvidencePurgedAsync** *(method)* - _(no description)_
 - **MarkOutboundResultAsync** *(method)* - _(no description)_
 - **MoveMessageAsync** *(method)* - _(no description)_
@@ -160,19 +188,24 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **NoteRecoveredFromJunk** *(method)* - Record that a message was moved out of Junk by the reader.
 - **OldestPendingOutboundAsync** *(method)* - _(no description)_
 - **PruneAppApiAsync** *(method)* - _(no description)_
+- **PurgeEndedSecureLinksAsync** *(method)* - _(no description)_
 - **PurgeSessionKeysAsync** *(method)* - _(no description)_
 - **RaiseEvidenceRetentionAsync** *(method)* - _(no description)_
 - **RememberSignatureAsync** *(method)* - _(no description)_
 - **RemoveAppInboxAddressAsync** *(method)* - _(no description)_
+- **RemoveAppPasswordAsync** *(method)* - _(no description)_
+- **RemoveChatMessageAsync** *(method)* - _(no description)_
 - **RemoveOutboundContentAsync** *(method)* - _(no description)_
 - **RemoveTrustedSenderAsync** *(method)* - _(no description)_
 - **ReplaceGreylistAsync** *(method)* - _(no description)_
 - **ReplaceOutboundRawAsync** *(method)* - _(no description)_
 - **ReplayWebhookJobAsync** *(method)* - _(no description)_
+- **ResealEvidenceAsync** *(method)* - _(no description)_
 - **RetryOutboundNowAsync** *(method)* - _(no description)_
 - **SaveAppWebhookDeliveryAsync** *(method)* - _(no description)_
 - **SaveBreakGlassAsync** *(method)* - _(no description)_
 - **SaveGrantAsync** *(method)* - _(no description)_
+- **SaveImportJobAsync** *(method)* - _(no description)_
 - **SaveInboundMessageAsync** *(method)* - _(no description)_
 - **SaveMailboxKeysAsync** *(method)* - _(no description)_
 - **SaveMessageAsync** *(method)* - _(no description)_
@@ -193,6 +226,8 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **SetMessageEvidenceAsync** *(method)* - _(no description)_
 - **SetMessageFlagsAsync** *(method)* - _(no description)_
 - **SetOutboundEvidenceAsync** *(method)* - _(no description)_
+- **SetPresenceAsync** *(method)* - _(no description)_
+- **SetReceivedAtAsync** *(method)* - _(no description)_
 - **SetServiceRecordAsync** *(method)* - _(no description)_
 - **SetSignatureAsync** *(method)* - _(no description)_
 - **SetTenantDocumentAsync** *(method)* - _(no description)_
@@ -201,10 +236,16 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **StartEvidenceClocks** *(method)* - The in-memory stand-in for the database trigger: when the last copy pointing at an evidence row is gone, its retention clock starts. Called with the gate held.
 - **StepStart** *(method)* - The start of the step a local time falls in: the hour, the day, the Monday, or the first of the month.
 - **SumFolderBytesAsync** *(method)* - _(no description)_
+- **TakeSecureCodeMailAsync** *(method)* - _(no description)_
+- **TakeSecureCodeTryAsync** *(method)* - _(no description)_
+- **TakeSecureReplyAsync** *(method)* - _(no description)_
+- **TouchAppPasswordAsync** *(method)* - _(no description)_
+- **TouchPresenceAsync** *(method)* - _(no description)_
 - **TouchSignInAsync** *(method)* - _(no description)_
 - **UndispatchedAppEventsAsync** *(method)* - _(no description)_
 - **UpdateAppSendAsync** *(method)* - _(no description)_
 - **UpdateMessageTransportAsync** *(method)* - _(no description)_
+- **UpdateSecureLinkAsync** *(method)* - _(no description)_
 - **UpsertCategoryAsync** *(method)* - _(no description)_
 - **UpsertCategoryRuleAsync** *(method)* - _(no description)_
 - **UpsertDkimKeyAsync** *(method)* - _(no description)_
@@ -218,6 +259,7 @@ rc.26 (DES-14 §28.1): the application API, in memory.
 - **UpsertSmtpUserAsync** *(method)* - _(no description)_
 - **UpsertTenantAsync** *(method)* - _(no description)_
 - **UpsertTenantDomainAsync** *(method)* - _(no description)_
+- **UseSecureLinkCodeAsync** *(method)* - _(no description)_
 - **VerifyAuditChainAsync** *(method)* - _(no description)_
 - **WithdrawDeskNoteAsync** *(method)* - _(no description)_
 - **AllMailboxes** *(property)* - rc.25: every mailbox, for inspection in tests.

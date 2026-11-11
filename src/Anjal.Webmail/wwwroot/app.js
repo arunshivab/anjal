@@ -3626,6 +3626,136 @@
 
   page(function printButtons() {
   $$("[data-print]").forEach(function (b) { b.addEventListener("click", function () { window.print(); }); });
+  // rc.28 (DES-18 §10): the viewer - ← and → for the previous and next file, Escape back to the letter,
+  // and for a picture: fit, actual size, zoom (+ and -) and turn (R), all without reloading the page.
+  (function () {
+    var bar = document.querySelector("[data-viewer]");
+    if (!bar) { return; }
+    var img = document.querySelector("[data-viewer-img]");
+    var zoom = 1, turn = 0, natural = false;
+    function apply() {
+      if (!img) { return; }
+      img.setAttribute("data-turn", String(turn));
+      img.style.maxWidth = natural ? "none" : "";
+      img.style.transform = (zoom !== 1 || turn) ? "scale(" + zoom + ") rotate(" + turn + "deg)" : "";
+      img.style.transformOrigin = "center top";
+    }
+    function act(what) {
+      if (what === "fit") { zoom = 1; natural = false; }
+      else if (what === "full") { zoom = 1; natural = true; }
+      else if (what === "in") { zoom = Math.min(8, zoom * 1.25); }
+      else if (what === "out") { zoom = Math.max(0.125, zoom / 1.25); }
+      else if (what === "turn") { turn = (turn + 90) % 360; }
+      apply();
+    }
+    $$("[data-img]").forEach(function (b) { b.addEventListener("click", function () { act(b.getAttribute("data-img")); }); });
+    document.addEventListener("keydown", function (e) {
+      var t = e.target;
+      if (e.ctrlKey || e.metaKey || e.altKey || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) { return; }
+      var go = null;
+      if (e.key === "ArrowLeft") { go = bar.querySelector("[data-viewer-prev]"); }
+      else if (e.key === "ArrowRight") { go = bar.querySelector("[data-viewer-next]"); }
+      else if (e.key === "Escape") { go = bar.querySelector("[data-viewer-close]"); }
+      if (go) { e.preventDefault(); go.click(); return; }
+      if (!img) { return; }
+      if (e.key === "+" || e.key === "=") { act("in"); e.preventDefault(); }
+      else if (e.key === "-") { act("out"); e.preventDefault(); }
+      else if (e.key === "r" || e.key === "R") { act("turn"); e.preventDefault(); }
+    });
+  })();
+  // rc.28 (R9 [9d], DES-18 §5): touch. A list row swipes - left a short way and a long way, and right -
+  // doing what the person chose in Settings › Mail; pressing and holding a row opens its menu. Only for a
+  // finger (pointer: coarse); a mouse keeps hover. A swipe must be mostly sideways, so scrolling still works.
+  (function () {
+    var list = document.getElementById("maillist");
+    if (!list || !window.matchMedia || !window.matchMedia("(pointer: coarse)").matches) { return; }
+    var pick = { left: list.getAttribute("data-swipe-left"), long: list.getAttribute("data-swipe-long"), right: list.getAttribute("data-swipe-right") };
+    function word(what) { return list.getAttribute("data-word-swipe-" + what) || ""; }
+    // A swipe presses the row's own quick button (the one with that action, or another of them carrying
+    // it), so the post is the same form and address as a tap would send.
+    function run(row, what) {
+      if (!what || what === "none") { return false; }
+      if (what === "flag") { var f = row.querySelector("button[formaction$='/flag']"); if (f) { f.click(); return true; } return false; }
+      var value = what === "read" ? (row.getAttribute("data-seen") === "1" ? "unread" : "read") : what;
+      var b = row.querySelector(".rowacts .rowact[value='" + value + "']") || row.querySelector(".rowacts .rowact[formaction]");
+      var form = row.closest("form");
+      if (!b || !form) { return false; }
+      b.value = value;
+      if (what === "snooze") { var u = document.createElement("input"); u.type = "hidden"; u.name = "until"; u.value = "tomorrow"; form.appendChild(u); }
+      b.click();
+      return true;
+    }
+    function reset(row) { row.style.transform = ""; row.classList.remove("swiping"); row.removeAttribute("data-swipe-word"); row.removeAttribute("data-swipe-side"); }
+    // The hold menu is the page's own markup (data-holdmenu), shown beside the row that was held.
+    var menu = document.querySelector("[data-holdmenu]"), heldRow = null, open = false;
+    function closeMenu() { if (menu) { menu.hidden = true; } open = false; heldRow = null; $$(".mrow.held").forEach(function (r) { r.classList.remove("held"); }); }
+    if (menu) {
+      $$("[data-hold]", menu).forEach(function (b) {
+        b.addEventListener("click", function () {
+          var row = heldRow, what = b.getAttribute("data-hold");
+          closeMenu();
+          if (!row) { return; }
+          if (what === "reply") { location.href = row.getAttribute("data-reply"); }
+          else if (what === "forward") { location.href = "/compose?forward=" + encodeURIComponent(row.getAttribute("data-message")); }
+          else if (what === "select") { var box = row.querySelector("input[data-rowcheck]"); if (box) { box.checked = true; box.dispatchEvent(new Event("change", { bubbles: true })); } }
+          else { run(row, what); }
+        });
+      });
+    }
+    function openMenu(row) {
+      if (!menu) { return; }
+      closeMenu();
+      heldRow = row; open = true;
+      row.classList.add("held");
+      menu.hidden = false;
+      var r = row.getBoundingClientRect();
+      menu.style.top = Math.max(8, Math.min(r.bottom, window.innerHeight - menu.offsetHeight - 8)) + "px";
+      menu.style.left = Math.max(8, Math.min(r.left + 16, window.innerWidth - menu.offsetWidth - 8)) + "px";
+      var first = menu.querySelector("button"); if (first) { first.focus(); }
+    }
+    document.addEventListener("pointerdown", function (e) { if (open && !menu.contains(e.target)) { closeMenu(); } }, true);
+    document.addEventListener("keydown", function (e) { if (open && e.key === "Escape") { closeMenu(); } });
+    var start = null;
+    list.addEventListener("pointerdown", function (e) {
+      if (e.pointerType !== "touch") { return; }
+      var row = e.target.closest(".mrow");
+      if (!row || e.target.closest("input, button, select")) { return; }
+      start = { x: e.clientX, y: e.clientY, row: row, swiping: false, hold: setTimeout(function () { if (start && !start.swiping) { start.held = true; openMenu(row); } }, 500) };
+    });
+    list.addEventListener("pointermove", function (e) {
+      if (!start || e.pointerType !== "touch") { return; }
+      var dx = e.clientX - start.x, dy = e.clientY - start.y;
+      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) { clearTimeout(start.hold); }
+      if (!start.swiping && Math.abs(dx) > 24 && Math.abs(dx) > 2 * Math.abs(dy)) { start.swiping = true; start.row.classList.add("swiping"); }
+      if (!start.swiping) { return; }
+      e.preventDefault();
+      var what = dx < -160 ? pick.long : dx < -80 ? pick.left : dx > 80 ? pick.right : null;
+      start.row.style.transform = "translateX(" + dx + "px)";
+      start.row.setAttribute("data-swipe-side", dx < 0 ? "left" : "right");
+      if (what && what !== "none") { start.row.setAttribute("data-swipe-word", word(what)); } else { start.row.removeAttribute("data-swipe-word"); }
+      start.what = what;
+    });
+    function end(e) {
+      if (!start) { return; }
+      clearTimeout(start.hold);
+      var s = start; start = null;
+      if (s.swiping) {
+        if (e) { e.preventDefault(); }
+        if (!run(s.row, s.what)) { reset(s.row); }
+      }
+    }
+    list.addEventListener("pointerup", end);
+    list.addEventListener("pointercancel", function () { if (start) { clearTimeout(start.hold); reset(start.row); start = null; } });
+    // A swipe or a hold never also opens the mail under the finger.
+    list.addEventListener("click", function (e) { if (e.target.closest(".mrow.swiping, .mrow.held")) { e.preventDefault(); e.stopPropagation(); } }, true);
+  })();
+  // rc.28 (D-332): the recovery sheet in larger letters, for writing it down by hand.
+  $$("[data-sheet-big]").forEach(function (b) {
+    b.addEventListener("click", function () {
+      var card = b.closest(".sheetcard");
+      if (card) { b.setAttribute("aria-pressed", card.classList.toggle("sheetbig") ? "true" : "false"); }
+    });
+  });
   });
 
   // On a phone the Settings sections are a strip; the one open is brought into view.
@@ -4024,4 +4154,101 @@
     veil.addEventListener("click", done);
     scope.on(document, "keydown", function (e) { if (e.key === "Escape") { done(); } });
   });
+}());
+
+// rc.28 (DES-21): chat. The rail's number every 30 seconds on every page (it also keeps the person
+// online); on the chat page, new messages every 3 seconds while it is in front (30 when not), Enter
+// sends without leaving the page, Shift+Enter is a new line.
+(function () {
+  var rail = document.querySelector("[data-chat-unread]");
+  function unread() {
+    if (!rail) { return; }
+    fetch("/chat/unread", { credentials: "same-origin" }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) {
+      if (t === null) { return; }
+      var n = parseInt(t, 10) || 0;
+      rail.textContent = String(n);
+      rail.hidden = n === 0;
+    }).catch(function () { });
+  }
+  if (rail) { setInterval(unread, 30000); }
+
+  var page = document.querySelector(".chatpage[data-chat]");
+  var room = page ? page.getAttribute("data-chat") : "";
+  var list = page ? page.querySelector("[data-chat-lines]") : null;
+  var form = page ? page.querySelector("[data-chat-send]") : null;
+  if (!room || !list || !form) { return; }
+  var seen = page.querySelector("[data-chat-seen]");
+  var box = form.querySelector("textarea");
+  var busy = false;
+  function bottom() { list.scrollTop = list.scrollHeight; }
+  function add(l) {
+    if (list.querySelector('[data-line="' + l.id + '"]')) {
+      var known = list.querySelector('[data-line="' + l.id + '"]');
+      if (l.removed && !known.classList.contains("removed")) {
+        known.classList.add("removed");
+        known.querySelector(".cltext").textContent = page.getAttribute("data-word-removed");
+        var rm = known.querySelector(".clremove");
+        if (rm) { rm.remove(); }
+      }
+      return false;
+    }
+    var li = document.createElement("li");
+    li.className = "chatline" + (l.mine ? " mine" : "") + (l.removed ? " removed" : "");
+    li.setAttribute("data-line", l.id);
+    if (!l.mine) {
+      var b = document.createElement("b");
+      b.className = "clname";
+      b.textContent = l.name;
+      li.appendChild(b);
+    }
+    var t = document.createElement("span");
+    t.className = "cltext";
+    t.textContent = l.removed ? page.getAttribute("data-word-removed") : l.text;
+    li.appendChild(t);
+    var time = document.createElement("span");
+    time.className = "cltime";
+    time.textContent = l.time;
+    li.appendChild(time);
+    list.appendChild(li);
+    return true;
+  }
+  function poll() {
+    if (busy) { return; }
+    busy = true;
+    var after = list.getAttribute("data-after") || "0";
+    fetch("/chat/" + room + "/since?after=" + encodeURIComponent(after), { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      busy = false;
+      if (!d) { return; }
+      var grew = false;
+      d.lines.forEach(function (l) { grew = add(l) || grew; if (l.at > parseInt(list.getAttribute("data-after") || "0", 10)) { list.setAttribute("data-after", String(l.at)); } });
+      if (grew) { bottom(); }
+      if (seen) { seen.textContent = d.seen.length ? page.getAttribute("data-word-seen").replace("{names}", d.seen.join(", ")) : ""; }
+      if (rail) { rail.textContent = String(d.unread); rail.hidden = d.unread === 0; }
+    }).catch(function () { busy = false; });
+  }
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var text = box.value.trim();
+    if (!text) { return; }
+    var data = new FormData(form);
+    box.value = "";
+    fetch(form.action, { method: "POST", body: data, credentials: "same-origin", headers: { "X-Anjal-Chat": "1" } }).then(function (r) {
+      if (!r.ok) { box.value = text; }
+      poll();
+    }).catch(function () { box.value = text; });
+  });
+  box.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+  });
+  bottom();
+  var timer = null;
+  function schedule() {
+    if (timer) { clearInterval(timer); }
+    timer = setInterval(poll, document.hidden ? 30000 : 3000);
+  }
+  document.addEventListener("visibilitychange", function () { schedule(); if (!document.hidden) { poll(); } });
+  schedule();
 }());

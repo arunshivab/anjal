@@ -483,7 +483,7 @@ public sealed class WebmailEndToEndTests : IAsyncLifetime, System.IDisposable
         Assert.Contains("2 unread", list, System.StringComparison.Ordinal);
         string three = await this.client.GetStringAsync($"folder/INBOX?page=0&open={m.Id}");
         Assert.Contains("class=\"fview layout-three has-open\"", three, System.StringComparison.Ordinal);
-        Assert.Contains("<section class=\"listcol\" id=\"maillist\" tabindex=\"-1\">", three, System.StringComparison.Ordinal); // rc.27: the skip link's target
+        Assert.Contains("<section class=\"listcol\" id=\"maillist\" tabindex=\"-1\"", three, System.StringComparison.Ordinal); // rc.27: the skip link's target (rc.28 adds the swipe choices after it)
         Assert.Contains("<article class=\"letter\"", three, System.StringComparison.Ordinal);
         Assert.Contains("class=\"mrow open\" aria-current=\"true\" data-message=\"" + m.Id, three, System.StringComparison.Ordinal);
         Assert.Contains("1 unread", three, System.StringComparison.Ordinal);

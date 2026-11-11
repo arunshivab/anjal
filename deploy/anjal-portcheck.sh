@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Anjal port-ownership check (ANJAL-INC-01, preventive action P-1 B).
-# Anjal's ports - TCP 25, 80, 443, 465, 587 and UDP 443 - must be held only by
+# Anjal's ports - TCP 25, 80, 443, 465, 587, 993 (rc.28) and UDP 443 - must be held only by
 # processes of the anjal account. Anything else is an ALERT: logged at priority
 # "crit" and the check exits 1, so the unit shows as failed.
 set -uo pipefail
@@ -29,7 +29,7 @@ check() {
         fi
     done < <(grep -o 'pid=[0-9]*' <<<"$lines" | cut -d= -f2 | sort -u)
 }
-for p in 25 80 443 465 587; do check t "$p"; done
+for p in 25 80 443 465 587 993; do check t "$p"; done
 check u 443
 if [ "$alerts" -eq 0 ]; then echo "anjal-portcheck: ok - Anjal's ports are held only by Anjal"; fi
 [ "$alerts" -eq 0 ]

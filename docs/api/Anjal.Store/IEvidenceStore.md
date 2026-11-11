@@ -20,6 +20,7 @@ The database side of the evidence store (v1.0.0-rc.8, ANJAL-DES-01).
 - **ListEvidencePurgedAsync** *(method)* - Copies purged in [start, end), in purge order.
 - **MarkEvidencePurgedAsync** *(method)* - Mark a copy purged (its file has been removed).
 - **RaiseEvidenceRetentionAsync** *(method)* - Raise a copy's retention to at least (the longest of the tenants it reached).
+- **ResealEvidenceAsync** *(method)* - rc.28 (D-264, DES-18 §11): an original kept before rc.25 now sealed to its organisation - its new file, size and SHA-256, keeping the SHA-256 it had as so the manifest of its day still proves it. Done once: an original already re-sealed is left alone.
 - **SetEvidenceOutcomeAsync** *(method)* - Set an incoming copy's outcome; not-accepted copies become due for purging at once.
 - **SetMessageEvidenceAsync** *(method)* - Link a stored message to its evidence copy (only when it has none yet).
 - **SetOutboundEvidenceAsync** *(method)* - Record the evidence copy made for a queued row (signed once; every retry sends it).

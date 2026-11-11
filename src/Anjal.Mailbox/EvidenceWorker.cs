@@ -109,7 +109,10 @@ public sealed class EvidenceWorker
                         continue;
                     }
                     string actual = EvidenceVault.Sha256Hex(await this.vault.ReadAsync(row.Path, ct).ConfigureAwait(false));
-                    if (!string.Equals(actual, f[1], System.StringComparison.Ordinal) || !string.Equals(actual, row.Sha256, System.StringComparison.Ordinal))
+                    // rc.28 (D-264): an original kept before rc.25 and since sealed to its organisation is
+                    // proved by the SHA-256 it had (the one in this manifest) and the record of its re-seal.
+                    string listed = row.ResealedFromSha256 ?? row.Sha256;
+                    if (!string.Equals(listed, f[1], System.StringComparison.Ordinal) || !string.Equals(actual, row.Sha256, System.StringComparison.Ordinal))
                     {
                         problems.Add($"evidence {id}: file altered - its SHA-256 no longer matches manifest {day}");
                     }

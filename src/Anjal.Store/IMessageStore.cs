@@ -222,6 +222,15 @@ public interface IMessageStore
     System.Threading.Tasks.Task ReplaceOutboundRawAsync(System.Guid id, byte[] raw, System.Threading.CancellationToken ct = default);
 
     /// <summary>
+    /// rc.28 (D-264, DES-18 §11): queued messages still waiting (or being sent) that were stored before
+    /// the queue was sealed (rc.25), oldest first; <see cref="ReplaceOutboundRawAsync"/> seals each.
+    /// </summary>
+    /// <param name="limit">At most this many.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Their ids.</returns>
+    System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<System.Guid>> ListUnsealedQueuedOutboundAsync(int limit, System.Threading.CancellationToken ct = default);
+
+    /// <summary>
     /// Append an entry to the audit trail. Entries are never updated or
     /// deleted; in PostgreSQL a trigger refuses any attempt to.
     /// </summary>

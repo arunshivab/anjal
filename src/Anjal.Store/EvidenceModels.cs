@@ -54,6 +54,16 @@ public sealed class EvidenceRow
     /// <summary>For outgoing mail: the Sent copy it belongs to, or null (for example mail sent through the API).</summary>
     public System.Guid? SentMessageId { get; set; }
 
+    /// <summary>
+    /// rc.28 (D-264, DES-18 §11): for an original kept before rc.25 and since sealed to its
+    /// organisation, the SHA-256 it had when it was kept - the value in the manifest of its day.
+    /// Null for an original sealed as it was kept, or never re-sealed.
+    /// </summary>
+    public string? ResealedFromSha256 { get; set; }
+
+    /// <summary>rc.28: when the original was re-sealed; null when it never was.</summary>
+    public System.DateTimeOffset? ResealedAt { get; set; }
+
     /// <summary>pending, accepted, not-accepted or sent.</summary>
     public string Outcome { get; set; } = "pending";
 

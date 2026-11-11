@@ -130,4 +130,18 @@ public interface IEvidenceStore
     /// <param name="ct">Cancellation.</param>
     /// <returns>A task.</returns>
     Task InsertEvidenceManifestAsync(EvidenceManifestRow row, CancellationToken ct = default);
+
+    /// <summary>
+    /// rc.28 (D-264, DES-18 §11): an original kept before rc.25 now sealed to its organisation - its
+    /// new file, size and SHA-256, keeping the SHA-256 it had as <see cref="EvidenceRow.ResealedFromSha256"/>
+    /// so the manifest of its day still proves it. Done once: an original already re-sealed is left alone.
+    /// </summary>
+    /// <param name="id">The evidence id.</param>
+    /// <param name="path">The sealed file's path under the evidence root.</param>
+    /// <param name="sizeBytes">Its size.</param>
+    /// <param name="sha256">Its SHA-256.</param>
+    /// <param name="at">When.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>True when the record was changed; false when it was already re-sealed or is gone.</returns>
+    Task<bool> ResealEvidenceAsync(System.Guid id, string path, long sizeBytes, string sha256, System.DateTimeOffset at, CancellationToken ct = default);
 }

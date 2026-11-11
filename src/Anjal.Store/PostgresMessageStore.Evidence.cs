@@ -5,7 +5,7 @@ namespace Anjal.Store;
 /// <summary>v1.0.0-rc.8 evidence store in PostgreSQL (ANJAL-DES-01).</summary>
 public sealed partial class PostgresMessageStore
 {
-    private const string EvidenceColumns = "id, direction, captured_at, envelope_from, envelope_to, remote_address, client_hostname, transport_tls, authenticated_user, size_bytes, sha256, path, reconstructed, outcome, retention_days, all_copies_deleted_at, purge_after, purged_at, purge_reason, sent_message_id";
+    private const string EvidenceColumns = "id, direction, captured_at, envelope_from, envelope_to, remote_address, client_hostname, transport_tls, authenticated_user, size_bytes, sha256, path, reconstructed, outcome, retention_days, all_copies_deleted_at, purge_after, purged_at, purge_reason, sent_message_id, resealed_from_sha256, resealed_at";
 
     /// <inheritdoc/>
     public async Task InsertEvidenceAsync(EvidenceRow row, CancellationToken ct = default)
@@ -292,7 +292,47 @@ VALUES (@e, @at, @rcpt, @host, @tls, @code, @text, @outcome);";
                 PurgedAt = r.IsDBNull(17) ? null : r.GetFieldValue<System.DateTimeOffset>(17),
                 PurgeReason = r.IsDBNull(18) ? null : r.GetString(18),
                 SentMessageId = r.IsDBNull(19) ? null : r.GetGuid(19),
+                ResealedFromSha256 = r.IsDBNull(20) ? null : r.GetString(20),
+                ResealedAt = r.IsDBNull(21) ? null : r.GetFieldValue<System.DateTimeOffset>(21),
             });
+        }
+        return list;
+    }
+
+    /// <inheritdoc/>
+    public async Task<bool> ResealEvidenceAsync(System.Guid id, string path, long sizeBytes, string sha256, System.DateTimeOffset at, CancellationToken ct = default)
+    {
+        System.ArgumentNullException.ThrowIfNull(path);
+        System.ArgumentNullException.ThrowIfNull(sha256);
+        // One statement, guarded: the old SHA-256 is kept once, and a second run changes nothing.
+        const string sql = @"UPDATE evidence SET resealed_from_sha256 = sha256, sha256 = @sha, path = @path, size_bytes = @size, resealed_at = @at
+WHERE id = @id AND resealed_at IS NULL;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("sha", sha256);
+        cmd.Parameters.AddWithValue("path", path);
+        cmd.Parameters.AddWithValue("size", sizeBytes);
+        cmd.Parameters.AddWithValue("at", at);
+        return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<System.Guid>> ListUnsealedQueuedOutboundAsync(int limit, CancellationToken ct = default)
+    {
+        // Waiting or being sent, and not yet in the sealed container ("ANJQ", rc.25).
+        const string sql = @"SELECT id FROM outbound_messages
+WHERE status IN (0, 1) AND raw_bytes IS NOT NULL AND length(raw_bytes) > 0
+  AND substring(raw_bytes from 1 for 4) <> '\x414e4a51'::bytea
+ORDER BY created_at, id LIMIT @limit;";
+        await using var conn = await this.OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = new NpgsqlCommand(sql, conn);
+        cmd.Parameters.AddWithValue("limit", limit);
+        await using var r = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var list = new List<System.Guid>();
+        while (await r.ReadAsync(ct).ConfigureAwait(false))
+        {
+            list.Add(r.GetGuid(0));
         }
         return list;
     }

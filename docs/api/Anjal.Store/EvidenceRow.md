@@ -23,6 +23,8 @@ One evidence copy (v1.0.0-rc.8, ANJAL-DES-01): the exact bytes of a message as r
 - **PurgedAt** *(property)* - When it was purged, or null.
 - **Reconstructed** *(property)* - True for copies made later from stored mail, not captured as received.
 - **RemoteAddress** *(property)* - The connecting client's address (incoming).
+- **ResealedAt** *(property)* - rc.28: when the original was re-sealed; null when it never was.
+- **ResealedFromSha256** *(property)* - rc.28 (D-264, DES-18 §11): for an original kept before rc.25 and since sealed to its organisation, the SHA-256 it had when it was kept - the value in the manifest of its day. Null for an original sealed as it was kept, or never re-sealed.
 - **RetentionDays** *(property)* - Days kept after the last mailbox copy is deleted.
 - **SentMessageId** *(property)* - For outgoing mail: the Sent copy it belongs to, or null (for example mail sent through the API).
 - **Sha256** *(property)* - SHA-256 of the file, lower-case hex.

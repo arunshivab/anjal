@@ -24,8 +24,9 @@ the owner asked for on 7 October 2026. The "screens" GitHub check runs them on e
 | `swap` | No full page reloads (owner, 9 Oct 2026): every rail link, Back and Forward, a search and a choice that applies at once swap the page in place - no page load, the address and title change, focus goes to the new heading, no script error - and each page swapped in matches a full load of the same address. |
 | `keyboard` | Keyboard only: on each kind of screen, Tab from the top until focus comes round; every stop visible and showing focus, focus never trapped, every control reached. Writes `out/keyboard.md`, the test record (UX-09). |
 | `reach` | Every link opens and every button does its job: no error page, no refused request, no script error. **It presses Delete too.** |
-| `zoom` | Text at 200%: a 1280 by 800 screen zoomed to 200% (640 by 400 to the page) - the page never scrolls sideways and no button or heading sits beyond the right edge. Listed in `out/zoom.txt`, not failed, until the tablet layouts of rc.28. |
+| `zoom` | Text at 200%: a 1280 by 800 screen zoomed to 200% (640 by 400 to the page) - the page never scrolls sideways and no button or heading sits beyond the right edge. From rc.28 this fails (640 by 400 is a phone held sideways); a control in a strip that scrolls sideways on purpose, such as the dashboard's cards or the letter's tools, does not count. |
 | `contrast` | Three open mails in every light and dark theme (high contrast included): each word in the envelope against what is really behind it, 4.5:1 (3:1 for large text). Then with Windows' forced colours: every button keeps a border. |
+| `devices` | rc.28 (DES-18): phones and tablets, upright and sideways, with touch - 375x812, 390x844, 844x390 (a phone sideways), 768x1024, 820x1180, 1024x768 and 1180x820. Fails when a page scrolls sideways or a mail's envelope is not beside its letter; controls under 44px are listed in `out/devices-touch.txt`. |
 
 The screens are found by following links from the main ones, signed in as someone who is an
 operator and an organisation's administrator, so the organisation and Anjal consoles are included
