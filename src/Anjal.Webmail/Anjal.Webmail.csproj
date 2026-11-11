@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Anjal.Acme\Anjal.Acme.csproj" />
+    <ProjectReference Include="..\Anjal.Imap\Anjal.Imap.csproj" />
     <ProjectReference Include="..\Anjal.Mailbox\Anjal.Mailbox.csproj" />
     <ProjectReference Include="..\Anjal.Mime\Anjal.Mime.csproj" />
     <ProjectReference Include="..\Anjal.Smtp\Anjal.Smtp.csproj" />

@@ -208,8 +208,8 @@ public sealed partial class MailboxService
             return Array.Empty<string>();
         }
         List<string> fileNames = request.Attachments.Select(x => x.FileName).ToList();
-        IReadOnlyList<string> patient = PatientInformation.Signs(request.Subject, request.Body, fileNames);
-        IReadOnlyList<string> personal = PatientInformation.PersonalSigns(request.Subject, request.Body, fileNames);
+        IReadOnlyList<string> patient = Anjal.Mailbox.PatientInformation.Signs(request.Subject, request.Body, fileNames);
+        IReadOnlyList<string> personal = Anjal.Mailbox.PatientInformation.PersonalSigns(request.Subject, request.Body, fileNames);
         string kind = patient.Count > 0 && personal.Count > 0 ? "both" : patient.Count > 0 ? "patient" : personal.Count > 0 ? "personal" : string.Empty;
         if (kind.Length == 0 && fileNames.Count > 0)
         {
@@ -237,17 +237,20 @@ public sealed partial class MailboxService
     /// <summary>
     /// rc.27 (item 72.4, brief 6k): the patient warning in the activity log - when it was shown, and
     /// when the person chose to send anyway: what Anjal noticed and where it was going (domains only),
-    /// never the mail's words or its files' names.
+    /// never the mail's words or its files' names. rc.28 (D-331): also when the person went back to
+    /// change the mail, and the sent mail's Message-ID, so the line leads to its evidence copy.
     /// </summary>
     /// <param name="actor">Who.</param>
     /// <param name="signs">What <see cref="PatientWarningAsync"/> found.</param>
-    /// <param name="sentAnyway">True for "Send anyway".</param>
+    /// <param name="outcome">One of <see cref="PatientShown"/>, <see cref="PatientSent"/> and <see cref="PatientChanged"/>.</param>
+    /// <param name="messageId">For <see cref="PatientSent"/>, the sent mail's Message-ID; empty when there is none (Send one each makes one per person).</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>A task.</returns>
-    public async Task LogPatientWarningAsync(string actor, IReadOnlyList<string> signs, bool sentAnyway, CancellationToken ct = default)
+    public async Task LogPatientWarningAsync(string actor, IReadOnlyList<string> signs, string outcome, string messageId = "", CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(signs);
-        if (signs.Count < 2)
+        ArgumentNullException.ThrowIfNull(outcome);
+        if (signs.Count < 2 || outcome is not (PatientShown or PatientSent or PatientChanged or PatientSecure or PatientRemoved))
         {
             return;
         }
@@ -261,10 +264,58 @@ public sealed partial class MailboxService
         await this.messageStore.AppendAuditAsync(new AuditEvent
         {
             Actor = actor,
-            Action = sentAnyway ? "webmail.patient-warning.sent" : "webmail.patient-warning.shown",
+            Action = "webmail.patient-warning." + outcome,
             Subject = domains,
-            Detail = signs[0] + (noticed.Length > 0 ? ": " + noticed : string.Empty),
+            Detail = signs[0] + (noticed.Length > 0 ? ": " + noticed : string.Empty)
+                + (outcome is PatientSent or PatientSecure && !string.IsNullOrWhiteSpace(messageId) ? " · " + messageId.Trim() : string.Empty),
         }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>rc.28 (D-331): the warning was shown and the mail held back.</summary>
+    public const string PatientShown = "shown";
+
+    /// <summary>rc.28 (D-331): the person sent it anyway, unchanged since the warning.</summary>
+    public const string PatientSent = "sent";
+
+    /// <summary>rc.28 (D-331): the person chose "Change the mail" after the warning.</summary>
+    public const string PatientChanged = "changed";
+
+    /// <summary>rc.28 (DES-19 §2): the person sent the outside people a secure link instead.</summary>
+    public const string PatientSecure = "secure-link";
+
+    /// <summary>rc.28 (DES-19 §2): the person took the outside people off and sent to the rest.</summary>
+    public const string PatientRemoved = "removed";
+
+    /// <summary>
+    /// rc.28 (DES-19 §2, brief 6k): "Remove them and send to the rest" - every address outside the
+    /// organisation is taken off To, Cc and Bcc.
+    /// </summary>
+    /// <param name="mailboxId">The sender's mailbox.</param>
+    /// <param name="request">The mail, changed in place.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The error when nobody inside is left, or null.</returns>
+    public async Task<string?> DropOutsideAsync(Guid mailboxId, ComposeRequest request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        IReadOnlyList<string> domains = await this.OrganisationDomainsAsync(mailboxId, ct).ConfigureAwait(false);
+        string Keep(string field) => string.Join(", ", Anjal.Mime.AddressParser.Parse(field)
+            .Where(a => domains.Contains(a.Domain, StringComparer.OrdinalIgnoreCase)).Select(a => a.ToString()));
+        string to = Keep(request.To);
+        string cc = Keep(request.Cc);
+        string bcc = Keep(request.Bcc);
+        if (domains.Count == 0 || to.Length + cc.Length + bcc.Length == 0)
+        {
+            return "Nobody inside the organisation is left to send it to.";
+        }
+        // A mail needs a To: the first person left moves up when only Cc or Bcc remain.
+        if (to.Length == 0)
+        {
+            (to, cc, bcc) = cc.Length > 0 ? (cc, string.Empty, bcc) : (bcc, cc, string.Empty);
+        }
+        request.To = to;
+        request.Cc = cc;
+        request.Bcc = bcc;
+        return null;
     }
 }
 

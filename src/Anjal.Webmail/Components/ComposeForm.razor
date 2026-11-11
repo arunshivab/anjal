@@ -22,7 +22,7 @@ else if (Docked)
           data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
           data-word-sendeach="@L["Send {n} separate messages"]">
         <AntiforgeryToken />
-        @if (Patient is not null) { <input type="hidden" name="patientOk" value="1" /> }
+        @if (Patient is not null) { <input type="hidden" name="patientOk" value="@PatientSeal" /> }
             <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
         <input type="hidden" name="inReplyTo" value="@inReplyTo" />
         <input type="hidden" name="references" value="@references" />
@@ -105,7 +105,7 @@ else
           data-word-people="@L["people"]" data-word-others="@L["{names} and {n} others"]" data-word-showall="@L["Show all {n}"]"
           data-word-sendeach="@L["Send {n} separate messages"]">
         <AntiforgeryToken />
-        @if (Patient is not null) { <input type="hidden" name="patientOk" value="1" /> }
+        @if (Patient is not null) { <input type="hidden" name="patientOk" value="@PatientSeal" /> }
             <input type="hidden" name="draftId" value="@(DraftId?.ToString() ?? string.Empty)" />
         <input type="hidden" name="inReplyTo" value="@inReplyTo" />
         <input type="hidden" name="references" value="@references" />
@@ -140,6 +140,19 @@ else
                     {
                         <span><b>@(PatientKind == "personal" ? L["This looks like personal information"] : PatientKind == "both" ? L["This looks like patient and personal information"] : L["This looks like patient information"])</b> @L["({signs}), and it is going outside {org} to {who}. Check that this is allowed and that the address is right. Press Send again to send it anyway; untick a file below to leave it out."].Replace("{signs}", string.Join("; ", PatientSigns.Skip(2)), StringComparison.Ordinal).Replace("{org}", orgName, StringComparison.Ordinal).Replace("{who}", PatientWho, StringComparison.Ordinal)</span>
                     }
+                    @* rc.28 (D-331, option D): going back to change the mail is recorded, so the log tells it from leaving. *@
+                    @* rc.28 (DES-19 §2, brief 6k): a secure link instead, or the mail to the people inside only. *@
+                    <span class="pw-choices">
+                        @if (maySecure)
+                        {
+                            <button type="submit" class="btn btn-p btn-sm pw-secure" name="secure" value="1">@L["Send a secure link instead"]</button>
+                        }
+                        @if (AnyoneInside)
+                        {
+                            <button type="submit" class="btn btn-s btn-sm pw-drop" name="dropOutside" value="1">@L["Remove them and send to the rest"]</button>
+                        }
+                        <button type="submit" class="btn btn-s pw-change" name="patientChanged" value="1" formnovalidate>@L["Change the mail"]</button>
+                    </span>
                 </div>
             }
             <div class="notice n-err readnotice" data-client-error hidden></div>
@@ -335,6 +348,11 @@ else
                         <button type="submit" class="pmi" formaction="/draft" name="templates" value="1" formnovalidate><LipiIcon Name="email-template" Size="15" />@L["Templates"]</button>
                         @* rc.15 (owner, 7 Oct; item 48): the same message in a small window over the Inbox, and back. *@
                         <button type="submit" class="pmi cpop" formaction="/draft" name="dock" value="1" formnovalidate title="@L["Write in a small window over the Inbox"]"><LipiIcon Name="collapse" Size="15" />@L["Small window"]</button>
+                        @if (maySecure)
+                        {
+                            @* rc.28 (DES-19 §2): people outside get a link and a code by mail; people inside get the mail. *@
+                            <button type="submit" class="pmi" name="secure" value="1" title="@L["People outside your organisation get a link instead of the mail, and a code by mail to open it."]"><LipiIcon Name="lock" Size="15" />@L["Send as a secure link"]</button>
+                        }
                         <button type="submit" class="pmi" formaction="/draft" formnovalidate><LipiIcon Name="download" Size="15" />@L["Save draft"]</button>
                         <button type="submit" class="pmi" formaction="/draft" name="savetemplate" value="1" formnovalidate><LipiIcon Name="bookmark" Size="15" />@L["Save as template"]</button>
                         @if (IsAdmin)
@@ -406,6 +424,9 @@ else
     // The kind comes first (patient, personal, both, files), then the outside address, then the reasons.
     private string PatientKind => PatientSigns.Count > 0 ? PatientSigns[0] : "patient";
 
+    // rc.28 (D-331, option C): what this warning showed, sealed, so Send sends only the mail warned about.
+    private string PatientSeal => PatientSigns.Count > 0 ? PatientWarningSeal.Seal(DataProtection, PatientSigns) : string.Empty;
+
     private string PatientWho => PatientSigns.Count > 1 ? PatientSigns[1] : string.Empty;
     [SupplyParameterFromQuery(Name = "to")] private string? ToQuery { get; set; }
     [SupplyParameterFromQuery(Name = "cc")] private string? CcQuery { get; set; }
@@ -436,6 +457,11 @@ else
     private long used;
     private long quota;
     private IReadOnlyList<string> orgDomains = System.Array.Empty<string>();
+    private bool maySecure;
+
+    // rc.28 (DES-19 §2): someone inside the organisation is among the people the mail goes to.
+    private bool AnyoneInside => orgDomains.Count > 0 && Anjal.Mime.AddressParser.Parse(to + ", " + cc + ", " + bcc)
+        .Any(a => orgDomains.Contains(a.Domain, StringComparer.OrdinalIgnoreCase));
     private string orgName = string.Empty;
     private IReadOnlyDictionary<string, string> names = new Dictionary<string, string>();
     private DateTimeOffset tomorrow;
@@ -504,6 +530,7 @@ else
         // rc.26 (item 80): if the session ends while writing, this lets the page keep the draft.
         keepToken = DraftKeeping.Token(DataProtection, mailboxId.Value);
         orgDomains = await Mail.OrganisationDomainsAsync(mailboxId.Value);
+        maySecure = await Mail.MaySendSecureLinksAsync(mailboxId.Value);
         mergeLimit = await Mail.MergeLimitForAsync(mailboxId.Value);
         mayMerge = WebmailAuthService.PersonIdOf(user) is Guid merger && await Mail.MayMergeAsync(merger);
         IsAdmin = WebmailAuthService.PersonIdOf(user) is Guid person && await Mail.IsOrgAdminAsync(person);

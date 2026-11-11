@@ -137,6 +137,24 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
             }
         }
 
+        // rc.28 (DES-20 §4, D-345): a mail app cannot show the patient warning, so an organisation's mail
+        // going outside with signs of patient or personal information is kept in the sender's Drafts and
+        // the app is told why; opened in Anjal, the warning and its choices (a secure link among them) apply.
+        if (external.Count > 0 && this.mailboxes is not null && this.outbound is Anjal.Store.IMailboxStore people
+            && ctx.AuthenticatedUser is string who && Anjal.Mailbox.MailboxSink.TrySplitAddress(who, out string whoLocal, out string whoDomain)
+            && await people.GetMailboxAsync(whoLocal, whoDomain, ct).ConfigureAwait(false) is Anjal.Store.MailboxRow person
+            && !await Anjal.Mailbox.TenantKind.IsIndividualsAsync(people, person.TenantId, ct).ConfigureAwait(false)
+            && (parsedForFiles is null || HasPatientSigns(parsedForFiles)))
+        {
+            await this.mailboxes.FileIntoFolderAsync(person.Address, "Drafts", ctx.RawBytes, seen: true, ct).ConfigureAwait(false);
+            this.log?.Invoke($"Submission: {person.Address}'s mail to {external.Count} outside address(es) kept in Drafts (patient or personal information)");
+            return new Anjal.Smtp.DeliveryResult
+            {
+                Outcome = Anjal.Smtp.DeliveryOutcome.PermanentFailure,
+                ReplyText = "Not sent: it looks like patient or personal information going outside. It is in your Drafts; open it in Anjal to check and send",
+            };
+        }
+
         // rc.26 (item 99, D-219): the organisation's sends per day counted on this route too; over the
         // figure the mail app is told to try tomorrow (452), before anything is delivered or queued.
         // The organisation is the signed-in user's (a person's address, or an application key's
@@ -285,5 +303,39 @@ public sealed class SubmissionSink : Anjal.Smtp.IMessageSink
             }
         }
         return false;
+    }
+
+    // The same signs the webmail's warning looks for, in the subject, the text and the files' names.
+    private static bool HasPatientSigns(Anjal.Mime.MimeMessage? parsed)
+    {
+        if (parsed is null)
+        {
+            return false;
+        }
+        string text = Anjal.Mailbox.MessageText.Extract(parsed);
+        var files = new System.Collections.Generic.List<string>();
+        CollectFileNames(parsed.Body, files);
+        return Anjal.Mailbox.PatientInformation.Signs(parsed.Subject, text, files).Count > 0
+            || Anjal.Mailbox.PatientInformation.PersonalSigns(parsed.Subject, text, files).Count > 0;
+    }
+
+    private static void CollectFileNames(Anjal.Mime.MimeEntity? entity, System.Collections.Generic.List<string> files)
+    {
+        if (entity is Anjal.Mime.MimeMultipart multi)
+        {
+            foreach (Anjal.Mime.MimeEntity child in multi.Parts)
+            {
+                CollectFileNames(child, files);
+            }
+        }
+        else if (entity is Anjal.Mime.MimePart part)
+        {
+            string disposition = part.Headers.Get("Content-Disposition") ?? string.Empty;
+            int f = disposition.IndexOf("filename=", System.StringComparison.OrdinalIgnoreCase);
+            if (f >= 0)
+            {
+                files.Add(disposition[(f + 9)..].Trim().Trim('"'));
+            }
+        }
     }
 }

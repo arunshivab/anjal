@@ -127,6 +127,18 @@ public sealed class ServerSmtpAuthenticator : Anjal.Smtp.ISmtpAuthenticator
             {
                 return DummyMiss(password);
             }
+            // rc.28 (DES-20 §4): a mail app sends with the password made for it, as it reads with it.
+            if (Anjal.Mailbox.AppPasswords.LooksLikeOne(password) && this.mailboxStore is Anjal.Store.IMailAppStore apps
+                && Anjal.Mailbox.AppPasswords.Match(await apps.ListAppPasswordsAsync(mailbox.Id, ct).ConfigureAwait(false), password) is Anjal.Store.AppPasswordRow app)
+            {
+                await apps.TouchAppPasswordAsync(app.Id, System.DateTimeOffset.UtcNow, "submission", ct).ConfigureAwait(false);
+                await this.mailboxStore.TouchSignInAsync(mailbox.Id, System.DateTimeOffset.UtcNow, ct).ConfigureAwait(false);
+                return new Anjal.Smtp.AuthenticatedUser
+                {
+                    Username = mailbox.Address,
+                    AllowedFromDomains = new[] { mailbox.Domain },
+                };
+            }
             if (!Anjal.Smtp.Pbkdf2Hasher.Verify(password, mailbox.PasswordPbkdf2))
             {
                 return null;

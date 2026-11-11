@@ -1,0 +1,180 @@
+@inject MailboxService Mail
+@inject HostInfo Host
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+@* rc.28 (DES-20 §1): Settings › Mail apps - a password made for each phone or computer mail app, the
+   settings to type into it, and bringing old mail in from a file or another mail server. *@
+<section class="formcard setcard" data-mailapps>
+    <h2>@L["Mail apps"]</h2>
+    <p class="hint">@L["Read and send your mail in the mail app on your phone or computer (iPhone and Mac Mail, Outlook, Thunderbird, Gmail's app). Each app gets its own password, made here; your Anjal password never goes into an app."]</p>
+    @if (Error is string error)
+    {
+        <div class="notice n-err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+    }
+    @if (Made is (string device, string password))
+    {
+        <div class="appmade" role="status" data-app-made>
+            <p><b>@L["The password for {device}"].Replace("{device}", device, StringComparison.Ordinal)</b></p>
+            <p class="apppw" translate="no">@password</p>
+            <p class="hint">@L["Type it into the app now. Anjal shows it only this once; if it is lost, remove the app and make a new one."]</p>
+        </div>
+    }
+    @if (Removed == "1")
+    {
+        <div class="notice n-ok" role="status"><LipiIcon Name="check" Size="16" /><span>@L["Removed. That app can no longer read or send your mail."]</span></div>
+    }
+    <form method="post" action="/settings/apps/new" class="setrow">
+        <AntiforgeryToken />
+        <label class="setlbl" for="appname">@L["Add a mail app"]</label>
+        <div class="setinline">
+            <input class="inp" id="appname" name="name" maxlength="60" placeholder="@L["Such as: My phone"]" required />
+            <button type="submit" class="btn btn-p" title="@L["Make a new password for one mail app; it is shown once"]" disabled="@(apps.Count >= Anjal.Mailbox.AppPasswords.MaxPerPerson)">@L["Make a password"]</button>
+        </div>
+    </form>
+    @if (apps.Count > 0)
+    {
+        <table class="apptable">
+            <thead><tr><th scope="col">@L["App"]</th><th scope="col">@L["Made"]</th><th scope="col">@L["Last used"]</th><th scope="col"><span class="sr-only">@L["Remove"]</span></th></tr></thead>
+            <tbody>
+                @foreach (AppPasswordRow a in apps)
+                {
+                    <tr>
+                        <td><b>@a.Name</b></td>
+                        <td>@Clock.Date(a.CreatedAt)</td>
+                        <td>@(a.LastUsedAt is DateTimeOffset used ? Clock.List(used, DateTimeOffset.UtcNow) + (a.LastUsedFrom.Length > 0 && a.LastUsedFrom != "submission" ? " · " + a.LastUsedFrom : string.Empty) : L["Not used yet"])</td>
+                        <td>
+                            <form method="post" action="/settings/apps/@a.Id/remove">
+                                <AntiforgeryToken />
+                                <button type="submit" class="btn btn-s btn-sm" title="@L["The app stops at once; it can no longer read or send your mail."]">@L["Remove"]</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+    <h3 class="sethead">@L["Settings to type into the app"]</h3>
+    <dl class="appsettings" translate="no">
+        <dt>@L["Incoming mail (IMAP)"]</dt><dd>@Host.Name · @L["port"] @ImapPort · @Tls</dd>
+        <dt>@L["Outgoing mail (SMTP)"]</dt><dd>@Host.Name · @L["port"] @SmtpPort · @Tls</dd>
+        <dt>@L["User name"]</dt><dd>@Address</dd>
+        <dt>@L["Password"]</dt><dd>@L["the app password made above"]</dd>
+    </dl>
+    @if (!individual)
+    {
+        <p class="hint">@L["A mail written in an app that looks like patient or personal information going outside your organisation is not sent: it waits in Drafts for you to open it here, where Anjal can offer a secure link."]</p>
+    }
+</section>
+
+<section class="formcard setcard" id="import" data-import>
+    <h2>@L["Bring old mail in"]</h2>
+    <p class="hint">@L["Copy mail from your old mail service into Anjal. It is checked like any mail from outside, kept with its own date, and put in its own folder. Nothing is changed or deleted at the old service."]</p>
+    @if (Importing == "1")
+    {
+        <div class="notice n-ok" role="status"><LipiIcon Name="clock" Size="16" /><span>@L["The import has started. You get a mail when it is done."]</span></div>
+    }
+    @if (choosing is not null)
+    {
+        <form method="post" action="/settings/import/@choosing.Id/folders" class="setrow" data-import-choose>
+            <AntiforgeryToken />
+            <p class="setlbl">@L["Which folders of {account} should Anjal copy?"].Replace("{account}", choosing.Source[(choosing.Source.IndexOf(' ', StringComparison.Ordinal) + 1)..], StringComparison.Ordinal)</p>
+            <div class="importfolders">
+                @foreach (string f in choosing.Folders.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    bool usual = !(f.Contains("Trash", StringComparison.OrdinalIgnoreCase) || f.Contains("Spam", StringComparison.OrdinalIgnoreCase) || f.Contains("Junk", StringComparison.OrdinalIgnoreCase) || f.Contains("All Mail", StringComparison.OrdinalIgnoreCase));
+                    <label class="chk"><input type="checkbox" name="folder" value="@f" checked="@usual" /> @f</label>
+                }
+            </div>
+            <div class="setactions"><button type="submit" class="btn btn-p btn-sm">@L["Copy these folders"]</button></div>
+        </form>
+    }
+    <div class="importways">
+        <form method="post" action="/settings/import/file" enctype="multipart/form-data" class="setrow">
+            <AntiforgeryToken />
+            <label class="setlbl" for="importfile">@L["From a file"]</label>
+            <p class="hint">@L["An .mbox file (Thunderbird, Apple Mail, Google Takeout), a .zip of .eml files, or one .eml. Up to 2 GB."]</p>
+            <input class="inp" id="importfile" name="file" type="file" accept=".mbox,.zip,.eml,application/mbox,application/zip,message/rfc822" required />
+            <div class="setactions"><button type="submit" class="btn btn-s btn-sm" title="@L["Copy the mail in this file into a new folder"]">@L["Bring it in"]</button></div>
+        </form>
+        <form method="post" action="/settings/import/server" class="setrow">
+            <AntiforgeryToken />
+            <label class="setlbl" for="importhost">@L["From another mail service"]</label>
+            <p class="hint">@L["Its IMAP server, your address there and a password. Gmail and Outlook need an app password made there for this."]</p>
+            <input class="inp" id="importhost" name="host" placeholder="imap.gmail.com" maxlength="253" autocomplete="off" required />
+            <input class="inp" name="user" placeholder="@L["Your address there"]" maxlength="200" autocomplete="off" aria-label="@L["Your address there"]" required />
+            <input class="inp" name="password" type="password" placeholder="@L["Password"]" autocomplete="off" aria-label="@L["Password"]" required />
+            <div class="setactions"><button type="submit" class="btn btn-s btn-sm" title="@L["Sign in there and list its folders; nothing is copied yet"]">@L["Look at the account"]</button></div>
+        </form>
+    </div>
+    @if (jobs.Count > 0)
+    {
+        <h3 class="sethead">@L["Imports"]</h3>
+        <ul class="importjobs">
+            @foreach (ImportJobRow j in jobs.Take(10))
+            {
+                <li>
+                    <b>@(j.Kind == ImportJobRow.FileKind ? j.Folders : j.Source[(j.Source.IndexOf(' ', StringComparison.Ordinal) + 1)..])</b>
+                    <span class="hint">@JobState(j)</span>
+                    @if (j.State is ImportJobRow.Waiting or ImportJobRow.Running or MailboxService.ImportChoosing)
+                    {
+                        <form method="post" action="/settings/import/@j.Id/stop"><AntiforgeryToken /><button type="submit" class="btn btn-s btn-sm">@L["Stop"]</button></form>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    /// <summary>The words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>The person's clock.</summary>
+    [Parameter] public ZonedClock Clock { get; set; } = ZonedClock.Default;
+
+    /// <summary>The person's mailbox.</summary>
+    [Parameter] public Guid MailboxId { get; set; }
+
+    /// <summary>The person's address.</summary>
+    [Parameter] public string Address { get; set; } = string.Empty;
+
+    [SupplyParameterFromQuery(Name = "made")] private string? MadeNote { get; set; }
+    [SupplyParameterFromQuery(Name = "err")] private string? Err { get; set; }
+    [SupplyParameterFromQuery(Name = "removed")] private string? Removed { get; set; }
+    [SupplyParameterFromQuery(Name = "importing")] private string? Importing { get; set; }
+    [SupplyParameterFromQuery(Name = "choose")] private string? Choose { get; set; }
+
+    private IReadOnlyList<AppPasswordRow> apps = Array.Empty<AppPasswordRow>();
+    private IReadOnlyList<ImportJobRow> jobs = Array.Empty<ImportJobRow>();
+    private ImportJobRow? choosing;
+    private bool individual;
+
+    // What a mail app's set-up asks for, written as the apps write it (not words to translate).
+    private const string ImapPort = "993";
+    private const string SmtpPort = "465";
+    private const string Tls = "SSL/TLS";
+
+    private string? Error => AuthEndpoints.ReadNote(Protection, Err);
+
+    private (string Device, string Password)? Made =>
+        AuthEndpoints.ReadNote(Protection, MadeNote) is string note && note.Split('\n') is { Length: 2 } parts ? (parts[0], parts[1]) : null;
+
+    private string JobState(ImportJobRow j) => j.State switch
+    {
+        ImportJobRow.Waiting => L["Waiting to start"],
+        ImportJobRow.Running => L["Copying: {n} so far"].Replace("{n}", j.Imported.ToString(System.Globalization.CultureInfo.CurrentCulture), StringComparison.Ordinal),
+        ImportJobRow.Done => L["Done: {n} brought in, {s} skipped"].Replace("{n}", j.Imported.ToString(System.Globalization.CultureInfo.CurrentCulture), StringComparison.Ordinal).Replace("{s}", j.Skipped.ToString(System.Globalization.CultureInfo.CurrentCulture), StringComparison.Ordinal),
+        ImportJobRow.Failed => L["Stopped: {why}"].Replace("{why}", L.Say(j.Error), StringComparison.Ordinal),
+        ImportJobRow.Stopped => L["Stopped by you"],
+        _ => L["Waiting for you to choose folders"],
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        apps = await Mail.AppPasswordsAsync(MailboxId);
+        jobs = await Mail.ImportJobsAsync(MailboxId);
+        individual = await Mail.IsIndividualAsync(MailboxId);
+        choosing = Guid.TryParse(Choose, out Guid c) ? jobs.FirstOrDefault(j => j.Id == c && j.State == MailboxService.ImportChoosing) : null;
+    }
+}

@@ -63,7 +63,9 @@ async function open(size, browser) {
 }
 
 async function newPage(b, size) {
-  const page = await b.newPage({ viewport: { width: size[0], height: size[1] } });
+  // rc.28 (DES-18 §13): a size may say it is a touch screen (a phone or a tablet): { touch: true, mobile: true }.
+  const as = size[2] || {};
+  const page = await b.newPage({ viewport: { width: size[0], height: size[1] }, hasTouch: !!as.touch, isMobile: !!as.mobile });
   page.scriptErrors = [];
   page.on('pageerror', (e) => page.scriptErrors.push(e.message));
   page.on('dialog', (d) => (d.type() === 'prompt' ? d.dismiss() : d.accept()).catch(() => {}));

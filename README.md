@@ -10,6 +10,20 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.28** (9 November 2026) - Group 1 (DES-18 to DES-21). Phones and tablets: five width
+bands, touch sizes from the pointer, swipes and press-and-hold, the phone screens and Today's cards
+in a row. The patient warning sends only what it warned about and logs "Change the mail"; the
+recovery sheet prints black on white. Images and ZIP files open in the letter area. Evidence and
+queued mail from before rc.25 are re-sealed by `Anjal.Server --reseal-old` (with `--dry-run`). An
+organisation's mail can go to an outside person as a secure link: the mail stays here, sealed, and
+opens with a code mailed to that person, who can reply through the page. Mail apps (iPhone and Mac
+Mail, Outlook, Thunderbird) read mail over IMAP on port 993 with a password made for each app, and
+old mail comes in from an .mbox, .zip or .eml file or from another IMAP server. People of an
+organisation can chat, sealed like mail, and show whether they are online, away or busy. A seventh
+screen job checks seven phone and tablet sizes. DEPLOY.md gains WireGuard for SSH (section 1e). The
+database gains ten tables; run `tools/sql/schema.sql` and set `ANJAL_IMAP_TLS_PORT` (DEPLOY.md
+section 13d).
+
 **v1.0.0-rc.27** (28 October 2026) - Shared desks and accessibility (DES-17 v1.2). Every shared
 mailbox is a desk: each conversation with a person outside is one piece of work - Not assigned,
 Open with one member, Waiting after the desk's reply, Done - with tabs, a Desk block in the
@@ -972,6 +986,7 @@ Every `ANJAL_*` setting the code reads is described in this README; a test holds
 | `ANJAL_SMTP_MAX_CONNECTIONS_PER_IP` | Server | 10 | Integer. No range check | Maximum concurrent SMTP sessions from one IP address. |
 | `ANJAL_SMTP_MAX_SESSION_MINUTES` | Server | 15 | Integer minutes. No range check (unclear for ≤ 0: `CancelAfter`, SmtpSession.cs:129) | Hard cap on one SMTP session's total length, however active it is. Stops slow-drip clients. |
 | `ANJAL_SUBMISSION_TLS_PORT` | Server | 0 (disabled) | Integer port > 0. Empty, unparsable or ≤ 0 gives 0 | Port for implicit-TLS submission (RFC 8314, normally 465), with the same auth, limits and policy as 587. Only read inside the ANJAL_SUBMISSION_PORT > 0 block, so it does nothing unless ANJAL_SUBMISSION_PORT is also set. |
+| `ANJAL_IMAP_TLS_PORT` | Server | 0 (off) | Integer port > 0. Empty, unparsable or ≤ 0 gives 0 | rc.28 (DES-20): IMAP for mail apps (normally 993), TLS from the first byte with the same certificate as submission; no plain-text IMAP port. People sign in with an app password made under Settings, Mail apps; the account password is refused. Needs the database. |
 | `ANJAL_TLS_ALLOW_PLAINTEXT` | Server | false. Outbound mail is never sent unencrypted: if TLS fails, the message is held, retried and finally bounced | `true` or anything else | `true` allows outbound SMTP to fall back to plaintext when TLS can't be used. For test rigs only. Not related to inbound AUTH (that is ANJAL_AUTH_ALLOW_PLAINTEXT). |
 | `ANJAL_TLS_REVOCATION` | Server | `online` (CRL/OCSP checked; soft-fails only when status can't be obtained) | `nocheck` (case-insensitive) skips revocation. Any other value means online | Certificate revocation checking when validating the receiving server's certificate on outbound delivery. |
 | `ANJAL_WEBHOOK_ALLOW_HTTP` | Server | false (https only) | `true` or anything else | Allows plain `http://` webhook URLs, for a receiver on a private network. |

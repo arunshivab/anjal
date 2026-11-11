@@ -78,8 +78,10 @@ public sealed partial class MailboxService
     /// </summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="heldId">The waiting message.</param>
+    /// <param name="actor">Who took it back; when given, the activity log says so with the mail's
+    /// Message-ID (rc.28, D-331: a "sent anyway" line that was then undone is not left standing alone).</param>
     /// <param name="ct">Cancellation.</param>
-    public async Task<Guid?> UnholdAsync(Guid mailboxId, Guid heldId, CancellationToken ct = default)
+    public async Task<Guid?> UnholdAsync(Guid mailboxId, Guid heldId, string actor = "", CancellationToken ct = default)
     {
         using IDisposable hold = this.UseHoldKey();
         if (!await this.IsWaitingAsync(mailboxId, heldId, ct).ConfigureAwait(false))
@@ -87,10 +89,26 @@ public sealed partial class MailboxService
             return null;
         }
         this.waiting.TryRemove(heldId, out _);
+        // The Message-ID it would have gone with, for the activity log (read while it is still the held copy).
+        string heldMessageId = string.Empty;
+        if (!string.IsNullOrEmpty(actor) && await this.ReadRawAsync(mailboxId, heldId, ct).ConfigureAwait(false) is { } heldCopy)
+        {
+            heldMessageId = MessageIdOf(heldCopy.Raw);
+        }
         MessageRow? moved = await this.MoveAsync(mailboxId, heldId, "Drafts", ct).ConfigureAwait(false);
         if (moved is not null)
         {
             await this.ResealFromHoldAsync(mailboxId, moved.Id, ct).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(actor))
+            {
+                await this.messageStore.AppendAuditAsync(new AuditEvent
+                {
+                    Actor = actor,
+                    Action = "webmail.send.taken-back",
+                    Subject = heldMessageId.Length == 0 || heldMessageId.StartsWith('<') ? heldMessageId : "<" + heldMessageId + ">",
+                    Detail = "Back to Drafts before it was sent",
+                }, ct).ConfigureAwait(false);
+            }
         }
         return moved?.Id;
     }
@@ -506,6 +524,12 @@ internal sealed class ScheduledSender : Microsoft.Extensions.Hosting.BackgroundS
             if (emptyDrafts > 0)
             {
                 Console.WriteLine($"[drafts] {emptyDrafts} empty draft(s) older than 30 days removed.");
+            }
+            // rc.28 (DES-19 §7, D-342): the sealed copies of secure links that ended over a day ago.
+            int links = await this.mail.PurgeSecureLinksAsync(now, ct).ConfigureAwait(false);
+            if (links > 0)
+            {
+                Console.WriteLine($"[secure-links] {links} ended link(s) cleared.");
             }
         }
 #pragma warning disable CA1031 // The daily work is tried again within the hour; sending never waits for it.

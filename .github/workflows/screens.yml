@@ -40,6 +40,10 @@ jobs:
             checks: "shrink,clip,steady,live,lineup"
           - group: look
             checks: "align,same,sizes,scrollbars,zoom,contrast"
+          # rc.28 (DES-18, D-335): phones and tablets - a touch screen at each width band, nothing
+          # scrolls sideways, the tablet envelope beside the letter; controls under 44px are listed.
+          - group: devices
+            checks: "devices"
           # rc.27 (item 75, D-310, D-328): Hindi runs the word-cut check and fails like English; Tamil
           # is listed (not failed) until the owner's shorter words are in the word sheet.
           - group: languages
@@ -71,7 +75,7 @@ jobs:
           python-version: '3.12'
 
       - name: Setup Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
@@ -100,7 +104,7 @@ jobs:
 
       - name: Keep the reports
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: screen-checks-${{ matrix.group }}
           path: |

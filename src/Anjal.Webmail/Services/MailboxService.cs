@@ -96,6 +96,9 @@ public sealed class MessageView
     /// <summary>Attachments in order.</summary>
     public IReadOnlyList<AttachmentView> Attachments { get; init; } = Array.Empty<AttachmentView>();
 
+    /// <summary>rc.28 (DES-19 §5): the secure link a reply says it came through (checked against the store before it is shown); empty otherwise.</summary>
+    public string SecureReplyLink { get; init; } = string.Empty;
+
     /// <summary>rc.24 (item 93): the files delivered with a warning - encrypted archives, files with macros - by attachment index.</summary>
     public IReadOnlyDictionary<int, Anjal.Mailbox.FileRisk> FileRisks { get; init; } = new Dictionary<int, Anjal.Mailbox.FileRisk>();
 
@@ -172,8 +175,23 @@ public sealed class ComposeRequest
     /// <summary>rc.27 (DES-17 §2.12): the person writing, when it is not the mailbox's own (a desk's member); null otherwise.</summary>
     public Guid? WrittenBy { get; set; }
 
+    /// <summary>
+    /// rc.28 (DES-19): the people outside the organisation get a secure link instead of the mail; the
+    /// people inside get the mail as usual. Set by the server, never from the form alone.
+    /// </summary>
+    public bool SecureOutside { get; set; }
+
+    /// <summary>rc.28 (DES-19): the webmail's address, for the secure links' notice mails.</summary>
+    public string SecureBaseUrl { get; set; } = string.Empty;
+
     /// <summary>rc.22 (item 41): an extra address the person sends from instead of their own; empty for their own.</summary>
     public string FromAddress { get; set; } = string.Empty;
+
+    /// <summary>
+    /// rc.28 (D-331): the Message-ID the last build of this request was given, so the activity log can
+    /// name the mail a person sent after the patient warning. Set by the message builder; empty before.
+    /// </summary>
+    public string SentMessageId { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -455,6 +473,7 @@ public sealed partial class MailboxService
             IsHtml = isHtml,
             HasBlockedImages = blocked,
             SpamReasons = parsed?.Headers.Get(Anjal.Spam.SpamHeaders.Reasons) ?? string.Empty,
+            SecureReplyLink = parsed?.Headers.Get(SecureReplyHeader)?.Trim() ?? string.Empty,
             BodyShortened = shortened,
             Auth = parsed is null ? null : AuthVerdicts.FromHeaders(parsed.Headers),
             Attachments = views,
@@ -791,6 +810,17 @@ public sealed partial class MailboxService
                 external.Add(rcpt);
             }
         }
+        // rc.28 (DES-19): outside people get a secure link instead of the mail itself.
+        var secureFor = new List<MailAddress>();
+        if (request.SecureOutside && external.Count > 0)
+        {
+            if (!await this.MaySendSecureLinksAsync(mailbox.Id, ct).ConfigureAwait(false))
+            {
+                return "Secure links are for an organisation's people.";
+            }
+            secureFor.AddRange(external);
+            external.Clear();
+        }
         // DES-11 D2: mail between people here follows the same rule - a full mailbox receives nothing.
         var fullHere = new List<string>();
         foreach (string address in local)
@@ -805,7 +835,7 @@ public sealed partial class MailboxService
             return "Not sent: the mailbox of " + string.Join(", ", fullHere) + " is full. Send it later, or without them.";
         }
         // rc.26 (item 99, D-219): the organisation's sends per day, every route together.
-        if (external.Count > 0 && await Anjal.Mailbox.SendingDay.RefusedAsync(this.store, this.messageStore, tenant.Id, external.Count, now, ct).ConfigureAwait(false) is string overToday)
+        if (external.Count + secureFor.Count > 0 && await Anjal.Mailbox.SendingDay.RefusedAsync(this.store, this.messageStore, tenant.Id, external.Count + secureFor.Count, now, ct).ConfigureAwait(false) is string overToday)
         {
             if (evidenceId is Guid notQueued && this.Evidence is not null)
             {
@@ -856,6 +886,10 @@ public sealed partial class MailboxService
             {
                 await this.NoteDeskReplyAsync(mailbox.Id, noCopyWriter, request.Subject, request.To, request.InReplyTo, null, ct).ConfigureAwait(false);
             }
+            if (secureFor.Count > 0)
+            {
+                await this.MakeSecureLinksAsync(mailbox, tenant, raw, secureFor, request.WrittenBy ?? mailbox.Id, null, request.SecureBaseUrl, ct).ConfigureAwait(false);
+            }
             if (evidenceId is Guid noCopy && this.Evidence is not null)
             {
                 await this.Evidence.CompleteInboundAsync(noCopy, accepted: true, ct).ConfigureAwait(false);
@@ -896,6 +930,11 @@ public sealed partial class MailboxService
         if (request.WrittenBy is Guid writer)
         {
             await this.NoteDeskReplyAsync(mailbox.Id, writer, request.Subject, request.To, request.InReplyTo, sentRow.Id, ct).ConfigureAwait(false);
+        }
+
+        if (secureFor.Count > 0)
+        {
+            await this.MakeSecureLinksAsync(mailbox, tenant, raw, secureFor, request.WrittenBy ?? mailbox.Id, sentRow.Id, request.SecureBaseUrl, ct).ConfigureAwait(false);
         }
 
         // v1.0.0-rc.8: the queued rows' outgoing evidence belongs to this Sent copy,
@@ -1087,7 +1126,8 @@ public sealed partial class MailboxService
         }
         msg.Subject = EncodeHeaderText(request.Subject.Trim());
         msg.Date = FormatDate(DateTimeOffset.UtcNow);
-        msg.Headers.Add("Message-ID", $"<{Guid.NewGuid():N}@{mailbox.Domain}>");
+        request.SentMessageId = $"<{Guid.NewGuid():N}@{mailbox.Domain}>";
+        msg.Headers.Add("Message-ID", request.SentMessageId);
         msg.Headers.Add("MIME-Version", "1.0");
         return MimeBuilder.Build(msg);
     }

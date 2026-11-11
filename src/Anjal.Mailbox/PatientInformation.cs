@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 
-namespace Anjal.Webmail.Services;
+namespace Anjal.Mailbox;
 
 /// <summary>
 /// rc.22 (item 50, design review 6k; owner 19 Oct 2026: personal information too): the warning in Compose. When a message to

@@ -44,11 +44,26 @@ public sealed class EvidenceVault
     /// <param name="bytes">The exact bytes.</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>The path under the root (forward slashes), the size and the SHA-256.</returns>
-    public async Task<(string RelativePath, long SizeBytes, string Sha256)> WriteAsync(System.Guid id, System.DateTimeOffset capturedAt, byte[] bytes, CancellationToken ct = default)
+    public Task<(string RelativePath, long SizeBytes, string Sha256)> WriteAsync(System.Guid id, System.DateTimeOffset capturedAt, byte[] bytes, CancellationToken ct = default) =>
+        this.WriteNamedAsync(id, capturedAt, string.Empty, bytes, ct);
+
+    /// <summary>
+    /// rc.28 (D-264, DES-18 §11): write the sealed copy of an original kept before rc.25, beside it in
+    /// its day's folder as <c>&lt;id&gt;.r1.eml</c>; written once, like every evidence file.
+    /// </summary>
+    /// <param name="id">The evidence id.</param>
+    /// <param name="capturedAt">When the original was captured (its folder).</param>
+    /// <param name="bytes">The sealed bytes.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The path under the root (forward slashes), the size and the SHA-256.</returns>
+    public Task<(string RelativePath, long SizeBytes, string Sha256)> WriteResealedAsync(System.Guid id, System.DateTimeOffset capturedAt, byte[] bytes, CancellationToken ct = default) =>
+        this.WriteNamedAsync(id, capturedAt, ".r1", bytes, ct);
+
+    private async Task<(string RelativePath, long SizeBytes, string Sha256)> WriteNamedAsync(System.Guid id, System.DateTimeOffset capturedAt, string suffix, byte[] bytes, CancellationToken ct)
     {
         System.ArgumentNullException.ThrowIfNull(bytes);
         System.DateTimeOffset utc = capturedAt.ToUniversalTime();
-        string relative = $"{utc:yyyy}/{utc:MM}/{utc:dd}/{id:N}.eml";
+        string relative = $"{utc:yyyy}/{utc:MM}/{utc:dd}/{id:N}{suffix}.eml";
         string final = this.FullPath(relative);
         string dir = System.IO.Path.GetDirectoryName(final)!;
         CreateDirectory(dir);
@@ -56,7 +71,7 @@ public sealed class EvidenceVault
         {
             throw new System.IO.IOException("evidence file already exists: " + relative);
         }
-        string temp = System.IO.Path.Combine(dir, "." + id.ToString("N") + ".tmp");
+        string temp = System.IO.Path.Combine(dir, "." + id.ToString("N") + suffix + ".tmp");
         await using (var fs = new System.IO.FileStream(temp, System.IO.FileMode.CreateNew, System.IO.FileAccess.Write, System.IO.FileShare.None, 81920, useAsync: true))
         {
             await fs.WriteAsync(bytes, ct).ConfigureAwait(false);

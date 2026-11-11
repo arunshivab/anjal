@@ -16,7 +16,17 @@
         <ComposeForm DraftId="WriteDraft" Back="@PageLink(pageIndex)" />
     </section>
 }
-<section class="listcol" id="maillist" tabindex="-1">
+@* rc.28 (R9 [9d], DES-18 §5): pressing and holding a row with a finger opens this menu beside it. *@
+<div class="holdmenu" role="menu" aria-label="@L["Mail"]" hidden data-holdmenu>
+    <button type="button" role="menuitem" class="holditem hold-reply" data-hold="reply">@L["Reply"]</button>
+    <button type="button" role="menuitem" class="holditem hold-forward" data-hold="forward">@L["Forward"]</button>
+    <button type="button" role="menuitem" class="holditem hold-flag" data-hold="flag">@L["Flag"]</button>
+    <button type="button" role="menuitem" class="holditem hold-snooze" data-hold="snooze">@L["Snooze until tomorrow"]</button>
+    <button type="button" role="menuitem" class="holditem hold-select" data-hold="select">@L["Select more"]</button>
+    <button type="button" role="menuitem" class="holditem hold-trash" data-hold="trash">@L["Delete"]</button>
+</div>
+<section class="listcol" id="maillist" tabindex="-1" data-swipe-left="@swipes.SwipeLeft" data-swipe-long="@swipes.SwipeLeftLong" data-swipe-right="@swipes.SwipeRight"
+         data-word-swipe-archive="@L["Archive"]" data-word-swipe-snooze="@L["Snooze until tomorrow"]" data-word-swipe-read="@L["Read or unread"]" data-word-swipe-flag="@L["Flag"]" data-word-swipe-trash="@L["Delete"]">
 <div class="listhead">
     <div class="lh-row">
         <h1>@FolderLabel</h1>
@@ -437,6 +447,8 @@ else
 </div>
 
 @code {
+    // rc.28 (R9 [9d]): the person's Mail settings - the swipes and the grouping.
+    private MailSettings swipes = new();
     [Parameter] public string? FolderName { get; set; }
     // Read as text and parsed here: a non-numeric or out-of-range value in a
     // hand-edited link falls back to the first page instead of failing the
@@ -816,8 +828,10 @@ else
         // rc.24 (item 68, brief 10a): with "Group by conversation" (the default) each conversation is
         // listed once, at its newest mail in this folder. Not for Drafts, Scheduled or the Outbox; and
         // not for a desk's Inbox, whose conversations are also told apart by the person outside (D-318).
+        // rc.28 (R9 [9d]): the person's swipes, for the list rows on a touch screen.
+        swipes = await Mail.GetMailSettingsAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value);
         grouping = Name is not ("Drafts" or "Outbox" or MailboxService.ScheduledFolder) && !(deskRight is not null && Name == FolderRow.Inbox)
-            && (await Mail.GetMailSettingsAsync(WebmailAuthService.PersonIdOf((await AuthState!).User) ?? mailboxId.Value)).GroupByConversation
+            && swipes.GroupByConversation
             ? await Mail.ConversationGroupingAsync(mailboxId.Value, folder.Name)
             : null;
         // rc.15: a page past the end (an old link, or fewer messages now) shows the last page.

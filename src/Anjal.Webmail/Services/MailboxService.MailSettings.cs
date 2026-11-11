@@ -9,6 +9,15 @@ public sealed class MailSettings
     /// <summary>Seconds Send waits so it can be undone; 0 sends at once.</summary>
     public int UndoSeconds { get; set; } = 10;
 
+    /// <summary>rc.28 (R9 [9d], DES-18 §5): what a short swipe left does to a list row on a touch screen.</summary>
+    public string SwipeLeft { get; set; } = "archive";
+
+    /// <summary>rc.28: what a long swipe left does (D-336: snooze until tomorrow morning).</summary>
+    public string SwipeLeftLong { get; set; } = "snooze";
+
+    /// <summary>rc.28: what a swipe right does.</summary>
+    public string SwipeRight { get; set; } = "read";
+
     /// <summary>Days a message stays in Trash before it is deleted for good - the person's own choice, used only when <see cref="TrashChosen"/>.</summary>
     public int TrashDays { get; set; } = MailboxService.DefaultTrashDays;
 
@@ -304,7 +313,34 @@ public sealed partial class MailboxService
         MailSettings s = await this.ReadDocumentAsync<MailSettings>(mailboxId, MailSettingsKind, ct).ConfigureAwait(false) ?? new MailSettings();
         s.UndoSeconds = UndoChoices.Contains(s.UndoSeconds) ? s.UndoSeconds : 10;
         s.TrashDays = Math.Clamp(s.TrashDays, MinTrashDays, MaxTrashDays);
+        s.SwipeLeft = SwipeChoices.Contains(s.SwipeLeft) ? s.SwipeLeft : "archive";
+        s.SwipeLeftLong = SwipeChoices.Contains(s.SwipeLeftLong) ? s.SwipeLeftLong : "snooze";
+        s.SwipeRight = SwipeChoices.Contains(s.SwipeRight) ? s.SwipeRight : "read";
         return s;
+    }
+
+    /// <summary>rc.28 (R9 [9d]): what a swipe on a list row may do, in the order Settings offers them.</summary>
+    public static readonly IReadOnlyList<string> SwipeChoices = new[] { "archive", "snooze", "read", "flag", "trash", "none" };
+
+    /// <summary>rc.28 (R9 [9d], DES-18 §5): the person's three swipes. A choice not offered is refused.</summary>
+    /// <param name="mailboxId">The person.</param>
+    /// <param name="left">A short swipe left.</param>
+    /// <param name="leftLong">A long swipe left.</param>
+    /// <param name="right">A swipe right.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The error, or null when saved.</returns>
+    public async Task<string?> SetSwipesAsync(Guid mailboxId, string? left, string? leftLong, string? right, CancellationToken ct = default)
+    {
+        if (!SwipeChoices.Contains(left ?? string.Empty) || !SwipeChoices.Contains(leftLong ?? string.Empty) || !SwipeChoices.Contains(right ?? string.Empty))
+        {
+            return "Choose one of the actions listed.";
+        }
+        MailSettings s = await this.GetMailSettingsAsync(mailboxId, ct).ConfigureAwait(false);
+        s.SwipeLeft = left!;
+        s.SwipeLeftLong = leftLong!;
+        s.SwipeRight = right!;
+        await this.WriteDocumentAsync(mailboxId, MailSettingsKind, s, ct).ConfigureAwait(false);
+        return null;
     }
 
     /// <summary>

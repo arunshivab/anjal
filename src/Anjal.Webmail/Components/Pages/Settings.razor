@@ -14,7 +14,9 @@
    SetMail, SetSecurity, SetRules): the sections listed with what each holds,
    the section in a card, and beside it what applies - a preview, how dates
    will look, what the organisation allows, the rules for signing in. *@
-<div class="settings3 @(Aside ? "" : "noaside")">
+@* rc.28 (R9 [9i]): on a phone, Settings with no section chosen is the list of sections; a section opens
+   as its own page with a way back to the list. Wider screens show both, as before. *@
+<div class="settings3 @(Aside ? "" : "noaside") @(string.IsNullOrEmpty(Section) && Find is null ? "setindex" : "setpage")">
     <nav class="setnav3" aria-label="@L["Settings sections"]">
         <h1 class="setnav-title">@L["Settings"]</h1>
         <form method="get" action="/settings/@Current" class="setfind" role="search">
@@ -32,6 +34,7 @@
     </nav>
 
     <div class="setmain">
+    <a class="setback" href="/settings"><LipiIcon Name="chevron-left" Size="16" />@L["Settings"]</a>
     @if (Saved is not null)
     {
         <div class="notice n-ok setnotice" role="status"><LipiIcon Name="check" Size="16" /><span>@SavedMessage</span></div>
@@ -330,6 +333,10 @@
             <div class="setactions"><button type="submit" class="btn btn-p btn-sm">@L["Save"]</button></div>
         </form>
     }
+    @if (Current == "apps")
+    {
+        <MailAppsSettings L="L" Clock="clock" MailboxId="personId" Address="@address" />
+    }
     @if (Current == "data")
     {
         @* rc.22 (item 40, mockup 18): the person's rights under India's Digital Personal Data Protection Act. *@
@@ -433,6 +440,25 @@
                             <option value="@sec" selected="@(mailSettings.UndoSeconds == sec)">@(sec == 0 ? L["Off: send at once"] : L["{n} seconds"].Replace("{n}", sec.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</option>
                         }
                     </select>
+                    <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
+                </form>
+                @* rc.28 (R9 [9d], DES-18 §5): on a touch screen a list row swipes; the person chooses what each swipe does. *@
+                <form method="post" action="/settings/swipes" class="setfield setfield-wide">
+                    <AntiforgeryToken />
+                    <span class="setlbl">@L["Swipes on a touch screen"]</span>
+                    <div class="swipesets">
+                        @foreach ((string field, string label, string value) in new[] { ("left", L["Swipe left"], mailSettings.SwipeLeft), ("leftLong", L["Long swipe left"], mailSettings.SwipeLeftLong), ("right", L["Swipe right"], mailSettings.SwipeRight) })
+                        {
+                            <label class="swipeset"><span>@label</span>
+                                <select name="@field" class="setsel" data-autosubmit>
+                                    @foreach (string choice in MailboxService.SwipeChoices)
+                                    {
+                                        <option value="@choice" selected="@(value == choice)">@SwipeWord(choice)</option>
+                                    }
+                                </select>
+                            </label>
+                        }
+                    </div>
                     <noscript><button type="submit" class="btn btn-s btn-sm">@L["Save"]</button></noscript>
                 </form>
                 <form method="post" action="/settings/notify" class="setfield setfield-wide" data-notify-form>
@@ -1156,6 +1182,7 @@
         ("mail", "Mail", "Open on, signature, sound, Undo send", "email"),
         ("away", "Away", "Out of office, automatic reply", "clock"),
         ("security", "Security", "Password, two-step, devices", "lock"),
+        ("apps", "Mail apps", "Phone and computer mail apps, old mail brought in", "upload"),
         ("data", "Your data", "Download everything, delete your account", "download"),
         ("rules", "Folders and rules", "Your folders, rules that file mail", "folder"),
         ("senders", "Junk and senders", "Blocked, always or never to Junk", "security"),
@@ -1171,6 +1198,7 @@
         ["profile"] = "name first last phone date of birth nickname display from",
         ["away"] = "away vacation out of office holiday automatic reply responder leave",
         ["data"] = "download export delete account privacy dpdp data rights",
+        ["apps"] = "imap app password phone iphone outlook thunderbird mobile import mbox gmail old mail move",
         ["mail"] = "today inbox open signature sound undo send trash empty per page offline notification desktop",
         ["security"] = "password two-step authenticator passkey backup codes devices sign out recovery",
         ["rules"] = "folder rule filter move file",
@@ -1245,6 +1273,17 @@
     private long used;
     private ZonedClock clock = ZonedClock.Default;
     private MailSettings mailSettings = new();
+
+    // rc.28 (R9 [9d]): the words for a swipe's action.
+    private string SwipeWord(string choice) => choice switch
+    {
+        "archive" => L["Archive"],
+        "snooze" => L["Snooze until tomorrow"],
+        "read" => L["Read or unread"],
+        "flag" => L["Flag"],
+        "trash" => L["Delete"],
+        _ => L["Nothing"],
+    };
     private string clockOwn = string.Empty;
     private string? tenantSlug;
     private PersonFiguresSetting figures = new();
@@ -1273,6 +1312,7 @@
 
     private static readonly (string Key, string Word)[] Modes = { ("light", "Light"), ("dark", "Dark"), ("auto", "Follow this device") };
     private string address = string.Empty;
+    private Guid personId;
     private string tenantName = string.Empty;
     private IReadOnlyList<CategoryView> categories = System.Array.Empty<CategoryView>();
     private IReadOnlyList<CategoryRuleRow> rules = System.Array.Empty<CategoryRuleRow>();
@@ -1394,6 +1434,7 @@
         L = Words.For(WebmailAuthService.LanguageOf(user, Words));
         clock = WebmailAuthService.ClockOf(user);
         Guid? mailboxId = WebmailAuthService.PersonIdOf(user);
+        personId = mailboxId ?? Guid.Empty;
         if (mailboxId is null)
         {
             return;

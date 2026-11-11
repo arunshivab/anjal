@@ -27,6 +27,7 @@ namespace Anjal.Server;
 ///   ANJAL_WEBHOOK_ALLOW_HTTP    - "true" allows plain-http webhook URLs (default https only).
 ///   ANJAL_WEBHOOK_ALLOW_PRIVATE - "true" allows webhooks to loopback/private addresses (default public only).
 ///   ANJAL_SUBMISSION_TLS_PORT         - Implicit-TLS submission port, normally 465 (RFC 8314). 0 disables.
+///   ANJAL_IMAP_TLS_PORT               - rc.28: IMAP for mail apps, TLS from the first byte, normally 993. Unset or 0: off.
 ///   ANJAL_SMTP_IDLE_TIMEOUT_SECONDS   - Close a session idle this long (default 300; RFC 5321 4.5.3.2.7).
 ///   ANJAL_SMTP_MAX_SESSION_MINUTES    - Hard limit on one session (default 15).
 ///   ANJAL_SMTP_MAX_CONNECTIONS        - Concurrent sessions per listener (default 200).
@@ -208,6 +209,30 @@ public static class Program
             };
             evidenceWorker = new Anjal.Mailbox.EvidenceWorker(evidenceStore, vault, log: Log);
             Log($"Evidence: originals kept in {vault.Root} - incoming as received, outgoing as sent, SHA-256 each, daily manifest chain; a message is not accepted or sent unless its original is kept.");
+
+            // rc.28 (D-264, DES-18 §11): the one-time job sealing what was kept before rc.25, run by the
+            // operator beside the running server (DEPLOY 13d): "--reseal-old", with "--dry-run" first.
+            if (args is not null && System.Array.IndexOf(args, "--reseal-old") >= 0)
+            {
+                if (evidence.Keys is null)
+                {
+                    System.Console.Error.WriteLine("Re-seal needs the database (ANJAL_POSTGRES): the organisations' keys are there.");
+                    return 1;
+                }
+                if (sealKey is null)
+                {
+                    System.Console.Error.WriteLine("Re-seal needs the mail server's seal key, for the outgoing queue; it could not be read.");
+                    return 1;
+                }
+                var resealer = new Anjal.Mailbox.EvidenceResealer(evidenceStore, vault, evidence.Keys, store, Log);
+                await resealer.RunAsync(dryRun: System.Array.IndexOf(args, "--dry-run") >= 0).ConfigureAwait(false);
+                return 0;
+            }
+        }
+        else if (args is not null && System.Array.IndexOf(args, "--reseal-old") >= 0)
+        {
+            System.Console.Error.WriteLine("Re-seal: this store keeps no evidence.");
+            return 1;
         }
 
         // Fan out: mailbox sink first, then webhook routing. An address may
@@ -313,6 +338,10 @@ public static class Program
         // Disabled when ANJAL_SUBMISSION_PORT is unset or 0.
         Anjal.Smtp.SmtpServer? submissionServer = null;
         Anjal.Smtp.SmtpServer? implicitTlsServer = null;
+
+        // Across sessions and across submission and IMAP (rc.28): ten failed sign-ins from one address in
+        // 15 minutes, by either way in, and that address is refused before any password is checked.
+        var signInFailures = new Anjal.Smtp.AuthFailureLimiter(ParseLimitEnv("ANJAL_SMTP_AUTH_FAILURES_PER_IP", 10), System.TimeSpan.FromMinutes(15));
         int submissionPort = ParsePortOrZero(System.Environment.GetEnvironmentVariable("ANJAL_SUBMISSION_PORT"));
         if (submissionPort > 0)
         {
@@ -341,12 +370,7 @@ public static class Program
                 Log = Log,
                 Refused = ServiceRecords.RefusalRecorder(store, Log),
 
-                // Across sessions: ten failed logins from one address in 15
-                // minutes and that address is refused before any password
-                // is checked.
-                AuthFailures = new Anjal.Smtp.AuthFailureLimiter(
-                    ParseLimitEnv("ANJAL_SMTP_AUTH_FAILURES_PER_IP", 10),
-                    System.TimeSpan.FromMinutes(15)),
+                AuthFailures = signInFailures,
             };
 
             // Authenticated submission reaches outside addresses through the
@@ -402,6 +426,34 @@ public static class Program
             else if (tlsCert is null)
             {
                 Log("WARNING: submission port has no TLS cert and plaintext AUTH is disabled - AUTH will fail.");
+            }
+        }
+
+        // rc.28 (DES-20 §3): IMAP for mail apps, on 993 with TLS from the first byte; off until
+        // ANJAL_IMAP_TLS_PORT is set. People sign in with app passwords (Settings, Mail apps) only.
+        Anjal.Imap.ImapServer? imapServer = null;
+        int imapPort = ParsePortOrZero(System.Environment.GetEnvironmentVariable("ANJAL_IMAP_TLS_PORT"));
+        if (imapPort > 0)
+        {
+            if (store is not Anjal.Store.IMailAppStore)
+            {
+                Log("IMAP: off - it needs the database (ANJAL_POSTGRES).");
+            }
+            else
+            {
+                imapServer = new Anjal.Imap.ImapServer(
+                    new Anjal.Imap.ImapServerOptions
+                    {
+                        BindAddress = System.Net.IPAddress.Parse(bind),
+                        Port = imapPort,
+                        HostName = hostname,
+                        Certificate = () => certSource?.Invoke() ?? tlsCert,
+                        AuthFailures = signInFailures,
+                        Log = Log,
+                    },
+                    new Anjal.Imap.StoreImapBackend(mailboxStore, maildir, Anjal.Store.MailKeys.PepperFromEnvironment(), Log));
+                imapServer.Start();
+                Log($"Anjal IMAP (TLS, port {imapPort}) listening on {bind}; mail apps sign in with app passwords.");
             }
         }
 
@@ -630,6 +682,10 @@ public static class Program
         {
             submissionServer?.Dispose();
             implicitTlsServer?.Dispose();
+            if (imapServer is not null)
+            {
+                await imapServer.DisposeAsync().ConfigureAwait(false);
+            }
         }
 
         if (workerTask is not null)

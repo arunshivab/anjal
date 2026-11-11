@@ -37,6 +37,9 @@ public sealed class OrgMailPolicy
     /// </summary>
     public string PrintNote { get; set; } = string.Empty;
 
+    /// <summary>rc.28 (DES-21 §2, D-350): whether the organisation's people can chat with each other; on by default.</summary>
+    public bool Chat { get; set; } = true;
+
     /// <summary>Read an organisation's policy; Anjal's defaults when it has set none.</summary>
     /// <param name="store">The store.</param>
     /// <param name="tenantId">The organisation.</param>

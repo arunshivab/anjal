@@ -12,6 +12,7 @@
     <ProjectReference Include="..\Anjal.Dns\Anjal.Dns.csproj" />
     <ProjectReference Include="..\Anjal.Dkim\Anjal.Dkim.csproj" />
     <ProjectReference Include="..\Anjal.Auth\Anjal.Auth.csproj" />
+    <ProjectReference Include="..\Anjal.Imap\Anjal.Imap.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

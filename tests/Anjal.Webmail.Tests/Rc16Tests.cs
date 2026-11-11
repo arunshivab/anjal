@@ -319,7 +319,7 @@ public sealed partial class Rc16Tests : IAsyncLifetime, IDisposable
         return seen.Where(kv => kv.Value > 1).Select(kv => kv.Key).ToList();
     }
 
-    private const int RepeatedBaseline = 298;
+    private const int RepeatedBaseline = 297;
 
     private static string RepoRoot()
     {

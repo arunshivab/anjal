@@ -171,6 +171,7 @@ to the node **instead of** the default group:
 | Inbound | Custom TCP | 443 | Any | webmail |
 | Inbound | Custom TCP | 587 | Any | your own clients, authenticated (STARTTLS) |
 | Inbound | Custom TCP | 465 | Any | your own clients, authenticated (implicit TLS, RFC 8314) |
+| Inbound | Custom TCP | 993 | Any | mail apps over IMAP, TLS from the first byte (rc.28, DES-20) |
 | Outbound | ALL | - | Any | see the warning below |
 
 **Leave outbound permissive.** Anjal must reach port 25 on other mail
@@ -303,7 +304,7 @@ vm$ sudo ss -tlnp
   (`Server=` in `/etc/zabbix/zabbix_agentd.conf`, a 10.x address). Keep it.
 
 **Check:** after section 6, `sudo ss -tlnp` shows exactly: 22, 25, 80,
-443, 465 and 587 on all addresses; 5432 and 8025 on `127.0.0.1` only; 10050
+443, 465, 587 and (from rc.28, once `ANJAL_IMAP_TLS_PORT` is set) 993 on all addresses; 5432 and 8025 on `127.0.0.1` only; 10050
 (Zabbix, blocked by the Security Group). Anything else listening publicly
 is a finding.
 
@@ -364,6 +365,82 @@ Without libmsquic, or with `ANJAL_WEBMAIL_HTTP3=false`, the webmail logs
 start over HTTP/3.
 
 ---
+
+### 1e. WireGuard for SSH, then port 22 closed (rc.28, pending item 16)
+
+SSH stops being open to the internet: the owner's PC reaches the server through a WireGuard
+tunnel (UDP 51820), and SSH is used inside it at 10.77.0.1. Do this in one sitting, with the E2E
+web console open in another tab as the way back in if something goes wrong. Nothing in Anjal
+changes; the outbound firewall (13f) lets the tunnel's replies out from rc.28.
+
+**Read first** (nothing is changed by these):
+```
+vm$ command -v wg || echo "not installed"
+vm$ sudo test -e /etc/wireguard/wg0.conf && echo "wg0.conf exists - stop and ask" || echo "no wg0.conf"
+vm$ ip -br addr | grep -c '10\.77\.'   # 0: the tunnel's addresses are free
+vm$ sudo ss -ulnp | grep -c ':51820 '   # 0
+```
+
+**1. The server's keys.**
+```
+vm$ sudo apt-get install -y wireguard
+vm$ sudo sh -c 'umask 077; wg genkey > /etc/wireguard/server.key; wg pubkey < /etc/wireguard/server.key > /etc/wireguard/server.pub'
+vm$ sudo cat /etc/wireguard/server.pub   # the server's public key, for the PC (not a secret)
+```
+
+**2. The PC's tunnel.** In the WireGuard app for Windows: Add Tunnel › Add empty tunnel. The app
+makes the PC's keys; name it `anjal`, and make it read as below (the PrivateKey line the app wrote
+stays as it is; the server's public key is the one step 1 printed):
+```
+[Interface]
+PrivateKey = (the line the app wrote)
+Address = 10.77.0.2/32
+
+[Peer]
+PublicKey = (the server's public key from step 1)
+AllowedIPs = 10.77.0.1/32
+Endpoint = 151.185.43.171:51820
+PersistentKeepalive = 25
+```
+Copy the PC's **public** key from the top of the app's window.
+
+**3. The server's side**, with the PC's public key pasted when asked:
+```
+vm$ read -r -p "PC public key: " PCKEY; echo "$PCKEY" | grep -Eq '^[A-Za-z0-9+/]{43}=$' && echo "looks right"
+vm$ printf '[Interface]\nAddress = 10.77.0.1/24\nListenPort = 51820\nPostUp = wg set %%i private-key /etc/wireguard/server.key\n\n[Peer]\nPublicKey = %s\nAllowedIPs = 10.77.0.2/32\n' "$PCKEY" | sudo tee /etc/wireguard/wg0.conf >/dev/null; unset PCKEY
+vm$ sudo chmod 600 /etc/wireguard/wg0.conf
+vm$ sudo systemctl enable --now wg-quick@wg0
+vm$ sudo wg show wg0 | head -4   # interface wg0, its public key, listening port 51820
+```
+
+**4. E2E Security Group**: add an inbound rule **UDP 51820** from anywhere (read the rules first;
+add only this one). Then the outbound firewall (13f), which lets the tunnel's replies out:
+```
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh generate
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh apply
+```
+
+**5. Test through the tunnel** before anything is closed. Activate `anjal` in the app, then:
+```
+pc> ssh arun@10.77.0.1
+```
+It signs in. Keep that session open and confirm the firewall from it:
+```
+vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh confirm
+vm$ sudo wg show wg0 latest-handshakes   # a recent time for the PC
+```
+
+**6. Close port 22 to the internet**: in the E2E Security Group remove the inbound **TCP 22** rule.
+Then, from the PC:
+```
+pc> ssh -o ConnectTimeout=10 arun@151.185.43.171   # times out: closed
+pc> ssh arun@10.77.0.1                              # signs in through the tunnel
+```
+From now on every `vm$` command in this document is run over `ssh arun@10.77.0.1`. If the tunnel is
+ever down, the E2E web console is the way in; put the TCP 22 rule back only for as long as needed.
+
+**Record**: the date, the first 8 characters of the server's public key, and "22 closed" on the
+server form.
 
 ## 2. PostgreSQL
 
@@ -565,8 +642,17 @@ Write it in the row "Mail encryption pepper" of all three forms, marking the
 look-alikes, then:
 
 ```
-vm$ sudo sed -i "s|^ANJAL_KEY_PEPPER=.*|ANJAL_KEY_PEPPER=$PEPPER|" /etc/anjal/server.env /etc/anjal/webmail.env; unset PEPPER; clear
+vm$ for f in server webmail; do
+      if [ "$(sudo grep -c '^ANJAL_KEY_PEPPER=' /etc/anjal/$f.env)" = 0 ]; then
+        echo "ANJAL_KEY_PEPPER=$PEPPER" | sudo tee -a /etc/anjal/$f.env >/dev/null; echo "$f.env: line added"
+      else
+        sudo sed -i "s|^ANJAL_KEY_PEPPER=.*|ANJAL_KEY_PEPPER=$PEPPER|" /etc/anjal/$f.env; echo "$f.env: line replaced"
+      fi; done; unset PEPPER; clear
 ```
+
+An env file made before rc.25 has no `ANJAL_KEY_PEPPER=` line at all, so a replacement alone would
+change nothing; the loop adds the line where it is missing and replaces it where it is there (found
+on the first server, 9 November 2026). The checks below must then show it in both files.
 
 **The certificate rehearsal** - staging on in `webmail.env` only (section 7
 turns it off again):
@@ -1435,7 +1521,7 @@ future you can see each one and where it lives.
 
 | Concern | Control | Where |
 | --- | --- | --- |
-| Network exposure | E2E Security Group (only 22, 25, 80, 443, 465, 587 and UDP 443 open) and, since 27 Sep 2026, a host firewall: outbound mail ports only for Anjal, an outbound allowlist and a port-ownership check every 5 minutes (incident ANJAL-INC-01); internal services bound to 127.0.0.1 and measured with `ss -tlnp` | sections 1a, 1c, 13f |
+| Network exposure | E2E Security Group (only 25, 80, 443, 465, 587, 993 and UDP 443 and 51820 open; TCP 22 until WireGuard is in, section 1e) and, since 27 Sep 2026, a host firewall: outbound mail ports only for Anjal, an outbound allowlist and a port-ownership check every 5 minutes (incident ANJAL-INC-01); internal services bound to 127.0.0.1 and measured with `ss -tlnp` | sections 1a, 1c, 13f |
 | Administrative access | Named account per person with sudo; root SSH login, passwords, keyboard-interactive, GSSAPI and X11 off; fail2ban; port 22 to move behind WireGuard before real mail | section 1b, `01-anjal-hardening.conf` |
 | Software updates | unattended-upgrades for Ubuntu security and the PostgreSQL repository | sections 1, 2 |
 | Admin API | Loopback only, bearer token required, refuses to start otherwise; reached over SSH | `server.env`, section 13 |
@@ -1680,6 +1766,75 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.27 to rc.28** (group 1: phones and tablets, the file viewer with archives, the patient
+warning's choices, the recovery sheet that prints white, old evidence sealed - DES-18; the secure
+link - DES-19; mail apps over IMAP with a password per device, and old mail brought in - DES-20;
+chat and online status - DES-21): backup first (section 11).
+
+1. **TCP 993 in the E2E Security Group** (as 465 was, section 1a): an inbound rule for TCP 993 from
+   anywhere, for mail apps. Read the group's rules first; add only this one.
+2. The usual install, and `schema.sql` once: ten new tables (`secure_links`, `secure_link_codes`,
+   `app_passwords`, `imap_folders`, `imap_uids`, `import_jobs`, `chat_rooms`, `chat_members`,
+   `chat_messages`, `presence`) and two new columns, `evidence.resealed_from_sha256` and
+   `resealed_at` - 53 tables in all.
+3. **The one new setting** (server.env), IMAP for mail apps. Read first:
+   ```
+   vm$ sudo grep -c '^ANJAL_IMAP_TLS_PORT=' /etc/anjal/server.env   # 0: not there yet
+   ```
+   0 means unset (IMAP off). Add it:
+   ```
+   vm$ echo 'ANJAL_IMAP_TLS_PORT=993' | sudo tee -a /etc/anjal/server.env >/dev/null
+   vm$ sudo grep '^ANJAL_IMAP_TLS_PORT=' /etc/anjal/server.env   # ANJAL_IMAP_TLS_PORT=993
+   ```
+4. **The outbound firewall** (section 13f) gains replies from 993 and, for the anjal account, IMAP
+   out to other mail servers (the import): generate, apply, then a new SSH session and the webmail,
+   then confirm, as in 13f.
+   ```
+   vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh generate
+   vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh apply
+   vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh confirm
+   ```
+5. Restart. The start-up log says `Anjal IMAP (TLS, port 993) listening`. Check from the PC:
+   ```
+   pc> openssl s_client -connect mail.anjal.co.in:993 -quiet
+   ```
+   It shows the certificate's chain and `* OK [CAPABILITY IMAP4rev1 ...] mail.anjal.co.in Anjal IMAP
+   ready`; type `a LOGOUT` to leave. Then the webmail on a phone and a tablet: the list and the
+   letter take turns on a phone and on an upright tablet, and the envelope sits beside the letter on
+   a tablet.
+6. **Seal what was kept before rc.25** (D-264), once. The originals of organisations' mail kept
+   before rc.25, and any mail still waiting in the queue from then, are sealed now, as everything
+   since rc.25 already is. The job runs beside the running services, as the `anjal` user with the
+   server's settings. A dry run first; it changes nothing and prints one line of counts:
+   ```
+   vm$ sudo systemd-run --uid=anjal --pty --wait -p EnvironmentFile=/etc/anjal/server.env -p WorkingDirectory=/opt/anjal/server /opt/anjal/server/Anjal.Server --reseal-old --dry-run
+   ```
+   Read the line: `... checked; N of organisations to seal, ... 0 with a problem; Q queued
+   message(s) to seal.` A problem count above 0 means an original is missing or does not match its
+   record: stop, and run the evidence check (section 13g) before going on. Otherwise run it for real:
+   ```
+   vm$ sudo systemd-run --uid=anjal --pty --wait -p EnvironmentFile=/etc/anjal/server.env -p WorkingDirectory=/opt/anjal/server /opt/anjal/server/Anjal.Server --reseal-old
+   ```
+   It writes `manifests/reseal-YYYYMMDD-HHmmss.txt` in the evidence store (each original's old and
+   new hash) and prints its SHA-256: write that on the upgrade form. The old files go on that day's
+   purge list, so the next backup drops its own copies. Running it a second time finds nothing to do.
+7. **A mail app, end to end** (the owner, on his phone): Settings › Mail apps › Add a mail app;
+   type the password shown into the phone's mail app with the settings on that page; the Inbox
+   appears in the app; a mail sent from the app arrives and its copy is in Sent once.
+8. Each organisation's administrator prints the recovery sheet again only if they want to: nothing
+   about the sheet changed except that it now prints black on white in every theme (D-332). Chat is
+   on for every organisation (D-350); Organisation › Mail rules › Chat turns it off.
+
+**Check** (counts only):
+```
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 53
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) filter (where resealed_at is not null), count(*) from evidence"   # the sealed count, and all
+vm$ sudo ss -tlnp | grep -c ':993 '   # 1
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/verify | jq '{intact, problems}'   # true, []
+vm$ unset TOKEN
+```
+
 **rc.26 to rc.27** (shared desks, the dark envelope, high contrast and the other accessibility work,
 the ten small items, DES-17 v1.2): the first server goes from rc.24 straight to rc.27 (D-248); these
 steps are part of that upgrade, after the rc.25 and rc.26 steps below. Backup first (section 11).
@@ -1697,9 +1852,14 @@ steps are part of that upgrade, after the rc.25 and rc.26 steps below. Backup fi
 5. Once a month the operator does the screen-reader check (Anjal console > Service health) and
    records it there.
 
+Done on the first server 9 Nov 2026, from rc.24 straight to rc.27 with the rc.25 and rc.26 steps:
+the pepper line was missing from both env files and was added (the step in section 4 now does that
+itself); 371 of 371 stored messages encrypted; two mailbox keys (arun@ and ops@); no pepper in the
+database; no errors in the start-up log.
+
 **Check** (counts only):
 ```
-vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 43
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 43 (53 once rc.28's schema is in)
 vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from desk_items"   # 0 until mail arrives at a shared mailbox
 ```
 
@@ -1932,8 +2092,10 @@ INBOX with the red lock (the default).
 
 Only the `anjal` account may send mail from this server (TCP 25, 465, 587);
 root, manual tests and any other program are refused and logged. Everything
-else outbound is allowed per account and purpose only. A check every 5
-minutes confirms that only Anjal holds its ports. Incoming traffic stays with
+else outbound is allowed per account and purpose only (from rc.28, the `anjal`
+account may also reach other mail servers' IMAP on 993, to bring a person's old
+mail in). A check every 5 minutes confirms that only Anjal holds its ports (993
+among them from rc.28). Incoming traffic stays with
 E2E's Security Group and fail2ban; the rules live in their own nftables table.
 
 **Never run manual mail tests from this server.** Use another machine. If one
@@ -2181,6 +2343,9 @@ folders, the evidence store or the backups - cannot read it (D-232). Individuals
 | The organisation's recovery key | Locked for each administrator, and with the recovery sheet | The administrators; whoever holds the sheet |
 | Mail waiting to be sent | The outgoing queue, sealed to the mail server's seal key | The mail server until it is delivered; afterwards only its record (D-244) |
 | Mail waiting in Scheduled | Sealed with a key the webmail derives from the pepper | The webmail |
+| A mail app's copy of a person's key (rc.28, DES-20) | Wrapped with a key made from that app's password, its salt and the pepper | That app, while its password works; removing it deletes the copy |
+| Chat (rc.28, DES-21) | Each message sealed to its members' keys and the organisation's recovery key | The members from when they joined; the administrators (recovery key) |
+| A secure link's mail (rc.28, DES-19) | Sealed with a key made from the link's token, which only the link holds | The outside person, after the code mailed to them; deleted a day after the link ends |
 | The words of mail rules, From and To | Plain | As before (D-231, D-244) |
 
 - **The pepper** (`ANJAL_KEY_PEPPER`, both env files, section 4) is never in the database. Lost or

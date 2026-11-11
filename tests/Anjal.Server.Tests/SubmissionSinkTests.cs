@@ -8,6 +8,7 @@ namespace Anjal.Server.Tests;
 public sealed class SubmissionSinkTests : IDisposable
 {
     private static readonly string[] Colleague = { "colleague@qa.test" };
+    private static readonly string[] OutsideDoctor = { "doctor@hospital.example" };
 
     private readonly string root = Path.Combine(Path.GetTempPath(), "anjal-sub-" + Guid.NewGuid().ToString("N"));
     private readonly InMemoryMessageStore store = new();
@@ -44,12 +45,14 @@ public sealed class SubmissionSinkTests : IDisposable
         this.colleague = await this.store.UpsertMailboxAsync(new MailboxRow { TenantId = tenant.Id, LocalPart = "colleague", Domain = "qa.test" });
     }
 
+    // rc.28 (D-345): the subject was "Referral", itself a sign of patient information, which an
+    // organisation's mail app may no longer send outside; these tests are about routing, so it is neutral now.
     private static DeliveryContext Submitted(string user, params string[] to) => new()
     {
         EnvelopeFrom = "arun@qa.test",
         EnvelopeTo = to,
         AuthenticatedUser = user,
-        RawBytes = System.Text.Encoding.ASCII.GetBytes("From: arun@qa.test\r\nTo: x\r\nSubject: Referral\r\nMessage-ID: <m1@qa.test>\r\n\r\nbody\r\n"),
+        RawBytes = System.Text.Encoding.ASCII.GetBytes("From: arun@qa.test\r\nTo: x\r\nSubject: Rota for next week\r\nMessage-ID: <m1@qa.test>\r\n\r\nbody\r\n"),
     };
 
     private async Task<int> CountInAsync(MailboxRow mailbox, string folder)
@@ -76,6 +79,26 @@ public sealed class SubmissionSinkTests : IDisposable
     }
 
     [Fact]
+    public async Task Rc28_PatientMailFromAMailApp_ToTheOutside_IsKeptInDrafts_AndTheAppIsToldWhy()
+    {
+        await this.SeedAsync();
+        byte[] raw = System.Text.Encoding.ASCII.GetBytes("From: arun@qa.test\r\nTo: x\r\nSubject: Discharge summary\r\nMessage-ID: <p1@qa.test>\r\n\r\nPatient MRN 2026-10443 discharged today.\r\n");
+        DeliveryResult held = await this.sink.DeliverAsync(new DeliveryContext { EnvelopeFrom = "arun@qa.test", EnvelopeTo = OutsideDoctor, AuthenticatedUser = "arun@qa.test", RawBytes = raw });
+
+        Assert.Equal(DeliveryOutcome.PermanentFailure, held.Outcome);
+        Assert.StartsWith("Not sent:", held.ReplyText, StringComparison.Ordinal);
+        Assert.Contains("Drafts", held.ReplyText, StringComparison.Ordinal);
+        Assert.Empty(await this.QueuedAsync());
+        Assert.Equal(0, await this.CountInAsync(this.arun, "Sent"));
+        Assert.Equal(1, await this.CountInAsync(this.arun, "Drafts"));
+
+        // The same mail to a colleague inside the organisation goes as before.
+        DeliveryResult inside = await this.sink.DeliverAsync(new DeliveryContext { EnvelopeFrom = "arun@qa.test", EnvelopeTo = Colleague, AuthenticatedUser = "arun@qa.test", RawBytes = raw });
+        Assert.Equal(DeliveryOutcome.Accepted, inside.Outcome);
+        Assert.Equal(1, await this.CountInAsync(this.colleague, "INBOX"));
+    }
+
+    [Fact]
     public async Task AnExternalRecipient_IsQueuedForDelivery_AndFiledInSent()
     {
         await this.SeedAsync();
@@ -88,7 +111,7 @@ public sealed class SubmissionSinkTests : IDisposable
         Assert.Equal(1, await this.CountInAsync(this.arun, "Sent"));
         MessageRow copy = (await this.store.ListMessagesAsync(this.arun.Id, (await this.store.ListFoldersAsync(this.arun.Id)).First(f => f.Name == "Sent").Id, 10, 0)).Single();
         Assert.True(copy.Seen);
-        Assert.Equal("Referral", copy.Subject);
+        Assert.Equal("Rota for next week", copy.Subject);
     }
 
     [Fact]

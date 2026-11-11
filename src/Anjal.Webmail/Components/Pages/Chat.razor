@@ -1,0 +1,218 @@
+@page "/chat"
+@page "/chat/{Room}"
+@attribute [Authorize]
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+
+<PageTitle>@L["Chat"] — Anjal</PageTitle>
+
+@* rc.28 (DES-21): chat between the organisation's people. The list on the left, the open chat on the
+   right (on a phone and an upright tablet they take turns, like the mail list and a mail). *@
+@if (!on)
+{
+    <div class="emptystate chatoff">
+        <LipiIcon Name="comment" Size="28" />
+        <h1>@L["Chat"]</h1>
+        <p>@L["Chat is for the people of an organisation, when its administrator has it on."]</p>
+    </div>
+}
+else
+{
+    <div class="chatpage @(view is null ? "" : "has-open")" data-chat="@(view?.Summary.Room.Id.ToString("N") ?? string.Empty)"
+         data-word-removed="@L["Message removed"]" data-word-seen="@L["Seen by {names}"]" data-word-you="@L["You"]">
+        <section class="chatlist" aria-label="@L["Chats"]">
+            <div class="chathead">
+                <h1>@L["Chat"]</h1>
+                <span class="lh-grow"></span>
+                <details class="pmenu chatme">
+                    <summary class="btn btn-s btn-sm" title="@L["Your status"]"><span class="pdot p-@MyWord" aria-hidden="true"></span>@L.Say(StatusWord(MyWord))</summary>
+                    <form method="post" action="/presence" class="pmenu-body chatstatus">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="back" value="@Here" />
+                        <label class="chk"><input type="radio" name="status" value="auto" checked="@(me.Status == PresenceRow.Auto)" /> <span class="pdot p-online"></span>@L["Online when I use Anjal"]</label>
+                        <label class="chk"><input type="radio" name="status" value="busy" checked="@(me.Status == PresenceRow.Busy)" /> <span class="pdot p-busy"></span>@L["Busy: do not disturb"]</label>
+                        <label class="chk"><input type="radio" name="status" value="away" checked="@(me.Status == PresenceRow.Away)" /> <span class="pdot p-away"></span>@L["Appear away"]</label>
+                        <input class="inp" name="note" value="@me.Note" maxlength="80" placeholder="@L["A line, such as: In theatre until 3"]" aria-label="@L["Your line"]" />
+                        <button type="submit" class="btn btn-p btn-sm">@L["Save"]</button>
+                    </form>
+                </details>
+            </div>
+            <details class="chatnew" open="@(New == "1")">
+                <summary class="btn btn-p btn-sm" title="@L["Start a chat with one or more colleagues"]"><LipiIcon Name="plus" Size="15" />@L["New chat"]</summary>
+                <form method="post" action="/chat/new" class="chatpick">
+                    <AntiforgeryToken />
+                    @if (colleagues.Count == 0)
+                    {
+                        <p class="hint">@L["Nobody else in your organisation has signed in yet."]</p>
+                    }
+                    <div class="chatpeople">
+                        @foreach (ChatPerson p in colleagues)
+                        {
+                            <label class="chk chatperson"><input type="checkbox" name="person" value="@p.Id" /> <span class="pdot p-@p.Status" title="@L.Say(StatusWord(p.Status))"></span><b>@p.Name</b><span class="hint">@p.Address</span></label>
+                        }
+                    </div>
+                    <input class="inp" name="name" maxlength="60" placeholder="@L["A name, for a group"]" aria-label="@L["Group name"]" />
+                    <button type="submit" class="btn btn-p btn-sm" title="@L["Start the chat with the people ticked"]">@L["Start"]</button>
+                </form>
+            </details>
+            @if (Error is string error)
+            {
+                <div class="notice n-err" role="alert"><LipiIcon Name="warning" Size="16" /><span>@L.Say(error)</span></div>
+            }
+            <nav class="chatrooms">
+                @if (rooms.Count == 0)
+                {
+                    <p class="hint chatnone">@L["No chats yet. Start one with a colleague."]</p>
+                }
+                @foreach (ChatSummary c in rooms)
+                {
+                    <a class="chatroomlink @(view?.Summary.Room.Id == c.Room.Id ? "on" : "") @(c.Unread > 0 ? "unread" : "")" href="/chat/@c.Room.Id.ToString("N")" aria-current="@(view?.Summary.Room.Id == c.Room.Id ? "page" : null)">
+                        @if (!c.Room.IsGroup && c.Others.Count == 1)
+                        {
+                            <span class="pdot p-@c.Others[0].Status" title="@L.Say(StatusWord(c.Others[0].Status))"></span>
+                        }
+                        else
+                        {
+                            <LipiIcon Name="users" Size="16" />
+                        }
+                        <span class="crtitle">@c.Title</span>
+                        @if (c.Unread > 0)
+                        {
+                            <span class="n">@c.Unread</span>
+                        }
+                    </a>
+                }
+            </nav>
+        </section>
+        <section class="chatroom" aria-label="@(view?.Summary.Title ?? L["Chat"])">
+            @if (view is null)
+            {
+                <div class="emptystate"><LipiIcon Name="comment" Size="28" /><p>@L["Choose a chat, or start a new one."]</p></div>
+            }
+            else
+            {
+                <div class="chatroomhead">
+                    <a class="iconbtn chatback" href="/chat" aria-label="@L["Back to chats"]"><LipiIcon Name="arrow-left" Size="18" /></a>
+                    <h2>@view.Summary.Title</h2>
+                    @if (!view.Summary.Room.IsGroup && view.Summary.Others.Count == 1)
+                    {
+                        ChatPerson other = view.Summary.Others[0];
+                        <span class="chatwho"><span class="pdot p-@other.Status"></span>@L.Say(StatusWord(other.Status))@(other.Note.Length > 0 ? " · " + other.Note : string.Empty)</span>
+                    }
+                    else
+                    {
+                        <span class="chatwho">@L["{n} people"].Replace("{n}", (view.Summary.Others.Count + 1).ToString(System.Globalization.CultureInfo.CurrentCulture), StringComparison.Ordinal)</span>
+                    }
+                    <span class="lh-grow"></span>
+                    @if (view.Summary.Room.IsGroup)
+                    {
+                        <details class="pmenu">
+                            <summary class="iconbtn" aria-label="@L["More"]" title="@L["More"]"><LipiIcon Name="more-horizontal" Size="18" /></summary>
+                            <div class="pmenu-body pmenu-right">
+                                <form method="post" action="/chat/@view.Summary.Room.Id.ToString("N")/add" class="chatpick">
+                                    <AntiforgeryToken />
+                                    <p class="setlbl">@L["Add people"]</p>
+                                    @foreach (ChatPerson p in colleagues.Where(p => view.Summary.Others.All(o => o.Id != p.Id)))
+                                    {
+                                        <label class="chk"><input type="checkbox" name="person" value="@p.Id" /> @p.Name</label>
+                                    }
+                                    <button type="submit" class="btn btn-s btn-sm">@L["Add"]</button>
+                                </form>
+                                <form method="post" action="/chat/@view.Summary.Room.Id.ToString("N")/leave">
+                                    <AntiforgeryToken />
+                                    <button type="submit" class="pmi danger">@L["Leave the group"]</button>
+                                </form>
+                            </div>
+                        </details>
+                    }
+                </div>
+                <ol class="chatlines" aria-live="polite" data-chat-lines data-after="@(view.Lines.Count > 0 ? view.Lines[^1].At.UtcTicks : 0)">
+                    @foreach (ChatLine l in view.Lines)
+                    {
+                        <li class="chatline @(l.Mine ? "mine" : "") @(l.Removed ? "removed" : "")" data-line="@l.Id.ToString("N")">
+                            @if (!l.Mine)
+                            {
+                                <b class="clname">@l.SenderName</b>
+                            }
+                            <span class="cltext">@(l.Removed ? L["Message removed"] : l.Text)</span>
+                            <span class="cltime">@clock.Time(l.At)</span>
+                            @if (l.Mine && !l.Removed && DateTimeOffset.UtcNow - l.At < MailboxService.ChatRemoveWindow)
+                            {
+                                <form method="post" action="/chat/message/@l.Id.ToString("N")/remove" class="clremove">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="back" value="@Here" />
+                                    <button type="submit" class="linkbtn" title="@L["Remove it for everyone (within 15 minutes)"]">@L["Remove"]</button>
+                                </form>
+                            }
+                        </li>
+                    }
+                </ol>
+                <p class="chatseen" data-chat-seen>@SeenText</p>
+                <form method="post" action="/chat/@view.Summary.Room.Id.ToString("N")/send" class="chatwrite" data-chat-send id="end">
+                    <AntiforgeryToken />
+                    <textarea class="inp" name="text" rows="2" maxlength="4000" placeholder="@L["Write a message. Enter sends; Shift+Enter for a new line."]" aria-label="@L["Message"]" required></textarea>
+                    <button type="submit" class="btn btn-p">@L["Send"]</button>
+                </form>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [Parameter] public string? Room { get; set; }
+    [SupplyParameterFromQuery(Name = "new")] private string? New { get; set; }
+    [SupplyParameterFromQuery(Name = "err")] private string? Err { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private bool on;
+    private IReadOnlyList<ChatSummary> rooms = Array.Empty<ChatSummary>();
+    private IReadOnlyList<ChatPerson> colleagues = Array.Empty<ChatPerson>();
+    private ChatView? view;
+    private PresenceRow me = new();
+
+    private string? Error => AuthEndpoints.ReadNote(Protection, Err);
+
+    private string Here => view is null ? "/chat" : "/chat/" + view.Summary.Room.Id.ToString("N");
+
+    private string MyWord => me.Status switch { PresenceRow.Busy => "busy", PresenceRow.Away => "away", _ => "online" };
+
+    private string SeenText => view is null || view.SeenBy.Count == 0 ? string.Empty
+        : view.Summary.Room.IsGroup ? L["Seen by {n}"].Replace("{n}", view.SeenBy.Count.ToString(System.Globalization.CultureInfo.CurrentCulture), StringComparison.Ordinal)
+        : L["Seen by {names}"].Replace("{names}", string.Join(", ", view.SeenBy), StringComparison.Ordinal);
+
+    private static string StatusWord(string word) => word switch
+    {
+        "online" => "Online",
+        "away" => "Away",
+        "busy" => "Busy",
+        _ => "Offline",
+    };
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        if (WebmailAuthService.PersonIdOf(user) is not Guid person)
+        {
+            return;
+        }
+        on = await Mail.ChatOnAsync(person);
+        if (!on)
+        {
+            return;
+        }
+        await Mail.TouchPresenceAsync(person);
+        me = await Mail.MyPresenceAsync(person);
+        colleagues = await Mail.ChatColleaguesAsync(person);
+        view = Guid.TryParse(Room, out Guid id) ? await Mail.ChatAsync(person, id, DateTimeOffset.MinValue) : null;
+        rooms = await Mail.ChatListAsync(person);
+    }
+}

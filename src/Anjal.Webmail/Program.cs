@@ -301,6 +301,8 @@ public static class Program
         builder.Services.AddSingleton<Anjal.Webmail.AppApi.AppApiService>();
         builder.Services.AddSingleton<Anjal.Webmail.AppApi.AppWebhookWorker>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<Anjal.Webmail.AppApi.AppWebhookWorker>());
+        // rc.28 (DES-20 §5): old mail brought in, one job at a time.
+        builder.Services.AddHostedService(sp => new ImportWorker(sp.GetRequiredService<MailboxService>()));
         builder.Services.AddSingleton(new HostInfo(hostName));
         builder.Services.AddSingleton(Words.Load());
         // rc.18 (design review section 11): the help guide, and Lajna, which reads it and the person's own mail - inside Anjal.
@@ -518,6 +520,22 @@ public static class Program
             await next().ConfigureAwait(false);
         });
 
+        // rc.28 (DES-19 §4): a secure link's pages are never indexed, cached or named to another site.
+        app.Use(async (http, next) =>
+        {
+            if (http.Request.Path.StartsWithSegments("/s", StringComparison.OrdinalIgnoreCase))
+            {
+                http.Response.OnStarting(() =>
+                {
+                    http.Response.Headers["X-Robots-Tag"] = "noindex, nofollow";
+                    http.Response.Headers.CacheControl = "no-store";
+                    http.Response.Headers["Referrer-Policy"] = "no-referrer";
+                    return Task.CompletedTask;
+                });
+            }
+            await next().ConfigureAwait(false);
+        });
+
 
         app.UseAuthentication();
         app.UseMailKeys();
@@ -550,7 +568,9 @@ public static class Program
                 !http.Request.Path.StartsWithSegments("/auth", StringComparison.OrdinalIgnoreCase) &&
                 !http.Request.Path.StartsWithSegments(Anjal.Webmail.AppApi.AppApiRoutes.Base, StringComparison.OrdinalIgnoreCase) &&
                 // rc.26 (item 80): the page whose session ended keeps its draft with its keep token.
-                !http.Request.Path.Equals("/draft/keep", StringComparison.OrdinalIgnoreCase))
+                !http.Request.Path.Equals("/draft/keep", StringComparison.OrdinalIgnoreCase) &&
+                // rc.28 (DES-19): the outside person's forms on a secure link are signed out by design.
+                !http.Request.Path.StartsWithSegments("/s", StringComparison.OrdinalIgnoreCase))
             {
                 http.Response.Redirect("/sign-in?unsaved=1");
                 return;
@@ -646,6 +666,12 @@ public static class Program
         OrgAppApiEndpoints.Map(app);
         OrgEncryptionEndpoints.Map(app);
         DeskEndpoints.Map(app);
+        // rc.28 (DES-19): secure links to outside people.
+        SecureLinkEndpoints.Map(app);
+        // rc.28 (DES-20): mail apps and import.
+        MailAppEndpoints.Map(app);
+        // rc.28 (DES-21): chat and online status.
+        ChatEndpoints.Map(app);
         app.MapDraftKeeping();
         OpsEndpoints.Map(app);
 
@@ -780,7 +806,7 @@ public static class Program
             }
             (AttachmentView View, byte[] Bytes)? found = await svc.GetAttachmentAsync(mailboxId.Value, id, index, ct).ConfigureAwait(false);
             string? type = found is null ? null : MailboxService.PreviewType(found.Value.View);
-            if (found is null || type is null)
+            if (found is null || type is null or MailboxService.ZipType)
             {
                 return Results.NotFound();
             }
@@ -790,6 +816,19 @@ public static class Program
             http.Response.Headers.XFrameOptions = "SAMEORIGIN";
             http.Response.Headers.ContentDisposition = "inline";
             return Results.Bytes(found.Value.Bytes, type);
+        }).RequireAuthorization();
+
+        // rc.28 (DES-18 §10, R10 [10c]): one file from inside an archive, downloaded - never a program, never
+        // from a locked or refused archive; served like every attachment, as a download of no particular type.
+        app.MapGet("/message/{id:guid}/attachment/{index:int}/zip/{entry:int}", async (HttpContext http, Guid id, int index, int entry, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            (string Name, byte[] Bytes)? inside = await svc.ZipEntryAsync(mailboxId.Value, id, index, entry, ct).ConfigureAwait(false);
+            return inside is null ? Results.NotFound() : Results.File(inside.Value.Bytes, "application/octet-stream", inside.Value.Name);
         }).RequireAuthorization();
 
         app.MapGet("/message/{id:guid}/raw.eml", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
@@ -1101,7 +1140,7 @@ public static class Program
         }).RequireAuthorization();
 
         // ---- compose, drafts ----
-        app.MapPost("/compose", async (HttpContext http, [FromForm] string to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? references, [FromForm] string? undo, [FromForm] string? sendAt, [FromForm] string? sendAtLocal, [FromForm] string? back, [FromForm] string? merge, [FromForm] string? expect, IFormFileCollection attachments, MailboxService svc, CancellationToken ct) =>
+        app.MapPost("/compose", async (HttpContext http, [FromForm] string to, [FromForm] string? cc, [FromForm] string? bcc, [FromForm] string? subject, [FromForm] string? body, [FromForm] string? draftId, [FromForm] string? inReplyTo, [FromForm] string? references, [FromForm] string? undo, [FromForm] string? sendAt, [FromForm] string? sendAtLocal, [FromForm] string? back, [FromForm] string? merge, [FromForm] string? expect, IFormFileCollection attachments, MailboxService svc, IDataProtectionProvider dp, CancellationToken ct) =>
         {
             Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
             if (mailboxId is null)
@@ -1142,15 +1181,64 @@ public static class Program
 
             // rc.22 (item 50, mockup 24): patient information on its way outside the organisation - ask once.
             // rc.27 (item 72.4, brief 6k): the warning, and the person's choice to send anyway, go to the activity log.
-            if (http.Request.Form["patientOk"] == "1" && await svc.PatientWarningAsync(mailboxId.Value, request, ct).ConfigureAwait(false) is { Count: > 0 } confirmed)
+            // rc.28 (D-331): "Send anyway" sends only the mail the person was warned about - the form carries a
+            // seal of what was shown, and other signs or other outside addresses bring the warning back (C); the
+            // sent line names the mail's Message-ID (B); "Change the mail" is logged and returns to the draft (D).
+            string actorName = http.User.Identity?.Name ?? string.Empty;
+            string patientSeal = http.Request.Form["patientOk"].ToString();
+            if (http.Request.Form["patientChanged"] == "1")
             {
-                await svc.LogPatientWarningAsync(http.User.Identity?.Name ?? string.Empty, confirmed, sentAnyway: true, ct).ConfigureAwait(false);
+                IReadOnlyList<string> warned = PatientWarningSeal.Open(dp, patientSeal);
+                await svc.LogPatientWarningAsync(actorName, warned, MailboxService.PatientChanged, string.Empty, ct).ConfigureAwait(false);
+                Guid? kept = await svc.SaveDraftAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
+                return Results.Redirect(kept is Guid k ? $"/draft/{k}#body" : "/compose" + ComposeQuery(string.Empty, request).Replace("?error=&", "?", StringComparison.Ordinal));
             }
-            if (http.Request.Form["patientOk"] != "1" && await svc.PatientWarningAsync(mailboxId.Value, request, ct).ConfigureAwait(false) is { Count: > 0 } signs)
+            // rc.28 (DES-19 §2, brief 6k): the warning's other two choices - a secure link to the people
+            // outside instead of the mail, or the mail to the people inside only.
+            string patientOutcome = MailboxService.PatientSent;
+            IReadOnlyList<string> warnedBefore = PatientWarningSeal.Open(dp, patientSeal);
+            if (http.Request.Form["secure"] == "1")
             {
-                await svc.LogPatientWarningAsync(http.User.Identity?.Name ?? string.Empty, signs, sentAnyway: false, ct).ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(sendAt) || string.Equals(merge, "1", StringComparison.Ordinal))
+                {
+                    return Results.Redirect("/compose" + ComposeQuery("A secure link goes at once: it cannot be sent later or one each.", request));
+                }
+                if (!await svc.MaySendSecureLinksAsync(mailboxId.Value, ct).ConfigureAwait(false))
+                {
+                    return Results.Redirect("/compose" + ComposeQuery("Secure links are for an organisation's people.", request));
+                }
+                request.SecureOutside = true;
+                request.SecureBaseUrl = OrgEndpoints.BaseUrl(http);
+                patientOutcome = MailboxService.PatientSecure;
+            }
+            else if (http.Request.Form["dropOutside"] == "1")
+            {
+                // What the warning found, as shown; worked out again when the form came without it.
+                if (warnedBefore.Count == 0)
+                {
+                    warnedBefore = await svc.PatientWarningAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
+                }
+                if (await svc.DropOutsideAsync(mailboxId.Value, request, ct).ConfigureAwait(false) is string dropError)
+                {
+                    return Results.Redirect("/compose" + ComposeQuery(dropError, request));
+                }
+                await svc.LogPatientWarningAsync(actorName, warnedBefore, MailboxService.PatientRemoved, string.Empty, ct).ConfigureAwait(false);
+            }
+            IReadOnlyList<string> patientSigns = await svc.PatientWarningAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
+            bool sentAnyway = patientSigns.Count > 0 && (request.SecureOutside || PatientWarningSeal.Matches(dp, patientSeal, patientSigns));
+            if (patientSigns.Count > 0 && !sentAnyway)
+            {
+                await svc.LogPatientWarningAsync(actorName, patientSigns, MailboxService.PatientShown, string.Empty, ct).ConfigureAwait(false);
                 Guid? held = await svc.SaveDraftAsync(mailboxId.Value, request, ct).ConfigureAwait(false);
-                return Results.Redirect((held is Guid h ? $"/draft/{h}" : "/compose" + ComposeQuery(string.Empty, request).Replace("?error=&", "?", StringComparison.Ordinal)) + (held is null ? "&" : "?") + "patient=" + Uri.EscapeDataString(string.Join("; ", signs)));
+                return Results.Redirect((held is Guid h ? $"/draft/{h}" : "/compose" + ComposeQuery(string.Empty, request).Replace("?error=&", "?", StringComparison.Ordinal)) + (held is null ? "&" : "?") + "patient=" + Uri.EscapeDataString(string.Join("; ", patientSigns)));
+            }
+            // Logged once the mail has really gone (or been put in Scheduled), with what it was given.
+            async Task LogSentAnyway()
+            {
+                if (sentAnyway)
+                {
+                    await svc.LogPatientWarningAsync(actorName, patientSigns, patientOutcome, request.SentMessageId, ct).ConfigureAwait(false);
+                }
             }
 
             // rc.15 (item 63): "Expect a reply" - counted on the dashboard if no answer comes in three days.
@@ -1197,6 +1285,12 @@ public static class Program
                 }
                 request.MergeSummaryTo = http.Request.Form["mergeSummary"].ToString();
                 (string? mergeError, int made) = await svc.SendOneEachAsync(mailboxId.Value, request, list, first, map.Count > 0 ? map : null, WebmailAuthService.ClockOf(http.User), ct).ConfigureAwait(false);
+                if (mergeError is null)
+                {
+                    // One mail per person, each with its own Message-ID: the line names none.
+                    request.SentMessageId = string.Empty;
+                    await LogSentAnyway().ConfigureAwait(false);
+                }
                 return mergeError is null
                     ? Results.Redirect($"/folder/{MailboxService.ScheduledFolder}?merged={made}")
                     : Results.Redirect("/compose" + ComposeQuery(mergeError, request));
@@ -1212,6 +1306,10 @@ public static class Program
                     return Results.Redirect("/compose" + ComposeQuery("Pick a send time in the future.", request));
                 }
                 (string? holdError, Guid? _) = await svc.HoldAsync(mailboxId.Value, request, when.Value, ct).ConfigureAwait(false);
+                if (holdError is null)
+                {
+                    await LogSentAnyway().ConfigureAwait(false);
+                }
                 return holdError is null
                     ? Results.Redirect("/folder/" + MailboxService.ScheduledFolder + "?scheduled=1")
                     : Results.Redirect("/compose" + ComposeQuery(holdError, request));
@@ -1227,6 +1325,7 @@ public static class Program
                 {
                     return Results.Redirect("/compose" + ComposeQuery(holdError ?? "Not sent.", request));
                 }
+                await LogSentAnyway().ConfigureAwait(false);
                 string after = SafeBack(back, "/folder/INBOX");
                 return Results.Redirect(after + (after.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "held=" + held.Value + "&wait=" + wait.ToString(CultureInfo.InvariantCulture));
             }
@@ -1236,6 +1335,7 @@ public static class Program
             {
                 return Results.Redirect("/compose" + ComposeQuery(error, request));
             }
+            await LogSentAnyway().ConfigureAwait(false);
             return Results.Redirect("/folder/Sent?sent=1");
         }).RequireAuthorization();
 
@@ -1411,7 +1511,7 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
-            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, http.User.Identity?.Name ?? string.Empty, ct).ConfigureAwait(false);
             return Results.Redirect(draft is Guid d ? $"/draft/{d}?undone=1" : "/folder/Sent?toolate=1");
         }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
@@ -1422,7 +1522,7 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
-            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, http.User.Identity?.Name ?? string.Empty, ct).ConfigureAwait(false);
             return Results.Redirect(draft is Guid d ? $"/draft/{d}" : "/folder/" + MailboxService.ScheduledFolder);
         }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
@@ -1433,7 +1533,7 @@ public static class Program
             {
                 return Results.Redirect("/sign-in");
             }
-            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
+            Guid? draft = await svc.UnholdAsync(mailboxId.Value, id, http.User.Identity?.Name ?? string.Empty, ct).ConfigureAwait(false);
             return Results.Redirect("/folder/" + MailboxService.ScheduledFolder + (draft is null ? string.Empty : "?cancelled=1"));
         }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
@@ -1474,6 +1574,18 @@ public static class Program
             }
             bool done = await svc.CancelOutboxAsync(mailboxId.Value, id, ct).ConfigureAwait(false);
             return Results.Redirect(done ? "/outbox?cancelled=1" : "/outbox");
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
+
+        // rc.28 (DES-19 §2.3, brief 11c): Send as a secure link.
+        app.MapPost("/outbox/{id:guid}/secure", async (HttpContext http, Guid id, MailboxService svc, IDataProtectionProvider dp, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.OutboxAsSecureLinkAsync(mailboxId.Value, id, http.User.Identity?.Name ?? string.Empty, OrgEndpoints.BaseUrl(http), ct).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/outbox?secured=1" : $"/outbox?open={id}&err=" + Uri.EscapeDataString(AuthEndpoints.Note(dp, error)));
         }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
         // rc.26 (item 80, brief 11c): Try all again.
@@ -1786,6 +1898,18 @@ public static class Program
             string? error = await svc.SetMailSettingsAsync(mailboxId.Value, undo, trash, ct).ConfigureAwait(false);
             return Results.Redirect(error is null ? "/settings/mail?saved=mail" : "/settings/mail?error=" + Uri.EscapeDataString(error));
         }).RequireAuthorization();
+
+        // rc.28 (R9 [9d], DES-18 §5): the three swipes on a touch screen.
+        app.MapPost("/settings/swipes", async (HttpContext http, [FromForm] string? left, [FromForm] string? leftLong, [FromForm] string? right, MailboxService svc, CancellationToken ct) =>
+        {
+            Guid? mailboxId = WebmailAuthService.PersonIdOf(http.User);
+            if (mailboxId is null)
+            {
+                return Results.Redirect("/sign-in");
+            }
+            string? error = await svc.SetSwipesAsync(mailboxId.Value, left, leftLong, right, ct).ConfigureAwait(false);
+            return Results.Redirect(error is null ? "/settings/mail?saved=mail" : "/settings/mail?error=" + Uri.EscapeDataString(error));
+        }).RequireAuthorization().AddEndpointFilter(RequireAntiforgery);
 
         // rc.11 (item 14): messages per page.
         app.MapPost("/settings/pagesize", async (HttpContext http, [FromForm] int size, [FromForm] string? back, MailboxService svc, CancellationToken ct) =>
@@ -2475,6 +2599,9 @@ public static class Program
 
     /// <summary>Total attachment bytes one message may carry, before encoding.</summary>
     internal const long MaxAttachmentBytes = MailboxService.MaxAttachmentBytes;
+
+    /// <summary>rc.28: what an over-large upload is told, for the secure link's reply too.</summary>
+    internal const string AttachmentsTooLarge = AttachmentsTooLargeException.UserMessage;
 
     /// <summary>Whether a Host header names this server and is safe to redirect to.</summary>
     /// <param name="requested">The Host header value.</param>

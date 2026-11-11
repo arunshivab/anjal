@@ -19,8 +19,10 @@
                 <a href="@Link(tab: Tab, p: key)" aria-current="@(PeriodKey == key ? "page" : null)">@L[label]</a>
             }
         </nav>
-        <a class="btn btn-p" href="/org/apps?new=1"><LipiIcon Name="plus" Size="16" />@L["Add an application"]</a>
+        <a class="btn btn-p ssadd" href="/org/apps?new=1"><LipiIcon Name="plus" Size="16" />@L["Add an application"]</a>
     </header>
+    @* rc.28 (R9 [9k]): on a phone you watch and pause; keys, webhooks, templates and domains are set up on a computer. *@
+    <p class="notice n-info ssphone"><LipiIcon Name="info" Size="16" /><span>@L["On a phone you can watch your sending systems and pause one. Keys, webhooks, templates and domains are set up on a computer."]</span></p>
     <nav class="sstabs" aria-label="@L["Sending systems"]">
         @foreach ((string key, string icon, string label) in Tabs)
         {

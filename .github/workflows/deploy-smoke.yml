@@ -71,9 +71,11 @@ jobs:
           # 20 up to rc.6; rc.7 adds mailbox_trusted_senders, greylist_entries, settings;
           # rc.8 adds evidence, evidence_attempts, evidence_manifests; rc.12 adds mailbox_documents; rc.13 tenant_documents;
           # rc.15 adds service_records; rc.26 adds app_sends, app_events, app_webhook_deliveries,
-          # app_signatures_seen, app_inbox_addresses (the application API, DES-14 §28); rc.27 adds desk_items, desk_events, desk_notes (shared desks, DES-17 §2).
-          test "$tables" -eq 43
-          for t in mailbox_trusted_senders greylist_entries settings evidence evidence_attempts evidence_manifests mailbox_documents tenant_documents service_records; do
+          # app_signatures_seen, app_inbox_addresses (the application API, DES-14 §28); rc.27 adds desk_items, desk_events, desk_notes (shared desks, DES-17 §2);
+          # rc.28 adds secure_links, secure_link_codes (DES-19), app_passwords, imap_folders, imap_uids, import_jobs (DES-20),
+          # chat_rooms, chat_members, chat_messages, presence (DES-21).
+          test "$tables" -eq 53
+          for t in mailbox_trusted_senders greylist_entries settings evidence evidence_attempts evidence_manifests mailbox_documents tenant_documents service_records secure_links secure_link_codes app_passwords imap_folders imap_uids import_jobs chat_rooms chat_members chat_messages presence; do
             PGPASSWORD="$pw" psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select to_regclass('public.$t')" | grep -qx "$t"
           done
 
@@ -151,7 +153,8 @@ jobs:
           if grep -E '(0\.0\.0\.0|\*|\[::\]):8025\b' "$RUNNER_TEMP/listen.txt"; then
             echo "::error::the admin API is reachable from outside"; exit 1
           fi
-          for p in 25 587 465 80 443; do grep -qE "0\.0\.0\.0:$p\b" "$RUNNER_TEMP/listen.txt"; done
+          # rc.28 (DES-20): IMAP for mail apps on 993, from the shipped template.
+          for p in 25 587 465 993 80 443; do grep -qE "0\.0\.0\.0:$p\b" "$RUNNER_TEMP/listen.txt"; done
 
       - name: The ACME client speaks to the real Let's Encrypt (staging)
         run: |

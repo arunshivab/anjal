@@ -204,26 +204,26 @@ public sealed class Rc22MailTests : IDisposable
         IReadOnlyList<string> reasons = await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "dr.rao@gmail.test", Subject = "Discharge summary MRN 2026-10443", Body = "Diagnosis attached." });
         Assert.Contains(reasons, r => r.Contains("record number", StringComparison.Ordinal));
         Assert.Empty(await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "dr.rao@gmail.test", Subject = "Lunch", Body = "Friday?" }));
-        Assert.Empty(PatientInformation.Signs("Lunch", "Friday?", NoFiles));
-        Assert.Contains(PatientInformation.Signs("Hi", "see file", ReportFile), r => r.Contains("discharge-summary.pdf", StringComparison.Ordinal));
+        Assert.Empty(Anjal.Mailbox.PatientInformation.Signs("Lunch", "Friday?", NoFiles));
+        Assert.Contains(Anjal.Mailbox.PatientInformation.Signs("Hi", "see file", ReportFile), r => r.Contains("discharge-summary.pdf", StringComparison.Ordinal));
         // The kind comes first, then the outside address.
         Assert.Equal("patient", reasons[0]);
         Assert.Equal("dr.rao@gmail.test", reasons[1]);
         // Whole words only: "forward" is not "ward", "showcase" is not "case".
-        Assert.Empty(PatientInformation.Signs("Please forward the showcase deck", "toward Friday", NoFiles));
+        Assert.Empty(Anjal.Mailbox.PatientInformation.Signs("Please forward the showcase deck", "toward Friday", NoFiles));
     }
 
     [Fact]
     public async Task PersonalInformation_IsNamed_AndTheOrganisationCanAskAboutEveryFileGoingOutside()
     {
         // Owner, 19 Oct 2026: Aadhaar, PAN, phone, bank account, pay and passwords are personal information.
-        IReadOnlyList<string> aadhaar = PatientInformation.PersonalSigns("Details", "Aadhaar 2345 6789 0123, PAN ABCDE1234F, call 98400 12345", NoFiles);
+        IReadOnlyList<string> aadhaar = Anjal.Mailbox.PatientInformation.PersonalSigns("Details", "Aadhaar 2345 6789 0123, PAN ABCDE1234F, call 98400 12345", NoFiles);
         Assert.Contains("an Aadhaar number", aadhaar);
         Assert.Contains("a PAN", aadhaar);
         Assert.Contains("a phone number", aadhaar);
-        Assert.Contains(PatientInformation.PersonalSigns("Salary revision", "Your payslip is attached.", NoFiles), r => r.Contains("\"salary\"", StringComparison.Ordinal));
-        Assert.Contains(PatientInformation.PersonalSigns("Hi", "see file", Payroll), r => r.Contains("payroll-oct.xlsx", StringComparison.Ordinal));
-        Assert.Empty(PatientInformation.PersonalSigns("Lunch on Friday?", "Order no 2026-10-19 placed at 12:30, bill 1,250.", NoFiles));
+        Assert.Contains(Anjal.Mailbox.PatientInformation.PersonalSigns("Salary revision", "Your payslip is attached.", NoFiles), r => r.Contains("\"salary\"", StringComparison.Ordinal));
+        Assert.Contains(Anjal.Mailbox.PatientInformation.PersonalSigns("Hi", "see file", Payroll), r => r.Contains("payroll-oct.xlsx", StringComparison.Ordinal));
+        Assert.Empty(Anjal.Mailbox.PatientInformation.PersonalSigns("Lunch on Friday?", "Order no 2026-10-19 placed at 12:30, bill 1,250.", NoFiles));
 
         IReadOnlyList<string> personal = await this.svc.PatientWarningAsync(this.arun.Id, new ComposeRequest { To = "hr.vendor@gmail.test", Subject = "Bank details", Body = "A/c no 123456789012, IFSC HDFC0001234" });
         Assert.Equal("personal", personal[0]);

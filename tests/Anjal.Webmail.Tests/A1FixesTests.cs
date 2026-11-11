@@ -18,6 +18,7 @@ namespace Anjal.Webmail.Tests;
 public sealed class A1FixesTests : IAsyncLifetime, IDisposable
 {
     private static readonly Regex TokenRegex = new("name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"", RegexOptions.CultureInvariant);
+    private static readonly Regex SealRegex = new("name=\"patientOk\" value=\"([^\"]+)\"", RegexOptions.CultureInvariant);
     private static readonly string[] Arun = new[] { "arun@anjal.co.in" };
 
     private readonly string root = Path.Combine(Path.GetTempPath(), "anjal-a1-" + Guid.NewGuid().ToString("N"));
@@ -102,15 +103,31 @@ public sealed class A1FixesTests : IAsyncLifetime, IDisposable
 
     private async Task<HttpResponseMessage> ComposeAsync(string to, string subject, byte[]? file = null)
     {
+        // rc.22: the patient-information warning is its own test (rc.28: Rc28PatientAndResealTests). Here
+        // it is answered as a person would: when it shows, Send again with the warning's own seal.
+        HttpResponseMessage first = await this.PostComposeAsync(to, subject, file, seal: null);
+        if (first.Headers.Location?.OriginalString is string warned && warned.Contains("patient=", StringComparison.Ordinal))
+        {
+            Match seal = SealRegex.Match(await this.client.GetStringAsync(warned.TrimStart('/')));
+            return await this.PostComposeAsync(to, subject, file, System.Net.WebUtility.HtmlDecode(seal.Groups[1].Value));
+        }
+        return first;
+    }
+
+    private async Task<HttpResponseMessage> PostComposeAsync(string to, string subject, byte[]? file, string? seal)
+    {
         string token = await this.TokenAsync("compose");
         using var form = new MultipartFormDataContent
         {
             { new StringContent(token), "__RequestVerificationToken" },
             { new StringContent(to), "to" },
-            { new StringContent("1"), "patientOk" },   // rc.22: the patient-information warning is its own test
             { new StringContent(subject), "subject" },
             { new StringContent("Body text."), "body" },
         };
+        if (seal is not null)
+        {
+            form.Add(new StringContent(seal), "patientOk");
+        }
         if (file is not null)
         {
             form.Add(new ByteArrayContent(file), "attachments", "scan.pdf");

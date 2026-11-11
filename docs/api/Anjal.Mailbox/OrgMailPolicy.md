@@ -10,6 +10,7 @@ What an organisation lets its people do with their mail (rc.22, owner's decision
 - **ReadAsync** *(method)* - Read an organisation's policy; Anjal's defaults when it has set none.
 - **AskBeforeFilesOutside** *(property)* - Owner, 19 Oct 2026: ask once before any mail that carries files goes to an address outside the organisation, whatever the files are. Off by default; the patient and personal-information checks run either way.
 - **AwayOutside** *(property)* - Whether out-of-office replies go to senders outside the organisation (item 30).
+- **Chat** *(property)* - rc.28 (DES-21 §2, D-350): whether the organisation's people can chat with each other; on by default.
 - **ForwardingOutside** *(property)* - Whether rules may forward a copy to an address outside the organisation (item 29). Forwarding inside the organisation is always allowed; every forward is logged. Individuals (an "individuals" tenant) may forward anywhere.
 - **Nicknames** *(property)* - Whether people may choose the name on their mails (item 37); off means first name + last name.
 - **PrintNote** *(property)* - rc.26 (item 80, brief 11f): the confidentiality line printed at the foot of every printed page of the organisation's mail, for example "Confidential: for the addressee only". Empty: none.

@@ -517,6 +517,10 @@ CREATE TABLE IF NOT EXISTS evidence_manifests (
 ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS evidence_id UUID REFERENCES evidence(id);
 ALTER TABLE outbound_messages ADD COLUMN IF NOT EXISTS sent_message_id UUID;
 ALTER TABLE evidence ADD COLUMN IF NOT EXISTS sent_message_id UUID;
+-- rc.28 (D-264, DES-18 section 11): an original kept before rc.25 and since sealed to its organisation
+-- keeps the SHA-256 its day's manifest recorded; the row then holds the sealed file's.
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS resealed_from_sha256 TEXT;
+ALTER TABLE evidence ADD COLUMN IF NOT EXISTS resealed_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS evidence_sent_message ON evidence (sent_message_id) WHERE sent_message_id IS NOT NULL;
 
 -- When the last mailbox copy of a message is deleted - by any path, including
@@ -833,3 +837,120 @@ CREATE INDEX IF NOT EXISTS desk_notes_item_idx ON desk_notes (item_id, at);
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS written_by UUID;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS draft_empty BOOLEAN NOT NULL DEFAULT false;
 CREATE INDEX IF NOT EXISTS messages_draft_empty_idx ON messages (received_at) WHERE draft_empty;
+
+-- rc.28 (DES-19, item 74): secure links - a mail kept here for one outside person, sealed under a key
+-- made from the link's token (never kept: only its SHA-256), opened with a code mailed to that person.
+CREATE TABLE IF NOT EXISTS secure_links (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mailbox_id     UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    sent_by        UUID,
+    recipient      TEXT NOT NULL,
+    token_sha256   TEXT NOT NULL UNIQUE,
+    sealed         BYTEA NOT NULL,
+    message_id     TEXT NOT NULL,
+    sent_copy_id   UUID,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at     TIMESTAMPTZ NOT NULL,
+    stopped_at     TIMESTAMPTZ,
+    locked_at      TIMESTAMPTZ,
+    mailed_at      TIMESTAMPTZ,
+    last_code_at   TIMESTAMPTZ,
+    opened_at      TIMESTAMPTZ,
+    replied_at     TIMESTAMPTZ,
+    wrong_codes    INT NOT NULL DEFAULT 0,
+    replies        INT NOT NULL DEFAULT 0,
+    purged_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS secure_links_message_idx ON secure_links (mailbox_id, message_id);
+CREATE INDEX IF NOT EXISTS secure_links_open_idx ON secure_links (expires_at) WHERE purged_at IS NULL;
+CREATE TABLE IF NOT EXISTS secure_link_codes (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    link_id    UUID NOT NULL REFERENCES secure_links(id) ON DELETE CASCADE,
+    code_hmac  TEXT NOT NULL,
+    made_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    used_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS secure_link_codes_link_idx ON secure_link_codes (link_id, made_at);
+
+-- rc.28 (DES-20): mail apps - a password per device (it opens its own copy of the mail key), the IMAP
+-- numbers of each folder and message, and jobs that bring old mail in.
+CREATE TABLE IF NOT EXISTS app_passwords (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mailbox_id      UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    name            TEXT NOT NULL,
+    hash            TEXT NOT NULL,
+    unlock_salt     BYTEA NOT NULL,
+    private_by_app  BYTEA,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at    TIMESTAMPTZ,
+    last_used_from  TEXT NOT NULL DEFAULT '',
+    removed_at      TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS app_passwords_mailbox_idx ON app_passwords (mailbox_id) WHERE removed_at IS NULL;
+CREATE TABLE IF NOT EXISTS imap_folders (
+    folder_id     UUID PRIMARY KEY REFERENCES folders(id) ON DELETE CASCADE,
+    uid_validity  BIGINT NOT NULL,
+    uid_next      BIGINT NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS imap_uids (
+    message_id  UUID PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    folder_id   UUID NOT NULL,
+    uid         BIGINT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS imap_uids_folder_uid_idx ON imap_uids (folder_id, uid);
+CREATE TABLE IF NOT EXISTS import_jobs (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    mailbox_id     UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    kind           TEXT NOT NULL,
+    source         TEXT NOT NULL,
+    secret         TEXT NOT NULL DEFAULT '',
+    target_folder  TEXT NOT NULL DEFAULT '',
+    folders        TEXT NOT NULL DEFAULT '',
+    cursor         TEXT NOT NULL DEFAULT '',
+    state          TEXT NOT NULL,
+    seen           INT NOT NULL DEFAULT 0,
+    imported       INT NOT NULL DEFAULT 0,
+    skipped        INT NOT NULL DEFAULT 0,
+    total          INT NOT NULL DEFAULT 0,
+    error          TEXT NOT NULL DEFAULT '',
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS import_jobs_mailbox_idx ON import_jobs (mailbox_id, created_at DESC);
+
+-- rc.28 (DES-21): chat between the people of an organisation, and their online status. A message's
+-- words are sealed to its members' keys and the organisation's recovery key, as mail is.
+CREATE TABLE IF NOT EXISTS chat_rooms (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id        UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name             TEXT NOT NULL DEFAULT '',
+    is_group         BOOLEAN NOT NULL DEFAULT false,
+    created_by       UUID NOT NULL,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_message_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS chat_members (
+    room_id       UUID NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+    mailbox_id    UUID NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+    joined_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+    left_at       TIMESTAMPTZ,
+    last_read_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (room_id, mailbox_id)
+);
+CREATE INDEX IF NOT EXISTS chat_members_mailbox_idx ON chat_members (mailbox_id) WHERE left_at IS NULL;
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id     UUID NOT NULL REFERENCES chat_rooms(id) ON DELETE CASCADE,
+    sender_id   UUID NOT NULL,
+    body        TEXT NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    removed_at  TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS chat_messages_room_idx ON chat_messages (room_id, created_at);
+CREATE TABLE IF NOT EXISTS presence (
+    mailbox_id    UUID PRIMARY KEY REFERENCES mailboxes(id) ON DELETE CASCADE,
+    last_seen_at  TIMESTAMPTZ,
+    status        TEXT NOT NULL DEFAULT 'auto',
+    note          TEXT NOT NULL DEFAULT '',
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);

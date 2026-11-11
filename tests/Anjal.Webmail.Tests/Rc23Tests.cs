@@ -701,9 +701,10 @@ public sealed class Rc23Tests : IAsyncLifetime, IDisposable
         string css = await this.Client().GetStringAsync("app.css");
         Assert.Contains(".fview .readcol { container: reader / inline-size; }", css, StringComparison.Ordinal);
         Assert.Contains("@container reader (max-width: 600px)", css, StringComparison.Ordinal);
-        Assert.DoesNotContain("@media (max-width: 720px) {", css, StringComparison.Ordinal);
-        Assert.Contains("@media (max-width: 720px), (max-height: 480px) and (max-width: 950px) {", css, StringComparison.Ordinal);
-        Assert.Contains("@media (min-width: 721px) and (min-height: 481px), (min-width: 951px) {", css, StringComparison.Ordinal);
+        // rc.28 (DES-18 §2): the phone band ends at 719 px and the upright tablet starts at 720.
+        Assert.DoesNotContain("@media (max-width: 719px) {", css, StringComparison.Ordinal);
+        Assert.Contains("@media (max-width: 719px), (max-height: 480px) and (max-width: 950px) {", css, StringComparison.Ordinal);
+        Assert.Contains("@media (min-width: 720px) and (min-height: 481px), (min-width: 951px) {", css, StringComparison.Ordinal);
     }
 
     [Fact]

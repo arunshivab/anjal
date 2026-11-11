@@ -401,6 +401,15 @@ else
                         </div>
                         <p class="hint">@L["Ask first: before any mail with files goes to an address outside your domains, the person is asked to check it, whatever the files are. Patient and personal information are checked either way."]</p>
                     </div>
+                    @* rc.28 (DES-21 §2, D-350): chat between the organisation's people. *@
+                    <div class="setfield">
+                        <span class="setlbl">@L["Chat"]</span>
+                        <div class="seg" role="radiogroup">
+                            <label class="segopt"><input type="radio" name="chat" value="1" checked="@mailPolicy.Chat" /><span>@L["On"]</span></label>
+                            <label class="segopt"><input type="radio" name="chat" value="0" checked="@(!mailPolicy.Chat)" /><span>@L["Off"]</span></label>
+                        </div>
+                        <p class="hint">@L["Whether people of the organisation can chat with each other and see who is online. Chat is sealed like mail."]</p>
+                    </div>
                     @* rc.26 (item 80, brief 11f): a line at the foot of every printed page. *@
                     <div class="setfield">
                         <label class="setlbl" for="printnote">@L["Printed pages"]</label>
@@ -719,7 +728,12 @@ else
                             <p class="hint">@L["Print it now, or write it down, and keep it locked away. It is shown once: Anjal does not keep it and cannot show it again. Whoever holds it can open the organisation's recovery key."]</p>
                             <pre class="sheettext" lang="en">@sheet[0]</pre>
                             <p class="hint">@L["Made {date} by {name}."].Replace("{date}", clock.Date(DateTimeOffset.UtcNow), StringComparison.Ordinal).Replace("{name}", NameOf(me), StringComparison.Ordinal)</p>
-                            <button type="button" class="btn btn-s btn-sm" data-print><LipiIcon Name="print" Size="15" />@L["Print"]</button>
+                            @* rc.28 (D-332): on paper only - a saved file is a copy no one can lock away. *@
+                            <p class="hint sheetnote"><b>@L["Print it on paper. Do not save it as a file."]</b> @L["Or write it down by hand: larger letters make that easier."]</p>
+                            <div class="sheetacts">
+                                <button type="button" class="btn btn-s btn-sm" data-print><LipiIcon Name="print" Size="15" />@L["Print"]</button>
+                                <button type="button" class="btn btn-s btn-sm" data-sheet-big aria-pressed="false">@L["Larger letters"]</button>
+                            </div>
                         </div>
                     }
                     <table class="orgtable rules">

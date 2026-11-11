@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Anjal.Mime\Anjal.Mime.csproj" />
+    <ProjectReference Include="..\Anjal.Smtp\Anjal.Smtp.csproj" />
+    <ProjectReference Include="..\Anjal.Store\Anjal.Store.csproj" />
+    <ProjectReference Include="..\Anjal.Mailbox\Anjal.Mailbox.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Anjal.Imap.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

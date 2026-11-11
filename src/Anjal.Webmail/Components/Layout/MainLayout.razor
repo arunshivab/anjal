@@ -80,6 +80,11 @@ else
                     </div>
                     @* rc.16, design review 8 (owner, 11 Oct 2026): Today, the landing page, sits above Inbox. *@
                     <a class="rail-item @(OnPath("/dashboard/today") ? "on" : "")" href="/dashboard/today" title="@L["Today"]" aria-current="@(OnPath("/dashboard/today") ? "page" : null)"><LipiIcon Name="home" Size="18" /><span class="rl">@L["Today"]</span></a>
+                    @if (chatOn)
+                    {
+                        @* rc.28 (DES-21): chat, after Today; its number is the chats with unread messages. *@
+                        <a class="rail-item @(OnPath("/chat") ? "on" : "")" href="/chat" title="@L["Chat"]" aria-current="@(OnPath("/chat") ? "page" : null)" data-chat-rail><LipiIcon Name="comment" Size="18" /><span class="rl">@L["Chat"]</span><span class="n" data-chat-unread hidden="@(chatUnread == 0)">@chatUnread</span></a>
+                    }
                     @if (folders is not null)
                     {
                         @foreach (FolderView f in folders)
@@ -264,6 +269,10 @@ else
                         }
                     }
                     <a class="pfolder" href="/outbox"><LipiIcon Name="upload" Size="18" /><span>@L["Outbox"]</span>@if (outboxCount > 0) { <span class="n">@outboxCount</span> }</a>
+                    @if (chatOn)
+                    {
+                        <a class="pfolder" href="/chat"><LipiIcon Name="comment" Size="18" /><span>@L["Chat"]</span>@if (chatUnread > 0) { <span class="n">@chatUnread</span> }</a>
+                    }
                     <a class="pfolder" href="/contacts"><LipiIcon Name="user" Size="18" /><span>@L["Contacts"]</span></a>
                     <a class="pfolder" href="/dashboard"><LipiIcon Name="chart-bar" Size="18" /><span>@L["Dashboard"]</span></a>
                     <a class="pfolder" href="/settings"><LipiIcon Name="sliders" Size="18" /><span>@L["Settings"]</span></a>
@@ -710,6 +719,13 @@ else
         if (personId is Guid me)
         {
             sharedBoxes = await Mail.SharedForPersonAsync(me);
+            // rc.28 (DES-21): chat in the rail, and the person is online while they use Anjal.
+            chatOn = await Mail.ChatOnAsync(me);
+            if (chatOn)
+            {
+                chatUnread = await Mail.UnreadChatsAsync(me);
+                await Mail.TouchPresenceAsync(me);
+            }
             isAdmin = await Mail.IsOrgAdminAsync(me);
             lastSignIn = (await Mail.GetSecurityAsync(me)).PreviousSignIn;
             signInDemand = await Mail.SignInDemandCachedAsync(me);
@@ -731,6 +747,8 @@ else
     }
 
     private int outboxCount;
+    private bool chatOn;
+    private int chatUnread;
     private IReadOnlyList<(MailboxRow Mailbox, long Unread)> otherAccounts = Array.Empty<(MailboxRow, long)>();
     private string notifyScope = string.Empty;
 
