@@ -181,7 +181,7 @@ public sealed class AnjalClient : IDisposable
     {
         string text = await this.GetTextAsync("messages/" + id.ToString(), ct).ConfigureAwait(false);
         MessageStatus status = JsonSerializer.Deserialize<MessageStatus>(text, Json) ?? new MessageStatus();
-        status.Raw = JsonDocument.Parse(text).RootElement.Clone();
+        status.Raw = JsonElement.Parse(text);
         return status;
     }
 
@@ -293,7 +293,7 @@ public sealed class AnjalClient : IDisposable
     /// <param name="ct">Cancellation.</param>
     /// <returns>The answer.</returns>
     public async Task<JsonElement> LimitsAsync(CancellationToken ct = default) =>
-        JsonDocument.Parse(await this.GetTextAsync("limits", ct).ConfigureAwait(false)).RootElement.Clone();
+        JsonElement.Parse(await this.GetTextAsync("limits", ct).ConfigureAwait(false));
 
     /// <summary>Whether the application can send now (GET /health): {ok, key, domains, limits, server}.</summary>
     /// <param name="ct">Cancellation.</param>
@@ -302,7 +302,7 @@ public sealed class AnjalClient : IDisposable
     {
         using HttpRequestMessage req = this.Build(HttpMethod.Get, "health", null, null);
         using HttpResponseMessage res = await this.http.SendAsync(req, ct).ConfigureAwait(false);
-        return JsonDocument.Parse(await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false)).RootElement.Clone();
+        return JsonElement.Parse(await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false));
     }
 
     private string? KeyFor(string? given) => given ?? (this.AutoIdempotency ? Guid.NewGuid().ToString("N") : null);
