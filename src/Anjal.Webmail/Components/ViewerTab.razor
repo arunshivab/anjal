@@ -1,0 +1,27 @@
+@* rc.29 (owner, 15 Nov, option A): what kind of file is in the shaded viewer box, on a label sitting half in and
+   half out of the box's top edge - "PDF document · 3 pages", "ZIP archive · 4 files", "Word document · in
+   Audit-papers.zip". The colour of each kind is the file strip's own (.ftag). *@
+@if (!string.IsNullOrEmpty(Words))
+{
+    <span class="pvtab pvtab-@Kind" title="@Title">
+        <LipiIcon Name="@(Kind == "zip" ? "archive" : "file")" Size="14" />
+        <b>@Words</b>
+        @foreach (string fact in Facts)
+        {
+            <span class="pvfact">· @fact</span>
+        }
+    </span>
+}
+
+@code {
+    /// <summary>The kind, as the file strip names it (FileTag): "pdf", "doc", "xls", "zip", "img" or "dicom".</summary>
+    [Parameter] public string Kind { get; set; } = string.Empty;
+
+    /// <summary>The kind in the reader's words ("PDF document").</summary>
+    [Parameter] public string? Words { get; set; }
+
+    /// <summary>What follows it ("3 pages", "in Audit-papers.zip"), each after a dot.</summary>
+    [Parameter] public IReadOnlyList<string> Facts { get; set; } = Array.Empty<string>();
+
+    private string Title => string.Join(" · ", new[] { Words ?? string.Empty }.Concat(Facts));
+}

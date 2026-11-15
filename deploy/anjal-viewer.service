@@ -1,0 +1,69 @@
+# Anjal viewer (rc.29, DES-22 §4, D-358): reads every attachment shown in the mail window, in single-use child
+# processes. Its own user, no network at all, no disk to write, its own memory cap. The webmail (user anjal, in
+# group anjal-viewer) hands it a file's bytes over /run/anjal-viewer/viewer.sock; it holds no key, no database and
+# no mail store, so a file that took it over would find nothing to read and nowhere to send it.
+# Install: /etc/systemd/system/anjal-viewer.service
+[Unit]
+Description=Anjal viewer (attachments shown in the mail window)
+Documentation=https://github.com/arunshivab/anjal
+Before=anjal-webmail.service
+
+[Service]
+Type=simple
+User=anjal-viewer
+Group=anjal-viewer
+WorkingDirectory=/opt/anjal/viewer
+Environment=ANJAL_VIEWER_SOCKET=/run/anjal-viewer/viewer.sock
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Environment=DOTNET_gcServer=0
+ExecStart=/opt/anjal/viewer/Anjal.Viewer
+Restart=always
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+# The socket's folder, made at start and owned by the viewer; the webmail's user reaches it through the group.
+RuntimeDirectory=anjal-viewer
+RuntimeDirectoryMode=0750
+
+# No network at all: a file cannot call out, and nothing can call in except through the socket's folder.
+PrivateNetwork=true
+IPAddressDeny=any
+RestrictAddressFamilies=AF_UNIX
+
+# No disk to write: everything is read-only except its own /tmp (private) and the socket's folder.
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+UMask=0007
+
+# Its own share of the machine (DES-22 §4.1, §9): 1.5 GB for the service, no swap; each child is also stopped by
+# the viewer itself past 768 MB, or at its job's deadline.
+MemoryMax=1536M
+MemorySwapMax=0
+TasksMax=64
+
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+# Deliberately NOT set: MemoryDenyWriteExecute=true (the .NET JIT writes code at run time; the runtime would stop).
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=anjal-viewer
+
+[Install]
+WantedBy=multi-user.target

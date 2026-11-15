@@ -21,6 +21,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # rc.29 (DES-22 §11): the packages in localpackages/ are the checked ones, byte for byte.
+      - name: Local packages match their SHA-256
+        shell: bash
+        run: if command -v python3 >/dev/null; then python3 tools/check_packages.py; else python tools/check_packages.py; fi
+
       - name: Restore
         run: dotnet restore
 

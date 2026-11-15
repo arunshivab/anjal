@@ -127,7 +127,11 @@ public sealed class Rc25EncryptionFlowTests : IAsyncLifetime, IDisposable
         {
             Assert.Equal("/org/encryption?sheet=1", made.Headers.Location!.ToString());
         }
-        string shown = await admin.GetStringAsync("org/encryption?sheet=1");
+        // rc.29 (AC-15, DES-22 §17): the page that shows the sheet is never kept in the browser's cache.
+        using HttpResponseMessage sheetPage = await admin.GetAsync("org/encryption?sheet=1");
+        Assert.True(sheetPage.Headers.CacheControl?.NoStore == true, "the recovery sheet's page must be Cache-Control: no-store");
+        string shown = await sheetPage.Content.ReadAsStringAsync();
+        Assert.Contains("Check that your printer does not keep a copy of printed documents.", WebUtility.HtmlDecode(shown), StringComparison.Ordinal);
         string sheet = WebUtility.HtmlDecode(SheetRegex.Match(shown).Groups[1].Value);
         Assert.Matches("^([0-9A-F]{4} ){16}[0-9A-F]{4}$", sheet);
         Assert.DoesNotContain(sheet, await admin.GetStringAsync("org/encryption"), StringComparison.Ordinal);   // shown once

@@ -3012,7 +3012,7 @@
       if (total > LIMIT) {
         e.preventDefault();
         if (notice) {
-          notice.textContent = W("The attachments add up to more than 18 MB. Remove some, or send them in more than one message.");
+          notice.textContent = W("The attachments add up to more than 18 MB. Remove some, or send them in more than one message. Large imaging studies, such as a CT or PET-CT, should be shared by a link instead, not by mail.");
           notice.hidden = false;
           notice.scrollIntoView({ block: "nearest" });
         }
@@ -4153,6 +4153,146 @@
     }
     veil.addEventListener("click", done);
     scope.on(document, "keydown", function (e) { if (e.key === "Escape") { done(); } });
+  });
+  // rc.29 (DES-22 §3.1, D-359): a PDF drawn by Anjal's viewer. The pages are pictures from the server; this lays
+  // each page's text over its picture (so selecting, copying and the browser's own find work), asks for a
+  // sharper picture when a page is shown larger, zooms, shows the thumbnails, keeps "Page n of N" up to date,
+  // and runs Find through the server, marking each match. Without script the pages are still shown.
+  page(function pdfView() {
+    var view = document.querySelector("[data-pdfview]");
+    if (!view) { return; }
+    var base = view.getAttribute("data-base"), entry = view.getAttribute("data-entry") || "";
+    var extra = entry ? "&entry=" + encodeURIComponent(entry) : "";
+    var pages = $$("[data-page]", view), holder = view.querySelector("[data-pdf-pages]");
+    var pos = view.querySelector("[data-pdf-pos]"), total = pages.length;
+    var zoom = 1, hits = [], at = -1;
+    function wordPage(n) { return (view.getAttribute("data-word-page") || "").replace("{n}", String(n)).replace("{total}", String(total)); }
+    function widthFor(fig) {
+      var px = Math.round(fig.getBoundingClientRect().width * (window.devicePixelRatio || 1) / 100) * 100;
+      return Math.max(200, Math.min(2000, px));
+    }
+    function sharpen(fig) {
+      var img = fig.querySelector("[data-pdf-img]"), want = widthFor(fig);
+      var have = parseInt(fig.getAttribute("data-px") || "1000", 10);
+      if (img && want > have) {
+        fig.setAttribute("data-px", String(want));
+        img.src = base + "/page/" + fig.getAttribute("data-page") + "?w=" + want + extra;
+      }
+    }
+    function lay(fig) {
+      var layer = fig.querySelector("[data-pdf-text]"), w = parseFloat(fig.getAttribute("data-w")) || 1;
+      if (!layer || !layer.children.length) { return; }
+      var scale = fig.getBoundingClientRect().width / w;
+      $$("span", layer).forEach(function (s) {
+        var size = parseFloat(s.getAttribute("data-s")) * scale;
+        s.style.fontSize = size + "px";
+        s.style.left = (parseFloat(s.getAttribute("data-x")) * scale) + "px";
+        s.style.top = (parseFloat(s.getAttribute("data-y")) * scale - size * 0.8) + "px";
+        var want = parseFloat(s.getAttribute("data-wd")) * scale, angle = parseFloat(s.getAttribute("data-a")) || 0;
+        s.style.transform = "";
+        var have = s.getBoundingClientRect().width;
+        var sx = want > 0 && have > 0 ? want / have : 1;
+        s.style.transform = (angle ? "rotate(" + angle + "deg) " : "") + (sx !== 1 ? "scaleX(" + sx + ")" : "");
+      });
+    }
+    function text(fig) {
+      if (fig.getAttribute("data-text") === "1") { return; }
+      fig.setAttribute("data-text", "1");
+      fetch(base + "/text/" + fig.getAttribute("data-page") + (extra ? "?" + extra.slice(1) : ""), { credentials: "same-origin" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          var layer = fig.querySelector("[data-pdf-text]");
+          if (!d || !layer) { return; }
+          (d.Runs || []).forEach(function (run) {
+            var s = document.createElement("span");
+            s.textContent = run.T;
+            s.setAttribute("data-x", run.X); s.setAttribute("data-y", run.Y); s.setAttribute("data-s", run.S);
+            s.setAttribute("data-a", run.A || 0); s.setAttribute("data-wd", run.W || 0);
+            layer.appendChild(s);
+            layer.appendChild(document.createTextNode(" "));
+          });
+          lay(fig);
+        }).catch(function () { fig.removeAttribute("data-text"); });
+    }
+    if ("IntersectionObserver" in window) {
+      var seen = new IntersectionObserver(function (items) {
+        items.forEach(function (it) {
+          if (!it.isIntersecting) { return; }
+          text(it.target);
+          sharpen(it.target);
+        });
+        var top = pages.filter(function (f) { var r = f.getBoundingClientRect(); return r.bottom > 80; })[0];
+        if (top && pos) { pos.textContent = wordPage(parseInt(top.getAttribute("data-page"), 10) + 1); }
+      }, { root: null, rootMargin: "200px 0px" });
+      pages.forEach(function (f) { seen.observe(f); });
+      scope.on(document, "anjal:leaving", function () { seen.disconnect(); });
+    }
+    function rezoom() {
+      holder.style.setProperty("--pdfzoom", String(zoom));
+      holder.classList.toggle("zoomed", zoom !== 1);
+      pages.forEach(function (f) { if (f.getAttribute("data-text") === "1") { lay(f); } });
+      window.setTimeout(function () { pages.forEach(function (f) { var r = f.getBoundingClientRect(); if (r.bottom > 0 && r.top < window.innerHeight) { sharpen(f); } }); }, 50);
+      marks();
+    }
+    $$("[data-pdf-zoom]", view).forEach(function (b) {
+      b.addEventListener("click", function () {
+        var how = b.getAttribute("data-pdf-zoom");
+        zoom = how === "in" ? Math.min(4, zoom * 1.25) : how === "out" ? Math.max(0.5, zoom / 1.25) : 1;
+        rezoom();
+      });
+    });
+    scope.on(window, "resize", function () { pages.forEach(function (f) { if (f.getAttribute("data-text") === "1") { lay(f); } }); marks(); });
+    var thumbsBtn = view.querySelector("[data-pdf-thumbs]"), strip = view.querySelector("[data-pdf-thumbstrip]");
+    if (thumbsBtn && strip) {
+      thumbsBtn.addEventListener("click", function () {
+        strip.hidden = !strip.hidden;
+        thumbsBtn.setAttribute("aria-pressed", strip.hidden ? "false" : "true");
+      });
+    }
+    // Find: the server searches the whole file; each match is marked on its page, and ↑ ↓ move between them.
+    var form = view.querySelector("[data-pdf-findform]"), found = view.querySelector("[data-pdf-found]");
+    function marks() {
+      $$("[data-pdf-marks]", view).forEach(function (m) { m.textContent = ""; });
+      hits.forEach(function (h, i) {
+        var fig = document.getElementById("pdf-p" + h.Page);
+        if (!fig) { return; }
+        var layer = fig.querySelector("[data-pdf-marks]"), scale = fig.getBoundingClientRect().width / (parseFloat(fig.getAttribute("data-w")) || 1);
+        (h.Boxes || []).forEach(function (b) {
+          var m = document.createElement("i");
+          m.className = "pdfmark" + (i === at ? " on" : "");
+          m.style.left = (b.X * scale - 1) + "px"; m.style.top = (b.Y * scale - 1) + "px";
+          m.style.width = (b.W * scale + 2) + "px"; m.style.height = (b.H * scale + 2) + "px";
+          layer.appendChild(m);
+        });
+      });
+    }
+    function go(i) {
+      if (!hits.length) { return; }
+      at = (i + hits.length) % hits.length;
+      var fig = document.getElementById("pdf-p" + hits[at].Page);
+      if (fig) { fig.scrollIntoView({ block: "center" }); }
+      marks();
+      if (found) { found.textContent = (view.getAttribute("data-word-found") || "").replace("{n}", String(hits.length)) + " · " + (at + 1); }
+    }
+    if (form) {
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var q = (form.querySelector("[data-pdf-find]") || {}).value || "";
+        if (!q.trim()) { hits = []; at = -1; marks(); if (found) { found.textContent = ""; } return; }
+        fetch(base + "/find?q=" + encodeURIComponent(q.trim()) + extra, { credentials: "same-origin" })
+          .then(function (r) { return r.ok ? r.json() : { Hits: [] }; })
+          .then(function (d) {
+            hits = d.Hits || [];
+            at = -1;
+            $$("[data-pdf-hit]", view).forEach(function (b) { b.hidden = hits.length < 2; });
+            if (!hits.length) { marks(); if (found) { found.textContent = view.getAttribute("data-word-none") || ""; } return; }
+            go(0);
+          }).catch(function () { /* nothing found is said by nothing marked */ });
+      });
+      $$("[data-pdf-hit]", view).forEach(function (b) {
+        b.addEventListener("click", function () { go(at + (b.getAttribute("data-pdf-hit") === "next" ? 1 : -1)); });
+      });
+    }
   });
 }());
 

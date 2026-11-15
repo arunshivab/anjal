@@ -270,7 +270,10 @@ public sealed class SessionHardeningTests
             await w.SendAsync("EHLO c\r\n");
             await w.ReplyAsync();
             await w.SendAsync("MAIL FROM:<a@sender.test> SIZE=5000\r\n");
-            Assert.StartsWith("552 5.3.4", await w.LineAsync(), System.StringComparison.Ordinal);
+            string refused = await w.LineAsync() ?? string.Empty;
+            Assert.StartsWith("552 5.3.4", refused, System.StringComparison.Ordinal);
+            // rc.29 (AC-18): the sender is told where large files, imaging studies among them, belong.
+            Assert.Contains("by a link instead", refused, System.StringComparison.Ordinal);
             await w.SendAsync("MAIL FROM:<a@sender.test> SIZE=500\r\n");
             Assert.StartsWith("250", await w.LineAsync(), System.StringComparison.Ordinal);
             cts.Cancel();

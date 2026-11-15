@@ -34,14 +34,21 @@ foreach ($app in @("Server", "Webmail")) {
     if ($LASTEXITCODE -ne 0) { throw "publish failed for $app" }
 }
 
+# rc.29 (DES-22 section 4): the viewer, its own program run by its own user. Trimmed and compiled ahead (51 MB
+# instead of about 120), so its children start quickly.
+dotnet publish "$repo\src\Anjal.Viewer\Anjal.Viewer.csproj" -c Release -r linux-x64 --self-contained true `
+    -p:PublishTrimmed=true -p:PublishReadyToRun=true -p:PublishSingleFile=false -p:DebugType=none -p:Version=$Version -o "$out\viewer"
+if ($LASTEXITCODE -ne 0) { throw "publish failed for Viewer" }
+
 Copy-Item "$repo\deploy\backup.sh", "$repo\deploy\restore.sh", "$repo\deploy\install.sh" "$out\bin\"
 Copy-Item "$repo\deploy\anjal-firewall.sh", "$repo\deploy\anjal-portcheck.sh" "$out\bin\"
 Copy-Item "$repo\deploy\*.service", "$repo\deploy\*.timer", "$repo\deploy\*.example" "$out\bin\"
 Copy-Item "$repo\tools\sql\schema.sql" "$out\bin\"
+Copy-Item "$repo\tools\viewer_check.py" "$out\bin\"
 Copy-Item "$repo\deploy\DEPLOY.md" "$out\"
 
 # Normalise line endings for scripts, units and templates (git may have checked them out CRLF).
-foreach ($f in Get-ChildItem "$out\bin\*" -Include *.sh, *.service, *.timer, *.example) {
+foreach ($f in Get-ChildItem "$out\bin\*" -Include *.sh, *.py, *.service, *.timer, *.example) {
     $text = (Get-Content $f.FullName -Raw) -replace "`r`n", "`n"
     [System.IO.File]::WriteAllText($f.FullName, $text, [System.Text.UTF8Encoding]::new($false))
 }

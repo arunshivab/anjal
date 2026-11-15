@@ -138,6 +138,8 @@ internal static class AuthEndpoints
             if (me is Guid mailboxId && SessionRegistry.SessionOf(http.User) is string sid)
             {
                 await sessions.EndAsync(mailboxId, sid).ConfigureAwait(false);
+                // rc.29 (D-362): the pictures, text and passwords of files viewed in this session go with it.
+                http.RequestServices.GetService<ViewerAccess>()?.ForgetSession(sid);
             }
             // rc.22 (item 33): the other accounts on this browser - all signed out, or the next one opened.
             List<(Guid Mailbox, string Sid)> others = ReadAccounts(http).Where(o => o.Mailbox != me).ToList();

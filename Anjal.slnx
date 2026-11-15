@@ -29,6 +29,8 @@
     <Project Path="src/Anjal.Smtp/Anjal.Smtp.csproj" />
     <Project Path="src/Anjal.Spam/Anjal.Spam.csproj" />
     <Project Path="src/Anjal.Store/Anjal.Store.csproj" />
+    <Project Path="src/Anjal.Viewer/Anjal.Viewer.csproj" />
+    <Project Path="src/Anjal.Viewing/Anjal.Viewing.csproj" />
     <Project Path="src/Anjal.Webmail/Anjal.Webmail.csproj" />
   </Folder>
   <Folder Name="/tests/">
@@ -46,6 +48,7 @@
     <Project Path="tests/Anjal.Smtp.Tests/Anjal.Smtp.Tests.csproj" />
     <Project Path="tests/Anjal.Spam.Tests/Anjal.Spam.Tests.csproj" />
     <Project Path="tests/Anjal.Store.Tests/Anjal.Store.Tests.csproj" />
+    <Project Path="tests/Anjal.Viewer.Tests/Anjal.Viewer.Tests.csproj" />
     <Project Path="tests/Anjal.Webmail.Tests/Anjal.Webmail.Tests.csproj" />
   </Folder>
 </Solution>

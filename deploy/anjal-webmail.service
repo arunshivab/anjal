@@ -3,8 +3,8 @@
 [Unit]
 Description=Anjal webmail
 Documentation=https://github.com/arunshivab/anjal
-After=network-online.target postgresql.service
-Wants=network-online.target
+After=network-online.target postgresql.service anjal-viewer.service
+Wants=network-online.target anjal-viewer.service
 
 [Service]
 Type=simple
@@ -44,6 +44,8 @@ ProtectProc=invisible
 # aborts at startup. SystemCallFilter is also left unset until it has been
 # proven against this runtime on the target VM.
 ReadWritePaths=/var/mail/anjal /var/lib/anjal
+# rc.29 (DES-22): the viewer's socket (made by anjal-viewer.service; "-" when it is not there yet).
+ReadWritePaths=-/run/anjal-viewer
 UMask=0027
 
 StandardOutput=journal

@@ -10,6 +10,16 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
+**v1.0.0-rc.29** (November 2026) - Attachments shown in the mail window (DES-22): PDF (pages,
+text to select and copy, Find, outline, thumbnails), Word (the text and its tables and pictures),
+Excel (the first 2,000 rows of each sheet), pictures, and the files inside a ZIP - password-locked ones
+shown view only (AC-17, AC-20) - all read by
+a separate `anjal-viewer` service with no network, no disk to write, its own memory cap and a kill
+timer per job (D-358). Built on chuvadi-pdf 3.33.0, Chuvadi.Docs 2.2.0, Chuvadi.Sheets 2.1.0 and
+Chuvadi.Zip 1.0.0 from `localpackages/`, each checked against its SHA-256 in CI. The 25 MB limit's refusal and the
+18 MB note say large imaging studies go by link (AC-18); the recovery sheet asks for a printer
+(AC-15). DICOM is written but switched off until the Siaara package is out.
+
 **v1.0.0-rc.28** (9 November 2026) - Group 1 (DES-18 to DES-21). Phones and tablets: five width
 bands, touch sizes from the pointer, swipes and press-and-hold, the phone screens and Today's cards
 in a row. The patient warning sends only what it warned about and logs "Change the mail"; the
@@ -929,6 +939,11 @@ not per browser, so a user's choice follows them to any machine.
 | `ANJAL_POSTGRES` | (in-memory) | Must point at the same database as `Anjal.Server` |
 | `ANJAL_MAILDIR_ROOT` | platform default | Must point at the same directory as `Anjal.Server`; both processes need read/write access |
 | `ANJAL_HOSTNAME` | `anjal.localhost` | Used in generated Message-IDs |
+| `ANJAL_VIEWER_SOCKET` | (unset) | rc.29 (DES-22): the anjal-viewer service's socket, `/run/anjal-viewer/viewer.sock` in production. Attachments shown in the mail window are read there, never in the webmail. Unset: a viewer program is looked for beside the webmail and started on this machine (development), else attachments are Download only. The viewer process reads the same name for where to listen |
+| `ANJAL_VIEWER_PATH` | (unset) | rc.29: the viewer program to start on this machine when `ANJAL_VIEWER_SOCKET` is unset (`Anjal.Viewer` or `Anjal.Viewer.dll`); unset, it is found under `src/Anjal.Viewer/bin` |
+| `ANJAL_VIEWER` | (on) | rc.29: `off` turns viewing off; every attachment is then Download only |
+| `ANJAL_VIEWER_DICOM` | (off) | rc.29: `on` would show DICOM images; stays off until the Siaara package is released (D-372) |
+| `ANJAL_VIEWER_TEST_HOOKS` | (off) | rc.29, the viewer process: `1` adds two jobs that hang and grow, for the tests of its kill timer and memory limit. Never set in production |
 
 Run it alongside the mail server:
 

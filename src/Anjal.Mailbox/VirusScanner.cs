@@ -277,13 +277,6 @@ public static class AttachmentPolicy
         return raw.Length;
     }
 
-    private static readonly string[] Programs =
-    {
-        ".exe", ".com", ".bat", ".cmd", ".msi", ".msp", ".scr", ".pif", ".cpl", ".dll", ".sys", ".drv",
-        ".js", ".jse", ".vbs", ".vbe", ".wsf", ".wsh", ".ps1", ".psm1", ".hta", ".reg", ".jar", ".app",
-        ".sh", ".bash", ".py", ".pl", ".rb", ".php", ".lnk", ".inf", ".vb", ".ws", ".msc", ".scf", ".apk", ".deb", ".rpm",
-    };
-
     private static readonly string[] DiskImages = { ".iso", ".img", ".vhd", ".vhdx", ".vmdk", ".dmg", ".bin", ".toast" };
 
     // Inside an archive, ".bin" is not a disk image: Office files hold vbaProject.bin, printerSettings1.bin and the like.
@@ -292,7 +285,7 @@ public static class AttachmentPolicy
     /// <summary>Whether a file name is a program or script, by its ending.</summary>
     /// <param name="fileName">The name.</param>
     /// <returns>True when refused.</returns>
-    public static bool IsProgram(string fileName) => EndsWithOneOf(fileName, Programs);
+    public static bool IsProgram(string fileName) => Anjal.Mime.ProgramSigns.IsProgramName(fileName);
 
     /// <summary>Whether a file name is a disk image, by its ending.</summary>
     /// <param name="fileName">The name.</param>
@@ -306,25 +299,7 @@ public static class AttachmentPolicy
     /// </summary>
     /// <param name="body">The file's bytes, decoded.</param>
     /// <returns>True when it is a program.</returns>
-    public static bool IsProgramContent(byte[] body)
-    {
-        System.ArgumentNullException.ThrowIfNull(body);
-        if (body.Length < 4)
-        {
-            return false;
-        }
-        uint head = (uint)(body[0] << 24 | body[1] << 16 | body[2] << 8 | body[3]);
-        if (IsWindowsProgram(body) || head == 0x7F454C46 || head is 0xFEEDFACE or 0xFEEDFACF or 0xCEFAEDFE or 0xCFFAEDFE or 0xCAFEBABE)
-        {
-            return true;
-        }
-        if (body[0] == (byte)'#' && body[1] == (byte)'!')
-        {
-            return true;
-        }
-        IReadOnlyList<string> entries = FileRisks.ZipEntryNames(body);
-        return !IsOfficeContainer(entries) && entries.Any(n => IsProgram(n) || n.EndsWith(".class", StringComparison.OrdinalIgnoreCase));
-    }
+    public static bool IsProgramContent(byte[] body) => Anjal.Mime.ProgramSigns.IsProgramContent(body);
 
     // A disk image inside an archive; an Office document (a ZIP with [Content_Types].xml) is not an archive here.
     private static bool DiskImageInside(byte[] body)
@@ -333,19 +308,7 @@ public static class AttachmentPolicy
         return !IsOfficeContainer(entries) && entries.Any(n => EndsWithOneOf(n, DiskImagesInside));
     }
 
-    private static bool IsOfficeContainer(IReadOnlyList<string> entries) =>
-        entries.Any(n => string.Equals(n, "[Content_Types].xml", StringComparison.OrdinalIgnoreCase));
-
-    // MZ, and the PE header it points to ("PE\0\0"): a text that happens to begin "MZ" is not one.
-    private static bool IsWindowsProgram(byte[] b)
-    {
-        if (b.Length < 0x40 || b[0] != 0x4D || b[1] != 0x5A)
-        {
-            return false;
-        }
-        int pe = b[0x3C] | (b[0x3D] << 8) | (b[0x3E] << 16) | (b[0x3F] << 24);
-        return pe > 0 && pe + 4 <= b.Length && b[pe] == (byte)'P' && b[pe + 1] == (byte)'E' && b[pe + 2] == 0 && b[pe + 3] == 0;
-    }
+    private static bool IsOfficeContainer(IReadOnlyList<string> entries) => Anjal.Mime.ProgramSigns.IsOfficeContainer(entries);
 
     /// <summary>
     /// The files of a message that are programs or scripts - by name, by content, or inside an archive

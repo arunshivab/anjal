@@ -19,13 +19,17 @@ Usage:
 
 import argparse
 import base64
+import html
+import io
 import json
 import os
 import smtplib
+import struct
 import subprocess
 import sys
 import urllib.error
 import urllib.request
+import zipfile
 from email.message import EmailMessage
 from email.utils import formataddr, format_datetime
 from datetime import datetime, timedelta, timezone
@@ -54,8 +58,130 @@ PEOPLE = {
     "news": ("Healthcare Weekly", "newsletter@hc-weekly.example"),
 }
 
-TINY_PDF = (b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
-            b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n")
+def small_pdf(lines):
+    """rc.29: a real one-page PDF with a few lines of text and a correct cross-reference table, so the viewer has
+    something to show (the screen checks open it)."""
+    text = "".join("BT /F1 14 Tf 72 %d Td (%s) Tj ET\n" % (760 - 22 * i, line) for i, line in enumerate(lines)).encode()
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Length %d >>\nstream\n" % len(text) + text + b"endstream",
+    ]
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for n, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % n + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for o in offsets:
+        out += b"%010d 00000 n \n" % o
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
+def _zip(entries):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, body in entries:
+            z.writestr(zipfile.ZipInfo(name, date_time=(2026, 10, 1, 9, 0, 0)), body)
+    return buf.getvalue()
+
+
+def _crc_table():
+    t = []
+    for n in range(256):
+        c = n
+        for _ in range(8):
+            c = (0xEDB88320 ^ (c >> 1)) if c & 1 else (c >> 1)
+        t.append(c)
+    return t
+
+
+_CRC = _crc_table()
+
+
+def locked_zip(password, entries):
+    """rc.29 (AC-20): an archive locked with the old ZipCrypto password scheme (stored, not packed), which Python
+    cannot write itself. Many tools still write it, so the viewer's password screens get a real one to show."""
+    def crc_byte(c, b):
+        return _CRC[(c ^ b) & 0xFF] ^ (c >> 8)
+    out, central = bytearray(), bytearray()
+    for name, body in entries:
+        keys = [0x12345678, 0x23456789, 0x34567890]
+        def update(b):
+            keys[0] = crc_byte(keys[0], b)
+            keys[1] = ((keys[1] + (keys[0] & 0xFF)) * 134775813 + 1) & 0xFFFFFFFF
+            keys[2] = crc_byte(keys[2], (keys[1] >> 24) & 0xFF)
+        def encrypt(data):
+            res = bytearray()
+            for b in data:
+                t = (keys[2] | 2) & 0xFFFF
+                k = ((t * (t ^ 1)) >> 8) & 0xFF
+                res.append(b ^ k)
+                update(b)
+            return bytes(res)
+        for b in password.encode():
+            update(b)
+        crc = zipfile.crc32(body) & 0xFFFFFFFF
+        header = bytes(range(11)) + bytes([crc >> 24])
+        data = encrypt(header) + encrypt(body)
+        raw = name.encode()
+        dos_time, dos_date = (9 << 11), ((2026 - 1980) << 9) | (10 << 5) | 1
+        offset = len(out)
+        out += struct.pack("<IHHHHHIIIHH", 0x04034B50, 20, 1, 0, dos_time, dos_date, crc, len(data), len(body), len(raw), 0) + raw + data
+        central += struct.pack("<IHHHHHHIIIHHHHHII", 0x02014B50, 20, 20, 1, 0, dos_time, dos_date, crc, len(data), len(body), len(raw), 0, 0, 0, 0, 0, offset) + raw
+    start = len(out)
+    out += central
+    out += struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, len(entries), len(entries), len(central), start, 0)
+    return bytes(out)
+
+
+def small_docx(heading, paragraphs, table):
+    """rc.29: a Word file with a heading, paragraphs and a table, written by hand."""
+    def p(style, s):
+        pr = '<w:pPr><w:pStyle w:val="%s"/></w:pPr>' % style if style else ""
+        return '<w:p>%s<w:r><w:t xml:space="preserve">%s</w:t></w:r></w:p>' % (pr, html.escape(s))
+    def row(cells):
+        return "<w:tr>" + "".join('<w:tc><w:p><w:r><w:t>%s</w:t></w:r></w:p></w:tc>' % html.escape(c) for c in cells) + "</w:tr>"
+    body = p("Heading1", heading) + "".join(p("", s) for s in paragraphs) + "<w:tbl>" + "".join(row(r) for r in table) + "</w:tbl>"
+    return _zip([
+        ("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'),
+        ("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'),
+        ("word/document.xml", '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + body + "</w:body></w:document>"),
+    ])
+
+
+def small_xlsx(sheet, rows):
+    """rc.29: a workbook with one sheet of text and numbers, written by hand."""
+    def cell(ref, v):
+        if isinstance(v, (int, float)):
+            return '<c r="%s"><v>%s</v></c>' % (ref, v)
+        return '<c r="%s" t="inlineStr"><is><t>%s</t></is></c>' % (ref, html.escape(v))
+    data = "".join('<row r="%d">' % (r + 1) + "".join(cell("%s%d" % (chr(65 + c), r + 1), v) for c, v in enumerate(vals)) + "</row>" for r, vals in enumerate(rows))
+    return _zip([
+        ("[Content_Types].xml", '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'),
+        ("_rels/.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'),
+        ("xl/workbook.xml", '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="%s" sheetId="1" r:id="rId1"/></sheets></workbook>' % html.escape(sheet)),
+        ("xl/_rels/workbook.xml.rels", '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'),
+        ("xl/worksheets/sheet1.xml", '<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' + data + "</sheetData></worksheet>"),
+    ])
+
+
+AGENDA_PDF = small_pdf(["Quality review - Friday 15:00", "1. Minutes of the last review", "2. Incident reports", "3. Hand hygiene audit", "4. Audit readiness"])
+INVOICE_PDF = small_pdf(["Invoice 2026-114", "September services", "Due 15 October 2026"])
+ROTA_PDF = small_pdf(["Holiday rota - Diwali week", "The hospital stays open throughout."])
+THEATRE_PDF = small_pdf(["Theatre list - Monday", "Theatre 1: 08:00 to 14:00", "Theatre 2: 09:00 to 17:00"])
+ROSTER_XLSX = small_xlsx("October", [["Date", "Ward", "Day", "Night"], ["1 Oct", "Ward 3", "Meera", "Ravi"], ["2 Oct", "Ward 3", "Ravi", "Meera"], ["3 Oct", "Ward 4", "Anil", "Priya"], ["Shifts", "", 3, 3]])
+MINUTES_DOCX = small_docx("Minutes of the 30 September meeting", ["Present: the board and the quality committee.", "Draft - corrections by Monday, please."],
+                          [["Item", "Decision"], ["Audit readiness", "Agreed"], ["New infusion pumps", "Ordered"]])
+# rc.29: a ZIP whose folder has no entry of its own (as many tools write it), and a password-locked one.
+AUDIT_ZIP = _zip([("Audit papers/Infection-control-register.pdf", small_pdf(["Infection-control register", "September 2026"])),
+                  ("Audit papers/Calibration-log.xlsx", small_xlsx("Log", [["Device", "Checked"], ["Infusion pump IP-200", "1 Oct"], ["Monitor M-4", "2 Oct"]])),
+                  ("Training-records.docx", small_docx("Training records", ["Fire safety and hand hygiene, September."], [["Course", "Staff"], ["Fire safety", "42"]]))])
+STATEMENT_ZIP = locked_zip("Teak-River-7", [("Statement-September.pdf", small_pdf(["Account statement", "September 2026"])), ("Read-me.txt", b"Statement for September.\n")])
 TINY_PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 
 
@@ -77,19 +203,19 @@ def messages(you, domain):
     add("quality", me + [p["ravi"]], "Agenda for Friday's review",
         "Dear colleagues,\n\nPlease find the updated agenda for Friday's quality review attached. Items 3 and 4 need decisions "
         "before the external audit, so please read the two short papers in advance.\n\nWe meet in the second-floor board room at 15:00.\n\nQuality committee",
-        cc=[p["board"], p["auditor"]], att=[("Agenda-quality-review.pdf", TINY_PDF, "application/pdf")], days=0, hour=9)
+        cc=[p["board"], p["auditor"]], att=[("Agenda-quality-review.pdf", AGENDA_PDF, "application/pdf")], days=0, hour=9)
     add("accounts", me, "Invoice 2026-114: payment due 15 October",
         "Hello,\n\nThe September invoice is attached for approval. Payment is due on 15 October.\n\nRegards,\nAccounts",
-        att=[("Invoice-2026-114.pdf", TINY_PDF, "application/pdf")], days=0, hour=8)
+        att=[("Invoice-2026-114.pdf", INVOICE_PDF, "application/pdf")], days=0, hour=8)
     add("meera", me, "Revised duty roster for October",
         "Hi Arun,\n\nTwo changes from last week, marked in yellow in the attached roster. Please confirm by Thursday.\n\nThanks,\nMeera",
-        att=[("Roster-October.pdf", TINY_PDF, "application/pdf")], days=0, hour=7)
+        att=[("Roster-October.xlsx", ROSTER_XLSX, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")], days=0, hour=7)
     add("priya", me, "நாளை காலை 10 மணிக்கு கூட்டம்",
         "வணக்கம்,\n\nநாளை காலை 10 மணிக்கு வாராந்திர கூட்டம் நடைபெறும். அறிக்கையை முன்கூட்டியே படிக்கவும்.\n\nநன்றி,\nபிரியா", days=0, hour=6)
     add("it", me, "Planned maintenance, Saturday 22:00",
         "Systems will be unavailable for about forty minutes on Saturday from 22:00. Mail sent during that time will be delivered afterwards.", days=1, hour=18)
     add("board", me, "Minutes of the 30 September meeting",
-        "Draft minutes for your corrections by Monday.", att=[("Minutes-30-Sep.pdf", TINY_PDF, "application/pdf")], days=1, hour=11)
+        "Draft minutes for your corrections by Monday.", att=[("Minutes-30-Sep.docx", MINUTES_DOCX, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")], days=1, hour=11)
     add("anil", me, "ഓണാശംസകൾ - യോഗം നാളെ രാവിലെ പത്തിന്",
         "നമസ്കാരം,\n\nയോഗം നാളെ രാവിലെ പത്തിന് നടക്കും. എല്ലാവർക്കും ഓണാശംസകൾ!\n\nഅനിൽ", days=1, hour=10)
     add("lab", me, "Your report is ready",
@@ -100,7 +226,7 @@ def messages(you, domain):
         "नमस्कार,\n\nउद्या सकाळी दहा वाजता बैठक आहे. कृपया वेळेवर उपस्थित राहा.\n\nसुरेश", days=3, hour=16)
     add("hr", many + me, "Diwali holiday schedule - दीपावली की हार्दिक शुभकामनाएँ",
         "Dear all,\n\nThe hospital remains open through Diwali. The holiday rota is attached.\n\nदीपावली की हार्दिक शुभकामनाएँ!\n\nHuman resources",
-        att=[("Holiday-rota.pdf", TINY_PDF, "application/pdf")], days=4, hour=9)
+        att=[("Holiday-rota.pdf", ROTA_PDF, "application/pdf")], days=4, hour=9)
     add("kinjal", me, "આવતીકાલે સવારે 10 વાગ્યે મીટિંગ છે",
         "નમસ્તે,\n\nઆવતીકાલે સવારે 10 વાગ્યે મીટિંગ છે. દિવાળીની શુભકામનાઓ!\n\nકિંજલ", days=4, hour=15)
     add("vendor", me, "Order 7781 dispatched",
@@ -109,7 +235,8 @@ def messages(you, domain):
              "<tr><td>Infusion pump IP-200</td><td>4</td></tr><tr><td>Giving sets</td><td>200</td></tr></table><p>Expected delivery: <b>9 October</b>.</p>",
         days=5, hour=13)
     add("bank", me, "Account statement for September",
-        "Your September statement is ready. For your security, we never ask for passwords by e-mail.", days=6, hour=7)
+        "Your September statement is ready. For your security, we never ask for passwords by e-mail.",
+        att=[("Statement-September.zip", STATEMENT_ZIP, "application/zip")], days=6, hour=7)
     add("news", me, "This week in healthcare: digital records, new tariffs",
         "Read this week's stories in your browser.",
         html="<h2 style='color:#0B4F7A'>Healthcare Weekly</h2><p><b>Digital records:</b> what changes for hospitals.</p>"
@@ -117,7 +244,7 @@ def messages(you, domain):
         days=6, hour=6)
     add("auditor", me, "Documents needed before the audit",
         "Please share the infection-control register, the equipment calibration log and the training records by 10 October.",
-        cc=[p["quality"]], days=7, hour=14)
+        cc=[p["quality"]], att=[("Audit-papers.zip", AUDIT_ZIP, "application/zip")], days=7, hour=14)
     add("ravi", me, "Re: Radiotherapy machine QA results",
         "Arun,\n\nThe monthly QA passed on all checks. Output within 0.8%. Full sheet attached.\n\nRavi",
         att=[("QA-results.png", TINY_PNG, "image/png")], days=8, hour=17)
@@ -160,7 +287,7 @@ def messages(you, domain):
     # same subject and no reply headers ("reply link unknown").
     a = add("meera", me + [p["ravi"]], "Theatre list for Monday",
             "Arun, Ravi,\n\nThe draft theatre list for Monday is attached. Two cases may need to move to Tuesday.\n\nMeera",
-            cc=[p["quality"]], att=[("Theatre-list-Monday.pdf", TINY_PDF, "application/pdf")], days=1, hour=9)
+            cc=[p["quality"]], att=[("Theatre-list-Monday.pdf", THEATRE_PDF, "application/pdf")], days=1, hour=9)
     b = add("ravi", me + [p["meera"]], "Re: Theatre list for Monday",
             "Meera,\n\nCase 4 can move to Tuesday; the anaesthetist is free then.\n\nRavi", days=1, hour=11, reply=(a, "irt"))
     add("quality", me + [p["meera"]], "Re: Theatre list for Monday",

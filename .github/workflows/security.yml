@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "10.0.x"
+      - name: Local packages match their SHA-256
+        run: python3 tools/check_packages.py
       - name: Restore
         run: dotnet restore
       - name: Vulnerable packages

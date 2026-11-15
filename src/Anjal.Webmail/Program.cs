@@ -117,6 +117,7 @@ public static class Program
     /// <summary>TLS-related settings for <see cref="CreateApp(string[], IMessageStore, IMaildirStore, string, string, TlsSettings?)"/>.</summary>
     // Set once the evidence line has been written (v1.0.0-rc.10).
     private static int evidenceNoteWritten;
+    private static int viewerNoteWritten;
 
     public sealed class TlsSettings
     {
@@ -285,8 +286,16 @@ public static class Program
         }
         // rc.22 (item 39): the same scanner the mail server uses, for held mail and the console.
         Anjal.Mailbox.ClamdScanner? scanner = Anjal.Mailbox.ClamdScanner.FromSetting(Environment.GetEnvironmentVariable(Anjal.Mailbox.ClamdScanner.Setting));
+        // rc.29 (DES-22 §4): the separate viewer process (its service's socket, or one started on this machine).
+        ViewerAccess viewerAccess = ViewerAccess.FromEnvironment();
+        if (System.Threading.Interlocked.Exchange(ref viewerNoteWritten, 1) == 0)
+        {
+            Console.WriteLine(viewerAccess.Describe());
+        }
+        builder.Services.AddSingleton(viewerAccess);
         builder.Services.AddSingleton(sp => new MailboxService(mailboxStore, store, maildir, hostName)
         {
+            Viewer = viewerAccess,
             Evidence = evidence,
             Scanner = scanner,
             Links = LinkChecker.FromEnvironment(),
@@ -672,6 +681,8 @@ public static class Program
         MailAppEndpoints.Map(app);
         // rc.28 (DES-21): chat and online status.
         ChatEndpoints.Map(app);
+        // rc.29 (DES-22): the viewer's pages, text, Find and pictures.
+        ViewerEndpoints.Map(app);
         app.MapDraftKeeping();
         OpsEndpoints.Map(app);
 
@@ -806,29 +817,16 @@ public static class Program
             }
             (AttachmentView View, byte[] Bytes)? found = await svc.GetAttachmentAsync(mailboxId.Value, id, index, ct).ConfigureAwait(false);
             string? type = found is null ? null : MailboxService.PreviewType(found.Value.View);
-            if (found is null || type is null or MailboxService.ZipType)
+            // rc.29 (D-359): only pictures are given to the browser to draw; a PDF, Word, Excel or archive is shown
+            // by Anjal's own viewer.
+            if (found is null || type is null || !type.StartsWith("image/", StringComparison.Ordinal))
             {
                 return Results.NotFound();
             }
-            http.Response.Headers.ContentSecurityPolicy = type == "application/pdf"
-                ? "default-src 'none'; frame-ancestors 'self'"
-                : "default-src 'none'; img-src 'self'; sandbox; frame-ancestors 'self'";
+            http.Response.Headers.ContentSecurityPolicy = "default-src 'none'; img-src 'self'; sandbox; frame-ancestors 'self'";
             http.Response.Headers.XFrameOptions = "SAMEORIGIN";
             http.Response.Headers.ContentDisposition = "inline";
             return Results.Bytes(found.Value.Bytes, type);
-        }).RequireAuthorization();
-
-        // rc.28 (DES-18 §10, R10 [10c]): one file from inside an archive, downloaded - never a program, never
-        // from a locked or refused archive; served like every attachment, as a download of no particular type.
-        app.MapGet("/message/{id:guid}/attachment/{index:int}/zip/{entry:int}", async (HttpContext http, Guid id, int index, int entry, MailboxService svc, CancellationToken ct) =>
-        {
-            Guid? mailboxId = WebmailAuthService.MailboxIdOf(http.User);
-            if (mailboxId is null)
-            {
-                return Results.Redirect("/sign-in");
-            }
-            (string Name, byte[] Bytes)? inside = await svc.ZipEntryAsync(mailboxId.Value, id, index, entry, ct).ConfigureAwait(false);
-            return inside is null ? Results.NotFound() : Results.File(inside.Value.Bytes, "application/octet-stream", inside.Value.Name);
         }).RequireAuthorization();
 
         app.MapGet("/message/{id:guid}/raw.eml", async (HttpContext http, Guid id, MailboxService svc, CancellationToken ct) =>
@@ -2745,6 +2743,6 @@ public static class Program
     /// <summary>The attachments on one message add up to more than <see cref="MaxAttachmentBytes"/>.</summary>
     private sealed class AttachmentsTooLargeException : Exception
     {
-        public const string UserMessage = "The attachments add up to more than 18 MB. Remove some, or send them in more than one message.";
+        public const string UserMessage = "The attachments add up to more than 18 MB. Remove some, or send them in more than one message. Large imaging studies, such as a CT or PET-CT, should be shared by a link instead, not by mail.";
     }
 }

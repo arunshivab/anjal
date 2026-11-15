@@ -730,6 +730,8 @@ else
                             <p class="hint">@L["Made {date} by {name}."].Replace("{date}", clock.Date(DateTimeOffset.UtcNow), StringComparison.Ordinal).Replace("{name}", NameOf(me), StringComparison.Ordinal)</p>
                             @* rc.28 (D-332): on paper only - a saved file is a copy no one can lock away. *@
                             <p class="hint sheetnote"><b>@L["Print it on paper. Do not save it as a file."]</b> @L["Or write it down by hand: larger letters make that easier."]</p>
+                            @* rc.29 (AC-15): browser printing stays; the paper is the only copy that should exist. *@
+                            <p class="hint sheetnote">@L["Print to a printer, not to “Save as PDF”. Check that your printer does not keep a copy of printed documents."]</p>
                             <div class="sheetacts">
                                 <button type="button" class="btn btn-s btn-sm" data-print><LipiIcon Name="print" Size="15" />@L["Print"]</button>
                                 <button type="button" class="btn btn-s btn-sm" data-sheet-big aria-pressed="false">@L["Larger letters"]</button>

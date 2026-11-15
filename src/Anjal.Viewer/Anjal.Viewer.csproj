@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- rc.29 (DES-22 §4, D-358): anjal-viewer, the separate process that reads every attachment shown in the mail
+       window. The only Anjal program that references the file libraries (DES-22 §11). -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\Anjal.Viewing\Anjal.Viewing.csproj" />
+    <ProjectReference Include="..\Anjal.Mime\Anjal.Mime.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Chuvadi.Pdf" Version="3.33.0" />
+    <PackageReference Include="Chuvadi.Docs" Version="2.2.0" />
+    <PackageReference Include="Chuvadi.Sheets" Version="2.1.0" />
+    <!-- AC-20: every ZIP the viewer reads, locked ones among them. -->
+    <PackageReference Include="Chuvadi.Zip" Version="1.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Anjal.Viewer.Tests" />
+  </ItemGroup>
+
+  <!-- D-372: DICOM is built only with -p:Siaara=true, once the Siaara package is on the GitHub feed. Until then the
+       code that calls it is not compiled, and the webmail's DICOM switch stays off. -->
+  <ItemGroup Condition="'$(Siaara)' != 'true'">
+    <Compile Remove="Dicom\DicomJob.Siaara.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Siaara)' == 'true'">
+    <Compile Remove="Dicom\DicomJob.Off.cs" />
+    <PackageReference Include="Siaara" Version="0.1.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Anjal.Viewer</AssemblyName>
+    <!-- AC-12: published trimmed and ReadyToRun (deploy/publish.ps1, the deploy-smoke job). -->
+    <IsTrimmable>true</IsTrimmable>
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- AC-20: Chuvadi.Zip 1.0.0 carries no trimming marker; kept whole until its next version. (AC-22: Sheets 2.1.0 is marked and is trimmed like the rest.) -->
+    <TrimmerRootAssembly Include="Chuvadi.Zip" />
+  </ItemGroup>
+
+</Project>
