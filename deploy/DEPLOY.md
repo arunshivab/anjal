@@ -1766,6 +1766,176 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.27 to rc.29 in one install** (the first server, which runs rc.27 since 9 Nov and was never
+updated to rc.28; the owner, 12 Nov). This one install brings everything rc.28 and rc.29 change on the
+server. rc.28 brought the secure link (DES-19), mail apps over IMAP on 993 with a password per app and
+the mail import (DES-20), chat and online status (DES-21), the re-seal of mail kept before rc.25,
+and phone and tablet. rc.29 brings the `anjal-viewer` service (DES-22), the clamd stream limit (AC-18)
+and the wording. Do the steps in this order. The two blocks after this one ("rc.28 to rc.29" and
+"rc.27 to rc.28") are for a server that is already at rc.28, and record what each release added.
+
+**Before you start.** WireGuard for SSH (section 1e) is a separate step for the owner. It is not part
+of this install and need not be done the same day. Do it before go-live, as section 1e says, from a
+second SSH session, never during this upgrade.
+
+1. **Backup first** (section 11). The release changes the database (ten new tables), so take one now
+   and see it verify:
+   ```
+   vm$ T0=$(date '+%Y-%m-%d %H:%M:%S'); sudo systemctl start anjal-backup
+   vm$ sudo journalctl -u anjal-backup --since "$T0" --no-pager | grep -E "verify ok|done"
+   ```
+   Both words must appear. If they do not, stop here and look at section 11.
+2. **TCP 993 in the E2E Security Group** (as 465 was, section 1a): one inbound rule for TCP 993 from
+   anywhere, for mail apps. Read the group's rules first and add only this one.
+3. **The install** (section 13d) with the rc.29 release, and `schema.sql` once:
+   ```
+   pc> git checkout v1.0.0-rc.29; .\deploy\publish.ps1 -Version 1.0.0-rc.29
+   vm$ sha256sum anjal-1.0.0-rc.29.tar.gz | cut -c1-16                 # the laptop's value
+   vm$ tar -xzf anjal-1.0.0-rc.29.tar.gz
+   vm$ sudo bash ./anjal-1.0.0-rc.29/bin/install.sh ~/anjal-1.0.0-rc.29
+   vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -v ON_ERROR_STOP=1 -f ~/anjal-1.0.0-rc.29/bin/schema.sql
+   vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 53
+   ```
+   `schema.sql` adds rc.28's ten tables (`secure_links`, `secure_link_codes`, `app_passwords`,
+   `imap_folders`, `imap_uids`, `import_jobs`, `chat_rooms`, `chat_members`, `chat_messages`,
+   `presence`) and the two evidence columns (`resealed_from_sha256`, `resealed_at`). rc.29 adds no
+   table. `install.sh` also creates the user `anjal-viewer`, adds `anjal` to its group, installs
+   `/opt/anjal/viewer` and the unit `anjal-viewer.service`, and enables it:
+   ```
+   vm$ id -nG anjal | grep -cw anjal-viewer        # 1
+   vm$ systemctl is-enabled anjal-viewer           # enabled
+   ```
+   Do not restart the services yet.
+4. **The two new settings.** Read each one first.
+   ```
+   vm$ sudo grep -c '^ANJAL_IMAP_TLS_PORT=' /etc/anjal/server.env      # 0: not there yet
+   vm$ sudo grep -c '^ANJAL_VIEWER_SOCKET=' /etc/anjal/webmail.env     # 0: not there yet
+   ```
+   0 means unset. Add only the ones that show 0:
+   ```
+   vm$ echo 'ANJAL_IMAP_TLS_PORT=993' | sudo tee -a /etc/anjal/server.env >/dev/null
+   vm$ echo 'ANJAL_VIEWER_SOCKET=/run/anjal-viewer/viewer.sock' | sudo tee -a /etc/anjal/webmail.env >/dev/null
+   vm$ sudo grep -h -E '^ANJAL_IMAP_TLS_PORT=|^ANJAL_VIEWER_SOCKET=' /etc/anjal/server.env /etc/anjal/webmail.env
+   ```
+   The last line shows both. Nothing else in the env files changes (rc.28's chat, secure link and
+   import need no setting; chat is on for every organisation, D-350).
+5. **clamd's stream limit matched to the 25 MB mail limit** (AC-18). This is step 3 of "rc.28 to
+   rc.29" below: read `StreamMaxLength` first, and change it and restart clamd only if it is not `25M`.
+6. **The outbound firewall** (section 13f). From rc.28 it lets out the replies from 993, IMAP to other
+   mail servers for the import (the `anjal` account only), and WireGuard's replies. Generate it, apply
+   it, then open a new SSH session and the webmail, and only then confirm:
+   ```
+   vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh generate
+   vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh apply
+   vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh confirm
+   ```
+7. **Start the viewer, then restart the others:**
+   ```
+   vm$ sudo systemctl start anjal-viewer
+   vm$ sudo test -S /run/anjal-viewer/viewer.sock && echo socket     # socket
+   vm$ sudo systemctl restart anjal-server anjal-webmail
+   vm$ sleep 10; systemctl is-active anjal-viewer anjal-server anjal-webmail; curl -s http://127.0.0.1:8025/healthz | jq .
+   vm$ sudo journalctl -u anjal-server -u anjal-webmail --since -2min --no-pager | grep -E 'Anjal IMAP|Viewer:'
+   ```
+   The last command shows `Anjal IMAP (TLS, port 993) listening` and `Viewer: the anjal-viewer service
+   at /run/anjal-viewer/viewer.sock.`
+8. **The viewer, as the webmail's user:**
+   ```
+   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page
+   ```
+9. **Seal what was kept before rc.25** (rc.28, D-264), once. This is step 6 of "rc.27 to rc.28"
+   below: a dry run first, read its line, and run it for real only if it shows `0 with a problem`.
+   Write the manifest's SHA-256 on the upgrade form.
+10. **From the PC and on a phone:**
+    ```
+    pc> openssl s_client -connect mail.anjal.co.in:993 -quiet
+    ```
+    This shows the certificate's chain and `* OK [CAPABILITY IMAP4rev1 ...] mail.anjal.co.in Anjal IMAP
+    ready`; type `a LOGOUT` to leave. Then the owner does steps 7 and 8 of "rc.27 to rc.28" (a mail app
+    end to end; the recovery sheet unchanged) and step 6 of "rc.28 to rc.29" (a PDF, a Word file, an
+    Excel file and a ZIP shown in the mail window).
+
+**Check** (counts only):
+```
+vm$ systemctl is-active anjal-viewer anjal-server anjal-webmail          # active, three times
+vm$ systemctl show anjal-viewer -p NRestarts --value                     # 0
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) from information_schema.tables where table_schema='public'"   # 53
+vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select count(*) filter (where resealed_at is not null), count(*) from evidence"   # the sealed count, and all
+vm$ sudo ss -tlnp | grep -c ':993 '                                       # 1
+vm$ sudo grep -E '^StreamMaxLength' /etc/clamav/clamd.conf               # StreamMaxLength 25M
+vm$ TOKEN=$(sudo grep '^ANJAL_API_TOKEN=' /etc/anjal/server.env | cut -d= -f2-)
+vm$ curl -s -X POST -d '' -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8025/api/evidence/verify | jq '{intact, problems}'   # true, []
+vm$ unset TOKEN
+```
+
+**rc.28 to rc.29**, for a server already at rc.28 (attachments shown in the mail window - PDF, Word, Excel, pictures and the files
+inside a ZIP - read by a separate viewer service with no network, DES-22; the 25 MB limit's
+wording; the print and phone fixes): backup first (section 11). No schema change and no new table.
+
+1. **The usual install.** `install.sh` now also creates the user `anjal-viewer`, adds `anjal` to its
+   group (the webmail reaches the viewer's socket through it, nothing else), installs
+   `/opt/anjal/viewer` and the unit `anjal-viewer.service`, and enables it. Check:
+   ```
+   vm$ id anjal-viewer                                  # uid=...(anjal-viewer) gid=...(anjal-viewer)
+   vm$ id -nG anjal | grep -cw anjal-viewer              # 1
+   vm$ systemctl is-enabled anjal-viewer                 # enabled
+   ```
+2. **The one new webmail setting** (webmail.env), where the viewer listens. Read first:
+   ```
+   vm$ sudo grep -c '^ANJAL_VIEWER_SOCKET=' /etc/anjal/webmail.env   # 0: not there yet
+   ```
+   0 means unset: the webmail would then look for a viewer program beside itself and, not finding
+   one, leave attachments Download only. Add it:
+   ```
+   vm$ echo 'ANJAL_VIEWER_SOCKET=/run/anjal-viewer/viewer.sock' | sudo tee -a /etc/anjal/webmail.env >/dev/null
+   vm$ sudo grep '^ANJAL_VIEWER_SOCKET=' /etc/anjal/webmail.env   # ANJAL_VIEWER_SOCKET=/run/anjal-viewer/viewer.sock
+   ```
+   `ANJAL_VIEWER=off` (not set by default) turns viewing off and leaves every attachment Download
+   only. The DICOM view stays off in rc.29; do not set `ANJAL_VIEWER_DICOM`.
+3. **clamd's stream limit matched to the 25 MB mail limit** (AC-18). Read first:
+   ```
+   vm$ sudo grep -E '^StreamMaxLength' /etc/clamav/clamd.conf   # e.g. StreamMaxLength 25M
+   ```
+   If it already says `StreamMaxLength 25M`, change nothing and go to step 4. Otherwise (another
+   value, or no line), set it and restart clamd:
+   ```
+   vm$ sudo cp -p /etc/clamav/clamd.conf /etc/clamav/clamd.conf.rc28
+   vm$ sudo sed -i '/^StreamMaxLength/d' /etc/clamav/clamd.conf
+   vm$ echo 'StreamMaxLength 25M' | sudo tee -a /etc/clamav/clamd.conf >/dev/null
+   vm$ sudo grep -E '^StreamMaxLength' /etc/clamav/clamd.conf   # StreamMaxLength 25M
+   vm$ sudo systemctl restart clamav-daemon
+   vm$ echo zPING | sudo -u anjal nc -U /var/run/clamav/clamd.ctl   # PONG once ready
+   ```
+   (`dpkg-reconfigure clamav-daemon` would write the file again; if it is ever run, check this line
+   afterwards.)
+4. **Start the viewer, then restart the others**:
+   ```
+   vm$ sudo systemctl start anjal-viewer
+   vm$ sudo test -S /run/anjal-viewer/viewer.sock && echo socket   # socket
+   vm$ sudo systemctl restart anjal-server anjal-webmail
+   vm$ sudo journalctl -u anjal-webmail --since -2min --no-pager | grep 'Viewer:'
+   ```
+   The last line says `Viewer: the anjal-viewer service at /run/anjal-viewer/viewer.sock.`
+5. **The viewer, as the webmail's user** (a small PDF the check makes itself; no mail is read):
+   ```
+   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page
+   vm$ systemctl show anjal-viewer -p PrivateNetwork -p RestrictAddressFamilies -p MemoryMax
+   ```
+   `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, `MemoryMax=1610612736` (1.5 GB).
+6. **In the webmail** (the owner): open a mail with a PDF, a Word file, an Excel file and a ZIP. Each
+   shows in the mail window; Download still gives the file as it came. A password-protected PDF asks
+   for its password. A program inside a ZIP is listed but cannot be opened or downloaded.
+7. Nothing changes for administrators: the recovery sheet prints as before, now with a line asking
+   for a printer rather than "Save as PDF" (AC-15).
+
+**Check** (counts only):
+```
+vm$ systemctl is-active anjal-viewer anjal-server anjal-webmail   # active, three times
+vm$ systemctl show anjal-viewer -p NRestarts --value              # 0
+vm$ pgrep -u anjal-viewer -f -- '--child' | wc -l                  # 2 (kept ready)
+vm$ sudo grep -E '^StreamMaxLength' /etc/clamav/clamd.conf        # StreamMaxLength 25M
+```
+
 **rc.27 to rc.28** (group 1: phones and tablets, the file viewer with archives, the patient
 warning's choices, the recovery sheet that prints white, old evidence sealed - DES-18; the secure
 link - DES-19; mail apps over IMAP with a password per device, and old mail brought in - DES-20;
@@ -2289,6 +2459,10 @@ vm$ sudo systemctl restart clamav-freshclam              # first download; clamd
 vm$ sudo systemctl status clamav-daemon --no-pager | head -5
 vm$ echo zPING | sudo -u anjal nc -U /var/run/clamav/clamd.ctl   # answers PONG once ready
 ```
+
+From rc.29 (AC-18), clamd's stream limit must match the 25 MB mail limit: read
+`StreamMaxLength` in `/etc/clamav/clamd.conf` and, only if it is not `25M`, set it as in the
+rc.28 to rc.29 upgrade step 3 (section 13d).
 
 Then in **both** `/etc/anjal/server.env` and `/etc/anjal/webmail.env`:
 

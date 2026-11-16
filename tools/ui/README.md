@@ -48,9 +48,8 @@ cd tools/ui
 node check.js                       # every check; exit code 1 when anything is found
 node check.js --only names,tips     # some checks
 node check.js --skip reach          # all but pressing every button
-node check.js --only clip --lang hi --strict      # the languages job: Hindi fails like English
-node check.js --only clip --lang ta               # ...and lists Tamil, until the owner's shorter words (D-328)
-node check.js --only clip --lang ta # a language preview: findings listed for the language check, not failed
+node check.js --only clip --lang hi,ta --strict   # the languages job: Hindi and Tamil fail like English (rc.29)
+node check.js --only clip --lang ml # a language preview: findings listed for the language check, not failed
 bash setup.sh stop
 ```
 

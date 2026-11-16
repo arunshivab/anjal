@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- rc.29 (DES-22 §4): what the webmail and the separate anjal-viewer process say to each other.
+       No file library here: the webmail references this, never the libraries themselves. -->
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Anjal.Viewer.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+</Project>

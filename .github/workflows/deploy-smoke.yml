@@ -34,12 +34,16 @@ jobs:
             dotnet publish "src/Anjal.$app/Anjal.$app.csproj" -c Release -r linux-x64 --self-contained true \
               -p:PublishSingleFile=false -p:DebugType=none -o "$rel/${app,,}"
           done
+          # rc.29: the viewer, trimmed and compiled ahead, as publish.ps1 does it.
+          dotnet publish src/Anjal.Viewer/Anjal.Viewer.csproj -c Release -r linux-x64 --self-contained true \
+            -p:PublishTrimmed=true -p:PublishReadyToRun=true -p:PublishSingleFile=false -p:DebugType=none -o "$rel/viewer"
           mkdir -p "$rel/bin"
+          cp tools/viewer_check.py "$rel/bin/"
           cp deploy/backup.sh deploy/restore.sh deploy/install.sh deploy/anjal-firewall.sh deploy/anjal-portcheck.sh deploy/*.service deploy/*.timer deploy/*.example tools/sql/schema.sql "$rel/bin/"
           sed -i 's/\r$//' "$rel"/bin/*.sh "$rel"/bin/*.service "$rel"/bin/*.timer "$rel"/bin/*.example
           # A release built on Windows arrives without executable bits
           # (measured on the production VM); install.sh must cope.
-          chmod -x "$rel/server/Anjal.Server" "$rel/webmail/Anjal.Webmail" "$rel/bin/install.sh"
+          chmod -x "$rel/server/Anjal.Server" "$rel/webmail/Anjal.Webmail" "$rel/viewer/Anjal.Viewer" "$rel/bin/install.sh"
           echo "REL=$rel" >> "$GITHUB_ENV"
 
       - name: Install with the real install.sh and the real units
@@ -48,10 +52,15 @@ jobs:
           sudo bash "$REL/bin/install.sh" "$REL"
           test -x /opt/anjal/server/Anjal.Server
           test -x /opt/anjal/webmail/Anjal.Webmail
+          test -x /opt/anjal/viewer/Anjal.Viewer
+          id anjal-viewer
+          id -nG anjal | grep -qw anjal-viewer
+          test "$(systemctl is-enabled anjal-viewer)" = enabled
           sudo test -d /var/lib/anjal/webmail-keys
           # The units under test are the shipped ones, with no local override.
           test ! -e /etc/systemd/system/anjal-server.service.d
           test ! -e /etc/systemd/system/anjal-webmail.service.d
+          test ! -e /etc/systemd/system/anjal-viewer.service.d
           systemctl show anjal-server -p RestrictAddressFamilies
 
       - name: PostgreSQL, role, database and the shipped schema
@@ -99,6 +108,8 @@ jobs:
       - name: Start both services under their systemd units
         run: |
           set -euo pipefail
+          sudo systemctl start anjal-viewer
+          for i in $(seq 1 20); do sudo test -S /run/anjal-viewer/viewer.sock && break; sleep 1; done
           sudo systemctl start anjal-server anjal-webmail
           # Long enough for a crash loop (RestartSec=5) to show, and for the
           # ACME client to reach Let's Encrypt staging.
@@ -110,9 +121,9 @@ jobs:
       - name: Both stay up, with no restarts and no unhandled exception
         run: |
           set -euo pipefail
-          sudo journalctl -u anjal-server -u anjal-webmail --no-pager > "$RUNNER_TEMP/services.log"
+          sudo journalctl -u anjal-server -u anjal-webmail -u anjal-viewer --no-pager > "$RUNNER_TEMP/services.log"
           cat "$RUNNER_TEMP/services.log"
-          for s in anjal-server anjal-webmail; do
+          for s in anjal-server anjal-webmail anjal-viewer; do
             state=$(systemctl is-active "$s" || true)
             restarts=$(systemctl show "$s" -p NRestarts --value)
             echo "$s: $state, restarts=$restarts"
@@ -133,10 +144,31 @@ jobs:
           if grep -q "Outbound worker started" "$RUNNER_TEMP/services.log"; then
             grep -q "never unencrypted, 13 cipher suites incl. DHE and RSA-GCM" "$RUNNER_TEMP/services.log"
           fi
+          # rc.29 (DES-22 section 4): the webmail found the viewer's service, and the viewer is listening.
+          grep -q "Viewer: the anjal-viewer service at /run/anjal-viewer/viewer.sock." "$RUNNER_TEMP/services.log"
+          grep -q "anjal-viewer: listening on /run/anjal-viewer/viewer.sock" "$RUNNER_TEMP/services.log"
           # DEF-048: the spam filter swallowed the same failure; it must not recur.
           if grep -q "no system DNS resolver" "$RUNNER_TEMP/services.log"; then
             echo "::error::the DNS resolver could not be created under the unit's sandbox"; exit 1
           fi
+
+      - name: The webmail's user reaches the viewer, and the viewer reaches nothing (rc.29)
+        run: |
+          set -euo pipefail
+          # DES-22 section 4.1: the webmail (user anjal, in group anjal-viewer) hands the viewer a file over its
+          # socket; the shipped PDF check is read the same way.
+          sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock
+          # Nobody else may reach the socket's folder.
+          if sudo -u nobody test -r /run/anjal-viewer; then echo "::error::the viewer's folder is open to others"; exit 1; fi
+          # No network, no disk to write, its own memory cap - as shipped.
+          test "$(systemctl show anjal-viewer -p PrivateNetwork --value)" = yes
+          test "$(systemctl show anjal-viewer -p RestrictAddressFamilies --value)" = AF_UNIX
+          test "$(systemctl show anjal-viewer -p ProtectSystem --value)" = strict
+          test "$(systemctl show anjal-viewer -p MemoryMax --value)" = $((1536*1024*1024))
+          test "$(systemctl show anjal-viewer -p User --value)" = anjal-viewer
+          # Its children are its own: two kept ready.
+          sleep 2
+          test "$(pgrep -u anjal-viewer -f -- '--child' | wc -l)" -ge 2
 
       - name: Health, and the network exposure of DEPLOY.md section 1c
         run: |

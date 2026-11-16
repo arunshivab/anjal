@@ -10,7 +10,7 @@
 set -euo pipefail
 
 RELEASE=${1:?usage: install.sh <release-dir>}
-[ -d "$RELEASE/server" ] && [ -d "$RELEASE/webmail" ] || { echo "release dir must contain server/ and webmail/" >&2; exit 2; }
+[ -d "$RELEASE/server" ] && [ -d "$RELEASE/webmail" ] && [ -d "$RELEASE/viewer" ] || { echo "release dir must contain server/, webmail/ and viewer/" >&2; exit 2; }
 
 log() { echo "[install] $*"; }
 
@@ -19,6 +19,13 @@ if ! id anjal >/dev/null 2>&1; then
   useradd --system --home-dir /var/lib/anjal --shell /usr/sbin/nologin --user-group anjal
   log "created user anjal"
 fi
+# rc.29 (DES-22 §4.1, D-358): the viewer runs as its own user; the webmail's user reaches its socket through
+# the viewer's group, and nothing else of it.
+if ! id anjal-viewer >/dev/null 2>&1; then
+  useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin --user-group anjal-viewer
+  log "created user anjal-viewer"
+fi
+usermod -aG anjal-viewer anjal
 install -d -o root  -g root  -m 755 /opt/anjal /opt/anjal/bin
 install -d -o root  -g anjal -m 750 /etc/anjal
 install -d -o anjal -g anjal -m 750 /var/lib/anjal
@@ -27,7 +34,7 @@ install -d -o anjal -g anjal -m 700 /var/mail/anjal
 install -d -o anjal -g anjal -m 750 /var/lib/anjal/evidence
 
 # ---- binaries (self-contained publish output) ----
-for app in server webmail; do
+for app in server webmail viewer; do
   rm -rf "/opt/anjal/$app.new"
   cp -a "$RELEASE/$app" "/opt/anjal/$app.new"
   chown -R root:root "/opt/anjal/$app.new"
@@ -35,6 +42,7 @@ for app in server webmail; do
   find "/opt/anjal/$app.new" -type f -exec chmod 644 {} +
   chmod 755 "/opt/anjal/$app.new/Anjal.Server" 2>/dev/null || true
   chmod 755 "/opt/anjal/$app.new/Anjal.Webmail" 2>/dev/null || true
+  chmod 755 "/opt/anjal/$app.new/Anjal.Viewer" 2>/dev/null || true
   rm -rf "/opt/anjal/$app.old"
   [ -d "/opt/anjal/$app" ] && mv "/opt/anjal/$app" "/opt/anjal/$app.old"
   mv "/opt/anjal/$app.new" "/opt/anjal/$app"
@@ -45,6 +53,8 @@ install -o root -g root -m 755 "$RELEASE/bin/restore.sh" /opt/anjal/bin/restore.
 # Outbound firewall (rc.8, INC-01): installed, not applied - see DEPLOY.md 13f.
 install -o root -g root -m 755 "$RELEASE/bin/anjal-firewall.sh"  /opt/anjal/bin/anjal-firewall.sh
 install -o root -g root -m 755 "$RELEASE/bin/anjal-portcheck.sh" /opt/anjal/bin/anjal-portcheck.sh
+# rc.29: asks the viewer to read a small PDF (DEPLOY.md, rc.29 checks).
+install -o root -g root -m 755 "$RELEASE/bin/viewer_check.py" /opt/anjal/bin/viewer_check.py
 
 # ---- config templates (never overwrite a real config) ----
 for f in server.env webmail.env rclone.conf; do
@@ -55,15 +65,15 @@ for f in server.env webmail.env rclone.conf; do
 done
 
 # ---- systemd ----
-for u in anjal-server.service anjal-webmail.service anjal-backup.service anjal-backup.timer; do
+for u in anjal-server.service anjal-webmail.service anjal-viewer.service anjal-backup.service anjal-backup.timer; do
   install -o root -g root -m 644 "$RELEASE/bin/$u" "/etc/systemd/system/$u"
 done
 systemctl daemon-reload
-systemctl enable anjal-server.service anjal-webmail.service >/dev/null
+systemctl enable anjal-server.service anjal-webmail.service anjal-viewer.service >/dev/null
 # The backup timer is left off until backups are configured and one run has
 # passed (DEPLOY.md section 11). Enabled here, it came alive at the next boot
 # and ran nightly against the unconfigured template (DEF-062).
-log "units installed; server and webmail enabled (not started); backup timer left off until DEPLOY.md section 11"
+log "units installed; server, webmail and viewer enabled (not started); backup timer left off until DEPLOY.md section 11"
 
 # ---- allow the anjal user to run pg_dump/psql via peer auth if local ----
 if command -v psql >/dev/null 2>&1; then

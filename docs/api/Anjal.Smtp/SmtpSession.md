@@ -28,3 +28,4 @@ One connected SMTP client. Implements the RFC 5321 command grammar for the subse
 - **RunAsync** *(method)* - Run the session until the client quits or disconnects. Safe to call once per session.
 - **SanitiseTraceToken** *(method)* - The client's HELO name is untrusted text going into a header; keep only characters that can appear in a host name or address literal.
 - **TryWriteFinalAsync** *(method)* - Best-effort final reply on a session that is closing anyway.
+- **TooLargeReply** *(property)* - rc.29 (AC-18): the size refusal says the limit in MB and where large files belong - a link - in words a sender's own mail program shows them. The limit stays 25 MB.

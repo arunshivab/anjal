@@ -1,0 +1,672 @@
+@* rc.29 (DES-22): a PDF, a Word document, a workbook or an archive shown in the letter area, drawn by the separate
+   viewer process. A file inside an archive (AC-17) opens here too, with the way back to the archive. *@
+@using Anjal.Viewing
+@inject MailboxService Mail
+
+<div class="pvframe">
+<ViewerTab Kind="@TabKind" Words="@TabWords" Facts="@TabFacts" />
+<div class="pvbody pvdoc">
+@if (status is not null && status != ViewStatus.Ok)
+{
+    @Trouble(status)
+}
+else if (kind == KindArchive && archive is not null)
+{
+    <section class="pvzip" aria-label="@L["Inside the archive"]">
+        @if (EntryPlaces.Length > 0)
+        {
+            <p class="pvcrumb"><a class="linkbtn" href="@Link(null)"><LipiIcon Name="chevron-left" Size="14" />@L["Back to the archive"]</a> <b>@entryName</b></p>
+        }
+        @if (archive.Refused is not null)
+        {
+            <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@Refusal(archive.Refused)</span></p>
+        }
+        else
+        {
+            @if (archive.Locked)
+            {
+                @* AC-20: opened with its password, in the viewer only; nothing inside was virus-scanned. *@
+                <p class="notice n-warn readnotice"><LipiIcon Name="lock" Size="16" /><span>@L["These files were not virus-scanned: the archive is locked with a password. They are shown here only and cannot be downloaded one by one; download the whole archive to keep them."]</span></p>
+            }
+            <p class="hint">@L["{n} files, {size} unpacked. Programs are blocked and cannot be taken out."].Replace("{n}", archive.Entries.Count(e => !e.Folder).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{size}", Anjal.Webmail.Components.Layout.MainLayout.Size(archive.Expanded), StringComparison.Ordinal)</p>
+            <div class="zipwrap">
+            <table class="ziptable">
+                <thead><tr><th scope="col">@L["Name"]</th><th scope="col">@L["Size"]</th><th scope="col">@L["Changed"]</th><th scope="col"><span class="sr-only">@L["Show it here"]</span></th></tr></thead>
+                <tbody>
+                @foreach (ArchiveItem e in archive.Entries)
+                {
+                    string place = Place(e.Index);
+                    <tr class="@(e.Blocked ? "zblocked" : null)">
+                        <td><span class="zname" style="--depth: @e.Depth">@if (e.Folder) {<LipiIcon Name="folder" Size="14" />}@e.Name</span></td>
+                        <td class="num">@(e.Folder ? string.Empty : Anjal.Webmail.Components.Layout.MainLayout.Size(e.Size))</td>
+                        <td>@(e.Folder ? string.Empty : Clock.Date(e.Modified))</td>
+                        <td class="zacts">
+                            @if (e.Blocked)
+                            {
+                                <span class="pill pill-bad">@L["Blocked"]</span>
+                            }
+                            else if (e.Unsupported)
+                            {
+                                <span class="pill" title="@L["This archive uses a method Anjal can't open. Download the original."]">@L["Can't open"]</span>
+                            }
+                            else if (!e.Folder)
+                            {
+                                @if (Opens(e.Opens))
+                                {
+                                    <a class="btn btn-s btn-sm" href="@Link(place)" title="@L["Show it here"]">@(e.Opens == FileKinds.Archive ? L["Open"] : L["View"])</a>
+                                }
+                                @if (!archive.Locked)
+                                {
+                                    <a class="iconbtn" href="/message/@MessageId/attachment/@File.Index/zip?entry=@Uri.EscapeDataString(place)" aria-label="@L["Download"] @e.Name" title="@L["Download"]"><LipiIcon Name="download" Size="15" /></a>
+                                }
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+            </div>
+        }
+    </section>
+}
+else
+{
+    @if (EntryPlaces.Length > 0)
+    {
+        <p class="pvcrumb"><a class="linkbtn" href="@Link(ParentPlace)"><LipiIcon Name="chevron-left" Size="14" />@L["Back to the archive"]</a> <b>@entryName</b>
+            @if (!fromLocked)
+            {
+                <a class="iconbtn" href="/message/@MessageId/attachment/@File.Index/zip?entry=@Uri.EscapeDataString(Entry!)" aria-label="@L["Download"] @entryName" title="@L["Download"]"><LipiIcon Name="download" Size="15" /></a>
+            }
+        </p>
+        @if (fromLocked)
+        {
+            <p class="notice n-warn readnotice"><LipiIcon Name="lock" Size="16" /><span>@L["This file was not virus-scanned: the archive is locked with a password. It is shown here only."]</span></p>
+        }
+    }
+    @if (kind == FileKinds.Pdf && pdf is not null)
+    {
+        @Notices(pdf.Notices)
+        <section class="pdfview" data-pdfview data-base="@ViewBase" data-entry="@(Entry ?? string.Empty)" data-pages="@pdf.Pages.Count"
+                 data-word-page="@L["Page {n} of {total}"]" data-word-found="@L["{n} found"]" data-word-none="@L["Not found in this file."]" aria-label="@File.FileName">
+            <div class="pdfbar" role="toolbar" aria-label="@L["Pages"]">
+                <span class="pdfpos" data-pdf-pos aria-live="polite">@L["Page {n} of {total}"].Replace("{n}", "1", StringComparison.Ordinal).Replace("{total}", pdf.Pages.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span>
+                <span class="lh-grow"></span>
+                <button type="button" class="iconbtn" data-pdf-zoom="out" aria-label="@L["Zoom out"]" title="@L["Zoom out"]"><LipiIcon Name="minus" Size="16" /></button>
+                <button type="button" class="iconbtn" data-pdf-zoom="fit" aria-label="@L["Fit"]" title="@L["Fit"]"><LipiIcon Name="fit-page" Size="16" /></button>
+                <button type="button" class="iconbtn" data-pdf-zoom="in" aria-label="@L["Zoom in"]" title="@L["Zoom in"]"><LipiIcon Name="plus" Size="16" /></button>
+                <button type="button" class="iconbtn" data-pdf-thumbs aria-pressed="false" aria-label="@L["Page thumbnails"]" title="@L["Page thumbnails"]"><LipiIcon Name="thumbnails" Size="16" /></button>
+                <form class="pdffind" role="search" method="get" action="@($"{ViewBase}/find")" data-pdf-findform>
+                    <label class="sr-only" for="pdffind-@File.Index">@L["Find in this file"]</label>
+                    <input id="pdffind-@File.Index" class="inp" type="search" name="q" maxlength="200" placeholder="@L["Find in this file"]" data-pdf-find />
+                    <button type="submit" class="iconbtn" aria-label="@L["Find"]" title="@L["Find"]"><LipiIcon Name="search" Size="16" /></button>
+                    <span class="pdffound" data-pdf-found aria-live="polite"></span>
+                    <button type="button" class="iconbtn" data-pdf-hit="prev" hidden aria-label="@L["Previous match"]" title="@L["Previous match"]"><LipiIcon Name="chevron-up" Size="16" /></button>
+                    <button type="button" class="iconbtn" data-pdf-hit="next" hidden aria-label="@L["Next match"]" title="@L["Next match"]"><LipiIcon Name="chevron-down" Size="16" /></button>
+                </form>
+            </div>
+            @if (pdf.Outline.Count > 0)
+            {
+                <details class="pdfoutline">
+                    <summary>@L["Bookmarks"]</summary>
+                    <ul>
+                        @foreach (OutlineLine o in pdf.Outline.Take(500))
+                        {
+                            bool linked = Linked(o);
+                            <li style="--depth: @Math.Min(o.Depth, 8)">
+                                @if (linked)
+                                {
+                                    <a href="#pdf-p@(o.Page)">@o.Title</a>
+                                }
+                                else
+                                {
+                                    <span>@o.Title</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+                </details>
+            }
+            <div class="pdfmain">
+                <nav class="pdfthumbs" data-pdf-thumbstrip hidden aria-label="@L["Page thumbnails"]">
+                    @for (int k = 0; k < pdf.Pages.Count; k++)
+                    {
+                        int n = k;
+                        <a href="#pdf-p@(n)" aria-label="@PageWord(n)"><img loading="lazy" decoding="async" src="@($"{ViewBase}/page/{n}?w=120{EntryQuery}")" alt="" width="120" height="@ThumbHeight(n)" /></a>
+                    }
+                </nav>
+                <div class="pdfpages" data-pdf-pages>
+                    @for (int k = 0; k < pdf.Pages.Count; k++)
+                    {
+                        int n = k;
+                        PageSize size = pdf.Pages[n];
+                        <figure class="pdfpage" id="pdf-p@(n)" data-page="@n" data-w="@Num(size.W)" data-h="@Num(size.H)" style="aspect-ratio: @Num(size.W) / @Num(size.H)">
+                            <img loading="@(n < 2 ? "eager" : "lazy")" decoding="async" src="@($"{ViewBase}/page/{n}?w=1000{EntryQuery}")" alt="@PageWord(n)" data-pdf-img />
+                            <div class="pdftext" data-pdf-text></div>
+                            <div class="pdfmarks" data-pdf-marks aria-hidden="true"></div>
+                        </figure>
+                    }
+                </div>
+            </div>
+        </section>
+    }
+    else if (kind == FileKinds.Word && word is not null)
+    {
+        @Notices(word.Notices)
+        <article class="wordview" lang="">
+            @foreach (WordBlock b in word.Blocks)
+            {
+                @switch (b.K)
+                {
+                    case "h1": <h2 class="wh1">@WordText(b.T, b.R)</h2> break;
+                    case "h2": <h3 class="wh2">@WordText(b.T, b.R)</h3> break;
+                    case "h3": <h4 class="wh3">@WordText(b.T, b.R)</h4> break;
+                    case "h4" or "h5" or "h6": <h5 class="wh4">@WordText(b.T, b.R)</h5> break;
+                    case "li": <p class="wli" style="--level: @Math.Clamp(b.L, 1, 5)"><span aria-hidden="true">•</span> @WordText(b.T, b.R)</p> break;
+                    case "table":
+                        <div class="wtablewrap">
+                            <table class="wtable">
+                                @for (int r = 0; r < (b.Rows?.Count ?? 0); r++)
+                                {
+                                    List<string> row = b.Rows![r];
+                                    <tr>
+                                        @for (int c = 0; c < row.Count; c++)
+                                        {
+                                            List<WordRun>? cellRuns = b.RunRows is { } rr && r < rr.Count && c < rr[r].Count ? rr[r][c] : null;
+                                            @if (r == 0 && b.Rows.Count > 1) { <th scope="col">@WordText(row[c], cellRuns)</th> } else { <td>@WordText(row[c], cellRuns)</td> }
+                                        }
+                                    </tr>
+                                }
+                            </table>
+                        </div>
+                        break;
+                    case "img":
+                        @if (b.Img >= 0)
+                        {
+                            <img class="wimg" loading="lazy" decoding="async" src="@($"{ViewBase}/word-picture/{b.Img}{EntryQueryFirst}")" alt="@(b.Alt ?? string.Empty)" />
+                        }
+                        else
+                        {
+                            <p class="hint wnoimg">@L["A picture of a kind Anjal does not show."]</p>
+                        }
+                        break;
+                    default:
+                        @if (string.IsNullOrEmpty(b.T) && b.R is null) { <p class="wempty"></p> } else { <p>@WordText(b.T, b.R)</p> }
+                        break;
+                }
+            }
+        </article>
+    }
+    else if (kind == FileKinds.Sheet && sheet is not null)
+    {
+        @Notices(sheet.Notices)
+        @if (sheet.Sheets.Count > 1)
+        {
+            <nav class="sheettabs" aria-label="@L["Sheets"]">
+                @for (int t = 0; t < sheet.Sheets.Count; t++)
+                {
+                    int n = t;
+                    SheetTab tab = sheet.Sheets[n];
+                    <a class="sheettab @(n == sheet.Index ? "on" : null) @(tab.Hidden ? "hid" : null)" href="@Link(Entry, n)" aria-current="@(n == sheet.Index ? "page" : null)" title="@(tab.Hidden ? L["A hidden sheet"] : null)">@tab.Name</a>
+                }
+            </nav>
+        }
+        @if (sheet.Cut)
+        {
+            <p class="notice n-info readnotice"><LipiIcon Name="info" Size="16" /><span>@RowsWord()</span></p>
+        }
+        <div class="sheetwrap" tabindex="0" role="region" aria-label="@(sheet.Sheets.Count > 0 ? sheet.Sheets[sheet.Index].Name : File.FileName)">
+            <table class="sheetgrid">
+                <thead><tr><th scope="col" class="corner"><span class="sr-only">@L["Row"]</span></th>
+                    @for (int c = 1; c <= sheet.Columns; c++)
+                    {
+                        int col = c;
+                        @if (!hiddenColumns.Contains(col))
+                        {
+                            <th scope="col" style="@ColumnStyle(col)">@ColumnName(col)</th>
+                        }
+                    }
+                </tr></thead>
+                <tbody>
+                @foreach (SheetRow row in sheet.Rows)
+                {
+                    <tr>
+                        <th scope="row">@row.N</th>
+                        @for (int c = 1; c <= sheet.Columns; c++)
+                        {
+                            int col = c;
+                            if (hiddenColumns.Contains(col) || covered.Contains((row.N, col)))
+                            {
+                                continue;
+                            }
+                            SheetCell? cell = row.Cells.FirstOrDefault(x => x.C == col);
+                            (int rs, int cs) = spans.TryGetValue((row.N, col), out (int, int) span) ? span : (1, 1);
+                            <td rowspan="@(rs > 1 ? rs : null)" colspan="@(cs > 1 ? cs : null)" title="@(cell?.V)" class="@(IsNumber(cell) ? "num" : null)">@(cell?.D)</td>
+                        }
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (kind == FileKinds.Picture && EntryPlaces.Length > 0)
+    {
+        <img class="pvimg" src="@($"{ViewBase}/picture?entry={Uri.EscapeDataString(Entry!)}")" alt="@entryName" data-viewer-img />
+    }
+    else if (kind == FileKinds.Dicom && dicom is not null)
+    {
+        <section class="dicomview">
+            <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@L["A preview, not for diagnosis."]</span></p>
+            @if (dicom.Incomplete)
+            {
+                <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@L["Incomplete file: what is shown is what could be read."]</span></p>
+            }
+            <p class="hint">@string.Join(" · ", new[] { dicom.Modality, dicom.StudyDate, dicom.Series, dicom.Rows is null ? null : dicom.Rows + " × " + dicom.Columns, dicom.Frames, dicom.TransferSyntax }.Where(x => !string.IsNullOrEmpty(x)).Select(x => x!.Length > 256 ? x[..256] : x))</p>
+        </section>
+    }
+    else
+    {
+        @Trouble(ViewStatus.Unsupported)
+    }
+}
+</div>
+</div>
+
+@code {
+    private const string KindArchive = "archive";
+
+    /// <summary>The mail.</summary>
+    [Parameter, EditorRequired] public Guid MessageId { get; set; }
+
+    /// <summary>The attachment.</summary>
+    [Parameter, EditorRequired] public AttachmentView File { get; set; } = default!;
+
+    /// <summary>The reader's link for this attachment ("...?preview=2"); the viewer adds the entry and the sheet.</summary>
+    [Parameter, EditorRequired] public string FileLink { get; set; } = string.Empty;
+
+    /// <summary>A file inside the archive ("3", "3/5"), or null.</summary>
+    [Parameter] public string? Entry { get; set; }
+
+    /// <summary>A workbook's sheet (0-based).</summary>
+    [Parameter] public int SheetIndex { get; set; }
+
+    /// <summary>The reader's words.</summary>
+    [Parameter, EditorRequired] public Lexicon L { get; set; } = default!;
+
+    /// <summary>The reader's clock.</summary>
+    [Parameter, EditorRequired] public ZonedClock Clock { get; set; } = default!;
+
+    [CascadingParameter] private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
+
+    [CascadingParameter] private HttpContext? Http { get; set; }
+
+    private string? status;
+    private string? statusDetail;
+    private bool fromLocked;
+    private string? kind;
+    private string? entryName;
+    private ArchiveView? archive;
+    private PdfInfo? pdf;
+    private WordView? word;
+    private SheetView? sheet;
+    private DicomView? dicom;
+    private readonly HashSet<int> hiddenColumns = new();
+    private readonly HashSet<(int, int)> covered = new();
+    private readonly Dictionary<(int, int), (int, int)> spans = new();
+
+    private string ViewBase => $"/message/{MessageId}/attachment/{File.Index}/view";
+
+    private string EntryQuery => string.IsNullOrEmpty(Entry) ? string.Empty : "&entry=" + Uri.EscapeDataString(Entry);
+
+    private string EntryQueryFirst => string.IsNullOrEmpty(Entry) ? string.Empty : "?entry=" + Uri.EscapeDataString(Entry);
+
+    private int[] EntryPlaces => Anjal.Webmail.Services.ViewerLinks.Places(Entry);
+
+    private string? ParentPlace => EntryPlaces.Length > 1 ? EntryPlaces[0].ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        status = null;
+        statusDetail = null;
+        fromLocked = false;
+        archive = null;
+        pdf = null;
+        word = null;
+        sheet = null;
+        dicom = null;
+        hiddenColumns.Clear();
+        covered.Clear();
+        spans.Clear();
+        if (AuthState is null || WebmailAuthService.MailboxIdOf((await AuthState).User) is not Guid mailboxId || Http is null)
+        {
+            status = ViewStatus.Unavailable;
+            return;
+        }
+        string session = Anjal.Webmail.ViewerEndpoints.SessionKey(Http, mailboxId);
+        string language = L.Language;
+        string? fileKind = MailboxService.PreviewType(File) switch
+        {
+            MailboxService.ZipType => KindArchive,
+            "application/pdf" => FileKinds.Pdf,
+            MailboxService.WordType => FileKinds.Word,
+            MailboxService.SheetType => FileKinds.Sheet,
+            _ => null,
+        };
+        if (fileKind == KindArchive && EntryPlaces.Length > 0)
+        {
+            // A file inside the archive: what it is comes from the listing of the archive that holds it.
+            string? holder = EntryPlaces.Length > 1 ? EntryPlaces[0].ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
+            ViewResult list = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.ArchiveList, Entry = holder }, session, language);
+            ArchiveView? parent = list.Ok ? ViewJson.ReadArchive(list.Answer.Json) : null;
+            ArchiveItem? item = parent?.Entries.FirstOrDefault(e => e.Index == EntryPlaces[^1]);
+            if (!list.Ok || item is null || item.Blocked || item.Folder || !Opens(item.Opens))
+            {
+                status = list.Ok ? (item?.Unsupported == true ? ViewStatus.Unsupported : ViewStatus.Refused) : list.Answer.Status;
+                statusDetail = list.Ok ? (item?.Unsupported == true ? ZipMethod : null) : list.Answer.Detail;
+                return;
+            }
+            entryName = item.Name;
+            fromLocked = parent!.Locked;
+            fileKind = item.Opens == FileKinds.Archive ? KindArchive : item.Opens;
+        }
+        kind = fileKind;
+        ViewResult r;
+        switch (kind)
+        {
+            case KindArchive:
+                r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.ArchiveList, Entry = Entry }, session, language);
+                archive = r.Ok ? ViewJson.ReadArchive(r.Answer.Json) : null;
+                break;
+            case FileKinds.Pdf:
+                r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.PdfInfo, Entry = Entry }, session, language);
+                pdf = r.Ok ? ViewJson.ReadPdfInfo(r.Answer.Json) : null;
+                break;
+            case FileKinds.Word:
+                r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.Word, Entry = Entry }, session, language);
+                word = r.Ok ? ViewJson.ReadWord(r.Answer.Json) : null;
+                break;
+            case FileKinds.Sheet:
+                r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.Sheet, Sheet = Math.Max(0, SheetIndex), Entry = Entry }, session, language);
+                sheet = r.Ok ? ViewJson.ReadSheet(r.Answer.Json) : null;
+                if (sheet is not null)
+                {
+                    Layout(sheet);
+                }
+                break;
+            case FileKinds.Dicom:
+                r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.Dicom, Entry = Entry }, session, language);
+                dicom = r.Ok ? ViewJson.ReadDicom(r.Answer.Json) : null;
+                break;
+            case FileKinds.Picture:
+                r = ViewResult.Of(ViewStatus.Ok);
+                break;
+            default:
+                r = ViewResult.Of(ViewStatus.Unsupported);
+                break;
+        }
+        status = r.Answer.Status;
+        statusDetail = r.Answer.Detail;
+    }
+
+    // rc.29 (owner, 15 Nov, option A): the label on the box - the kind, then what the file holds and where it is.
+    private string TabKind => kind switch
+    {
+        KindArchive => "zip",
+        FileKinds.Pdf => "pdf",
+        FileKinds.Word => "doc",
+        FileKinds.Sheet => "xls",
+        FileKinds.Picture => "img",
+        FileKinds.Dicom => "dicom",
+        _ => string.Empty,
+    };
+
+    private string? TabWords => TabKind switch
+    {
+        "zip" => L["ZIP archive"],
+        "pdf" => L["PDF document"],
+        "doc" => L["Word document"],
+        "xls" => L["Excel workbook"],
+        "img" => L["Picture"],
+        "dicom" => L["DICOM image"],
+        _ => null,
+    };
+
+    private string[] TabFacts
+    {
+        get
+        {
+            var facts = new List<string>();
+            string? count = kind switch
+            {
+                KindArchive when archive is { Refused: null } => Count(archive.Entries.Count(e => !e.Folder), L["1 file"], L["{n} files"]),
+                FileKinds.Pdf when pdf is not null => Count(pdf.Pages.Count, L["1 page"], L["{n} pages"]),
+                FileKinds.Sheet when sheet is not null => Count(Math.Max(1, sheet.Sheets.Count(t => !t.Hidden)), L["1 sheet"], L["{n} sheets"]),
+                _ => null,
+            };
+            if (count is not null)
+            {
+                facts.Add(count);
+            }
+            if (EntryPlaces.Length > 0)
+            {
+                facts.Add(L["in {name}"].Replace("{name}", File.FileName, StringComparison.Ordinal));
+            }
+            return facts.ToArray();
+        }
+    }
+
+    private string Count(int n, string one, string many) =>
+        n == 1 ? one : many.Replace("{n}", n.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+
+    // AC-20: the viewer's detail for an entry packed with a method Anjal cannot unpack.
+    private const string ZipMethod = "zip-method";
+
+    // AC-20: a password asked for by an archive ("archive:" and its place) is posted for that archive, not the file.
+    private string PasswordEntry => statusDetail is string d && d.StartsWith("archive:", StringComparison.Ordinal) ? d["archive:".Length..] : Entry ?? string.Empty;
+
+    private bool ForArchive => statusDetail?.StartsWith("archive:", StringComparison.Ordinal) == true || (kind == KindArchive && EntryPlaces.Length < 2);
+
+    // Where Download goes when a file cannot be shown: the file itself, or the whole archive for a file inside a
+    // locked one (its files are never given out one by one, AC-20).
+    private string TroubleDownload => EntryPlaces.Length > 0 && !fromLocked && statusDetail != "locked"
+        ? $"/message/{MessageId}/attachment/{File.Index}/zip?entry={Uri.EscapeDataString(Entry!)}"
+        : $"/message/{MessageId}/attachment/{File.Index}";
+
+    // Which kinds open here: a DICOM file only when the switch is on (D-372).
+    private bool Opens(string? opens) => opens is not null && (opens != FileKinds.Dicom || Mail.Viewer?.DicomOn == true);
+
+    private string Place(int index) => EntryPlaces.Length == 0 ? index.ToString(System.Globalization.CultureInfo.InvariantCulture) : EntryPlaces[0].ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private string Link(string? entry, int sheetIndex = 0) => FileLink
+        + (string.IsNullOrEmpty(entry) ? string.Empty : "&entry=" + Uri.EscapeDataString(entry))
+        + (sheetIndex > 0 ? "&sheet=" + sheetIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty);
+
+    private string PageWord(int n) => L["Page {n} of {total}"].Replace("{n}", (n + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{total}", (pdf?.Pages.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
+
+    private int ThumbHeight(int n) => pdf is null || pdf.Pages[n].W <= 0 ? 160 : (int)Math.Round(120 * pdf.Pages[n].H / pdf.Pages[n].W);
+
+    private bool Linked(OutlineLine o) => pdf is not null && o.Page >= 0 && o.Page < pdf.Pages.Count;
+
+    private static string Num(double v) => v.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    private string RowsWord() => sheet is not null && sheet.Total > sheet.Shown
+        ? L["{shown} of {total} rows shown. Download it to see the rest."].Replace("{shown}", sheet.Shown.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{total}", sheet.Total.ToString("N0", System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)
+        : L["The first 2,000 rows are shown. Download it to see the rest."];
+
+    private static string ColumnName(int c)
+    {
+        string name = string.Empty;
+        while (c > 0)
+        {
+            int m = (c - 1) % 26;
+            name = (char)('A' + m) + name;
+            c = (c - 1) / 26;
+        }
+        return name;
+    }
+
+    private string? ColumnStyle(int c)
+    {
+        double w = sheet is not null && c - 1 < sheet.Widths.Count ? sheet.Widths[c - 1] : 0;
+        return w > 0 ? "min-width: " + Num(Math.Min(w, 120) * 0.6) + "em" : null;
+    }
+
+    private static bool IsNumber(SheetCell? cell) => cell?.V is string v && double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out _);
+
+    // Merged ranges: the first cell spans the range; the others are not drawn.
+    private void Layout(SheetView s)
+    {
+        foreach (int c in s.HiddenColumns)
+        {
+            hiddenColumns.Add(c);
+        }
+        foreach (string range in s.Merges.Take(5000))
+        {
+            string[] ends = range.Split(':');
+            if (ends.Length != 2 || Cell(ends[0]) is not (int r1, int c1) || Cell(ends[1]) is not (int r2, int c2) || r2 < r1 || c2 < c1 || (long)(r2 - r1 + 1) * (c2 - c1 + 1) > 10000)
+            {
+                continue;
+            }
+            spans[(r1, c1)] = (r2 - r1 + 1, c2 - c1 + 1);
+            for (int r = r1; r <= r2; r++)
+            {
+                for (int c = c1; c <= c2; c++)
+                {
+                    if (r != r1 || c != c1)
+                    {
+                        covered.Add((r, c));
+                    }
+                }
+            }
+        }
+    }
+
+    private static (int Row, int Column)? Cell(string a)
+    {
+        (int column, int row) = Anjal.Webmail.Services.ViewerLinks.CellOf(a);
+        return column > 0 && row > 0 ? (row, column) : null;
+    }
+
+    // AC-24: a Word paragraph's or cell's text, run by run, with the formatting the library resolved: bold, italic,
+    // underline, strikethrough, raised or lowered, capitals. Every piece of the file's text is added as text, never as
+    // markup; a run that is a line break becomes <br>. With no runs (the text is plain) the text is shown as it is.
+    private static RenderFragment WordText(string? text, List<WordRun>? runs) => builder =>
+    {
+        if (runs is null)
+        {
+            builder.AddContent(0, text);
+            return;
+        }
+        foreach (WordRun r in runs)
+        {
+            if (r.T == "\n")
+            {
+                builder.OpenElement(1, "br");
+                builder.CloseElement();
+                continue;
+            }
+            int open = 0;
+            foreach ((bool on, string tag, string? css) in new (bool, string, string?)[]
+            {
+                (r.B, "strong", null),
+                (r.I, "em", null),
+                (r.U, "u", null),
+                (r.S, "s", null),
+                (r.P == "sup", "sup", null),
+                (r.P == "sub", "sub", null),
+                (r.C == "caps", "span", "wcaps"),
+                (r.C == "small", "span", "wsmall"),
+            })
+            {
+                if (!on)
+                {
+                    continue;
+                }
+                builder.OpenElement(2, tag);
+                if (css is not null)
+                {
+                    builder.AddAttribute(3, "class", css);
+                }
+                open++;
+            }
+            builder.AddContent(4, r.T);
+            for (; open > 0; open--)
+            {
+                builder.CloseElement();
+            }
+        }
+    };
+
+    private RenderFragment Notices(IReadOnlyList<string> codes) => __builder =>
+    {
+        foreach (string code in codes.Distinct())
+        {
+            string text = code switch
+            {
+                ViewNotices.Partial => L["Not every part could be shown."],
+                ViewNotices.Macros => L["This document has macros. Anjal shows its text only; Word or Excel may run them if you open it there."],
+                ViewNotices.Active => L["This document has active content, such as linked or embedded objects. Anjal shows its text only."],
+                ViewNotices.PdfActive => L["This PDF has scripts, actions or embedded files. They are never run here."],
+                ViewNotices.Incomplete => L["Incomplete file: what is shown is what could be read."],
+                ViewNotices.Xfa => L["This PDF is a form of a kind that may show little here. Download it to fill it in."],
+                ViewNotices.ManyPages => L["Only the first 2,000 pages are shown."],
+                _ => string.Empty,
+            };
+            if (text.Length == 0)
+            {
+                continue;
+            }
+            <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@text</span>
+                @if (code == ViewNotices.PdfActive)
+                {
+                    <a class="btn btn-s btn-sm" href="@($"{ViewBase}/clean{EntryQueryFirst}")">@L["Download without them"]</a>
+                }
+            </p>
+        }
+    };
+
+    private RenderFragment Trouble(string why) => __builder =>
+    {
+        if (why is ViewStatus.NeedsPassword or ViewStatus.WrongPassword or ViewStatus.WrongOrDamaged)
+        {
+            <form class="pvpassword" method="post" action="@($"{ViewBase}/password")">
+                <AntiforgeryToken />
+                <input type="hidden" name="entry" value="@PasswordEntry" />
+                <input type="hidden" name="back" value="@Link(Entry, SheetIndex)" />
+                <p class="notice n-info readnotice"><LipiIcon Name="lock" Size="16" /><span>@(why switch
+                {
+                    ViewStatus.WrongPassword => L["That password does not open it. Try again."],
+                    ViewStatus.WrongOrDamaged => L["The password is wrong, or the file is damaged. Try the password again, or download the whole archive."],
+                    _ => ForArchive ? L["This archive has a password."] : L["This file has a password."],
+                })</span></p>
+                <label class="modal-field">@L["Password"]<input class="inp" type="password" name="password" autocomplete="off" maxlength="256" required /></label>
+                <button type="submit" class="btn btn-p">@L["Open"]</button>
+                <p class="hint">@L["The password is used for this view only and is never stored."]</p>
+            </form>
+            return;
+        }
+        string text = why switch
+        {
+            ViewStatus.Unavailable => L["The viewer is not running, so this file cannot be shown here. Download it to open it."],
+            ViewStatus.TooLarge => L["Too large or too complex to show here. Download it instead."],
+            ViewStatus.TooSlow => L["Took too long to show. Download it instead."],
+            ViewStatus.Damaged => L["This file is damaged, so it cannot be shown here."],
+            ViewStatus.Busy => L["The viewer is busy. Try again in a moment."],
+            ViewStatus.Refused => L["Anjal does not open this file."],
+            ViewStatus.Unsupported when statusDetail == ZipMethod => L["This archive uses a method Anjal can't open. Download the original."],
+            ViewStatus.Unsupported => L["Anjal does not show this kind of file here."],
+            _ => L["This file could not be shown."],
+        };
+        <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@text</span>
+            <a class="btn btn-s btn-sm" href="@TroubleDownload">@L["Download"]</a></p>
+    };
+
+    private string Refusal(string why) => why switch
+    {
+        ArchiveRefusals.TooMany => L["This archive holds too many files to list here. Download it to look inside."],
+        ArchiveRefusals.TooLarge or ArchiveRefusals.TooPacked => L["This archive would be far larger unpacked than it looks, so Anjal does not open it. Download it only if you trust the sender."],
+        ArchiveRefusals.Unsupported => L["This archive uses a method Anjal can't open. Download the original."],
+        ArchiveRefusals.TooDeep => L["Anjal opens an archive inside an archive, but not one level deeper. Download it to look inside."],
+        _ => L["This archive cannot be read. Download it to look inside."],
+    };
+}

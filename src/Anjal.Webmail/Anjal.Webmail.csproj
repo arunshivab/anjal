@@ -8,6 +8,10 @@
     <ProjectReference Include="..\Anjal.Smtp\Anjal.Smtp.csproj" />
     <ProjectReference Include="..\Anjal.Spam\Anjal.Spam.csproj" />
     <ProjectReference Include="..\Anjal.Store\Anjal.Store.csproj" />
+    <ProjectReference Include="..\Anjal.Viewing\Anjal.Viewing.csproj" />
+    <!-- rc.29 (DES-22 §11): built with the webmail so a developer's run finds it, but never referenced - the
+         webmail speaks to the viewer over its socket and carries none of the file libraries. -->
+    <ProjectReference Include="..\Anjal.Viewer\Anjal.Viewer.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
 
   <ItemGroup>

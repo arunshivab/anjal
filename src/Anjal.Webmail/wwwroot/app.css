@@ -1809,8 +1809,27 @@ textarea.railinp { resize: vertical; }
 .pvpdf { width: 100%; height: 100%; min-height: calc(60vh / var(--z, 1)); border: 0; border-radius: 6px; background: #fff; }
 /* rc.28 (DES-18 §10, R10 [10b]/[10c]): the viewer - the mail's files beside the one shown, its tools,
    and an archive's list. The picture is turned and zoomed by the script (no page reload). */
-.pvwrap { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; }
+.pvwrap { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; container-type: inline-size; }
 .pvwrap .pvbody { flex: 1 1 auto; min-width: 0; }
+/* rc.29 (owner, 15 Nov, option A): the box, and the label of what it holds sitting half in and half out of its top
+   edge - the kind in the file strip's colour (.ftag), then the pages, sheets or files and the archive it is in. */
+.pvframe { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative; padding-top: 13px; }
+.pvframe > .pvbody { flex: 1 1 auto; min-height: 0; padding-top: 24px; }
+.pvframe > .pvbody.pvdoc { padding-top: 22px; }
+.pvwrap > .pvstrip { margin-top: 13px; }
+.pvtab { position: absolute; top: 0; left: 16px; z-index: 1; box-sizing: border-box; max-width: calc(100% - 32px); height: 26px; display: inline-flex; align-items: center; gap: 6px;
+         padding: 0 12px 0 9px; border-radius: 999px; background: var(--surface-100); border: 1px solid var(--line); box-shadow: var(--lift);
+         font-size: 12.5px; line-height: 1; white-space: nowrap; overflow: hidden; color: var(--ink); }
+.pvtab svg { flex: 0 0 auto; }
+.pvtab b { flex: 0 0 auto; font-weight: 650; }
+.pvfact { flex: 0 0 auto; color: var(--ink-muted); }
+.pvfact:last-child { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; } /* "in Audit-papers.zip" gives way first; the count stays whole */
+.pvtab-pdf b, .pvtab-pdf svg { color: var(--danger); }
+.pvtab-img b, .pvtab-img svg { color: color-mix(in srgb, var(--label-4) 75%, var(--ink)); }
+.pvtab-dicom b, .pvtab-dicom svg { color: color-mix(in srgb, var(--label-6) 75%, var(--ink)); }
+.pvtab-doc b, .pvtab-doc svg { color: color-mix(in srgb, var(--label-2) 75%, var(--ink)); }
+.pvtab-xls b, .pvtab-xls svg { color: color-mix(in srgb, var(--label-5) 75%, var(--ink)); }
+.pvtab-zip b, .pvtab-zip svg { color: color-mix(in srgb, var(--label-3) 75%, var(--ink)); }
 .pvstrip { flex: 0 0 180px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
 .pvfile { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px; border-radius: 8px; color: var(--ink); text-decoration: none; font-size: 13px; }
 .pvfile .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1825,6 +1844,9 @@ textarea.railinp { resize: vertical; }
 .ziptable .zname { display: inline-flex; align-items: center; gap: 6px; padding-left: calc(var(--depth, 0) * 18px); overflow-wrap: anywhere; }
 .ziptable tr.zblocked .zname { color: var(--ink-muted); text-decoration: line-through; }
 @media (max-width: 1023px) { .pvstrip { display: none; } }
+/* rc.29: the strip gives way whenever the letter area itself is narrow (the rail and the list open on a laptop), so
+   the file keeps the width; the bar's previous and next buttons still move between the files. */
+@container (max-width: 639px) { .pvstrip { display: none; } .wordview { padding: 20px 18px; } }
 
 /* Search filters (UX-05, the board GapSearch). */
 .sfield { position: relative; }
@@ -2932,7 +2954,7 @@ dialog.nsdialog { border: 0; padding: 24px 26px 22px; width: min(480px, calc(cal
 dialog.nsdialog::backdrop { background: color-mix(in srgb, var(--ink) 30%, transparent); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
 dialog.nsdialog .nsform { display: flex; flex-direction: column; gap: 14px; }
 dialog.nsdialog h2 { margin: 0; font-size: 18px; letter-spacing: -0.01em; }
-dialog.nsdialog .modal-actions { display: flex; align-items: center; gap: 8px; }
+dialog.nsdialog .modal-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } /* rc.29 (owner, 11 Nov): on a phone "Never for this sender" went off the left edge */
 
 /* rc.15 (owner, 7 Oct): a contact's mail between you - two numbers, each opening its list. */
 .ctnums { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 4px 0 2px; }
@@ -3476,7 +3498,7 @@ a.authbtn { color: var(--on-brand); }
 .eenclosed .attrow { display: flex; align-items: center; gap: 10px; height: 40px; margin: 0 0 6px; padding: 0 6px 0 6px; border-radius: 12px; background: var(--env-row);
        box-shadow: var(--shadow-sm); }
 .eenclosed .attname { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 8px; color: var(--ink); text-decoration: none; font-size: 13.5px; font-weight: 600; }
-.eenclosed .attname .fn { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eenclosed .attname .fn { flex: 1 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .eenclosed .attname .mt { flex: 0 0 auto; white-space: nowrap; font-size: 12px; font-weight: 500; color: var(--ink-muted); }
 .eenclosed .dlic { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; color: var(--ink-muted); }
 .eenclosed .dlic:hover { background: var(--surface-inset); color: var(--ink); }
@@ -4218,6 +4240,9 @@ a.cfig:hover { border-color: var(--brand); }
 @media (max-width: 719px), (max-height: 480px) and (max-width: 950px) {
   .lajnabtn { bottom: 76px; right: 12px; padding: 0 12px; }
   .lajnabtn span { display: none; }
+  /* rc.29 (owner, 11 Nov): on an open mail the Reply, Reply all and Forward row sits at the foot of the
+     screen and the Lajna button covered Forward - it rises above the row there. */
+  body:has(.letterend) .lajnabtn { bottom: 136px; }
   .lajna { right: 0; bottom: 0; width: calc(100vw / var(--z, 1)); max-width: none; height: calc(100dvh / var(--z, 1)); border-radius: 0; }
 }
 @media print { .lajnabtn, .lajna { display: none !important; } }
@@ -4418,6 +4443,10 @@ html[data-zoom="80"] { --z: 0.8; zoom: 0.8; }
 .sheetacts { display: flex; flex-wrap: wrap; gap: 8px; }
 /* rc.28 (D-331): "Change the mail" sits at the end of the patient warning. */
 .notice .pw-change { flex: none; margin-left: auto; align-self: center; }
+/* rc.29 (owner, 11 Nov): paper is never dark. A dark theme sets color-scheme: dark, and Chrome then
+   paints the page margins dark on paper whatever the page's own background says - a black frame of
+   ink round the sheet. Every print is light. */
+@media print { :root, html[data-theme] { color-scheme: light !important; } }
 @media print {
   @page { margin: 14mm; }
   html:has(.sheetcard), html:has(.sheetcard) body { background: #fff !important; color: #000 !important; }
@@ -4760,3 +4789,115 @@ button.tdrow-open { width: 100%; border: 0; background: none; color: inherit; fo
   .chatback { display: inline-flex; }
   .chatlist { border-right: 0; }
 }
+/* ===================== rc.29 (DES-22): attachments viewed in the mail window ===================== */
+.pvbody.pvdoc { display: block; padding: 12px; }
+.pvcrumb { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
+.pvpassword { display: flex; flex-direction: column; gap: 10px; max-width: 420px; margin: 8px auto; }
+.ziptable td.zacts { white-space: nowrap; text-align: right; }
+/* rc.29: a short name never breaks in the middle; the date gives way first, and only a long name wraps. */
+.ziptable td:first-child { min-width: 8em; }
+/* rc.29: on a narrow card (a phone) the date gives way, so the name, size and buttons always fit. */
+.zipwrap { container-type: inline-size; }
+@container (max-width: 479px) { .ziptable th:nth-child(3), .ziptable td:nth-child(3) { display: none; } .ziptable td:first-child { min-width: 6em; } }
+.ziptable td.zacts .btn { margin-right: 6px; }
+/* PDF (D-359): server-drawn pages with their text laid over them. */
+.pdfview { display: flex; flex-direction: column; gap: 10px; }
+.pdfbar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 10px; background: var(--surface-100); border: 1px solid var(--line); }
+.pdfpos { font-size: 13px; color: var(--ink-muted); white-space: nowrap; }
+.pdffind { display: flex; align-items: center; gap: 4px; flex: 0 1 300px; min-width: 0; }
+.pdffind .inp { flex: 1 1 auto; min-width: 0; height: 34px; }
+.pdffound { font-size: 12px; color: var(--ink-muted); white-space: nowrap; }
+/* rc.29: the bar is a row with a text box (Find), so its zoom and thumbnail buttons are regular like Find's (one height on a row). */
+@media (min-width: 720px) and (min-height: 481px), (min-width: 951px) { .pdfbar > .iconbtn { width: var(--h-reg); height: var(--h-reg); } }
+.pdfoutline { background: var(--surface-100); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; font-size: 13px; }
+.pdfoutline ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow: auto; }
+.pdfoutline li { padding: 2px 0 2px calc(var(--depth, 0) * 14px); }
+.pdfmain { display: flex; gap: 12px; align-items: flex-start; }
+.pdfthumbs { flex: 0 0 140px; display: flex; flex-direction: column; gap: 8px; max-height: calc(80vh / var(--z, 1)); overflow-y: auto; position: sticky; top: 52px; }
+.pdfthumbs img { display: block; width: 120px; height: auto; background: #fff; border-radius: 4px; box-shadow: 0 1px 4px rgba(16, 24, 40, 0.25); }
+.pdfpages { flex: 1 1 auto; min-width: 0; overflow-x: auto; --pdfzoom: 1; }
+.pdfpage { position: relative; width: calc(min(100%, 900px) * var(--pdfzoom)); margin: 0 auto 14px; background: #fff; border-radius: 4px; box-shadow: 0 6px 24px -8px rgba(16, 24, 40, 0.35); overflow: hidden; }
+.pdfpages.zoomed .pdfpage { max-width: none; }
+.pdfpage img { display: block; width: 100%; height: 100%; }
+.pdftext { position: absolute; inset: 0; overflow: hidden; line-height: 1; }
+.pdftext span { position: absolute; white-space: pre; color: transparent; transform-origin: 0 0; cursor: text; font-family: sans-serif; }
+.pdftext span::selection { background: rgba(27, 110, 194, 0.35); color: transparent; }
+.pdfmarks { position: absolute; inset: 0; pointer-events: none; }
+.pdfmark { position: absolute; background: rgba(250, 204, 21, 0.38); border-radius: 2px; }
+.pdfmark.on { background: rgba(249, 115, 22, 0.5); outline: 2px solid rgba(249, 115, 22, 0.9); }
+/* Word as text (AC-06): Anjal's own reading page, no styling from the file. */
+.wordview { max-width: 820px; margin: 0 auto; padding: 28px 32px; border-radius: 10px; background: var(--surface-100); color: var(--ink); font-size: 15px; line-height: 1.6; overflow-wrap: break-word; }
+.wordview p { margin: 0 0 10px; }
+.wordview .wempty { min-height: 8px; }
+/* AC-24: run formatting from the file. Capitals are shown, the text itself is unchanged; raised and lowered text keep the line height. */
+.wordview .wcaps { text-transform: uppercase; }
+.wordview .wsmall { font-variant: small-caps; }
+.wordview sup, .wordview sub { line-height: 0; }
+.wordview .wh1 { font-size: 24px; margin: 18px 0 10px; }
+.wordview .wh2 { font-size: 20px; margin: 16px 0 8px; }
+.wordview .wh3 { font-size: 17px; margin: 14px 0 6px; }
+.wordview .wh4 { font-size: 15px; margin: 12px 0 6px; }
+.wordview .wli { padding-left: calc(var(--level, 1) * 20px); text-indent: -12px; }
+.wordview .wtablewrap { overflow-x: auto; margin: 6px 0 14px; }
+.wordview .wtable { border-collapse: collapse; font-size: 14px; }
+.wordview .wtable td { border: 1px solid var(--line-strong); padding: 4px 8px; text-align: left; vertical-align: top; }
+.wordview .wtable th { border: 1px solid var(--line-strong); padding: 4px 8px; text-align: left; vertical-align: top; background: var(--surface-200); }
+.wordview .wimg { display: block; max-width: 100%; height: auto; margin: 8px 0 12px; background: #fff; }
+/* Excel (D-361): a sheet as a grid, 2,000 rows at most. */
+.sheettabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 0 0 8px; }
+.sheettab { padding: 6px 12px; border-radius: 8px 8px 0 0; border: 1px solid var(--line); border-bottom: 0; background: var(--surface-200); color: var(--ink); font-size: 13px; text-decoration: none; }
+.sheettab.on { background: var(--surface-100); font-weight: 700; box-shadow: inset 0 3px 0 var(--brand); }
+.sheettab.hid { color: var(--ink-muted); font-style: italic; }
+.sheetwrap { max-height: calc(70vh / var(--z, 1)); overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-100); }
+.sheetgrid { border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.sheetgrid th, .sheetgrid td { padding: 3px 8px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); white-space: nowrap; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+.sheetgrid thead th { position: sticky; top: 0; z-index: 2; background: var(--surface-200); color: var(--ink-muted); font-weight: 600; text-align: center; }
+.sheetgrid tbody th { position: sticky; left: 0; z-index: 1; background: var(--surface-200); color: var(--ink-muted); font-weight: 600; text-align: right; }
+.sheetgrid thead th.corner { left: 0; z-index: 3; }
+.sheetgrid td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dicomview { display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 719px), (max-height: 480px) and (max-width: 950px) {
+  .pvbody.pvdoc { padding: 6px; }
+  .pvframe > .pvbody.pvdoc { padding-top: 18px; }
+  .pdfthumbs { display: none; }
+  .pdffind { flex-basis: 100%; }
+  .pdfpage { width: calc(100% * var(--pdfzoom)); }
+  .wordview { padding: 16px 14px; }
+}
+@media print { .pdfbar, .pdfthumbs, .pdftext, .pdfmarks { display: none !important; } }
+
+/* rc.29 (owner, 15 Nov 2026, "Tamil fixes in this delivery"): Tamil words run longer than the
+   other five languages, so in Tamil the boxes get more room - never shorter words, which are the
+   owner's (the sheet's "Tamil fit", D-328). The folder names get 12px more; each setting takes the
+   whole width of its card; the right-hand column of Settings and the consoles is wider, and wider
+   again while a rule is being edited (pages with no right-hand column keep their width); the sign-in
+   rules stack a little sooner, Anjal's limit on a line of its own; the address box of Allowed and
+   blocked senders takes a line of its own, and is wider in its menu. */
+html[lang="ta"] .rail:not(.folded):not(.auto) { width: 232px; --railw: 232px; }
+@media (min-width: 1440px) { html[lang="ta"] .rail.auto { width: 232px; --railw: 232px; } }
+html[lang="ta"] .settings3 .setgrid { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1200px) {
+  html[lang="ta"] .settings3:not(.noaside), html[lang="ta"] .settings3.orgconsole:not(.noaside) { grid-template-columns: clamp(240px, calc(21vw / var(--z, 1)), 360px) minmax(0, 1fr) clamp(300px, calc(24vw / var(--z, 1)), 400px); }
+  html[lang="ta"] .settings3:has(.setaside .rulesedit) { grid-template-columns: clamp(240px, calc(21vw / var(--z, 1)), 360px) minmax(0, 1fr) clamp(380px, calc(32vw / var(--z, 1)), 460px); }
+}
+@container (max-width: 1000px) {
+  html[lang="ta"] .orgtable.rules:has(thead th:nth-child(4)) { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  html[lang="ta"] .orgtable.rules:has(thead th:nth-child(4)) :is(thead, tbody, tr) { display: contents; }
+  html[lang="ta"] .orgtable.rules:has(thead th:nth-child(4)) thead th:first-child { display: none; }
+  html[lang="ta"] .orgtable.rules:has(thead th:nth-child(4)) tbody th { grid-column: 1 / -1; min-width: 0; border-bottom: 0; padding-bottom: 2px; }
+  html[lang="ta"] .orgtable.rules:has(thead th:nth-child(4)) tbody td { padding-top: 4px; display: flex; align-items: center; }
+  html[lang="ta"] .orgtable.rules:has(thead th:nth-child(4)) td:last-child, html[lang="ta"] .orgtable.rules:has(thead th:nth-child(4)) th:last-child { width: auto; }
+  html[lang="ta"] .orgtable.rules:has(thead th:nth-child(4)) :is(thead th, tbody td):nth-child(2) { grid-column: 1 / -1; }
+}
+html[lang="ta"] .rhead:has(.ruleadd.inline) { flex-wrap: wrap; }
+html[lang="ta"] .rhead .ruleadd.inline { flex: 1 1 100%; }
+html[lang="ta"] .rhead .ruleadd.inline .railinp { flex: 1 1 auto; }
+/* The swipe choices: two to a line in Tamil, so "Read or unread" fits; the envelope's three action
+   buttons two to a line in Tamil, so "Not junk" fits; the first column of What Anjal holds about you
+   keeps a word or two on one line. */
+html[lang="ta"] .swipesets { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+html[lang="ta"] .envelope .eactions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+html[lang="ta"] .holdtable td:first-child { min-width: 184px; }
+html[lang="ta"] .pmenu-body.ruleadd .railinp[name="pattern"] { width: 384px; }
+/* What Anjal holds about you: the reason ("To run the account") stays on one line in every language. */
+.holdtable td:last-child, .holdtable th:last-child { min-width: 196px; }

@@ -363,7 +363,7 @@
                 <button type="submit" class="btn @(export is not null && export.Ready(DateTimeOffset.UtcNow) ? "btn-s" : "btn-p")" disabled="@(export is not null && export.Busy)" title="@L["Put everything in one file; you get a mail when it is ready."]"><LipiIcon Name="download" Size="16" />@L["Prepare my download"]</button>
             </form>
             <h3 class="sethead">@L["What Anjal holds about you"]</h3>
-            <table class="orgtable">
+            <table class="orgtable holdtable">
                 <thead><tr><th>@L["What"]</th><th>@L["Kept"]</th><th>@L["Why"]</th></tr></thead>
                 <tbody>
                     <tr><td>@L["First name, last name, phone, date of birth, personal email"]</td><td>@L["While the account exists"]</td><td>@(profile.TermsAcceptedAt is DateTimeOffset t ? L["To run the account; the Terms you accepted on {date}"].Replace("{date}", clock.Date(t), StringComparison.Ordinal) : L["To run the account"])</td></tr>

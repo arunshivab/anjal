@@ -620,7 +620,7 @@ public sealed class SmtpSession
         long declared = DeclaredSize(args);
         if (declared > this.options.MaxMessageBytes)
         {
-            await this.WriteLineAsync($"552 5.3.4 Message size exceeds fixed maximum of {this.options.MaxMessageBytes} bytes", ct).ConfigureAwait(false);
+            await this.WriteLineAsync(this.TooLargeReply, ct).ConfigureAwait(false);
             return true;
         }
 
@@ -852,7 +852,7 @@ public sealed class SmtpSession
         {
             // The whole oversized body was read and discarded, so the
             // session is still in step with the client.
-            await this.WriteLineAsync("552 5.3.4 Message size exceeds maximum permitted", ct).ConfigureAwait(false);
+            await this.WriteLineAsync(this.TooLargeReply, ct).ConfigureAwait(false);
             this.ResetTransaction();
             return true;
         }
@@ -1458,6 +1458,13 @@ public sealed class SmtpSession
         this.tlsDescription = TlsCipherSet.Describe(ssl);
         return true;
     }
+
+    /// <summary>
+    /// rc.29 (AC-18): the size refusal says the limit in MB and where large files belong - a link - in words a
+    /// sender's own mail program shows them. The limit stays 25 MB.
+    /// </summary>
+    private string TooLargeReply =>
+        $"552 5.3.4 Message too large: the limit is {this.options.MaxMessageBytes / (1024 * 1024)} MB. Please share large files, such as imaging studies, by a link instead.";
 
     /// <summary>The SIZE= value on a MAIL FROM line, or 0 when absent or unreadable.</summary>
     /// <summary>The parameters after the &lt;address&gt; of a MAIL or RCPT command.</summary>

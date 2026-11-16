@@ -44,11 +44,10 @@ jobs:
           # scrolls sideways, the tablet envelope beside the letter; controls under 44px are listed.
           - group: devices
             checks: "devices"
-          # rc.27 (item 75, D-310, D-328): Hindi runs the word-cut check and fails like English; Tamil
-          # is listed (not failed) until the owner's shorter words are in the word sheet.
+          # rc.27 (item 75, D-310, D-328): Hindi runs the word-cut check and fails like English.
+          # rc.29 (owner, 15 Nov 2026): Tamil too, now that its shorter words and room are in.
           - group: languages
-            langs: "hi"
-            listed: "ta"
+            langs: "hi,ta"
     services:
       postgres:
         image: postgres:16

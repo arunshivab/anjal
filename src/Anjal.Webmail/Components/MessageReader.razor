@@ -259,47 +259,21 @@ else
                             }
                         </nav>
                     }
-                    <div class="pvbody">
-                        @if (ptype == "application/pdf")
-                        {
-                            <iframe class="pvpdf" src="/message/@Id/attachment/@pv.Index/preview" title="@pv.FileName"></iframe>
-                        }
-                        else if (ptype == MailboxService.ZipType)
-                        {
-                            <section class="pvzip" aria-label="@L["Inside the archive"]">
-                                @if (zip is null || zip.Refused is not null)
-                                {
-                                    <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@ZipRefusal(zip?.Refused)</span></p>
-                                }
-                                else if (zip.Locked)
-                                {
-                                    <p class="notice n-info readnotice"><LipiIcon Name="lock" Size="16" /><span>@L["Locked with a password: Anjal cannot look inside it."]</span></p>
-                                }
-                                else
-                                {
-                                    <p class="hint">@L["{n} files, {size} unpacked. Programs are blocked and cannot be taken out."].Replace("{n}", zip.Entries.Count(e => !e.Folder).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{size}", MainLayout.Size(zip.Expanded), StringComparison.Ordinal)</p>
-                                    <table class="ziptable">
-                                        <thead><tr><th scope="col">@L["Name"]</th><th scope="col">@L["Size"]</th><th scope="col">@L["Changed"]</th><th scope="col"><span class="sr-only">@L["Download"]</span></th></tr></thead>
-                                        <tbody>
-                                        @foreach (ZipEntryView e in zip.Entries)
-                                        {
-                                            <tr class="@(e.Blocked ? "zblocked" : null)">
-                                                <td><span class="zname" style="--depth: @e.Depth">@if (e.Folder) {<LipiIcon Name="folder" Size="14" />}@e.Name</span></td>
-                                                <td class="num">@(e.Folder ? string.Empty : MainLayout.Size(e.Size))</td>
-                                                <td>@clock.Date(e.Modified)</td>
-                                                <td>@if (e.Blocked) {<span class="pill pill-bad">@L["Blocked"]</span>} else if (!e.Folder) {<a class="iconbtn" href="/message/@Id/attachment/@pv.Index/zip/@e.Index" aria-label="@L["Download"] @e.Name" title="@L["Download"]"><LipiIcon Name="download" Size="15" /></a>}</td>
-                                            </tr>
-                                        }
-                                        </tbody>
-                                    </table>
-                                }
-                            </section>
-                        }
-                        else
-                        {
-                            <img class="pvimg" src="/message/@Id/attachment/@pv.Index/preview" alt="@pv.FileName" data-viewer-img />
-                        }
-                    </div>
+                    @if (!ptype.StartsWith("image/", StringComparison.Ordinal))
+                    {
+                        @* rc.29 (DES-22): a PDF, Word, Excel or archive, drawn by the separate viewer process, in its
+                           own box with the label of what it is (owner, 15 Nov, option A). *@
+                        <AttachmentViewer MessageId="Id" File="pv" FileLink="@PreviewLink(pv.Index)" Entry="@ViewEntry" SheetIndex="@ViewSheet" L="L" Clock="clock" />
+                    }
+                    else
+                    {
+                        <div class="pvframe">
+                            <ViewerTab Kind="img" Words="@L["Picture"]" />
+                            <div class="pvbody">
+                                <img class="pvimg" src="/message/@Id/attachment/@pv.Index/preview" alt="@pv.FileName" data-viewer-img />
+                            </div>
+                        </div>
+                    }
                 </div>
             }
             else
@@ -1276,9 +1250,6 @@ else
 
     private AttachmentView? Previewed => Preview is int i && view is not null ? view.Attachments.FirstOrDefault(a => a.Index == i) : null;
 
-    // rc.28 (DES-18 §10): the archive being looked at, listed by the server; null when none is.
-    private ZipView? zip;
-
     // rc.28: the files before and after this one that can be shown here.
     private (AttachmentView? Before, AttachmentView? After) Neighbours(AttachmentView current)
     {
@@ -1287,12 +1258,10 @@ else
         return (at > 0 ? shown[at - 1] : null, at >= 0 && at + 1 < shown.Count ? shown[at + 1] : null);
     }
 
-    private string ZipRefusal(string? why) => why switch
-    {
-        ZipView.TooMany => L["This archive holds too many files to list here. Download it to look inside."],
-        ZipView.TooLarge or ZipView.TooPacked => L["This archive would be far larger unpacked than it looks, so Anjal does not open it. Download it only if you trust the sender."],
-        _ => L["This archive cannot be read. Download it to look inside."],
-    };
+    // rc.29 (DES-22, AC-17): the file inside an archive and the workbook's sheet being looked at, from the link.
+    private string? ViewEntry => Http?.Request.Query["entry"].ToString() is string e && ViewerLinks.Places(e).Length > 0 ? e : null;
+
+    private int ViewSheet => int.TryParse(Http?.Request.Query["sheet"].ToString(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int s) && s < 1000 ? s : 0;
 
     private string PreviewLink(int index) => Back + (Back.Contains('?', StringComparison.Ordinal) ? "&" : "?") + "preview=" + index.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
@@ -1728,10 +1697,6 @@ else
         // first, and this call works on its own copy, so neither call reads a view the other has cleared.
         MessageView? opened = await Mail.OpenAsync(mailboxId.Value, Id, allowRemoteImages: Images == "1");
         view = opened;
-        // rc.28 (DES-18 §10): an archive opened in the viewer is listed now, on the server.
-        zip = Previewed is AttachmentView shownFile && MailboxService.PreviewType(shownFile) == MailboxService.ZipType
-            ? await Mail.ZipViewAsync(mailboxId.Value, Id, shownFile.Index)
-            : null;
         // DEF-066: opening marked the message read; the left pane recounts now.
         if (Layout is not null)
         {

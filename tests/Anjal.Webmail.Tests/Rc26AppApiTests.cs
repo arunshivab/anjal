@@ -180,7 +180,7 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
         HttpResponseMessage again = await Send(c, this.liveKey, Body(Outside), "order-77");
         Assert.Equal(HttpStatusCode.Accepted, again.StatusCode);
         Assert.Equal("true", again.Headers.GetValues("Idempotent-Replayed").Single());
-        Assert.Equal(JsonDocument.Parse(first).RootElement.GetProperty("id").GetGuid(), JsonDocument.Parse(await again.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid());
+        Assert.Equal(JsonElement.Parse(first).GetProperty("id").GetGuid(), JsonElement.Parse(await again.Content.ReadAsStringAsync()).GetProperty("id").GetGuid());
         Assert.Single(this.store.Outbound);
         HttpResponseMessage other = await Send(c, this.liveKey, Body(Ravi), "order-77");
         Assert.Equal(HttpStatusCode.Conflict, other.StatusCode);
@@ -363,13 +363,13 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
         Assert.Empty(this.store.Outbound);
         Assert.Equal("bounced", await WaitForStatusAsync(c, this.testKey, id, "bounced"));
         HttpResponseMessage clean = await Send(c, this.testKey, Body(Outside));
-        Guid cleanId = JsonDocument.Parse(await clean.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid();
+        Guid cleanId = JsonElement.Parse(await clean.Content.ReadAsStringAsync()).GetProperty("id").GetGuid();
         Assert.Equal("delivered", await WaitForStatusAsync(c, this.testKey, cleanId, "delivered"));
         Assert.Empty(this.store.Outbound);
 
         // A sandbox key never reaches live data: no live sends, no inbox, no do-not-send list, no webhook changes.
         HttpResponseMessage live = await Send(c, this.liveKey, Body(Outside));
-        Guid liveId = JsonDocument.Parse(await live.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid();
+        Guid liveId = JsonElement.Parse(await live.Content.ReadAsStringAsync()).GetProperty("id").GetGuid();
         Assert.Equal(HttpStatusCode.NotFound, (await Get(c, this.testKey, "messages/" + liveId)).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await Get(c, this.liveKey, "messages/" + cleanId)).StatusCode);
         string listed = await (await Get(c, this.testKey, "messages")).Content.ReadAsStringAsync();
@@ -397,7 +397,7 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
         Assert.Equal("suppressed", await ErrorOf(held));
         HttpResponseMessage partly = await Send(c, this.liveKey, Body(GonePriya));
         Assert.Equal(HttpStatusCode.Accepted, partly.StatusCode);
-        Assert.Equal("gone@gmail.test", JsonDocument.Parse(await partly.Content.ReadAsStringAsync()).RootElement.GetProperty("suppressed")[0].GetString());
+        Assert.Equal("gone@gmail.test", JsonElement.Parse(await partly.Content.ReadAsStringAsync()).GetProperty("suppressed")[0].GetString());
         Assert.Equal("priya@gmail.test", Assert.Single(this.store.Outbound).EnvelopeTo);
 
         await AppSuppressions.AddAsync(this.store, this.store, this.sgh.Id, this.appId, "angry@gmail.test", "complaint", "Marked as spam", "anjal", null, DateTimeOffset.UtcNow);
@@ -452,7 +452,7 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
         string wire = Encoding.UTF8.GetString(Assert.Single(this.store.Outbound).RawBytes);
         Assert.Contains("Subject: Your code <482 113>", wire, StringComparison.Ordinal);
         Assert.Contains("&lt;482 113&gt;", HtmlOf(Assert.Single(this.store.Outbound).RawBytes), StringComparison.Ordinal);
-        Guid id = JsonDocument.Parse(await sent.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid();
+        Guid id = JsonElement.Parse(await sent.Content.ReadAsStringAsync()).GetProperty("id").GetGuid();
         using JsonDocument status = JsonDocument.Parse(await (await Get(c, this.liveKey, "messages/" + id)).Content.ReadAsStringAsync());
         Assert.Equal(2, status.RootElement.GetProperty("template").GetProperty("version").GetInt32());
 
@@ -667,7 +667,7 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
     {
         HttpClient c = this.Client();
         HttpResponseMessage sent = await Send(c, this.liveKey, Body(PriyaRavi));
-        Guid id = JsonDocument.Parse(await sent.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetGuid();
+        Guid id = JsonElement.Parse(await sent.Content.ReadAsStringAsync()).GetProperty("id").GetGuid();
         string bounce = AppBounceAddress.For(id, "bounce.anjal.localhost");
         var sink = new MailboxSink(this.store, this.maildir);
         Assert.True(await sink.IsApplicationAddressAsync(bounce));
@@ -802,7 +802,7 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
         HttpResponseMessage res = await c.GetAsync("api/v1/openapi.json");
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         string json = await res.Content.ReadAsStringAsync();
-        Assert.Equal("3.1.0", JsonDocument.Parse(json).RootElement.GetProperty("openapi").GetString());
+        Assert.Equal("3.1.0", JsonElement.Parse(json).GetProperty("openapi").GetString());
         IReadOnlyList<string> described = AppOpenApi.Operations(json);
         var mapped = this.app.Services.GetRequiredService<EndpointDataSource>().Endpoints.OfType<RouteEndpoint>()
             .Where(e => e.RoutePattern.RawText?.StartsWith(AppApiRoutes.Base, StringComparison.Ordinal) == true)
@@ -895,7 +895,7 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
     }
 
     private async Task<string> StatusOf(HttpClient c, Guid id) =>
-        JsonDocument.Parse(await (await Get(c, this.liveKey, "messages/" + id)).Content.ReadAsStringAsync()).RootElement.GetProperty("status").GetString()!;
+        JsonElement.Parse(await (await Get(c, this.liveKey, "messages/" + id)).Content.ReadAsStringAsync()).GetProperty("status").GetString()!;
 
     private static async Task<string> WaitForStatusAsync(HttpClient c, string key, Guid id, string want)
     {
@@ -903,7 +903,7 @@ public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
         for (int i = 0; i < 100 && status != want; i++)
         {
             await Task.Delay(30);
-            status = JsonDocument.Parse(await (await Get(c, key, "messages/" + id)).Content.ReadAsStringAsync()).RootElement.GetProperty("status").GetString()!;
+            status = JsonElement.Parse(await (await Get(c, key, "messages/" + id)).Content.ReadAsStringAsync()).GetProperty("status").GetString()!;
         }
         return status;
     }
