@@ -294,6 +294,8 @@ public sealed class Rc22AccountTests : IAsyncLifetime, IDisposable
         using (Anjal.Store.MailKeyring ring = TestMail.Ring(this.store))
         using (Anjal.Store.MailKeyring.Use(ring))
         {
+            // rc.29 part 2 (DES-22 §20.6): the signature kept for signing PDFs goes in the download too.
+            Assert.True(await this.svc.SaveDrawnSignatureAsync(this.arun.Id, new DrawnSignature { Points = { 10, 20, 40, 30, 70, 15, 20, 50, 60, 55 }, Strokes = { 0, 3 }, W = 400, H = 160 }));
             state = await this.svc.BuildExportAsync(this.arun.Id, this.root, "http://anjal.localhost");
         }
         Assert.True(state.Ready(DateTimeOffset.UtcNow), state.Error);
@@ -313,6 +315,18 @@ public sealed class Rc22AccountTests : IAsyncLifetime, IDisposable
             Assert.Contains(zip.Entries, e => e.FullName == "profile.json");
             Assert.Contains(zip.Entries, e => e.FullName == "activity.csv");
             Assert.Contains(zip.Entries, e => e.FullName == "README.txt");
+            Assert.Contains(zip.Entries, e => e.FullName == "signature/drawn-signature.json");
+            using (var svg = new StreamReader(zip.GetEntry("signature/drawn-signature.svg")!.Open()))
+            {
+                string picture = svg.ReadToEnd();
+                Assert.Contains("viewBox=\"0 0 400 160\"", picture, StringComparison.Ordinal);
+                Assert.Contains("<path d=\"M10 20 L40 30 L70 15\"/>", picture, StringComparison.Ordinal);
+                Assert.Contains("<path d=\"M20 50 L60 55\"/>", picture, StringComparison.Ordinal);
+            }
+            using (var readme = new StreamReader(zip.GetEntry("README.txt")!.Open()))
+            {
+                Assert.Contains("signature/", readme.ReadToEnd(), StringComparison.Ordinal);
+            }
         }
         HttpResponseMessage download = await arun.GetAsync("settings/data/download");
         Assert.Equal(HttpStatusCode.OK, download.StatusCode);

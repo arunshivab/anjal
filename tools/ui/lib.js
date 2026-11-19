@@ -236,6 +236,70 @@ async function deskScreens(w) {
   return list;
 }
 
+// A draft carrying an edited PDF, made through the editor's own Save ("New mail with it"); null if it cannot be made.
+// In a desktop window: the editor is not offered on a phone.
+// A PDF editor's address, read from the Edit link of a PDF shown on its own page, in a desktop window.
+async function editorFromViewer(list) {
+  const views = list.filter((u) => /^\/message\/[^?]+\?preview=\d+$/.test(u));
+  if (views.length === 0) {
+    return null;
+  }
+  const w = await open([1440, 900]);
+  try {
+    for (const v of views) {
+      await visit(w, v, 1500);
+      const href = await w.page.evaluate(() => {
+        const a = [...document.querySelectorAll('a[href*="edit=1"]')].find((x) => x.getAttribute('href').startsWith('/message/'));
+        return a ? a.getAttribute('href') : null;
+      });
+      if (href) {
+        return href;
+      }
+    }
+    return null;
+  } finally {
+    await w.close();
+  }
+}
+
+// The editor's tools as its bar offers them, read in a desktop window (the editor is not offered on a phone).
+async function editorTools(editor) {
+  const w = await open([1440, 900]);
+  try {
+    await visit(w, editor, 1500);
+    return await w.page.$$eval('[data-edit-tool]', (bs) => bs.map((b) => b.getAttribute('data-edit-tool')));
+  } finally {
+    await w.close();
+  }
+}
+
+async function editedDraft(editor) {
+  const w = await open([1440, 900]);
+  try {
+    await visit(w, editor, 1500);
+    const go = await w.page.evaluate(async () => {
+      const view = document.querySelector('[data-pdfedit]');
+      if (!view) { return null; }
+      const token = (document.querySelector('input[name=__RequestVerificationToken]') || {}).value || '';
+      const base = view.getAttribute('data-pdfedit');
+      const body = new FormData();
+      body.set('__RequestVerificationToken', token);
+      body.set('plan', JSON.stringify({ Numbers: { Format: '{n}', Where: 'bottom-centre', Start: 1, Size: 10 } }));
+      body.set('join', '');
+      body.set('entry', '');
+      body.set('go', 'draft');
+      const r = await fetch(base + '/save', { method: 'POST', body, credentials: 'same-origin' });
+      const d = await r.json().catch(() => null);
+      return d && d.go ? d.go : null;
+    });
+    return go;
+  } catch (e) {
+    return null;
+  } finally {
+    await w.close();
+  }
+}
+
 // The screens list is found once per run and kept, so every check looks at the same screens.
 let screens = null;
 async function allScreens() {
@@ -246,6 +310,30 @@ async function allScreens() {
   try {
     screens = await findScreens(s);
     screens = screens.concat(await deskScreens(s));
+    // rc.29 part 2 (DES-22 §7): the PDF editor's other tools, each opened from its address, so every check sees
+    // every panel (Sign, Redact when it is on, Pages, Stamp start hidden behind Mark up).
+    // The PDF editor's own address - a mail's (/ops/orgs?...&edit=1 is the console's form, not the editor; it was
+    // taken first until 17 Nov).
+    let editor = screens.find((u) => /^\/message\/[^?]+\?(?:[^#]*&)?edit=1(?:&|$)/.test(u));
+    // The crawl runs in a phone-sized window, where the editor is not offered (its Edit link is desktop-only), so it
+    // may not reach the editor at all (17 Nov): then the editor is taken from a PDF's view in a desktop window.
+    if (!editor) {
+      editor = await editorFromViewer(screens);
+      if (editor) {
+        screens.push(editor);
+      }
+    }
+    if (editor) {
+      // The tools the editor offers, read from its own bar: Redact is held back until chuvadi-pdf 3.35.1 (D-405).
+      const tools = await editorTools(editor);
+      tools.filter((t) => t !== 'markup').forEach((t) => screens.push(editor + '&tool=' + t));
+      // The owner's check (17 Nov 2026): a draft's file open over the compose screen, and the editor there. The
+      // editor's "New mail with it" makes the draft (once per run), as a person would.
+      const draft = await editedDraft(editor);
+      if (draft) {
+        screens.push(draft + '?view=0', draft + '?view=0&edit=1');
+      }
+    }
   } finally {
     await s.close();
   }

@@ -722,13 +722,14 @@ else
     // DES-11 F8: every standard folder, from the one list (Archive and Scheduled were left out).
     private static bool IsSystemFolder(string name) => MailboxService.DefaultFolders.Contains(name, StringComparer.Ordinal);
 
-    private static string Recipient(MessageRow m)
+    // The owner's check (17 Nov 2026): "(no recipient)" in the person's language (it was always English).
+    private string Recipient(MessageRow m)
     {
         string decoded = Anjal.Mime.EncodedWordDecoder.Decode(m.ToHeader);
         var parsed = Anjal.Mime.AddressParser.Parse(decoded);
         if (parsed.Count == 0)
         {
-            return string.IsNullOrWhiteSpace(decoded) ? "(no recipient)" : decoded;
+            return string.IsNullOrWhiteSpace(decoded) ? L["(no recipient)"] : decoded;
         }
         string first = parsed[0].DisplayName.Length > 0 ? parsed[0].DisplayName : parsed[0].Address;
         return parsed.Count == 1 ? first : $"{first} +{parsed.Count - 1}";

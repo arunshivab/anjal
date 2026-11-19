@@ -8,4 +8,5 @@ rc.29 (DES-22 §4): the webmail's side of the viewer. Each request opens the soc
 
 - **#ctor** *(method)* - Creates a client for the viewer listening at a socket.
 - **AskAsync** *(method)* - Asks the viewer to do one job on a file.
+- **AskAsync** *(method)* - rc.29 part 2: asks with several files - the PDF being edited, the PDFs joined to it, the pictures its marks use.
 - **SocketPath** *(property)* - The socket this client speaks to.

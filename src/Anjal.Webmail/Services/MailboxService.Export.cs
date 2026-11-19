@@ -186,13 +186,22 @@ public sealed partial class MailboxService
                     Exported = DateTimeOffset.UtcNow,
                 }, ExportJson), ct).ConfigureAwait(false);
                 await WriteTextAsync(zip, "activity.csv", await this.ActivityCsvAsync(mailbox.Address, ct).ConfigureAwait(false), ct).ConfigureAwait(false);
+                // rc.29 part 2 (DES-22 §20.6, owner 16 Nov 2026): the signature kept for signing PDFs is the person's own data.
+                DrawnSignature? drawn = await this.DrawnSignatureAsync(mailboxId, ct).ConfigureAwait(false);
+                if (drawn is not null && drawn.Points.Count >= 4)
+                {
+                    await WriteTextAsync(zip, "signature/drawn-signature.json", JsonSerializer.Serialize(drawn, ExportJson), ct).ConfigureAwait(false);
+                    await WriteTextAsync(zip, "signature/drawn-signature.svg", SignatureSvg(drawn), ct).ConfigureAwait(false);
+                }
                 await WriteTextAsync(zip, "README.txt",
                     "Your data from Anjal, " + DateTimeOffset.UtcNow.UtcDateTime.ToString("d MMM yyyy HH:mm", CultureInfo.InvariantCulture) + " UTC\r\n\r\n"
                     + "mail/<folder>/*.eml  every message, as received or sent (open with any mail program)\r\n"
                     + "contacts.vcf         your contacts (vCard)\r\n"
                     + "rules.json           your rules\r\n"
                     + "profile.json         your profile, settings, signature and away reply\r\n"
-                    + "activity.csv         the activity log entries about you (sign-ins and account changes)\r\n\r\n"
+                    + "activity.csv         the activity log entries about you (sign-ins and account changes)\r\n"
+                    + (drawn is not null && drawn.Points.Count >= 4 ? "signature/           the signature you kept for signing PDFs: a picture (.svg) and its strokes (.json)\r\n" : string.Empty)
+                    + "\r\n"
                     + "Evidence copies kept under the legal rule are not included: they are the same messages, kept unchanged for the period your organisation sets.\r\n", ct).ConfigureAwait(false);
             }
             state.ReadyAt = DateTimeOffset.UtcNow;
@@ -270,6 +279,35 @@ public sealed partial class MailboxService
             before = batch[^1].At;
         }
         return sb.ToString();
+    }
+
+    // The kept signature as a picture: one path per stroke, in the pad's own space, as it was drawn.
+    private static string SignatureSvg(DrawnSignature drawn)
+    {
+        var svg = new StringBuilder();
+        svg.Append("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ")
+            .Append(drawn.W.ToString("0.##", CultureInfo.InvariantCulture)).Append(' ')
+            .Append(drawn.H.ToString("0.##", CultureInfo.InvariantCulture))
+            .Append("\" fill=\"none\" stroke=\"#1f2a44\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\">\n");
+        int points = drawn.Points.Count / 2;
+        List<int> starts = drawn.Strokes.Where(s => s >= 0 && s < points).Distinct().Order().ToList();
+        if (starts.Count == 0 || starts[0] != 0)
+        {
+            starts.Insert(0, 0);
+        }
+        for (int i = 0; i < starts.Count; i++)
+        {
+            int end = i + 1 < starts.Count ? starts[i + 1] : points;
+            svg.Append("  <path d=\"");
+            for (int p = starts[i]; p < end; p++)
+            {
+                svg.Append(p == starts[i] ? "M" : " L")
+                    .Append(drawn.Points[p * 2].ToString("0.##", CultureInfo.InvariantCulture)).Append(' ')
+                    .Append(drawn.Points[(p * 2) + 1].ToString("0.##", CultureInfo.InvariantCulture));
+            }
+            svg.Append("\"/>\n");
+        }
+        return svg.Append("</svg>\n").ToString();
     }
 
     private static async Task WriteTextAsync(ZipArchive zip, string name, string text, CancellationToken ct)

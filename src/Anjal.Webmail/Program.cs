@@ -683,6 +683,9 @@ public static class Program
         ChatEndpoints.Map(app);
         // rc.29 (DES-22): the viewer's pages, text, Find and pictures.
         ViewerEndpoints.Map(app);
+        ViewerEndpoints.MapEditor(app);
+        ViewerEndpoints.MapSignature(app);
+        ViewerEndpoints.MapPicker(app);
         app.MapDraftKeeping();
         OpsEndpoints.Map(app);
 
@@ -1373,6 +1376,20 @@ public static class Program
             if (saved is null)
             {
                 return Results.NotFound();
+            }
+            // The owner's check, 17 Nov 2026: "Reply to a mail instead" - the draft, saved as written, becomes a reply.
+            if (Guid.TryParse(http.Request.Form["replyto"].ToString(), out Guid answer))
+            {
+                Guid? replied = await svc.ReplyDraftToAsync(mailboxId.Value, saved.Value, answer, http.Request.Form["replyall"].ToString() == "1", ct).ConfigureAwait(false);
+                return Results.Redirect(replied is Guid r ? $"/draft/{r}" : $"/draft/{saved.Value}?error=" + Uri.EscapeDataString("That mail could not be answered."));
+            }
+            // View on a file of the mail being written: the draft is saved (a file just chosen goes up with it), then
+            // shown again with that file open in the viewer.
+            string viewName = http.Request.Form["view"].ToString();
+            if (viewName.Length > 0)
+            {
+                int? at = await svc.DraftFileIndexAsync(mailboxId.Value, saved.Value, viewName, ct).ConfigureAwait(false);
+                return Results.Redirect($"/draft/{saved.Value}" + (at is int k ? "?view=" + k.ToString(CultureInfo.InvariantCulture) : string.Empty));
             }
             if (autosave == "1" || http.Request.Headers["X-Requested-With"] == "anjal")
             {

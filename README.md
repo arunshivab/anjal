@@ -15,10 +15,16 @@ text to select and copy, Find, outline, thumbnails), Word (the text and its tabl
 Excel (the first 2,000 rows of each sheet), pictures, and the files inside a ZIP - password-locked ones
 shown view only (AC-17, AC-20) - all read by
 a separate `anjal-viewer` service with no network, no disk to write, its own memory cap and a kill
-timer per job (D-358). Built on chuvadi-pdf 3.33.0, Chuvadi.Docs 2.2.0, Chuvadi.Sheets 2.1.0 and
+timer per job (D-358). Built on chuvadi-pdf 3.34.0, Chuvadi.Docs 2.2.0, Chuvadi.Sheets 2.1.0 and
 Chuvadi.Zip 1.0.0 from `localpackages/`, each checked against its SHA-256 in CI. The 25 MB limit's refusal and the
 18 MB note say large imaging studies go by link (AC-18); the recovery sheet asks for a printer
 (AC-15). DICOM is written but switched off until the Siaara package is out.
+And a PDF editor in the mail (DES-22 §7, rc.29 part 2): mark up (text in every script, shapes, pen,
+highlight, pictures), sign (a drawn signature or the person's scan, kept sealed to their key only when
+asked), redact (boxes, found words, and patient details such as MRN, Aadhaar and phone numbers offered as
+boxes; checked by the library's verifier, with the outline, document information and XMP removed),
+rearrange and join the mail's PDFs, and stamp a watermark and page numbers. Save puts a new file on a
+reply, a forward or a draft; the original never changes. Every write runs in the viewer process.
 
 **v1.0.0-rc.28** (9 November 2026) - Group 1 (DES-18 to DES-21). Phones and tablets: five width
 bands, touch sizes from the pointer, swipes and press-and-hold, the phone screens and Today's cards
@@ -694,6 +700,11 @@ it is the only package reference outside the ASP.NET shared framework.
 ## Build
 
     dotnet build
+
+`global.json` holds the build to a .NET 10 SDK: any 10.0 release (security updates included), never
+a preview or .NET 11, so GitHub, the server and a PC all build with the same rules. It was added in
+rc.29 after a runner's .NET 11 preview SDK, picked because nothing chose otherwise, turned on a new
+analyzer rule (CA2026) and stopped every job.
 
 ## Test
 

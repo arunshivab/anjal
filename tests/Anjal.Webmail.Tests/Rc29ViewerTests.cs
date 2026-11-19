@@ -97,6 +97,20 @@ public sealed class Rc29ViewerTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task AFile_OpensInTheViewer_FromTodayAndSearch_AsFromAFolder()
+    {
+        // The owner, 16 Nov: a file opened from Today did not show the viewer; Search had the same gap.
+        await this.SignInAsync();
+        MessageRow m = await this.DeliverAsync(("report.pdf", "application/pdf", SmallPdf("Haemoglobin 13.2")));
+        foreach (string path in new[] { $"dashboard/today?open={m.Id}&preview=0", $"search?q=Files&open={m.Id}&preview=0" })
+        {
+            string page = WebUtility.HtmlDecode(await this.client.GetStringAsync(path));
+            Assert.Contains("class=\"pdfview\"", page, StringComparison.Ordinal);
+            Assert.Equal("pdf: PDF document · 1 page", Tab(page));
+        }
+    }
+
+    [Fact]
     public async Task AWordFile_AndAWorkbook_ShowInTheMailWindow()
     {
         await this.SignInAsync();

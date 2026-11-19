@@ -1841,7 +1841,7 @@ second SSH session, never during this upgrade.
    at /run/anjal-viewer/viewer.sock.`
 8. **The viewer, as the webmail's user:**
    ```
-   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page
+   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page, 2 locked archives
    ```
 9. **Seal what was kept before rc.25** (rc.28, D-264), once. This is step 6 of "rc.27 to rc.28"
    below: a dry run first, read its line, and run it for real only if it shows `0 with a problem`.
@@ -1918,7 +1918,7 @@ wording; the print and phone fixes): backup first (section 11). No schema change
    The last line says `Viewer: the anjal-viewer service at /run/anjal-viewer/viewer.sock.`
 5. **The viewer, as the webmail's user** (a small PDF the check makes itself; no mail is read):
    ```
-   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page
+   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page, 2 locked archives
    vm$ systemctl show anjal-viewer -p PrivateNetwork -p RestrictAddressFamilies -p MemoryMax
    ```
    `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, `MemoryMax=1610612736` (1.5 GB).

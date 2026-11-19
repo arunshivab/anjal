@@ -30,7 +30,7 @@ jobs:
           - group: menus
             checks: "noscroll,names,menus"
           - group: buttons
-            checks: "tips,close,keyboard,swap,flap"
+            checks: "tips,close,keyboard,swap,flap,viewer"
           # rc.26 (27 Oct 2026): pressing every button grew past the job's limit with the new
           # console pages (the buttons group was cancelled at 75 minutes), so it runs on its own.
           - group: reach

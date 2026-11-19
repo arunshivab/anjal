@@ -344,7 +344,7 @@
             <h2>@L["Your data"]</h2>
             <p class="hint">@L["Your rights under India's Digital Personal Data Protection Act."]</p>
             <h3 class="sethead">@L["Download all your data"]</h3>
-            <p class="hint">@L["Every message in every folder (as .eml files), your contacts (vCard), rules, settings and the activity log about you, in one zip. Usually ready within minutes; you get a mail with a link that works for 7 days."]</p>
+            <p class="hint">@L["Every message in every folder (as .eml files), your contacts (vCard), rules, settings, the signature you kept for PDFs and the activity log about you, in one zip. Usually ready within minutes; you get a mail with a link that works for 7 days."]</p>
             @if (export is not null && export.Busy)
             {
                 <div class="notice n-info"><LipiIcon Name="clock" Size="16" /><span>@L["Being prepared since {time}. You will get a mail when it is ready."].Replace("{time}", clock.Full(export.RequestedAt), StringComparison.Ordinal)</span></div>
@@ -625,6 +625,17 @@
                 </div>
                 <p class="hint">@L["Added to new messages and replies. You can still change or remove it before sending."]</p>
                 <div class="setactions"><button type="submit" class="btn btn-p btn-sm">@L["Save signature"]</button></div>
+            </form>
+
+            @* rc.29 part 2 (DES-22 §7.5, §6.2): the signature drawn in the PDF editor, kept only when asked. *@
+            <form method="post" action="/settings/drawn-signature/remove" class="setrow">
+                <AntiforgeryToken />
+                <span class="setlbl">@L["Drawn signature"]</span>
+                <p class="hint">@(drawnSignature ? L["Kept for signing PDFs, locked to your key. Only you can use it."] : L["None kept. When you sign a PDF, you can keep your drawn signature for next time."])</p>
+                @if (drawnSignature)
+                {
+                    <div class="setactions"><button type="submit" class="btn btn-s btn-sm">@L["Remove it"]</button></div>
+                }
             </form>
         </section>
     }
@@ -1231,6 +1242,7 @@
 
     private string signatureHtml = string.Empty;
     private string signatureText = string.Empty;
+    private bool drawnSignature;
 
     [SupplyParameterFromQuery(Name = "saved")] private string? Saved { get; set; }
     [SupplyParameterFromQuery(Name = "find")] private string? Find { get; set; }
@@ -1407,6 +1419,7 @@
         "senderremoved" => L["Rule removed. That sender's mail will be judged afresh."],
         "senderadded" => L["Rule added. It applies to mail arriving from now on."],
         "signature" => L["Signature saved. It will appear in new messages, replies and forwards."],
+        "drawnremoved" => L["Your drawn signature is removed."],
         _ => L["Saved."],
     };
 
@@ -1512,6 +1525,14 @@
                     junkDays = (await Mail.RetentionOfAsync(context.Value.Tenant)).JunkDays;
                 }
                 (signatureHtml, signatureText) = await Mail.GetSignatureAsync(mailboxId.Value);
+                try
+                {
+                    drawnSignature = await Mail.DrawnSignatureAsync(mailboxId.Value) is not null;
+                }
+                catch (Anjal.Mailbox.MailLockedException)
+                {
+                    drawnSignature = false;
+                }
                 mailSettings = await Mail.GetMailSettingsAsync(mailboxId.Value);
                 hasDesks = (await Mail.SharedForPersonAsync(mailboxId.Value)).Count > 0;
                 trashRule = await Mail.TrashRuleForAsync(mailboxId.Value);

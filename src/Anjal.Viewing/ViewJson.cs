@@ -18,6 +18,11 @@ namespace Anjal.Viewing;
 [JsonSerializable(typeof(ArchiveView))]
 [JsonSerializable(typeof(FileOut))]
 [JsonSerializable(typeof(DicomView))]
+[JsonSerializable(typeof(EditPlan))]
+[JsonSerializable(typeof(EditCheck))]
+[JsonSerializable(typeof(EditReport))]
+[JsonSerializable(typeof(DmarcReport))]
+[JsonSerializable(typeof(List<TlsReportRow>))]
 internal sealed partial class ViewJsonContext : JsonSerializerContext
 {
 }
@@ -74,6 +79,56 @@ public static class ViewJson
     /// <param name="value">The value.</param>
     /// <returns>The JSON.</returns>
     public static string Write(DicomView value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.DicomView);
+
+    /// <summary>Writes the editor's plan.</summary>
+    /// <param name="value">The plan.</param>
+    /// <returns>Its JSON.</returns>
+    public static string Write(EditPlan value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.EditPlan);
+
+    /// <summary>Writes what the editor must know first.</summary>
+    /// <param name="value">The check.</param>
+    /// <returns>Its JSON.</returns>
+    public static string Write(EditCheck value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.EditCheck);
+
+    /// <summary>Writes what Save did.</summary>
+    /// <param name="value">The report.</param>
+    /// <returns>Its JSON.</returns>
+    public static string Write(EditReport value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.EditReport);
+
+    /// <summary>Writes a DMARC report (D-405: read in the viewer).</summary>
+    /// <param name="value">The report.</param>
+    /// <returns>The JSON.</returns>
+    public static string Write(DmarcReport value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.DmarcReport);
+
+    /// <summary>Writes a TLS report's rows (D-405: read in the viewer).</summary>
+    /// <param name="value">The rows.</param>
+    /// <returns>The JSON.</returns>
+    public static string Write(List<TlsReportRow> value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.ListTlsReportRow);
+
+    /// <summary>Reads a DMARC report.</summary>
+    /// <param name="json">The JSON, or null.</param>
+    /// <returns>The report, or null.</returns>
+    public static DmarcReport? ReadDmarc(string? json) => json is null ? null : JsonSerializer.Deserialize(json, ViewJsonContext.Default.DmarcReport);
+
+    /// <summary>Reads a TLS report's rows.</summary>
+    /// <param name="json">The JSON, or null.</param>
+    /// <returns>The rows, or null.</returns>
+    public static List<TlsReportRow>? ReadTls(string? json) => json is null ? null : JsonSerializer.Deserialize(json, ViewJsonContext.Default.ListTlsReportRow);
+
+    /// <summary>Reads the editor's plan.</summary>
+    /// <param name="json">Its JSON.</param>
+    /// <returns>The plan, or null.</returns>
+    public static EditPlan? ReadPlan(string? json) => json is null ? null : JsonSerializer.Deserialize(json, ViewJsonContext.Default.EditPlan);
+
+    /// <summary>Reads what the editor must know first.</summary>
+    /// <param name="json">Its JSON.</param>
+    /// <returns>The check, or null.</returns>
+    public static EditCheck? ReadEditCheck(string? json) => json is null ? null : JsonSerializer.Deserialize(json, ViewJsonContext.Default.EditCheck);
+
+    /// <summary>Reads what Save did.</summary>
+    /// <param name="json">Its JSON.</param>
+    /// <returns>The report, or null.</returns>
+    public static EditReport? ReadEditReport(string? json) => json is null ? null : JsonSerializer.Deserialize(json, ViewJsonContext.Default.EditReport);
 
     /// <summary>Reads a DICOM preview's caption.</summary>
     /// <param name="json">The JSON.</param>

@@ -9,7 +9,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Chuvadi.Pdf" Version="3.33.0" />
+    <PackageReference Include="Chuvadi.Pdf" Version="3.34.0" />
     <PackageReference Include="Chuvadi.Docs" Version="2.2.0" />
     <PackageReference Include="Chuvadi.Sheets" Version="2.1.0" />
     <!-- AC-20: every ZIP the viewer reads, locked ones among them. -->

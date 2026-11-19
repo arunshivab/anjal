@@ -6,7 +6,17 @@
    the letter and envelope panes. The folder page draws both. *@
 <Folder FolderName="INBOX" Writing="true" WriteDraft="DraftId" />
 
+@* The owner's check (17 Nov 2026): a file of the draft open in the viewer over the compose screen (?view=n). *@
+@if (DraftId is Guid draft && ViewIndex is int view)
+{
+    <DraftFileView DraftId="draft" Index="view" />
+}
+
 @code {
     /// <summary>The draft being edited, if any.</summary>
     [Parameter] public Guid? DraftId { get; set; }
+
+    [SupplyParameterFromQuery(Name = "view")] private string? ViewText { get; set; }
+
+    private int? ViewIndex => int.TryParse(ViewText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int i) && i < 1000 ? i : null;
 }

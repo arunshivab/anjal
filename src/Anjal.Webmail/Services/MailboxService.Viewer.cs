@@ -12,6 +12,33 @@ public sealed partial class MailboxService
     /// <summary>rc.29 (DES-22 §4): the viewer, when one is set up; null leaves attachments Download only.</summary>
     public ViewerAccess? Viewer { get; init; }
 
+    /// <summary>
+    /// D-405 (decision A, 17 Nov 2026): a report a receiver attached (DMARC or TLS), read in the viewer process like
+    /// every other outside file - the webmail never unpacks or parses it. The answer says whether the viewer looked
+    /// at it: a report not looked at (no viewer, or the viewer busy) is tried again later; one it looked at and could
+    /// not read is not a report.
+    /// </summary>
+    /// <param name="kind"><see cref="ViewKinds.DmarcReport"/> or <see cref="ViewKinds.TlsReport"/>.</param>
+    /// <param name="bytes">The attachment.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Whether the viewer looked, and its JSON when it was a report.</returns>
+    public async Task<(bool Looked, string? Json)> ReadReportAsync(string kind, byte[] bytes, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(kind);
+        ArgumentNullException.ThrowIfNull(bytes);
+        if (kind is not (ViewKinds.DmarcReport or ViewKinds.TlsReport) || this.Viewer is not ViewerAccess { Enabled: true } viewer)
+        {
+            return (false, null);
+        }
+        ViewResult r = await viewer.AskOnceAsync(new ViewRequest { Kind = kind }, new[] { bytes }, ct).ConfigureAwait(false);
+        return r.Answer.Status switch
+        {
+            ViewStatus.Ok => (true, r.Answer.Json),
+            ViewStatus.Unavailable or ViewStatus.Busy => (false, null),
+            _ => (true, null),
+        };
+    }
+
     /// <summary>The key a file's password is kept under: the mail, the attachment and the entry inside it.</summary>
     /// <param name="mailboxId">The mailbox.</param>
     /// <param name="messageId">The mail.</param>

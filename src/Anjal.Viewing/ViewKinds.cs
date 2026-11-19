@@ -36,6 +36,27 @@ public static class ViewKinds
     /// <summary>A DICOM file's preview (switched off until the Siaara package is on the feed, D-372).</summary>
     public const string Dicom = "dicom";
 
+    /// <summary>rc.29 part 2 (DES-22 §7.8, 1): what the editor must know first - signatures, a password, forms.</summary>
+    public const string PdfEditCheck = "pdf.edit.check";
+
+    /// <summary>rc.29 part 2 (DES-22 §7.7): the pages in their new order and turn, as a PDF the viewer's jobs can show.</summary>
+    public const string PdfArrange = "pdf.edit.arrange";
+
+    /// <summary>rc.29 part 2 (DES-22 §7.1): every change applied in one pass, checked, and the new PDF given back.</summary>
+    public const string PdfSave = "pdf.edit.save";
+
+    /// <summary>rc.29 part 2 (DES-22 §7.6): the patient signs in a PDF's text, each with its boxes, to redact or not.</summary>
+    public const string PdfSigns = "pdf.edit.signs";
+
+    /// <summary>
+    /// A DMARC aggregate report attached by a receiver (rc.15, items 31 to 33), unpacked and read here like every
+    /// other outside file (D-405, decision A of 17 Nov 2026).
+    /// </summary>
+    public const string DmarcReport = "report.dmarc";
+
+    /// <summary>An SMTP TLS report attached by a receiver (RFC 8460; rc.15, item 59), read here (D-405, decision A).</summary>
+    public const string TlsReport = "report.tls";
+
     /// <summary>
     /// How long the job may take before its child process is stopped (DES-22 §4.1): open and the first page 10 s,
     /// another page 5 s, a sheet 8 s, Word 15 s, DICOM 8 s, an editor save 60 s.
@@ -53,6 +74,11 @@ public static class ViewKinds
         Word => TimeSpan.FromSeconds(15),
         Sheet => TimeSpan.FromSeconds(8),
         Dicom => TimeSpan.FromSeconds(8),
+        PdfEditCheck => TimeSpan.FromSeconds(10),
+        PdfArrange => TimeSpan.FromSeconds(30),
+        PdfSave => TimeSpan.FromSeconds(90),
+        PdfSigns => TimeSpan.FromSeconds(20),
+        DmarcReport or TlsReport => TimeSpan.FromSeconds(10),
         _ when kind.StartsWith("test.", StringComparison.Ordinal) => TimeSpan.FromSeconds(3),
         _ => TimeSpan.FromSeconds(8),
     };

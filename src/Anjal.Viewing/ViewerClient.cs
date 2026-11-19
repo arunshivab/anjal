@@ -30,10 +30,19 @@ public sealed class ViewerClient
     /// <param name="file">The file's bytes (at most 64 MB).</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>The answer and its files; <see cref="ViewStatus.Unavailable"/> when the viewer is not there.</returns>
-    public async Task<ViewResult> AskAsync(ViewRequest request, ReadOnlyMemory<byte> file, CancellationToken ct = default)
+    public Task<ViewResult> AskAsync(ViewRequest request, ReadOnlyMemory<byte> file, CancellationToken ct = default) =>
+        this.AskAsync(request, new[] { file }, ct);
+
+    /// <summary>rc.29 part 2: asks with several files - the PDF being edited, the PDFs joined to it, the pictures its marks use.</summary>
+    /// <param name="request">The job.</param>
+    /// <param name="files">The files; the first is the attachment.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The answer.</returns>
+    public async Task<ViewResult> AskAsync(ViewRequest request, IReadOnlyList<ReadOnlyMemory<byte>> files, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        if (file.Length > ViewFrames.MaxFileBytes)
+        ArgumentNullException.ThrowIfNull(files);
+        if (files.Count > ViewFrames.MaxFiles || files.Any(f => f.Length > ViewFrames.MaxFileBytes) || files.Sum(f => (long)f.Length) > ViewFrames.MaxFrameBytes - ViewFrames.MaxJsonBytes)
         {
             return ViewResult.Of(ViewStatus.TooLarge);
         }
@@ -51,7 +60,7 @@ public sealed class ViewerClient
                 return ViewResult.Of(ViewStatus.Unavailable);
             }
             await using var stream = new NetworkStream(socket, ownsSocket: false);
-            await ViewFrames.WriteAsync(stream, ViewJson.Write(request), new[] { file }, limit.Token).ConfigureAwait(false);
+            await ViewFrames.WriteAsync(stream, ViewJson.Write(request), files, limit.Token).ConfigureAwait(false);
             (string Json, List<byte[]> Files)? frame = await ViewFrames.ReadAsync(stream, limit.Token).ConfigureAwait(false);
             if (frame is null)
             {

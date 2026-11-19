@@ -1,0 +1,42 @@
+@* The owner's check (17 Nov 2026): choose a mail - to answer with an edited file, or to turn a draft into a reply -
+   or one of the person's drafts to add the file to. The script (window.anjalMailPick) fills the list from
+   /mail/pick and answers with the mail chosen and the button pressed; the server checks the choice again. *@
+
+<div class="mailpick" data-mailpick="@Key" data-drafts="@(Drafts ? "1" : "0")" data-except="@(Except?.ToString("D") ?? string.Empty)" role="dialog" aria-label="@Title" hidden>
+    <div class="mailpick-head">
+        <b>@Title</b>
+        <span class="lh-grow"></span>
+        <button type="button" class="iconbtn" data-mailpick-close aria-label="@L["Close"]" title="@L["Close"]"><LipiIcon Name="close" Size="16" /></button>
+    </div>
+    <label class="sr-only" for="mailpick-@Key">@(Drafts ? L["Find a draft"] : L["Find a mail"])</label>
+    <input id="mailpick-@Key" class="inp" type="search" maxlength="200" autocomplete="off" data-mailpick-q
+           placeholder="@(Drafts ? L["Find a draft"] : L["Name, address or subject"])" />
+    <ul class="mailpick-list" data-mailpick-list></ul>
+    <p class="hint" data-mailpick-none hidden>@L["None found."]</p>
+    <template data-mailpick-acts>
+        @foreach ((string act, string word) in Actions)
+        {
+            <button type="button" class="btn btn-s btn-sm" data-mailpick-act="@act">@L[word]</button>
+        }
+    </template>
+</div>
+
+@code {
+    /// <summary>The page's words.</summary>
+    [Parameter] public Lexicon L { get; set; } = new("en", new Dictionary<string, string>());
+
+    /// <summary>Which picker this is on the page (the editor's Save menu opens it as "pick-" and this key).</summary>
+    [Parameter] public string Key { get; set; } = "mail";
+
+    /// <summary>The heading, in the person's words.</summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>Offer the person's drafts instead of their mail.</summary>
+    [Parameter] public bool Drafts { get; set; }
+
+    /// <summary>A mail never offered (the draft being turned into a reply).</summary>
+    [Parameter] public Guid? Except { get; set; }
+
+    /// <summary>The buttons on each mail offered: what each sends back, and its words.</summary>
+    [Parameter] public IReadOnlyList<(string Act, string Word)> Actions { get; set; } = Array.Empty<(string, string)>();
+}

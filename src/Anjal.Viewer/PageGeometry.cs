@@ -15,21 +15,21 @@ public readonly struct PageGeometry
     private readonly double w;
     private readonly double h;
 
-    /// <summary>Takes a page's crop box (its media box when it has none) and its turn.</summary>
+    /// <summary>
+    /// Takes the box the renderers show (chuvadi-pdf 3.34.0 <c>GetDisplayBox</c>: the CropBox intersected with the
+    /// MediaBox, normalised) and the page's turn, taken at its nearest lower multiple of 90 as the renderers take it -
+    /// so the positions shown over a page match the library's own display space, which the editor writes through.
+    /// </summary>
     /// <param name="page">The page.</param>
     public PageGeometry(PdfPage page)
     {
         ArgumentNullException.ThrowIfNull(page);
-        PdfRectangle box = page.CropBox;
-        if (box.Width <= 0 || box.Height <= 0)
-        {
-            box = page.MediaBox;
-        }
-        this.x1 = Math.Min(box.X1, box.X2);
-        this.y1 = Math.Min(box.Y1, box.Y2);
-        this.w = Math.Abs(box.Width);
-        this.h = Math.Abs(box.Height);
-        this.Rotate = ((page.Rotate % 360) + 360) % 360;
+        PdfRectangle box = page.GetDisplayBox(PdfDisplayBox.CropBox);
+        this.x1 = box.X1;
+        this.y1 = box.Y1;
+        this.w = box.Width;
+        this.h = box.Height;
+        this.Rotate = (((page.Rotate % 360) + 360) % 360) / 90 * 90;
     }
 
     /// <summary>Takes a crop box and a turn directly (for tests).</summary>

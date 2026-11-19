@@ -263,7 +263,9 @@ else
                     {
                         @* rc.29 (DES-22): a PDF, Word, Excel or archive, drawn by the separate viewer process, in its
                            own box with the label of what it is (owner, 15 Nov, option A). *@
-                        <AttachmentViewer MessageId="Id" File="pv" FileLink="@PreviewLink(pv.Index)" Entry="@ViewEntry" SheetIndex="@ViewSheet" L="L" Clock="clock" />
+                        <AttachmentViewer MessageId="Id" File="pv" FileLink="@PreviewLink(pv.Index)" Entry="@ViewEntry" SheetIndex="@ViewSheet" L="L" Clock="clock"
+                                          Edit="@EditAsked" EditHref="@EditHref(pv.Index)" Back="@EditBack(pv.Index)" EditTool="@(Http?.Request.Query["tool"].ToString())"
+                                          Others="@(view.Attachments.Where(a => a.Index != pv.Index && MailboxService.PreviewType(a) == "application/pdf").ToList())" />
                     }
                     else
                     {
@@ -1260,6 +1262,27 @@ else
 
     // rc.29 (DES-22, AC-17): the file inside an archive and the workbook's sheet being looked at, from the link.
     private string? ViewEntry => Http?.Request.Query["entry"].ToString() is string e && ViewerLinks.Places(e).Length > 0 ? e : null;
+
+    // rc.29 part 2 (DES-22 §7): the editor is asked for with edit=1, on the mail's own page (more room to work).
+    private bool EditAsked => Http?.Request.Query["edit"].ToString() == "1";
+
+    // The viewer's Edit button: the mail's own page with the editor, remembering where the person came from.
+    private string EditHref(int index)
+    {
+        string here = (Http?.Request.Path.Value ?? string.Empty) + (Http?.Request.QueryString.Value ?? string.Empty);
+        return $"/message/{Id}?preview={index.ToString(System.Globalization.CultureInfo.InvariantCulture)}&edit=1"
+            + (ViewEntry is string e ? "&entry=" + Uri.EscapeDataString(e) : string.Empty)
+            + "&back=" + Uri.EscapeDataString(here);
+    }
+
+    // Where the editor's Leave goes: back where the person came from (only a page of this webmail), else the viewer.
+    private string EditBack(int index)
+    {
+        string back = Http?.Request.Query["back"].ToString() ?? string.Empty;
+        return back.StartsWith('/') && !back.StartsWith("//", StringComparison.Ordinal) && !back.Contains('\\', StringComparison.Ordinal) && !back.Contains("edit=1", StringComparison.Ordinal)
+            ? back
+            : PreviewLink(index) + (ViewEntry is string e ? "&entry=" + Uri.EscapeDataString(e) : string.Empty);
+    }
 
     private int ViewSheet => int.TryParse(Http?.Request.Query["sheet"].ToString(), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int s) && s < 1000 ? s : 0;
 

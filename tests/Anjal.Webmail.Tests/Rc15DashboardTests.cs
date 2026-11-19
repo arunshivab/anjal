@@ -3,6 +3,7 @@ using System.Text;
 using Anjal.Mailbox;
 using Anjal.Smtp;
 using Anjal.Store;
+using Anjal.Viewing;
 using Anjal.Webmail.Services;
 
 namespace Anjal.Webmail.Tests;
@@ -149,7 +150,16 @@ public sealed class Rc15DashboardTests : IDisposable
         await this.DeliverAsync(raw);
 
         DashPeriod month = MailboxService.DashPeriodOf("30d", ZonedClock.Default, DateTimeOffset.UtcNow);
-        (IReadOnlyList<SenderLine> lines, int reports) = await this.svc.WhoSendsAsAsync(this.tenant, month);
+        // D-405 (decision A, 17 Nov 2026): a receiver's report is read in the viewer process, never in the webmail.
+        // With no viewer it is not read - and not marked as read, so it is read once the viewer is there.
+        (IReadOnlyList<SenderLine> none, int noReports) = await this.svc.WhoSendsAsAsync(this.tenant, month);
+        Assert.Empty(none);
+        Assert.Equal(0, noReports);
+        Assert.Empty((await this.svc.ReadTenantDocumentAsync<Dictionary<Guid, List<DmarcRow>>>(this.tenant.Id, MailboxService.DmarcKind)) ?? new());
+
+        using ViewerAccess viewer = ViewerAccess.FromEnvironment();
+        var withViewer = new MailboxService(this.store, this.store, this.maildir, "mail.anjal.co.in") { Viewer = viewer };
+        (IReadOnlyList<SenderLine> lines, int reports) = await withViewer.WhoSendsAsAsync(this.tenant, month);
         Assert.Equal(1, reports);
         Assert.Equal(ExpectedCounts, lines.Select(l => l.Count).ToArray());
         Assert.Equal("pass", lines[0].Status);
@@ -157,7 +167,7 @@ public sealed class Rc15DashboardTests : IDisposable
         Assert.Equal("SPF pass, DKIM fails", lines[1].Sub);
         Assert.Equal("blocked", lines[2].Status);
         // Read once: kept by message in the organisation's documents.
-        Assert.Single((await this.svc.ReadTenantDocumentAsync<Dictionary<Guid, List<DmarcRow>>>(this.tenant.Id, MailboxService.DmarcKind))!);
+        Assert.Single((await withViewer.ReadTenantDocumentAsync<Dictionary<Guid, List<DmarcRow>>>(this.tenant.Id, MailboxService.DmarcKind))!);
     }
 
     [Fact]

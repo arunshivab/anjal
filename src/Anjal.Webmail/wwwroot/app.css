@@ -1451,6 +1451,10 @@ details[open] > .pmenu-body, details[open] > .rte-menu { animation: anjal-pop 16
 /* DEF-159 (rc.23): "Snoozed" / "Virus removed" has its own column after the glimpse, so the subject never moves. */
 .mline2 .rowmark { flex: 0 0 auto; margin-left: 6px; }
 .fview:not(.has-open) .mrow .rowmark { grid-column: 6; grid-row: 1; margin-left: 10px; }
+/* The owner, 17 Nov: a draft's "Edited 15:59" shared the glimpse's cell and was drawn over it; like "Snoozed" it has
+   the column after the glimpse. */
+.fview:not(.has-open) .mrow .mline3.mnote { grid-column: 6; margin-left: 10px; }
+.fview:not(.has-open) .mrow .mline3.mnote::before { content: none; }
 .fview:not(.has-open) .mrow .chip { grid-column: 7; grid-row: 1; margin-left: 10px; }
 .fview:not(.has-open) .mrow .mfolder, .fview:not(.has-open) .mrow .deskcell { grid-column: 8; grid-row: 1; margin-left: 10px; }
 .fview:not(.has-open) .mrow [data-attachment] { grid-column: 9; grid-row: 1; margin-left: 10px; }
@@ -1988,7 +1992,7 @@ textarea.railinp { resize: vertical; }
   .cenv > .cblock .clabel-row { flex-direction: column; align-items: flex-start; }
   .cenv > .cblock .clabel-row .cgrow { display: none; }
   .cenv > .cblock .csel { border: 0; padding: 0; height: 36px; background: transparent; }
-  .cenv > .cblock[data-recips] .rbox { flex: 1 1 auto; min-width: 0; flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .cenv > .cblock[data-recips] .rbox { flex: 1 1 auto; min-width: 0; flex-direction: row; flex-wrap: wrap; gap: 4px; background: var(--env-row); }
   .cenv > .cblock[data-recips] .rchip { padding: 3px 4px 3px 10px; border-radius: 999px; }
   .cenv > .cblock[data-recips] .rchip-a { display: none; }
   .cenv > .cblock[data-recips] .rinput { flex: 1 1 120px; border: 0; padding: 0 2px; box-shadow: none; }
@@ -3896,13 +3900,22 @@ html:not(.js) .cenv .cblock.cbccrow { display: grid; }
 .cenv #ccrow .clabelrow { display: contents; }
 .cenv #ccrow > .rbox { grid-column: 2; grid-row: 1; }
 .cenv #ccrow .cbcclink { grid-column: 2; grid-row: 2; justify-self: end; }
-.cenv .rbox { background: var(--env-row); border-radius: 12px; }
+/* The owner, 17 Nov: a white patch under a To chip - the recipient box was white behind the chip and the input, so
+   the gap between them showed white. The input carries the envelope's white itself; on a phone, where chips and the
+   input share one field, the box keeps it (below). */
+.cenv .rbox { border-radius: 12px; }
+.cenv .rinput { background: var(--env-row); }
 .cenv .rchip.out { background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
 .cenv .cwarn[data-outside-warning] { background: none; padding: 0; color: var(--danger); font-size: 12.5px; font-weight: 600; }
 .cenv .cattach { padding-top: 12px; border-top: 1.5px dashed color-mix(in srgb, var(--env-edge) 70%, transparent); }
-.cenv .carry, .cenv .cfileitem { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 6px; border-radius: 12px; background: var(--env-row);
+.cenv .carry, .cenv .cfileitem { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 6px; border-radius: 12px; background: var(--env-row);
                                  box-shadow: var(--shadow-sm); font-size: 13.5px; }
-.cenv .carry .catname, .cenv .cfileitem .cfname { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.cenv .carry .catname, .cenv .cfileitem .cfname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* A file's size is one short line ("914 B" broke in two, 17 Nov); the name gives way instead. With View and Download
+   on the row (17 Nov) the size sits under the name, so the name keeps its room. */
+.carry .catmeta, .cfileitem .catmeta { flex-shrink: 0; white-space: nowrap; }
+.carry-t { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.cenv .carry-t .catmeta { font-size: 11.5px; }
 .cenv .cdrop { min-height: 40px; border: 1.5px dashed var(--accent); border-radius: 12px; background: transparent; color: var(--warning); font-weight: 600; gap: 6px; }
 .cenv .cdrop span { display: inline-flex; align-items: center; gap: 6px; }
 .cenv .cdrop u { color: var(--warning); }
@@ -4809,6 +4822,115 @@ button.tdrow-open { width: 100%; border: 0; background: none; color: inherit; fo
 .pdffound { font-size: 12px; color: var(--ink-muted); white-space: nowrap; }
 /* rc.29: the bar is a row with a text box (Find), so its zoom and thumbnail buttons are regular like Find's (one height on a row). */
 @media (min-width: 720px) and (min-height: 481px), (min-width: 951px) { .pdfbar > .iconbtn { width: var(--h-reg); height: var(--h-reg); } }
+
+/* rc.29 part 2 (DES-22 §7): the PDF editor. Its bar is the viewer's bar; each tool's panel sits under it; the marks are
+   an SVG in points over each page picture. Every control in a row is the regular height (one height on a row). */
+.pdfedit-go { display: none; }
+html.js .pdfedit-go { display: inline-flex; gap: 6px; }
+.pdfedit .pdfthumbs, .pdfedit .pdftext, .pdfedit .pdfmarks { display: none !important; }
+.editbar { gap: 8px; }
+.edittools { flex: 0 0 auto; display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 2px; padding: 1px; border-radius: 10px; background: var(--surface-200); border: 1px solid var(--line); box-sizing: border-box; }
+.edittool { display: inline-flex; align-items: center; gap: 6px; height: var(--h-sm); padding: 0 10px; border: 0; border-radius: 8px; background: none; color: var(--ink-muted); font: inherit; font-size: 13px; font-weight: 550; cursor: pointer; white-space: nowrap; }
+.edittool:hover { color: var(--ink); background: var(--surface-300); }
+.edittool[aria-pressed="true"] { color: var(--brand); background: var(--brand-soft); }
+.savemenu > summary { list-style: none; gap: 6px; }
+.savemenu .pmenu-body { left: auto; right: 0; min-width: 260px; }
+/* The owner's check, 17 Nov 2026: the mail picker - answer another mail with an edited file, add it to a draft, or
+   turn a draft into a reply. A small window over the page. */
+.mailpick { position: fixed; z-index: 85; top: calc(12vh / var(--z, 1)); left: 50%; transform: translateX(-50%); width: min(600px, calc(calc(100vw / var(--z, 1)) - 32px)); max-height: calc(72vh / var(--z, 1));
+            display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; background: var(--surface-100); border: 1px solid var(--line);
+            box-shadow: var(--shadow-lg); }
+.mailpick[hidden] { display: none; }
+.mailpick-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mailpick-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
+.mailpick-row { display: flex; align-items: center; gap: 10px; padding: 8px 6px; border-top: 1px solid var(--line); min-width: 0; }
+.mailpick-row:first-child { border-top: 0; }
+.mailpick-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
+.mailpick-text > b { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailpick-subj { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailpick-meta { font-size: 12px; color: var(--ink-subtle); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mailpick-acts { flex: 0 0 auto; display: flex; gap: 6px; }
+@media (max-width: 719px), (max-height: 480px) and (max-width: 950px) { .mailpick-row { flex-wrap: wrap; } .mailpick-acts { width: 100%; justify-content: flex-end; } }
+/* A file of the mail being written, open in the viewer over the compose screen. */
+.dfview-back { position: fixed; inset: 0; z-index: 71; background: color-mix(in srgb, var(--ink) 35%, transparent); }
+.dfview { position: fixed; z-index: 72; inset: 24px; display: flex; flex-direction: column; gap: 10px; padding: 12px 16px 16px; border-radius: 14px;
+          background: var(--surface-100); border: 1px solid var(--line); box-shadow: var(--shadow-lg); min-width: 0; }
+.dfview-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dfview-head .pvname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dfview-head .iconbtn { width: var(--h-reg); height: var(--h-reg); }
+.dfview-body { flex: 1 1 auto; min-height: 0; overflow: auto; }
+@media (max-width: 719px), (max-height: 480px) and (max-width: 950px) { .dfview { inset: 0; border-radius: 0; } }
+/* A draft that can become a reply; a file's View in the compose list. */
+.creplyto { justify-content: flex-end; }
+.creplyto .linkbtn { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; white-space: normal; text-align: start; }
+/* Found words and patient details: a line of the editor's bar while any are offered. */
+.editfoundbar { flex: 1 0 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding-top: 6px; border-top: 1px solid var(--line); min-width: 0; }
+.editfoundbar[hidden] { display: none; }
+.editfoundbar .hint { margin: 0; }
+/* After a redaction, what was removed is read before the file is attached (3.34.0). */
+.editreview { scroll-margin-top: 88px; }
+.editreview-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.editreview-lines { margin: 0; padding-left: 18px; }
+.editreview-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.savemenu .savenote { margin: 4px 8px 6px; max-width: 280px; }
+.editgate { align-items: flex-start; }
+.editgate p { margin: 0 0 6px; }
+.edittick { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.edittick input { width: 16px; height: 16px; margin: 0; accent-color: var(--brand); }
+.editpanel { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 10px; background: var(--surface-100); border: 1px solid var(--line); }
+.editpanel[hidden] { display: none; }
+.editpanel .hint { margin: 0; }
+.editrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; }
+.editsep { width: 1px; height: 24px; background: var(--line); }
+.editcolours { display: inline-flex; gap: 0; }
+/* Each colour is a regular-sized button (one height on a row) with its colour as a dot inside. */
+.editcolour { position: relative; width: var(--h-reg); height: var(--h-reg); border: 0; border-radius: 10px; background: none; cursor: pointer; padding: 0; }
+.editcolour::after { content: ""; position: absolute; inset: 7px; border-radius: 999px; background: var(--sw); box-shadow: 0 0 0 1px var(--line), inset 0 0 0 2px var(--surface-200); }
+.editcolour:hover { background: var(--surface-300); }
+.editcolour[aria-checked="true"]::after { box-shadow: 0 0 0 2px var(--brand), inset 0 0 0 2px var(--surface-200); }
+.editfield { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-muted); white-space: nowrap; }
+.editpick { cursor: pointer; }
+.inpnum { width: 76px; }
+.signpad { display: flex; flex-direction: column; gap: 8px; }
+.padcanvas { width: 100%; max-width: 480px; aspect-ratio: 3 / 1; border-radius: 10px; border: 1px dashed var(--line-strong); background: #fff; touch-action: none; cursor: crosshair; }
+.signnote { margin: 0; padding: 8px 10px; border-radius: 8px; }
+.joinset { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.joinset legend { padding: 0 4px; font-size: 12px; font-weight: 600; color: var(--ink-muted); }
+@media (min-width: 720px) and (min-height: 481px), (min-width: 951px) {
+  .editrow > .btn, .editrow select, .editrow .inp, .editbar > .btn, .editbar .savemenu > summary { height: var(--h-reg); }
+  .editrow > .iconbtn, .editrow .editpick.iconbtn { width: var(--h-reg); height: var(--h-reg); }
+  .editrow > .btn.btn-sm { padding: 0 14px; font-size: 13px; }
+  .edittools { height: var(--h-reg); }
+}
+/* The pages: the picture, the marks over it, and the box to choose the page with. */
+.editpage { touch-action: none; user-select: none; -webkit-user-select: none; }
+.pdfedit[data-tool="pages"] .editpage, .pdfedit[data-tool="stamp"] .editpage { touch-action: auto; }
+.editmarks { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; cursor: crosshair; }
+.pdfedit[data-tool="pages"] .editmarks, .pdfedit[data-tool="stamp"] .editmarks { cursor: default; }
+.pdfedit.placing .editmarks { cursor: copy; }
+.editmark .editgrip { fill: transparent; stroke: none; pointer-events: all; }
+.editmark { cursor: move; }
+.editmark.on .editgrip { stroke: var(--brand); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
+.edittext { font-family: inherit; }
+.editwm { pointer-events: none; }
+.editnum { font-family: inherit; pointer-events: none; }
+.editredact { fill: #111; fill-opacity: 0.72; stroke: #000; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; }
+.editfound { fill: rgba(220, 38, 38, 0.16); stroke: #dc2626; stroke-width: 1.5; stroke-dasharray: 5 3; vector-effect: non-scaling-stroke; cursor: pointer; }
+.editfound.dropped { fill: none; stroke: var(--ink-subtle); stroke-dasharray: 2 4; }
+.editchoose { position: absolute; top: 8px; left: 8px; display: none; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px; background: var(--surface-200); border: 1px solid var(--line); box-shadow: var(--shadow-sm); font-size: 12px; font-weight: 600; color: var(--ink); cursor: pointer; }
+.editchoose input { width: 16px; height: 16px; margin: 0; accent-color: var(--brand); }
+.pdfedit[data-tool="pages"] .editchoose { display: inline-flex; }
+.edittextbox { position: absolute; z-index: 2; min-height: 2em; padding: 2px 4px; border: 1px dashed var(--brand); border-radius: 4px; background: rgba(255, 255, 255, 0.85); font-family: inherit; line-height: 1.25; resize: horizontal; }
+.pdfedit.saving { cursor: progress; }
+.pdfedit.saving .editbar, .pdfedit.saving .editpanel { opacity: 0.7; pointer-events: none; }
+/* A narrower letter area: the tools show their icons only (their names stay for screen readers and in the tip), and
+   the fields' words go to the screen reader, so Save and each panel's controls keep to one line. */
+.pdfview.pdfedit { container-type: inline-size; }
+.editrow input[type="search"] { flex: 1 1 288px; width: auto; min-width: 288px; max-width: 360px; }
+@container (max-width: 980px) {
+  .edittool { padding: 0 8px; }
+  .edittool span, .editfield > span { display: none; }
+}
 .pdfoutline { background: var(--surface-100); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; font-size: 13px; }
 .pdfoutline ul { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow: auto; }
 .pdfoutline li { padding: 2px 0 2px calc(var(--depth, 0) * 14px); }
