@@ -4897,9 +4897,11 @@ html.js .pdfedit-go { display: inline-flex; gap: 6px; }
 .joinset { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
 .joinset legend { padding: 0 4px; font-size: 12px; font-weight: 600; color: var(--ink-muted); }
 @media (min-width: 720px) and (min-height: 481px), (min-width: 951px) {
-  .editrow > .btn, .editrow select, .editrow .inp, .editbar > .btn, .editbar .savemenu > summary { height: var(--h-reg); }
+  /* rc.29 part 2 (the "same" screen check, PR #72): a small button is drawn full size only beside a field (owner, 10 Oct
+     2026); a row of buttons alone - Sign's Clear, Use a scan, Place it on the page - keeps the small buttons' look. */
+  .editrow > .btn:not(.btn-sm), .editrow select, .editrow .inp, .editbar > .btn, .editbar .savemenu > summary { height: var(--h-reg); }
   .editrow > .iconbtn, .editrow .editpick.iconbtn { width: var(--h-reg); height: var(--h-reg); }
-  .editrow > .btn.btn-sm { padding: 0 14px; font-size: 13px; }
+  .editrow:has(> select) > .btn.btn-sm, .editrow:has(> .inp) > .btn.btn-sm, .editrow:has(> input) > .btn.btn-sm { height: var(--h-reg); padding: 0 14px; font-size: 13px; }
   .edittools { height: var(--h-reg); }
 }
 /* The pages: the picture, the marks over it, and the box to choose the page with. */
