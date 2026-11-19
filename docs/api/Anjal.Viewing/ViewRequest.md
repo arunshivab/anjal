@@ -15,7 +15,9 @@ rc.29 (DES-22 §4.2): one request to the viewer process. The file's bytes travel
 - **Name** *(property)* - The file's name as the mail gave it.
 - **Page** *(property)* - A page (0-based) for a PDF page, its text, or the first page of a search.
 - **Password** *(property)* - The file's password, for this request only; never kept.
+- **Plan** *(property)* - rc.29 part 2 (DES-22 §7): the editor's changes, for and .
 - **Query** *(property)* - The words to find.
 - **Sheet** *(property)* - A sheet (0-based) of a workbook.
+- **Switches** *(property)* - The editor's held-back parts the webmail allows (D-405, D-406); null allows none. Set by the webmail on its own, never taken from the page.
 - **Who** *(property)* - An opaque key for the person asking, so one person cannot take the whole viewer.
 - **Width** *(property)* - The width in pixels to draw a page at.

@@ -87,8 +87,16 @@ else
     @if (kind == FileKinds.Pdf && pdf is not null)
     {
         @Notices(pdf.Notices)
-        <section class="pdfview" data-pdfview data-base="@ViewBase" data-entry="@(Entry ?? string.Empty)" data-pages="@pdf.Pages.Count"
-                 data-word-page="@L["Page {n} of {total}"]" data-word-found="@L["{n} found"]" data-word-none="@L["Not found in this file."]" aria-label="@File.FileName">
+        <section class="pdfview@(editing ? " pdfedit" : null)" data-pdfview data-base="@ViewBase" data-entry="@(Entry ?? string.Empty)" data-pages="@pdf.Pages.Count"
+                 data-word-page="@L["Page {n} of {total}"]" data-word-found="@L["{n} found"]" data-word-none="@L["Not found in this file."]" aria-label="@File.FileName"
+                 data-pdfedit="@(editing ? EditBase : null)" data-edit-words="@(editing ? EditWordsJson : null)">
+            @if (editing && editCheck is not null)
+            {
+                <AntiforgeryToken />
+                <PdfEditorBar L="L" Check="editCheck" Others="Others" HasSaved="hasSavedSignature" Back="@Back" EditedName="@MailboxService.EditedName(entryName ?? File.FileName)" Tool="@(PdfEditorBar.ToolKeys.Contains(EditTool ?? string.Empty) ? EditTool! : "markup")" OnDraft="OnDraft" Switches="@(Mail.Viewer?.Switches ?? EditSwitches.Shipped)" />
+            }
+            else
+            {
             <div class="pdfbar" role="toolbar" aria-label="@L["Pages"]">
                 <span class="pdfpos" data-pdf-pos aria-live="polite">@L["Page {n} of {total}"].Replace("{n}", "1", StringComparison.Ordinal).Replace("{total}", pdf.Pages.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</span>
                 <span class="lh-grow"></span>
@@ -104,8 +112,14 @@ else
                     <button type="button" class="iconbtn" data-pdf-hit="prev" hidden aria-label="@L["Previous match"]" title="@L["Previous match"]"><LipiIcon Name="chevron-up" Size="16" /></button>
                     <button type="button" class="iconbtn" data-pdf-hit="next" hidden aria-label="@L["Next match"]" title="@L["Next match"]"><LipiIcon Name="chevron-down" Size="16" /></button>
                 </form>
+                @if (canEdit && !string.IsNullOrEmpty(EditHref))
+                {
+                    @* DES-22 §7, D-370: the editor on tablets and desktops, with the script; on a phone the viewer only. *@
+                    <a class="btn btn-s pdfedit-go nophone" href="@EditHref" title="@L["Mark up, sign, redact, rearrange or stamp a copy of this PDF"]"><LipiIcon Name="edit" Size="16" />@L["Edit"]</a>
+                }
             </div>
-            @if (pdf.Outline.Count > 0)
+            }
+            @if (!editing && pdf.Outline.Count > 0)
             {
                 <details class="pdfoutline">
                     <summary>@L["Bookmarks"]</summary>
@@ -296,12 +310,55 @@ else
     /// <summary>The reader's clock.</summary>
     [Parameter, EditorRequired] public ZonedClock Clock { get; set; } = default!;
 
+    /// <summary>rc.29 part 2 (DES-22 §7): show the PDF editor instead of the viewer's bar.</summary>
+    [Parameter] public bool Edit { get; set; }
+
+    /// <summary>The file is on one of the person's drafts (the owner's check, 17 Nov 2026): the editor puts its new file back there.</summary>
+    [Parameter] public bool OnDraft { get; set; }
+
+    /// <summary>Where the viewer's Edit button goes (the mail's own page, with the editor).</summary>
+    [Parameter] public string? EditHref { get; set; }
+
+    /// <summary>The editor's tool open first, from the address (tool=sign and so on).</summary>
+    [Parameter] public string? EditTool { get; set; }
+
+    /// <summary>Where the editor's Leave goes.</summary>
+    [Parameter] public string Back { get; set; } = string.Empty;
+
+    /// <summary>The mail's other PDFs, for Join (D-371).</summary>
+    [Parameter] public IReadOnlyList<AttachmentView> Others { get; set; } = Array.Empty<AttachmentView>();
+
     [CascadingParameter] private Task<Microsoft.AspNetCore.Components.Authorization.AuthenticationState>? AuthState { get; set; }
 
     [CascadingParameter] private HttpContext? Http { get; set; }
 
     private string? status;
     private string? statusDetail;
+    private bool canEdit;
+    private bool editing;
+    private bool hasSavedSignature;
+    private EditCheck? editCheck;
+
+    private string EditBase => $"/message/{MessageId}/attachment/{File.Index}/edit";
+
+    // The script's words for the editor: refusals it says itself, and its prompts.
+    private string EditWordsJson => System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, string>
+    {
+        ["saving"] = L["Saving a new file..."],
+        ["failed"] = L["The file could not be saved."],
+        ["tick"] = L["Tick “I understand” above first."],
+        ["leave"] = L["Leave without saving? Your changes will be lost."],
+        ["chosen"] = L["{n} chosen"],
+        ["found"] = L["{n} found"],
+        ["leftOut"] = L["{n} left out"],
+        ["none"] = L["None found."],
+        ["typeHere"] = L["Type here"],
+        ["page"] = L["Page {n}"],
+        ["tooBig"] = L["A picture is larger than 8 MB."],
+        ["arranging"] = L["Arranging the pages..."],
+        ["lastPage"] = L["A file needs at least one page."],
+        ["chooseFirst"] = L["Tick the pages to change first."],
+    });
     private bool fromLocked;
     private string? kind;
     private string? entryName;
@@ -328,6 +385,9 @@ else
     {
         status = null;
         statusDetail = null;
+        canEdit = false;
+        editing = false;
+        editCheck = null;
         fromLocked = false;
         archive = null;
         pdf = null;
@@ -380,6 +440,21 @@ else
             case FileKinds.Pdf:
                 r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.PdfInfo, Entry = Entry }, session, language);
                 pdf = r.Ok ? ViewJson.ReadPdfInfo(r.Answer.Json) : null;
+                // DES-22 §7: a PDF the person may edit (not one from a locked archive, AC-20); the editor's first check.
+                canEdit = pdf is not null && await Mail.EditTargetAsync(mailboxId, MessageId, File.Index, Entry, session) is { Editable: true };
+                if (canEdit && Edit)
+                {
+                    (editCheck, _) = await Mail.EditCheckAsync(mailboxId, MessageId, File.Index, Entry, session);
+                    editing = editCheck is not null;
+                    try
+                    {
+                        hasSavedSignature = await Mail.DrawnSignatureAsync(mailboxId) is not null;
+                    }
+                    catch (Anjal.Mailbox.MailLockedException)
+                    {
+                        hasSavedSignature = false;
+                    }
+                }
                 break;
             case FileKinds.Word:
                 r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.Word, Entry = Entry }, session, language);

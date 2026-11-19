@@ -27,6 +27,7 @@ the owner asked for on 7 October 2026. The "screens" GitHub check runs them on e
 | `zoom` | Text at 200%: a 1280 by 800 screen zoomed to 200% (640 by 400 to the page) - the page never scrolls sideways and no button or heading sits beyond the right edge. From rc.28 this fails (640 by 400 is a phone held sideways); a control in a strip that scrolls sideways on purpose, such as the dashboard's cards or the letter's tools, does not count. |
 | `contrast` | Three open mails in every light and dark theme (high contrast included): each word in the envelope against what is really behind it, 4.5:1 (3:1 for large text). Then with Windows' forced colours: every button keeps a border. |
 | `devices` | rc.28 (DES-18): phones and tablets, upright and sideways, with touch - 375x812, 390x844, 844x390 (a phone sideways), 768x1024, 820x1180, 1024x768 and 1180x820. Fails when a page scrolls sideways or a mail's envelope is not beside its letter; controls under 44px are listed in `out/devices-touch.txt`. |
+| `viewer` | rc.29 part 2: every screen that opens a file (`preview=` in its address) shows the viewer with its label, and every such file also opens from Today and from Search (owner, 16 Nov 2026: Today showed no viewer). In the buttons job. |
 
 The screens are found by following links from the main ones, signed in as someone who is an
 operator and an organisation's administrator, so the organisation and Anjal consoles are included

@@ -13,9 +13,15 @@
          webmail speaks to the viewer over its socket and carries none of the file libraries. -->
     <ProjectReference Include="..\Anjal.Viewer\Anjal.Viewer.csproj" ReferenceOutputAssembly="false" Private="false" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- D-405, D-406: the tests turn the PDF editor's held-back parts on to check what they guard. -->
+    <InternalsVisibleTo Include="Anjal.Webmail.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="LiPicons.Blazor" Version="1.1.0" />
+    <!-- D-405 (the owner, 18 Nov 2026): a mail import's ZIP is read with Chuvadi.Zip's untrusted limits, lowered. -->
+    <PackageReference Include="Chuvadi.Zip" Version="1.0.0" />
   </ItemGroup>
 
   <ItemGroup>

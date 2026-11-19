@@ -1,6 +1,7 @@
 using System.Globalization;
 using Anjal.Mime;
 using Anjal.Store;
+using Anjal.Viewing;
 
 namespace Anjal.Webmail.Services;
 
@@ -479,16 +480,26 @@ public sealed partial class MailboxService
                 if (!read.TryGetValue(m.Id, out List<DmarcRow>? found))
                 {
                     found = new List<DmarcRow>();
+                    bool looked = true;
                     foreach (AttachmentView a in await this.ListAttachmentsAsync(box.Id, m.Id, ct).ConfigureAwait(false) ?? Array.Empty<AttachmentView>())
                     {
-                        if (DmarcReports.MayBeReport(a.FileName, a.ContentType) && await this.GetAttachmentAsync(box.Id, m.Id, a.Index, ct).ConfigureAwait(false) is { } got
-                            && DmarcReports.Read(got.Bytes) is DmarcReport report)
+                        if (!DmarcReports.MayBeReport(a.FileName, a.ContentType) || await this.GetAttachmentAsync(box.Id, m.Id, a.Index, ct).ConfigureAwait(false) is not { } got)
+                        {
+                            continue;
+                        }
+                        // D-405: read in the viewer process; a report the viewer did not look at is read next time.
+                        (bool seen, string? json) = await this.ReadReportAsync(ViewKinds.DmarcReport, got.Bytes, ct).ConfigureAwait(false);
+                        looked &= seen;
+                        if (ViewJson.ReadDmarc(json) is DmarcReport report)
                         {
                             found.AddRange(report.Rows);
                         }
                     }
-                    read[m.Id] = found;
-                    changed = true;
+                    if (looked)
+                    {
+                        read[m.Id] = found;
+                        changed = true;
+                    }
                 }
                 List<DmarcRow> mine = found.Where(r => ours.Contains(r.HeaderFrom)).ToList();
                 if (mine.Count > 0)

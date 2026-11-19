@@ -22,7 +22,7 @@ namespace Anjal.Webmail.Tests;
 /// do-not-send list, events, the inbox encrypted to the application's key, shared addresses, the
 /// return path's reports, webhooks, and the API description.
 /// </summary>
-public sealed class Rc26AppApiTests : IAsyncLifetime, IDisposable
+public sealed partial class Rc26AppApiTests : IAsyncLifetime, IDisposable
 {
     private static readonly string[] Outside = { "priya@gmail.test" };
     private static readonly string[] PriyaMeera = new[] { "priya@gmail.test", "meera@sgh.in" };

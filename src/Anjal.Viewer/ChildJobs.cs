@@ -15,8 +15,20 @@ public static class ChildJobs
     /// <returns>The answer.</returns>
     public static JobAnswer Run(ViewRequest request, byte[] file, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(file);
+        return Run(request, new[] { file }, ct);
+    }
+
+    /// <summary>Runs one job over its files: the attachment first, then (for the editor) the joined PDFs and the pictures.</summary>
+    /// <param name="request">The job.</param>
+    /// <param name="files">The files; the first is the attachment.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The answer.</returns>
+    public static JobAnswer Run(ViewRequest request, IReadOnlyList<byte[]> files, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(files);
+        byte[] file = files.Count > 0 ? files[0] : Array.Empty<byte>();
         if (request.Kind.StartsWith("test.", StringComparison.Ordinal) && Environment.GetEnvironmentVariable("ANJAL_VIEWER_TEST_HOOKS") == "1")
         {
             return TestHook(request.Kind);
@@ -31,6 +43,11 @@ public static class ChildJobs
                 return listing.Status == ViewStatus.Ok
                     ? JobAnswer.Json(ViewJson.Write(listing.View))
                     : JobAnswer.Status(listing.Status, PasswordPlace(listing.Status, listing.Place));
+            // D-405 (decision A, 17 Nov 2026): the receivers' reports, read here and not in the webmail.
+            case ViewKinds.DmarcReport:
+                return DmarcReports.Read(file) is DmarcReport dmarc ? JobAnswer.Json(ViewJson.Write(dmarc)) : JobAnswer.Status(ViewStatus.Unsupported, null);
+            case ViewKinds.TlsReport:
+                return TlsReports.Read(file) is IReadOnlyList<TlsReportRow> tls ? JobAnswer.Json(ViewJson.Write(tls.ToList())) : JobAnswer.Status(ViewStatus.Unsupported, null);
             case ViewKinds.ArchiveEntry:
                 if (string.IsNullOrEmpty(request.Entry))
                 {
@@ -73,8 +90,20 @@ public static class ChildJobs
                 ? JobAnswer.File(bytes, ViewJson.Write(new FileOut { Name = name, Type = type }))
                 : JobAnswer.Status(ViewStatus.Unsupported, null),
             ViewKinds.Dicom => DicomJob.Run(bytes, ct),
+            ViewKinds.PdfEditCheck => PdfEdit.Check(bytes, request.Password, ct),
+            ViewKinds.PdfSigns => request.Switches is { Redact: true } ? PatientSigns.Find(bytes, request.Password, ct) : JobAnswer.Status(ViewStatus.Refused, null),
+            ViewKinds.PdfArrange => request.Plan is EditPlan arrange ? PdfEdit.Arrange(WithMain(bytes, files), request.Password, arrange.Whole(), request.Switches ?? EditSwitches.Shipped, ct) : JobAnswer.Status(ViewStatus.Refused, null),
+            ViewKinds.PdfSave => request.Plan is EditPlan save ? PdfEdit.Save(WithMain(bytes, files), request.Password, save.Whole(), request.Switches ?? EditSwitches.Shipped, ct) : JobAnswer.Status(ViewStatus.Refused, null),
             _ => JobAnswer.Status(ViewStatus.Unsupported, null),
         };
+    }
+
+    // The editor's files with the one being edited first: the attachment's own bytes, or the PDF inside its ZIP (D-382).
+    private static List<byte[]> WithMain(byte[] main, IReadOnlyList<byte[]> files)
+    {
+        var all = new List<byte[]>(files.Count) { main };
+        all.AddRange(files.Skip(1));
+        return all;
     }
 
     // For a file inside an archive: the attachment's password, and the inner archive's for "3/5".

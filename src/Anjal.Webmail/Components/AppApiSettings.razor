@@ -46,8 +46,8 @@
                     @foreach (AppSigningKey k in App.SigningKeys.OrderByDescending(k => k.Created))
                     {
                         <tr>
-                            <td class="mono">@k.Id</td>
-                            <td class="mono">@Short(k.Fingerprint)</td>
+                            <td class="mono nowrap">@k.Id</td>
+                            <td class="mono nowrap">@Short(k.Fingerprint)</td>
                             <td class="nowrap">@Clock.Date(k.Created)</td>
                             <td>@if (k.Retired is DateTimeOffset r) { <span class="pill">@L["Retired {date}"].Replace("{date}", Clock.Date(r), StringComparison.Ordinal)</span> } else { <span class="pill pill-info">@L["In use"]</span> }</td>
                             <td>
@@ -80,7 +80,7 @@
                     @foreach (AppEncryptionKey k in App.EncryptionKeys.OrderByDescending(k => k.Added))
                     {
                         <tr>
-                            <td class="mono">@Short(k.Fingerprint)</td>
+                            <td class="mono nowrap">@Short(k.Fingerprint)</td>
                             <td class="nowrap">@Clock.Date(k.Added)</td>
                             <td>@if (ReferenceEquals(k, App.EncryptionKeys.OrderByDescending(x => x.Added).First())) { <span class="pill pill-info">@L["New mail uses this"]</span> } else { <span class="pill">@L["Older key"]</span> }</td>
                             <td><form method="post" action="/org/apps/@Uri.EscapeDataString(App.Id)/encryption/remove" class="inline"><AntiforgeryToken /><input type="hidden" name="fingerprint" value="@k.Fingerprint" /><button type="submit" class="linkbtn">@L["Remove"]</button></form></td>
@@ -207,7 +207,7 @@
                         {
                             <tr>
                                 <td class="nowrap">@Clock.List(d.At, DateTimeOffset.UtcNow)</td>
-                                <td class="mono">#@d.EventSeq.ToString(Inv)</td>
+                                <td class="mono nowrap">#@d.EventSeq.ToString(Inv)</td>
                                 <td>@(d.Code is int code ? code.ToString(Inv) : d.Error.Length > 0 ? d.Error : "-")</td>
                                 <td class="num">@d.Attempts.ToString(Inv)</td>
                                 <td>@L[d.Status switch { "delivered" => "Delivered", "failed" => "Failed", _ => "Being tried" }]</td>
@@ -361,7 +361,7 @@
                     @foreach (AppHttpKey k in App.HttpKeys.OrderBy(k => k.Retired is null ? 0 : 1).ThenByDescending(k => k.Created))
                     {
                         <tr>
-                            <td class="mono">@k.Fingerprint</td>
+                            <td class="mono nowrap">@k.Fingerprint</td>
                             <td>@(k.Sandbox ? L["Sandbox"] : L["Live"])</td>
                             <td>@k.Note</td>
                             <td class="nowrap">@Clock.Date(k.Created)</td>

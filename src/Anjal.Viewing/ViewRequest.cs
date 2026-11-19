@@ -53,4 +53,13 @@ public sealed class ViewRequest
 
     /// <summary>An opaque key for the person asking, so one person cannot take the whole viewer.</summary>
     public string? Who { get; init; }
+
+    /// <summary>rc.29 part 2 (DES-22 §7): the editor's changes, for <see cref="ViewKinds.PdfArrange"/> and <see cref="ViewKinds.PdfSave"/>.</summary>
+    public EditPlan? Plan { get; init; }
+
+    /// <summary>
+    /// The editor's held-back parts the webmail allows (D-405, D-406); null allows none. Set by the webmail on its
+    /// own, never taken from the page.
+    /// </summary>
+    public EditSwitches? Switches { get; init; }
 }

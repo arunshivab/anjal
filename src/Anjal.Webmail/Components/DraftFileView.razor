@@ -1,0 +1,92 @@
+@* The owner's check (17 Nov 2026): a file of the mail being written, opened over the compose screen - Anjal's own
+   viewer, the same as for a mail that arrived, with Download and Close, so the person keeps their place. A PDF can
+   be edited here; Save puts the new file back on this draft. Drawn outside the compose form (the viewer has forms
+   of its own), and only for a draft of this mailbox. *@
+@inject MailboxService Mail
+@inject Words Words
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor HttpAccess
+
+@if (file is not null)
+{
+    (string tag, string kind) = FileTag.Of(file.FileName, file.ContentType);
+    string? ptype = MailboxService.PreviewType(file);
+    <div class="dfview-back" aria-hidden="true"></div>
+    <section class="dfview" role="dialog" aria-modal="true" aria-label="@file.FileName" data-dfview>
+        <div class="dfview-head">
+            <span class="ftag ftag-@kind" aria-hidden="true">@tag</span>
+            <b class="pvname">@file.FileName</b>
+            <span class="lh-grow"></span>
+            <a class="iconbtn" href="/message/@DraftId/attachment/@Index" title="@L["Download"]" aria-label="@L["Download"]"><LipiIcon Name="download" Size="16" /></a>
+            <a class="btn btn-s" href="/draft/@DraftId" data-dfview-close title="@L["Back to the mail you are writing"]">@L["Close"]</a>
+        </div>
+        <div class="dfview-body">
+            @if (ptype is null)
+            {
+                <p class="notice n-info">@L["This file could not be shown."] <a href="/message/@DraftId/attachment/@Index">@L["Download"]</a></p>
+            }
+            else if (ptype.StartsWith("image/", StringComparison.Ordinal))
+            {
+                <div class="pvframe">
+                    <ViewerTab Kind="img" Words="@L["Picture"]" />
+                    <div class="pvbody">
+                        <img class="pvimg" src="/message/@DraftId/attachment/@Index/preview" alt="@file.FileName" data-viewer-img />
+                    </div>
+                </div>
+            }
+            else
+            {
+                <AttachmentViewer MessageId="DraftId" File="file" FileLink="@Self" Entry="@ViewEntry" SheetIndex="@ViewSheet" L="L" Clock="clock"
+                                  Edit="@(Query("edit") == "1")" EditHref="@(Self + "&edit=1")" Back="@Self" EditTool="@Query("tool")"
+                                  Others="@others" OnDraft="true" />
+            }
+        </div>
+    </section>
+}
+
+@code {
+    /// <summary>The draft.</summary>
+    [Parameter] public Guid DraftId { get; set; }
+
+    /// <summary>The file to show, by its place on the draft.</summary>
+    [Parameter] public int Index { get; set; }
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Lexicon L = new("en", new Dictionary<string, string>());
+    private ZonedClock clock = ZonedClock.Default;
+    private AttachmentView? file;
+    private IReadOnlyList<AttachmentView> others = Array.Empty<AttachmentView>();
+
+    private string Self => $"/draft/{DraftId}?view={Index.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+
+    private string Query(string name) => HttpAccess.HttpContext?.Request.Query[name].ToString() ?? string.Empty;
+
+    // The file inside an archive and the workbook's sheet being looked at, from the link (as the reader takes them).
+    private string? ViewEntry => Query("entry") is string e && ViewerLinks.Places(e).Length > 0 ? e : null;
+
+    private int ViewSheet => int.TryParse(Query("sheet"), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int s) && s < 1000 ? s : 0;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        file = null;
+        if (AuthState is null)
+        {
+            return;
+        }
+        System.Security.Claims.ClaimsPrincipal user = (await AuthState).User;
+        if (WebmailAuthService.MailboxIdOf(user) is not Guid mailboxId)
+        {
+            return;
+        }
+        L = Words.For(WebmailAuthService.LanguageOf(user, Words));
+        clock = WebmailAuthService.ClockOf(user);
+        // Only a draft of this mailbox is opened here.
+        if (await Mail.ReadRawAsync(mailboxId, DraftId) is not { } raw || raw.Folder.Name != "Drafts")
+        {
+            return;
+        }
+        IReadOnlyList<AttachmentView> files = await Mail.ListAttachmentsAsync(mailboxId, DraftId) ?? Array.Empty<AttachmentView>();
+        file = files.FirstOrDefault(a => a.Index == Index);
+        others = files.Where(a => a.Index != Index && MailboxService.PreviewType(a) == "application/pdf").ToList();
+    }
+}

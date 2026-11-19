@@ -213,6 +213,97 @@ public sealed class Rc28MailAppsTests : IAsyncLifetime, IDisposable
     }
 
     // The test runs the import itself; the webmail's own worker may take it first - either way, wait for the end.
+    [Fact]
+    public async Task AZipOfMail_IsReadWithTheUntrustedLimits_AndOnePastThemStopsWithPlainWords()
+    {
+        // D-405 (the owner, 18 Nov 2026): Chuvadi.Zip's limits for untrusted input, lowered, a hard total cap and a
+        // time limit.
+        Assert.Equal(MailImportFile.ZipEntries, MailImportFile.ZipLimits.MaxEntries);
+        Assert.True(MailImportFile.ZipEntries <= Chuvadi.Zip.ZipExtractionLimits.Untrusted.MaxEntries);
+        Assert.Equal(ImapPullClient.MaxMessage, MailImportFile.ZipLimits.MaxEntryBytes);
+        Assert.Equal(MailImportFile.ZipTotalBytes, MailImportFile.ZipLimits.MaxTotalBytes);
+        Assert.True(MailImportFile.ZipLimits.MaxCompressionRatio <= Chuvadi.Zip.ZipExtractionLimits.Untrusted.MaxCompressionRatio);
+
+        MailboxService svc = this.app.Services.GetRequiredService<MailboxService>();
+        var seen = new HashSet<Guid>();
+        static byte[] Eml(string id, string subject) => Encoding.UTF8.GetBytes(
+            "From: <ravi@old.test>\r\nSubject: " + subject + "\r\nDate: Mon, 2 Nov 2026 10:00:00 +0530\r\nMessage-ID: <" + id + "@old.test>\r\n\r\nHello.\r\n");
+
+        // Two messages, a folder and a note: the two messages come in.
+        byte[] good = Zip(("mail/", null), ("mail/one.eml", Eml("z1", "Zip one")), ("mail/two.eml", Eml("z2", "Zip two")), ("readme.txt", Encoding.UTF8.GetBytes("notes")));
+        ImportJobRow done = await this.ImportZipAsync(svc, good, seen);
+        Assert.Equal(ImportJobRow.Done, done.State);
+        Assert.Equal(2, done.Imported);
+
+        // A message packed far tighter than 200 to 1 (5 MB of one letter): stopped, said plainly.
+        byte[] tight = Zip(("bomb.eml", Encoding.ASCII.GetBytes("Subject: x\r\n\r\n" + new string('a', 5 * 1024 * 1024))));
+        ImportJobRow bomb = await this.ImportZipAsync(svc, tight, seen);
+        Assert.Equal(ImportJobRow.Failed, bomb.State);
+        Assert.Equal("The ZIP file is too large to import: at most 10,000 files and 2 GB unpacked, and no file packed tighter than 200 to 1.", bomb.Error);
+
+        // More files than the limit.
+        byte[] many = Zip(Enumerable.Range(0, MailImportFile.ZipEntries + 1).Select(i => ("n" + i.ToString(System.Globalization.CultureInfo.InvariantCulture) + ".txt", (byte[]?)new byte[] { 0x41 })).ToArray());
+        ImportJobRow crowded = await this.ImportZipAsync(svc, many, seen);
+        Assert.Equal(ImportJobRow.Failed, crowded.State);
+        Assert.Equal(bomb.Error, crowded.Error);
+
+        // Past the time limit: stopped, and started again it goes on from where it stopped.
+        TimeSpan limit = MailImportFile.ZipTimeLimit;
+        MailImportFile.ZipTimeLimit = TimeSpan.Zero;
+        try
+        {
+            ImportJobRow slow = await this.ImportZipAsync(svc, Zip(("three.eml", Eml("z3", "Zip three"))), seen);
+            Assert.Equal(ImportJobRow.Failed, slow.State);
+            Assert.Equal("Reading the ZIP file took longer than 30 minutes, so the import stopped. Start it again to go on from where it stopped.", slow.Error);
+        }
+        finally
+        {
+            MailImportFile.ZipTimeLimit = limit;
+        }
+
+        // Something that only looks like a ZIP: the file could not be read.
+        byte[] broken = new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x00, 0x01, 0x02 };
+        ImportJobRow unreadable = await this.ImportZipAsync(svc, broken, seen);
+        Assert.Equal(ImportJobRow.Failed, unreadable.State);
+        Assert.Equal("The file could not be read.", unreadable.Error);
+    }
+
+    private async Task<ImportJobRow> ImportZipAsync(MailboxService svc, byte[] zip, HashSet<Guid> seen)
+    {
+        using var upload = new MemoryStream(zip);
+        Assert.Null(await svc.StartFileImportAsync(this.arun.Id, upload, "old.zip", null));
+        for (int i = 0; i < 300; i++)
+        {
+            await svc.RunImportsAsync();
+            List<ImportJobRow> fresh = (await svc.ImportJobsAsync(this.arun.Id)).Where(j => !seen.Contains(j.Id)).ToList();
+            if (fresh.Count == 1 && fresh[0].State is ImportJobRow.Done or ImportJobRow.Failed)
+            {
+                seen.Add(fresh[0].Id);
+                return fresh[0];
+            }
+            await Task.Delay(100);
+        }
+        throw new TimeoutException("The import did not end.");
+    }
+
+    private static byte[] Zip(params (string Name, byte[]? Bytes)[] entries)
+    {
+        using var packed = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(packed, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach ((string name, byte[]? bytes) in entries)
+            {
+                System.IO.Compression.ZipArchiveEntry e = zip.CreateEntry(name, System.IO.Compression.CompressionLevel.Optimal);
+                if (bytes is not null)
+                {
+                    using Stream s = e.Open();
+                    s.Write(bytes);
+                }
+            }
+        }
+        return packed.ToArray();
+    }
+
     private static async Task<ImportJobRow> DoneAsync(MailboxService svc, Guid mailboxId)
     {
         for (int i = 0; i < 300; i++)

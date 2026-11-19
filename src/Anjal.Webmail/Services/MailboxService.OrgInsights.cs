@@ -1,6 +1,7 @@
 using System.Net;
 using Anjal.Mime;
 using Anjal.Store;
+using Anjal.Viewing;
 
 namespace Anjal.Webmail.Services;
 
@@ -222,16 +223,26 @@ public sealed partial class MailboxService
                 if (!read.TryGetValue(m.Id, out List<TlsReportRow>? found))
                 {
                     found = new List<TlsReportRow>();
+                    bool looked = true;
                     foreach (AttachmentView a in await this.ListAttachmentsAsync(box.Id, m.Id, ct).ConfigureAwait(false) ?? Array.Empty<AttachmentView>())
                     {
-                        if (TlsReports.MayBeReport(a.FileName, a.ContentType) && await this.GetAttachmentAsync(box.Id, m.Id, a.Index, ct).ConfigureAwait(false) is { } got
-                            && TlsReports.Read(got.Bytes) is IReadOnlyList<TlsReportRow> report)
+                        if (!TlsReports.MayBeReport(a.FileName, a.ContentType) || await this.GetAttachmentAsync(box.Id, m.Id, a.Index, ct).ConfigureAwait(false) is not { } got)
+                        {
+                            continue;
+                        }
+                        // D-405: read in the viewer process; a report the viewer did not look at is read next time.
+                        (bool seen, string? json) = await this.ReadReportAsync(ViewKinds.TlsReport, got.Bytes, ct).ConfigureAwait(false);
+                        looked &= seen;
+                        if (ViewJson.ReadTls(json) is List<TlsReportRow> report)
                         {
                             found.AddRange(report);
                         }
                     }
-                    read[m.Id] = found;
-                    changed = true;
+                    if (looked)
+                    {
+                        read[m.Id] = found;
+                        changed = true;
+                    }
                 }
                 List<TlsReportRow> mine = found.Where(r => ours.Contains(r.Domain)).ToList();
                 if (mine.Count > 0)

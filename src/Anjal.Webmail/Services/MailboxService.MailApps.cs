@@ -1,8 +1,8 @@
-using System.IO.Compression;
 using System.Text;
 using Anjal.Mailbox;
 using Anjal.Mime;
 using Anjal.Store;
+using Chuvadi.Zip;
 using Microsoft.AspNetCore.DataProtection;
 
 namespace Anjal.Webmail.Services;
@@ -298,10 +298,21 @@ public sealed partial class MailboxService
             job.State = error is null ? ImportJobRow.Done : ImportJobRow.Failed;
             job.Error = error ?? string.Empty;
         }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or System.Net.Sockets.SocketException or System.Security.Authentication.AuthenticationException)
+        catch (ZipLimitExceededException)
+        {
+            // D-405: a ZIP past the limits for untrusted input is not read further.
+            job.State = ImportJobRow.Failed;
+            job.Error = "The ZIP file is too large to import: at most 10,000 files and 2 GB unpacked, and no file packed tighter than 200 to 1.";
+        }
+        catch (TimeoutException)
         {
             job.State = ImportJobRow.Failed;
-            job.Error = ex is InvalidDataException ? "The file could not be read." : "The other server stopped answering. Start the import again to go on from where it stopped.";
+            job.Error = "Reading the ZIP file took longer than 30 minutes, so the import stopped. Start it again to go on from where it stopped.";
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or ZipFormatException or System.Net.Sockets.SocketException or System.Security.Authentication.AuthenticationException)
+        {
+            job.State = ImportJobRow.Failed;
+            job.Error = ex is InvalidDataException or ZipFormatException ? "The file could not be read." : "The other server stopped answering. Start the import again to go on from where it stopped.";
         }
         job.Secret = string.Empty;
         await apps.SaveImportJobAsync(job, ct).ConfigureAwait(false);
@@ -558,19 +569,53 @@ public static class MailImportFile
         return new FileInfo(path).Length > Anjal.Imap.ImapPullClient.MaxMessage ? new[] { Array.Empty<byte>() } : new[] { File.ReadAllBytes(path) };
     }
 
+    /// <summary>
+    /// The library's security advisory (D-405; the owner's choice, 18 Nov 2026): a ZIP to import is read with
+    /// Chuvadi.Zip's limits for untrusted input, lowered - at most 10,000 files, no message over Anjal's largest, 2 GB
+    /// unpacked in all, a ratio of 200 - every one checked against the bytes actually unpacked.
+    /// </summary>
+    public static ZipExtractionLimits ZipLimits { get; } = Lowered(ZipExtractionLimits.Untrusted);
+
+    /// <summary>The hard cap on what one import's ZIP may unpack to, in all.</summary>
+    public const long ZipTotalBytes = 2L * 1024 * 1024 * 1024;
+
+    /// <summary>The most files a ZIP to import may hold.</summary>
+    public const int ZipEntries = 10_000;
+
+    /// <summary>
+    /// How long one run of an import may spend reading its ZIP; past it the import stops, and started again it goes
+    /// on from where it stopped.
+    /// </summary>
+    public static TimeSpan ZipTimeLimit { get; internal set; } = TimeSpan.FromMinutes(30);
+
+    private static ZipExtractionLimits Lowered(ZipExtractionLimits u) => new()
+    {
+        MaxEntries = Math.Min(u.MaxEntries ?? int.MaxValue, ZipEntries),
+        MaxEntryBytes = Math.Min(u.MaxEntryBytes ?? long.MaxValue, Anjal.Imap.ImapPullClient.MaxMessage),
+        MaxTotalBytes = Math.Min(u.MaxTotalBytes ?? long.MaxValue, ZipTotalBytes),
+        MaxCompressionRatio = Math.Min(u.MaxCompressionRatio ?? double.MaxValue, 200),
+        MaxPathDepth = u.MaxPathDepth,
+        MaxNameLength = u.MaxNameLength,
+        MaxCentralDirectoryBytes = u.MaxCentralDirectoryBytes,
+    };
+
     private static IEnumerable<byte[]> ReadZip(string path)
     {
-        using ZipArchive zip = ZipFile.OpenRead(path);
-        foreach (ZipArchiveEntry e in zip.Entries)
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        using ZipReader zip = ZipReader.Open(path, new ZipReaderOptions { Limits = ZipLimits, VerifyCrc = true });
+        foreach (ZipEntryInfo e in zip.Entries)
         {
-            if (e.FullName.EndsWith('/') || e.Length == 0 || e.Length > Anjal.Imap.ImapPullClient.MaxMessage || !e.Name.EndsWith(".eml", StringComparison.OrdinalIgnoreCase))
+            if (clock.Elapsed > ZipTimeLimit)
+            {
+                throw new TimeoutException("The import took too long.");
+            }
+            // A folder, a locked or unsupported file, one too large, or anything but a .eml is passed over.
+            if (e.IsDirectory || e.IsEncrypted || !e.IsSupported || e.Size == 0 || e.Size > Anjal.Imap.ImapPullClient.MaxMessage
+                || !e.Name.EndsWith(".eml", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
-            using Stream s = e.Open();
-            using var ms = new MemoryStream();
-            s.CopyTo(ms);
-            yield return ms.ToArray();
+            yield return zip.ReadAllBytes(e, null);
         }
     }
 

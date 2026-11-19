@@ -51,10 +51,9 @@ public static class ChildHost
         try
         {
             ViewRequest request = ViewJson.ReadRequest(frame.Value.Json);
-            byte[] file = frame.Value.Files.Count > 0 ? frame.Value.Files[0] : Array.Empty<byte>();
             // The library is asked to stop shortly before the supervisor would stop the process.
             using var cts = new CancellationTokenSource(ViewKinds.Deadline(request.Kind, request.Page) - TimeSpan.FromMilliseconds(500));
-            answer = ChildJobs.Run(request, file, cts.Token);
+            answer = ChildJobs.Run(request, frame.Value.Files, cts.Token);
         }
         catch (OperationCanceledException)
         {

@@ -87,6 +87,9 @@ public sealed class FindHit
     /// <summary>The page (0-based).</summary>
     public int Page { get; init; }
 
+    /// <summary>rc.29 part 2: for a patient sign found by <see cref="ViewKinds.PdfSigns"/>, which kind (record, aadhaar, pan, phone).</summary>
+    public string? Sign { get; init; }
+
     /// <summary>The boxes.</summary>
     public List<Box> Boxes { get; init; } = new();
 }

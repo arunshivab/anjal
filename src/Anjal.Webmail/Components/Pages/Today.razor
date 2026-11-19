@@ -68,7 +68,7 @@ else
                 {
                     <p class="tdwhy"><span class="tdtag tag-@why.Reason">@L[TagWord(why.Reason)]</span>@whyText</p>
                 }
-                <MessageReader Id="openId" BackLink="@OpenLink(openId)" ReturnTo="@("/dashboard/today" + DoneQuery(null))" QuickReply="@QuickReplyNext(openId)" />
+                <MessageReader Id="openId" BackLink="@OpenLink(openId)" Preview="@PreviewIndex" ReturnTo="@("/dashboard/today" + DoneQuery(null))" QuickReply="@QuickReplyNext(openId)" />
             </section>
         </div>
     }
@@ -262,6 +262,8 @@ else
     [SupplyParameterFromQuery(Name = "to")] private string? MovedTo { get; set; }
     [SupplyParameterFromQuery(Name = "held")] private string? HeldText { get; set; }
     [SupplyParameterFromQuery(Name = "wait")] private int? Wait { get; set; }
+    [SupplyParameterFromQuery(Name = "preview")] private string? PreviewText { get; set; }
+    private int? PreviewIndex => int.TryParse(PreviewText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int i) ? i : null;
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private Lexicon L = new("en", new Dictionary<string, string>());

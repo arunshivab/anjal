@@ -1,0 +1,298 @@
+@* rc.29 part 2 (DES-22 §7.2): the PDF editor's bar - Mark up, Sign, Redact, Pages, Stamp, Undo, Redo, Save - and
+   each tool's panel. The server draws every control; the editor's script (app.js, pdfEdit) works them and keeps
+   the list of changes until Save. Nothing in the PDF changes until Save, and Save makes a new file (§6.3). *@
+@using Anjal.Viewing
+
+<div class="pdfbar editbar" role="toolbar" aria-label="@L["Edit this PDF"]">
+    <div class="edittools" role="group" aria-label="@L["Tools"]">
+        @foreach ((string key, string word, string icon) in Tools.Where(x => x.Key != "redact" || Switches.Redact))
+        {
+            <button type="button" class="edittool" data-edit-tool="@key" aria-label="@L[word]" aria-pressed="@(key == Shown ? "true" : "false")" title="@L[word]"><LipiIcon Name="@icon" Size="16" /><span>@L[word]</span></button>
+        }
+    </div>
+    <span class="lh-grow"></span>
+    <button type="button" class="iconbtn" data-edit-undo disabled aria-label="@L["Undo"]" title="@L["Undo"]"><LipiIcon Name="undo" Size="16" /></button>
+    <button type="button" class="iconbtn" data-edit-redo disabled aria-label="@L["Redo"]" title="@L["Redo"]"><LipiIcon Name="redo" Size="16" /></button>
+    <button type="button" class="iconbtn" data-pdf-zoom="out" aria-label="@L["Zoom out"]" title="@L["Zoom out"]"><LipiIcon Name="minus" Size="16" /></button>
+    <button type="button" class="iconbtn" data-pdf-zoom="fit" aria-label="@L["Fit"]" title="@L["Fit"]"><LipiIcon Name="fit-page" Size="16" /></button>
+    <button type="button" class="iconbtn" data-pdf-zoom="in" aria-label="@L["Zoom in"]" title="@L["Zoom in"]"><LipiIcon Name="plus" Size="16" /></button>
+    <a class="btn btn-s" href="@Back" data-edit-leave title="@L["Back to the file, without these changes"]">@L["Leave"]</a>
+    <details class="pmenu savemenu" data-edit-savemenu>
+        <summary class="btn btn-p"><LipiIcon Name="save" Size="16" />@L["Save"]</summary>
+        <div class="pmenu-body" role="menu">
+            @if (OnDraft)
+            {
+                @* A file on a draft (the owner's check, 17 Nov 2026): the edited file goes back on the same draft. *@
+                <p class="hint savenote">@L["The new file, {name}, takes this file's place on the draft."].Replace("{name}", EditedName, StringComparison.Ordinal)</p>
+                <button type="button" role="menuitem" class="pmi" data-edit-go="ondraft"><LipiIcon Name="draft" Size="16" />@L["Save it on this draft"]</button>
+            }
+            else
+            {
+                <p class="hint savenote">@L["A new file, {name}, on a new mail. The original stays as it came."].Replace("{name}", EditedName, StringComparison.Ordinal)</p>
+                <button type="button" role="menuitem" class="pmi" data-edit-go="reply"><LipiIcon Name="undo" Size="16" />@L["Reply with it"]</button>
+                <button type="button" role="menuitem" class="pmi" data-edit-go="replyall"><LipiIcon Name="users" Size="16" />@L["Reply all with it"]</button>
+                <button type="button" role="menuitem" class="pmi" data-edit-go="forward"><LipiIcon Name="redo" Size="16" />@L["Forward with it"]</button>
+                <button type="button" role="menuitem" class="pmi" data-edit-go="draft"><LipiIcon Name="draft" Size="16" />@L["New mail with it"]</button>
+                @* The owner's check, 17 Nov 2026: the file can answer another mail, or join a draft being written. *@
+                <button type="button" role="menuitem" class="pmi" data-edit-go="pick-mail"><LipiIcon Name="email" Size="16" />@L["Reply to another mail with it..."]</button>
+                <button type="button" role="menuitem" class="pmi" data-edit-go="pick-draft"><LipiIcon Name="attachment" Size="16" />@L["Add to a draft I'm writing..."]</button>
+            }
+        </div>
+    </details>
+    @* Found words and patient details (Redact): kept in the bar, so the count, the choice and Redact stay in view
+       wherever the page is scrolled (the owner, 17 Nov: "Redact all found not working"; the button had scrolled away). *@
+    @if (Switches.Redact)
+    {
+        <div class="editfoundbar" data-edit-foundbar hidden>
+            <span class="pdffound" data-edit-found aria-live="polite"></span>
+            <span class="hint" data-edit-foundhint>@L["Click a found box to leave it out; click it again to put it back."]</span>
+            <span class="lh-grow"></span>
+            <button type="button" class="btn btn-s btn-sm" data-edit-foundcancel>@L["Cancel"]</button>
+            <button type="button" class="btn btn-p btn-sm" data-edit-redactall>@L["Redact"]</button>
+        </div>
+    }
+</div>
+
+@if (!OnDraft)
+{
+    <MailPicker L="L" Key="mail" Title="@L["Reply to another mail with it"]" Actions="MailActions" />
+    <MailPicker L="L" Key="draft" Drafts="true" Title="@L["Add to a draft I'm writing"]" Actions="DraftActions" />
+}
+
+@if (Check.Signatures.Count > 0)
+{
+    SignatureLine s = Check.Signatures[0];
+    <div class="notice n-warn editgate" role="alert">
+        <LipiIcon Name="warning" Size="16" />
+        <div>
+            <p>@L["This PDF is digitally signed by {name} ({state}). Saving any change makes a new file whose signature no longer holds."].Replace("{name}", s.Name.Length > 0 ? s.Name : L["someone"], StringComparison.Ordinal).Replace("{state}", s.Valid ? L["valid"] : L["not valid"], StringComparison.Ordinal)</p>
+            <label class="edittick"><input type="checkbox" data-edit-accept="signed" /> @L["I understand"]</label>
+        </div>
+    </div>
+}
+@if (Check.Locked)
+{
+    <div class="notice n-warn editgate" role="alert">
+        <LipiIcon Name="unlock" Size="16" />
+        <div>
+            <p>@L["This PDF has a password now. The new file will not have one."]</p>
+            <label class="edittick"><input type="checkbox" data-edit-accept="nopassword" /> @L["I understand"]</label>
+        </div>
+    </div>
+}
+
+<div class="editpanel" data-edit-panel="markup" hidden="@(Shown != "markup")">
+    <div class="editrow" role="group" aria-label="@L["Mark up"]">
+        @foreach ((string key, string word, string icon) in Shapes)
+        {
+            <button type="button" class="iconbtn" data-edit-shape="@key" aria-pressed="@(key == "rect" ? "true" : "false")" aria-label="@L[word]" title="@L[word]"><LipiIcon Name="@icon" Size="16" /></button>
+        }
+        <label class="iconbtn editpick" title="@L["Add a picture"]"><LipiIcon Name="file-image" Size="16" /><span class="sr-only">@L["Add a picture"]</span><input type="file" accept="image/png,image/jpeg" data-edit-picture hidden /></label>
+        <span class="editsep" aria-hidden="true"></span>
+        <div class="editcolours" role="radiogroup" aria-label="@L["Colour"]">
+            @foreach ((string hex, string word) in Colours)
+            {
+                <button type="button" class="editcolour" role="radio" data-edit-colour="@hex" aria-checked="@(hex == "#d32f2f" ? "true" : "false")" aria-label="@L[word]" title="@L[word]" style="--sw: @hex"></button>
+            }
+        </div>
+        <label class="editfield"><span>@L["Line"]</span>
+            <select class="inp" data-edit-line aria-label="@L["Line"]">
+                <option value="1">@L["Thin"]</option>
+                <option value="2" selected>@L["Medium"]</option>
+                <option value="4">@L["Thick"]</option>
+            </select>
+        </label>
+        <label class="editfield"><span>@L["Text size"]</span>
+            <select class="inp" data-edit-size aria-label="@L["Text size"]">
+                <option value="10">10</option>
+                <option value="12" selected>12</option>
+                <option value="16">16</option>
+                <option value="24">24</option>
+            </select>
+        </label>
+        <button type="button" class="iconbtn" data-edit-remove disabled aria-label="@L["Remove the chosen mark"]" title="@L["Remove the chosen mark"]"><LipiIcon Name="trash" Size="16" /></button>
+    </div>
+    <p class="hint">@L["Marks become part of the page when saved."]</p>
+</div>
+
+<div class="editpanel" data-edit-panel="sign" hidden="@(Shown != "sign")">
+    <p class="notice n-info signnote"><LipiIcon Name="info" Size="16" /><span>@L["This is a picture of your signature, not a digital signature. It does not prove who signed or that the file was not changed afterwards."]</span></p>
+    <div class="signpad">
+        <canvas class="padcanvas" width="480" height="160" data-edit-pad aria-label="@L["Draw your signature here"]"></canvas>
+        <div class="editrow">
+            <button type="button" class="btn btn-s btn-sm" data-edit-padclear>@L["Clear"]</button>
+            @if (HasSaved)
+            {
+                <button type="button" class="btn btn-s btn-sm" data-edit-padsaved>@L["Use my kept signature"]</button>
+            }
+            <label class="btn btn-s btn-sm editpick" title="@L["A JPEG or PNG picture of your own signature"]">@L["Use a scan of my signature"]<input type="file" accept="image/png,image/jpeg" data-edit-scan hidden /></label>
+            <label class="edittick"><input type="checkbox" data-edit-padkeep /> @L["Keep it for next time"]</label>
+            <span class="lh-grow"></span>
+            <button type="button" class="btn btn-p btn-sm" data-edit-padplace disabled title="@L["Then click the page where it goes. Drag it to move it."]">@L["Place it on the page"]</button>
+        </div>
+        <p class="hint">@L["Then click the page where it goes. Drag it to move it."]</p>
+    </div>
+</div>
+
+@* D-405 (the library's security advisory, 17 Nov 2026): Redact waits for chuvadi-pdf 3.35.1. *@
+@if (Switches.Redact)
+{
+<div class="editpanel" data-edit-panel="redact" hidden="@(Shown != "redact")">
+    <div class="editrow">
+        <p class="hint">@L["Draw a box over anything to hide. Whatever the box touches, even part of a letter, is removed from the file, not covered."]</p>
+    </div>
+    <form class="editrow" data-edit-findform>
+        <label class="sr-only" for="redactfind">@L["Find words to redact"]</label>
+        <input id="redactfind" class="inp" type="search" maxlength="200" placeholder="@L["Find words to redact"]" data-edit-find />
+        <button type="submit" class="btn btn-s btn-sm" title="@L["Find words to redact"]">@L["Find"]</button>
+        <button type="button" class="btn btn-s btn-sm" data-edit-signs title="@L["Record numbers (MRN, UHID), Aadhaar, PAN and phone numbers"]">@L["Find patient details"]</button>
+    </form>
+    <p class="hint">@L["Redacting flattens the whole file, and removes its bookmarks and details. A box that still shows anything stops the save."]</p>
+</div>
+}
+
+<div class="editpanel" data-edit-panel="pages" hidden="@(Shown != "pages")">
+    @if (Check.HasLayers && !Switches.LayerPages)
+    {
+        @* D-406: a file with hidden layers (optional content) keeps its pages until chuvadi-pdf 3.35.1. *@
+        <p class="notice n-info" data-edit-layers>@L["This file has hidden layers, so its pages cannot be turned, moved, removed or joined here yet. Mark up, Sign and Stamp still work."]</p>
+    }
+    else
+    {
+        <div class="editrow">
+            <button type="button" class="btn btn-s btn-sm" data-edit-turn="270" title="@L["Turn the ticked pages to the left"]"><LipiIcon Name="rotate-ccw" Size="16" />@L["Turn left"]</button>
+            <button type="button" class="btn btn-s btn-sm" data-edit-turn="90" title="@L["Turn the ticked pages to the right"]"><LipiIcon Name="rotate-cw" Size="16" />@L["Turn right"]</button>
+            <button type="button" class="btn btn-s btn-sm" data-edit-move="-1" title="@L["Move the ticked pages one place earlier"]"><LipiIcon Name="arrow-up" Size="16" />@L["Move earlier"]</button>
+            <button type="button" class="btn btn-s btn-sm" data-edit-move="1" title="@L["Move the ticked pages one place later"]"><LipiIcon Name="arrow-down" Size="16" />@L["Move later"]</button>
+            <button type="button" class="btn btn-s btn-sm" data-edit-delete title="@L["Leave the ticked pages out"]"><LipiIcon Name="page-delete" Size="16" />@L["Remove"]</button>
+            <button type="button" class="btn btn-s btn-sm" data-edit-take title="@L["Keep only the ticked pages; the others are left out"]"><LipiIcon Name="page-extract" Size="16" />@L["Keep only these"]</button>
+            <span class="pdffound" data-edit-chosen aria-live="polite"></span>
+        </div>
+        <p class="hint">@L["Tick the box on a page to choose it."]@(Check.HasForm ? " " + L["Forms become part of the page when pages are moved or joined."] : string.Empty)</p>
+        @if (Others.Count > 0)
+        {
+            <fieldset class="joinset">
+                <legend>@L["Join this mail's other PDFs at the end"]</legend>
+                @foreach (AttachmentView o in Others)
+                {
+                    <label class="edittick"><input type="checkbox" data-edit-join="@o.Index" /> @o.FileName</label>
+                }
+                <p class="hint">@L["Forms in joined files become part of the page. A joined file with a password needs it typed in the viewer first; the result has none."]</p>
+            </fieldset>
+        }
+    }
+</div>
+
+<div class="editpanel" data-edit-panel="stamp" hidden="@(Shown != "stamp")">
+    <div class="editrow">
+        <label class="edittick"><input type="checkbox" data-edit-wm /> @L["Watermark"]</label>
+        <input class="inp" type="text" maxlength="120" value="@L["COPY"]" aria-label="@L["Watermark words"]" data-edit-wmtext />
+        <label class="editfield"><span>@L["Size"]</span><input class="inp inpnum" type="number" min="12" max="200" value="60" aria-label="@L["Size"]" data-edit-wmsize /></label>
+        <label class="editfield"><span>@L["Angle"]</span><input class="inp inpnum" type="number" min="-90" max="90" value="45" aria-label="@L["Angle"]" data-edit-wmangle /></label>
+        <label class="editfield"><span>@L["Strength"]</span><select class="inp" aria-label="@L["Strength"]" data-edit-wmopacity><option value="0.12">@L["Faint"]</option><option value="0.2" selected>@L["Medium"]</option><option value="0.35">@L["Strong"]</option></select></label>
+    </div>
+    <div class="editrow">
+        <label class="edittick"><input type="checkbox" data-edit-num /> @L["Page numbers"]</label>
+        <input class="inp" type="text" maxlength="120" value="@L["Page {n} of {N}"]" aria-label="@L["Page number words"]" data-edit-numtext />
+        <label class="editfield"><span>@L["Where"]</span>
+            <select class="inp" aria-label="@L["Where"]" data-edit-numwhere>
+                @foreach ((string key, string word) in Places)
+                {
+                    <option value="@key" selected="@(key == NumberPlaces.BottomCentre)">@L[word]</option>
+                }
+            </select>
+        </label>
+        <label class="editfield"><span>@L["Starts at"]</span><input class="inp inpnum" type="number" min="0" max="99999" value="1" aria-label="@L["Starts at"]" data-edit-numstart /></label>
+    </div>
+    <p class="hint">@L["{n} is the page's number and {N} how many pages there are."]</p>
+</div>
+<p class="notice n-warn" data-edit-problem role="alert" hidden></p>
+@* Decisions of 15 Nov 2026 (3.34.0): after a redaction, what was removed is read before the file is attached. *@
+<div class="notice n-info editreview" data-edit-review role="status" hidden>
+    <div class="editreview-body">
+        <p><strong>@L["Check what the redaction removed before the file is attached."]</strong></p>
+        <ul class="editreview-lines" data-edit-review-lines></ul>
+        <div class="editreview-acts">
+            <button type="button" class="btn btn-p" data-edit-attach>@L["Attach it"]</button>
+            <button type="button" class="btn" data-edit-review-back>@L["Keep editing"]</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    /// <summary>The editor's words.</summary>
+    [Parameter, EditorRequired] public Lexicon L { get; set; } = default!;
+
+    /// <summary>What the editor must know first (§7.8, 1).</summary>
+    [Parameter, EditorRequired] public EditCheck Check { get; set; } = default!;
+
+    /// <summary>The mail's other PDFs, for Join (D-371).</summary>
+    [Parameter] public IReadOnlyList<AttachmentView> Others { get; set; } = Array.Empty<AttachmentView>();
+
+    /// <summary>The person keeps a drawn signature (§7.5).</summary>
+    [Parameter] public bool HasSaved { get; set; }
+
+    /// <summary>Where Leave goes.</summary>
+    [Parameter, EditorRequired] public string Back { get; set; } = string.Empty;
+
+    /// <summary>The new file's name.</summary>
+    [Parameter, EditorRequired] public string EditedName { get; set; } = string.Empty;
+
+    /// <summary>The file is on one of the person's drafts: Save puts the new file back on it (the owner's check, 17 Nov 2026).</summary>
+    [Parameter] public bool OnDraft { get; set; }
+
+    private static readonly (string, string)[] MailActions = { ("replyto", "Reply"), ("replyallto", "Reply all") };
+
+    private static readonly (string, string)[] DraftActions = { ("adddraft", "Add to this draft") };
+
+    /// <summary>The tool open first (markup, sign, redact, pages, stamp): from the address, so every panel can be linked to and checked.</summary>
+    [Parameter] public string Tool { get; set; } = "markup";
+
+    /// <summary>The editor's held-back parts (D-405, D-406): Redact, and the pages of a file with hidden layers.</summary>
+    [Parameter] public EditSwitches Switches { get; set; } = EditSwitches.Shipped;
+
+    // The tool shown open: Redact, while it is held back, opens as Mark up.
+    private string Shown => Tool == "redact" && !Switches.Redact ? "markup" : Tool;
+
+    /// <summary>The tools' keys.</summary>
+    public static readonly IReadOnlySet<string> ToolKeys = new HashSet<string>(StringComparer.Ordinal) { "markup", "sign", "redact", "pages", "stamp" };
+
+    private static readonly (string Key, string Word, string Icon)[] Tools =
+    {
+        ("markup", "Mark up", "edit"),
+        ("sign", "Sign", "signature"),
+        ("redact", "Redact", "redact"),
+        ("pages", "Pages", "page-extract"),
+        ("stamp", "Stamp", "watermark"),
+    };
+
+    private static readonly (string Key, string Word, string Icon)[] Shapes =
+    {
+        ("text", "Text", "text-box"),
+        ("rect", "Rectangle", "shape-rect"),
+        ("ellipse", "Ellipse", "shape-ellipse"),
+        ("line", "Line", "shape-line"),
+        ("arrow", "Arrow", "arrow-anno"),
+        ("pen", "Pen", "freehand"),
+        ("highlight", "Highlight", "highlight"),
+    };
+
+    private static readonly (string Hex, string Word)[] Colours =
+    {
+        ("#d32f2f", "Red"),
+        ("#1a237e", "Blue"),
+        ("#2e7d32", "Green"),
+        ("#212121", "Black"),
+        ("#f9a825", "Yellow"),
+    };
+
+    private static readonly (string Key, string Word)[] Places =
+    {
+        (NumberPlaces.BottomCentre, "Bottom, in the middle"),
+        (NumberPlaces.BottomRight, "Bottom, on the right"),
+        (NumberPlaces.BottomLeft, "Bottom, on the left"),
+        (NumberPlaces.TopCentre, "Top, in the middle"),
+        (NumberPlaces.TopRight, "Top, on the right"),
+        (NumberPlaces.TopLeft, "Top, on the left"),
+    };
+}

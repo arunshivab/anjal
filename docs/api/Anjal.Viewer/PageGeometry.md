@@ -6,7 +6,7 @@ rc.29 (DES-22 §3.1, §7.4): between a page as the PDF holds it (user space: bot
 
 ## Members
 
-- **#ctor** *(method)* - Takes a page's crop box (its media box when it has none) and its turn.
+- **#ctor** *(method)* - Takes the box the renderers show (chuvadi-pdf 3.34.0 GetDisplayBox: the CropBox intersected with the MediaBox, normalised) and the page's turn, taken at its nearest lower multiple of 90 as the renderers take it - so the positions shown over a page match the library's own display space, which the editor writes through.
 - **#ctor** *(method)* - Takes a crop box and a turn directly (for tests).
 - **ToShown** *(method)* - A point in user space as shown (from the top-left).
 - **ToShownAngle** *(method)* - A direction in user space (degrees, counter-clockwise) as a turn on the screen (degrees, clockwise).

@@ -235,6 +235,19 @@ else
                 </select>
             </div>
 
+            @if (DraftId is Guid answering && inReplyTo.Length == 0)
+            {
+                @* The owner's check (17 Nov 2026): a draft that is not a reply yet can become one - to a mail chosen now,
+                   in any folder - keeping what is written and its files. The draft is saved, then made the reply. *@
+                <div class="cblock creplyto">
+                    <button type="button" class="linkbtn" data-reply-instead title="@L["Choose a mail to answer: this draft becomes the reply, keeping what you wrote and its files."]"><LipiIcon Name="undo" Size="14" />@L["Reply to a mail instead..."]</button>
+                    <input type="hidden" name="replyto" value="" data-replyto />
+                    <input type="hidden" name="replyall" value="" data-replyall />
+                    <button type="submit" formaction="/draft" formnovalidate hidden data-replyto-go tabindex="-1" aria-hidden="true"></button>
+                    <MailPicker L="L" Key="answer" Except="answering" Title="@L["Reply to a mail instead"]" Actions="AnswerActions" />
+                </div>
+            }
+
             <div class="cblock" data-recips>
                 @* rc.15 (owner, 7 Oct; item 16): each label beside its box. *@
                 <label class="clabel" for="to">@L["To"] <span class="rcount" data-rcount></span></label>
@@ -285,7 +298,10 @@ else
                         <label class="carry">
                             <input type="checkbox" name="carry" value="@a.Index" checked />
                             @{ (string tag, string kind) = FileTag.Of(a.FileName, a.ContentType); }
-                            <span class="ftag ftag-@kind" aria-hidden="true">@tag</span><span class="catname">@a.FileName</span> <span class="catmeta">@MainLayout.Size(a.SizeBytes)</span>
+                            <span class="ftag ftag-@kind" aria-hidden="true">@tag</span><span class="carry-t"><span class="catname" title="@a.FileName">@a.FileName</span><span class="catmeta">@MainLayout.Size(a.SizeBytes)</span></span>
+                            @* The owner's check (17 Nov 2026): every file on the mail can be viewed and downloaded. *@
+                            <button type="submit" class="chip-x cfview" formaction="/draft" formnovalidate name="view" value="@a.FileName" aria-label="@(L["View"] + " " + a.FileName)" title="@L["Save the draft and view this file"]"><LipiIcon Name="eye" Size="12" /></button>
+                            <a class="chip-x" href="@(a.Index < 0 ? $"/message/{src}/raw.eml" : $"/message/{src}/attachment/{a.Index}")" aria-label="@(L["Download"] + " " + a.FileName)" title="@L["Download"]"><LipiIcon Name="download" Size="12" /></a>
                         </label>
                     }
                 }
@@ -380,6 +396,8 @@ else
 @code {
     /// <summary>The draft being edited, if any.</summary>
     [Parameter] public Guid? DraftId { get; set; }
+
+    private static readonly (string, string)[] AnswerActions = { ("reply", "Reply"), ("replyall", "Reply all") };
 
     /// <summary>The small panel over the message being answered (item 48).</summary>
     [Parameter] public bool Docked { get; set; }

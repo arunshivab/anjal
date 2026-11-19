@@ -55,6 +55,13 @@ public sealed class ViewerAccess : IDisposable
     /// </summary>
     public bool DicomOn { get; init; }
 
+    /// <summary>
+    /// The PDF editor's held-back parts (the library's security advisory, D-405 and D-406, 17 Nov 2026): redaction,
+    /// and changing the pages of a file with hidden layers. Off in rc.29 - not an operator's setting - and on in the
+    /// release that moves to chuvadi-pdf 3.35.1; the tests turn them on to check what they guard.
+    /// </summary>
+    public EditSwitches Switches { get; internal set; } = EditSwitches.Shipped;
+
     /// <summary>True when files can be viewed (a viewer is set or can be started).</summary>
     public bool Enabled => !this.off && (this.socket is not null || this.localProgram is not null);
 
@@ -136,6 +143,48 @@ public sealed class ViewerAccess : IDisposable
         return result;
     }
 
+    /// <summary>
+    /// rc.29 part 2 (DES-22 §7): asks the viewer once, with several files and nothing kept - the editor's arrange and
+    /// save, whose answers belong to the request that asked.
+    /// </summary>
+    /// <param name="request">The job.</param>
+    /// <param name="files">The files; the first is the attachment.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The answer.</returns>
+    public async Task<ViewResult> AskOnceAsync(ViewRequest request, IReadOnlyList<byte[]> files, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(files);
+        if (!this.Enabled || this.Client() is not ViewerClient viewer)
+        {
+            return ViewResult.Of(ViewStatus.Unavailable);
+        }
+        return await viewer.AskAsync(request, files.Select(f => (ReadOnlyMemory<byte>)f).ToList(), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>rc.29 part 2: keeps a file the editor made (the pages as they will be) in the session's memory, like a viewed file's pictures (D-362).</summary>
+    /// <param name="session">The session.</param>
+    /// <param name="key">What it is kept under.</param>
+    /// <param name="file">The file.</param>
+    public void KeepFile(string session, string key, byte[] file)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(key);
+        ArgumentNullException.ThrowIfNull(file);
+        this.keeps.GetOrAdd(session, _ => new SessionKeep()).Add("file\u001F" + key, new ViewResult(new ViewAnswer(), new[] { file }));
+    }
+
+    /// <summary>rc.29 part 2: a file kept by <see cref="KeepFile"/>, or null when it has gone (10 minutes, or the session's 64 MB).</summary>
+    /// <param name="session">The session.</param>
+    /// <param name="key">What it was kept under.</param>
+    /// <returns>The file, or null.</returns>
+    public byte[]? KeptFile(string session, string key)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(key);
+        return this.keeps.TryGetValue(session, out SessionKeep? keep) && keep.Find("file\u001F" + key) is ViewResult r && r.Files.Count > 0 ? r.Files[0] : null;
+    }
+
     /// <summary>Keeps a password the person typed for a file, for 10 minutes, in memory.</summary>
     /// <param name="session">The session.</param>
     /// <param name="fileKey">The file (message, attachment, entry).</param>
@@ -193,6 +242,8 @@ public sealed class ViewerAccess : IDisposable
             Who = who,
             ArchivePassword = r.ArchivePassword,
             InnerArchivePassword = r.InnerArchivePassword,
+            Plan = r.Plan,
+            Switches = r.Switches,
         };
     }
 
@@ -219,6 +270,8 @@ public sealed class ViewerAccess : IDisposable
             Who = r.Who,
             ArchivePassword = archive,
             InnerArchivePassword = inner,
+            Plan = r.Plan,
+            Switches = r.Switches,
         };
     }
 

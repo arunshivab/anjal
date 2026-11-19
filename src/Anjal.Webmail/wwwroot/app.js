@@ -415,6 +415,76 @@
     if (first) { first.focus(); }
     return true;
   }
+  // The owner's check (17 Nov 2026): the mail picker - "Reply to another mail with it", "Add to a draft I'm writing"
+  // and a draft's "Reply to a mail instead". It shows the newest mail (or drafts) at once and narrows as the person
+  // types; each row carries the picker's own buttons, and a press calls back with the mail and the button's choice.
+  window.anjalMailPick = function (el, chosen) {
+    var q = el.querySelector("[data-mailpick-q]"), list = el.querySelector("[data-mailpick-list]"), none = el.querySelector("[data-mailpick-none]");
+    var acts = el.querySelector("[data-mailpick-acts]"), timer = null, asked = 0;
+    el.hidden = false;
+    el.anjalChosen = chosen;
+    function load() {
+      var n = ++asked;
+      var url = "/mail/pick?q=" + encodeURIComponent(q ? q.value.trim() : "") + (el.getAttribute("data-drafts") === "1" ? "&drafts=1" : "") + (el.getAttribute("data-except") ? "&except=" + encodeURIComponent(el.getAttribute("data-except")) : "");
+      fetch(url, { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : []; }).then(function (items) {
+        if (n !== asked) { return; }
+        list.textContent = "";
+        (items || []).forEach(function (it) {
+          var li = document.createElement("li");
+          li.className = "mailpick-row";
+          var text = document.createElement("span");
+          text.className = "mailpick-text";
+          var who = document.createElement("b");
+          who.textContent = it.who;
+          var subj = document.createElement("span");
+          subj.className = "mailpick-subj";
+          subj.textContent = it.subject;
+          var meta = document.createElement("span");
+          meta.className = "mailpick-meta";
+          meta.textContent = it.folder + " \u00b7 " + it.when;
+          text.appendChild(who); text.appendChild(subj); text.appendChild(meta);
+          li.appendChild(text);
+          var box = document.createElement("span");
+          box.className = "mailpick-acts";
+          if (acts) { box.innerHTML = acts.innerHTML; }
+          $$("[data-mailpick-act]", box).forEach(function (btn) {
+            btn.addEventListener("click", function () { el.hidden = true; if (el.anjalChosen) { el.anjalChosen(it.id, btn.getAttribute("data-mailpick-act")); } });
+          });
+          li.appendChild(box);
+          list.appendChild(li);
+        });
+        if (none) { none.hidden = (items || []).length > 0; }
+      }).catch(function () { /* nothing offered */ });
+    }
+    if (!el.anjalWired) {
+      el.anjalWired = true;
+      if (q) {
+        q.addEventListener("input", function () { if (timer) { window.clearTimeout(timer); } timer = window.setTimeout(load, 250); });
+        // Enter looks now; inside a compose form it must never send the mail.
+        q.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); if (timer) { window.clearTimeout(timer); } load(); } });
+      }
+      var close = el.querySelector("[data-mailpick-close]");
+      if (close) { close.addEventListener("click", function () { el.hidden = true; }); }
+      el.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); el.hidden = true; } });
+    }
+    if (q) { q.value = ""; }
+    load();
+    if (q) { q.focus(); }
+  };
+  // A draft's "Reply to a mail instead": the mail chosen, the draft is saved and made the reply.
+  document.addEventListener("click", function (e) {
+    var open = e.target.closest ? e.target.closest("[data-reply-instead]") : null;
+    if (!open) { return; }
+    var box = open.closest(".creplyto"), form = open.closest("form");
+    var picker = box && box.querySelector("[data-mailpick]");
+    if (!picker || !form) { return; }
+    window.anjalMailPick(picker, function (id, act) {
+      box.querySelector("[data-replyto]").value = id;
+      box.querySelector("[data-replyall]").value = act === "replyall" ? "1" : "";
+      var go = box.querySelector("[data-replyto-go]");
+      if (form.requestSubmit && go) { form.requestSubmit(go); } else { form.action = "/draft"; form.submit(); }
+    });
+  });
   window.anjalGo = function (href) {
     if (askNewSender(href)) { return; }
     reachable().then(function (ok) {
@@ -1164,8 +1234,11 @@
       Array.prototype.forEach.call(input.files || [], function (f, i) {
         var li = tpl.content.firstElementChild.cloneNode(true);
         var n = $("[data-fname]", li), s = $("[data-fsize]", li), x = $("[data-fremove]", li);
-        if (n) { n.textContent = f.name; }
+        if (n) { n.textContent = f.name; n.title = f.name; }
         if (s) { s.textContent = size(f.size); }
+        // The owner's check (17 Nov 2026): View saves the draft (this file goes up with it), then opens it in the viewer.
+        var v = $("[data-fview]", li);
+        if (v) { v.value = f.name; v.setAttribute("aria-label", (v.getAttribute("aria-label") || "View") + " " + f.name); }
         // rc.16 (6a): the file's type tag, as in the envelope (FileTag on the server).
         var tag = $("[data-ftag]", li);
         if (tag) { var k = fileTag(f.name, f.type); tag.textContent = k[0]; tag.className = "ftag ftag-" + k[1]; }
@@ -4293,6 +4366,864 @@
         b.addEventListener("click", function () { go(at + (b.getAttribute("data-pdf-hit") === "next" ? 1 : -1)); });
       });
     }
+  });
+  // rc.29 part 2 (DES-22 §7): the PDF editor. The server draws every control and every page picture; this keeps the
+  // list of changes (marks, signatures, redaction boxes, the pages' order and turns, the joined files, the stamp),
+  // draws them over the pages as the person works, undoes and redoes them, and sends the whole list on Save, which
+  // makes a new file on a new mail. Positions are in points on the page as shown, as the server places them.
+  page(function pdfEdit() {
+    var view = document.querySelector("[data-pdfedit]");
+    if (!view) { return; }
+    var NS = "http://www.w3.org/2000/svg";
+    var base = view.getAttribute("data-pdfedit"), viewBase = view.getAttribute("data-base");
+    var entry = view.getAttribute("data-entry") || "";
+    var words = {};
+    try { words = JSON.parse(view.getAttribute("data-edit-words") || "{}"); } catch (e) { words = {}; }
+    function word(k, n) { return (words[k] || k).replace("{n}", n === undefined ? "" : String(n)); }
+    var tokenEl = view.querySelector("input[name=__RequestVerificationToken]");
+    var holder = view.querySelector("[data-pdf-pages]");
+    var problem = view.querySelector("[data-edit-problem]");
+    var thumbs = view.querySelector("[data-pdf-thumbstrip]");
+    if (thumbs) { thumbs.hidden = true; }
+
+    // The state Save sends; every change takes a copy first, for Undo.
+    var uidNext = 0;
+    var S = {
+      pages: $$("[data-page]", holder).map(function (f) {
+        return { uid: "p" + (uidNext++), file: 0, page: parseInt(f.getAttribute("data-page"), 10), turn: 0, w: parseFloat(f.getAttribute("data-w")), h: parseFloat(f.getAttribute("data-h")) };
+      }),
+      join: [], marks: [], redact: [], wm: null, num: null
+    };
+    var key = null, arranged = false;
+    var pictures = [], pictureUrls = [];
+    var undo = [], redo = [];
+    var pressed = view.querySelector('[data-edit-tool][aria-pressed="true"]');
+    var tool = pressed ? pressed.getAttribute("data-edit-tool") : "markup", shape = "rect", colour = "#d32f2f", line = 2, size = 12;
+    var chosen = {}, selected = null, pending = [], placing = null;
+    var accepted = { signed: !view.querySelector("[data-edit-accept=signed]"), nopassword: !view.querySelector("[data-edit-accept=nopassword]") };
+
+    function snapshot() { return JSON.stringify(S); }
+    function change() {
+      hideReview();
+      undo.push(snapshot());
+      if (undo.length > 200) { undo.shift(); }
+      redo = [];
+      buttons();
+    }
+    function buttons() {
+      var u = view.querySelector("[data-edit-undo]"), r = view.querySelector("[data-edit-redo]");
+      if (u) { u.disabled = undo.length === 0; }
+      if (r) { r.disabled = redo.length === 0; }
+      var rm = view.querySelector("[data-edit-remove]");
+      if (rm) { rm.disabled = !selected; }
+    }
+    function dirty() { return undo.length > 0; }
+    function say(text) {
+      if (!problem) { return; }
+      problem.textContent = text || "";
+      problem.hidden = !text;
+    }
+    function samePages(a, b) {
+      return a.length === b.length && a.every(function (p, i) { return p.file === b[i].file && p.page === b[i].page && p.turn === b[i].turn; });
+    }
+    function untouched() {
+      return S.join.length === 0 && S.pages.every(function (p, i) { return p.file === 0 && p.page === i && p.turn === 0; }) && S.pages.length === parseInt(view.getAttribute("data-pages"), 10);
+    }
+
+    // The pages: one figure each, its picture from the viewer (or from the pages as arranged), an SVG of the marks
+    // in points over it, and a box to choose it in the Pages tool.
+    function pageSrc(p, i, w) {
+      return arranged ? base + "/" + key + "/page/" + i + "?w=" + w : viewBase + "/page/" + p.page + "?w=" + w + (entry ? "&entry=" + encodeURIComponent(entry) : "");
+    }
+    function build() {
+      holder.textContent = "";
+      S.pages.forEach(function (p, i) {
+        var fig = document.createElement("figure");
+        fig.className = "pdfpage editpage";
+        fig.id = "pdf-p" + i;
+        fig.setAttribute("data-uid", p.uid);
+        fig.style.aspectRatio = p.w + " / " + p.h;
+        var img = document.createElement("img");
+        img.src = pageSrc(p, i, 1000);
+        img.alt = word("page", i + 1);
+        img.loading = i < 2 ? "eager" : "lazy";
+        img.decoding = "async";
+        img.draggable = false;
+        fig.appendChild(img);
+        var svg = document.createElementNS(NS, "svg");
+        svg.setAttribute("class", "editmarks");
+        svg.setAttribute("viewBox", "0 0 " + p.w + " " + p.h);
+        svg.setAttribute("preserveAspectRatio", "none");
+        fig.appendChild(svg);
+        var pick = document.createElement("label");
+        pick.className = "editchoose";
+        var box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = !!chosen[p.uid];
+        box.setAttribute("aria-label", word("page", i + 1));
+        box.addEventListener("change", function () { if (box.checked) { chosen[p.uid] = true; } else { delete chosen[p.uid]; } count(); });
+        pick.appendChild(box);
+        var n = document.createElement("span");
+        n.textContent = String(i + 1);
+        pick.appendChild(n);
+        fig.appendChild(pick);
+        holder.appendChild(fig);
+        draw(fig, p, i);
+        fig.addEventListener("pointerdown", function (e) { down(e, fig, p); });
+      });
+      count();
+    }
+    function figOf(uid) { return holder.querySelector('[data-uid="' + uid + '"]'); }
+    function pageOf(uid) { for (var i = 0; i < S.pages.length; i++) { if (S.pages[i].uid === uid) { return S.pages[i]; } } return null; }
+    function indexOf(uid) { for (var i = 0; i < S.pages.length; i++) { if (S.pages[i].uid === uid) { return i; } } return -1; }
+    function redrawAll() { S.pages.forEach(function (p, i) { var f = figOf(p.uid); if (f) { draw(f, p, i); } }); buttons(); }
+    function el(name, attrs, parent) {
+      var x = document.createElementNS(NS, name);
+      Object.keys(attrs).forEach(function (k) { x.setAttribute(k, attrs[k]); });
+      if (parent) { parent.appendChild(x); }
+      return x;
+    }
+    // The browser's own measure of LiPi Sans, to wrap a text box as the server will.
+    var measure = document.createElement("canvas").getContext("2d");
+    var face = getComputedStyle(document.body).fontFamily || "sans-serif";
+    function wrap(text, width, sz) {
+      measure.font = sz + "px " + face;
+      var lines = [];
+      String(text || "").split("\n").forEach(function (para) {
+        var lineNow = "";
+        para.split(" ").forEach(function (w) {
+          var tried = lineNow ? lineNow + " " + w : w;
+          if (lineNow && measure.measureText(tried).width > width) { lines.push(lineNow); lineNow = w; } else { lineNow = tried; }
+        });
+        lines.push(lineNow);
+      });
+      return lines;
+    }
+    function draw(fig, p, i) {
+      var svg = fig.querySelector(".editmarks");
+      if (!svg) { return; }
+      svg.textContent = "";
+      if (S.wm && S.wm.Text) {
+        var t = el("text", { x: p.w / 2, y: p.h / 2, "text-anchor": "middle", "dominant-baseline": "middle", "font-size": S.wm.Size, fill: S.wm.Color, "fill-opacity": S.wm.Opacity,
+          transform: "rotate(" + (-S.wm.Angle) + " " + (p.w / 2) + " " + (p.h / 2) + ")", "class": "editwm" }, svg);
+        t.textContent = S.wm.Text;
+      }
+      if (S.num) {
+        var label = S.num.Format.replace("{n}", String(S.num.Start + i)).replace("{N}", String(S.num.Start + S.pages.length - 1));
+        var top = S.num.Where.indexOf("top") === 0;
+        var anchor = /left$/.test(S.num.Where) ? "start" : /right$/.test(S.num.Where) ? "end" : "middle";
+        var x = anchor === "start" ? 28 : anchor === "end" ? p.w - 28 : p.w / 2;
+        var nt = el("text", { x: x, y: top ? 28 + S.num.Size * 0.8 : p.h - 28, "text-anchor": anchor, "font-size": S.num.Size, fill: "#333", "class": "editnum" }, svg);
+        nt.textContent = label;
+      }
+      S.marks.forEach(function (m, k) { if (m.uid === p.uid) { drawMark(svg, m, k); } });
+      S.redact.forEach(function (b, k) {
+        if (b.uid !== p.uid) { return; }
+        el("rect", { x: b.X, y: b.Y, width: b.W, height: b.H, "class": "editredact", "data-redact": k }, svg);
+      });
+      pending.forEach(function (b, k) {
+        if (b.uid !== p.uid) { return; }
+        var r = el("rect", { x: b.X, y: b.Y, width: b.W, height: b.H, "class": "editfound" + (b.drop ? " dropped" : ""), "data-pending": k }, svg);
+        r.addEventListener("pointerdown", function (e) { e.stopPropagation(); e.preventDefault(); b.drop = !b.drop; foundSay(); redrawAll(); });
+      });
+    }
+    function drawMark(svg, m, k) {
+      var g = el("g", { "class": "editmark" + (selected === m ? " on" : ""), "data-mark": k }, svg);
+      var stroke = { stroke: m.Color, "stroke-width": m.Line, fill: "none", "stroke-linecap": "round", "stroke-linejoin": "round" };
+      if (m.Kind === "rect") { el("rect", Object.assign({ x: m.X, y: m.Y, width: m.W, height: m.H }, stroke), g); }
+      else if (m.Kind === "ellipse") { el("ellipse", Object.assign({ cx: m.X + m.W / 2, cy: m.Y + m.H / 2, rx: m.W / 2, ry: m.H / 2 }, stroke), g); }
+      else if (m.Kind === "highlight") { el("rect", { x: m.X, y: m.Y, width: m.W, height: m.H, fill: m.Color, "fill-opacity": 0.35 }, g); }
+      else if (m.Kind === "line" || m.Kind === "arrow") {
+        el("line", Object.assign({ x1: m.Points[0], y1: m.Points[1], x2: m.Points[2], y2: m.Points[3] }, stroke), g);
+        if (m.Kind === "arrow") {
+          var dx = m.Points[2] - m.Points[0], dy = m.Points[3] - m.Points[1], len = Math.sqrt(dx * dx + dy * dy) || 1;
+          var hl = Math.max(6, m.Line * 4), hw = hl * 0.6, ux = dx / len, uy = dy / len;
+          var bx = m.Points[2] - ux * hl, by = m.Points[3] - uy * hl;
+          el("polygon", { points: m.Points[2] + "," + m.Points[3] + " " + (bx - uy * hw / 2) + "," + (by + ux * hw / 2) + " " + (bx + uy * hw / 2) + "," + (by - ux * hw / 2), fill: m.Color }, g);
+        }
+      }
+      else if (m.Kind === "pen" || m.Kind === "sign") {
+        var starts = (m.Strokes && m.Strokes.length ? m.Strokes : [0]).concat([m.Points.length / 2]);
+        for (var s = 0; s + 1 < starts.length; s++) {
+          var pts = [];
+          for (var q = starts[s]; q < starts[s + 1]; q++) { pts.push(m.Points[q * 2] + "," + m.Points[q * 2 + 1]); }
+          el("polyline", Object.assign({ points: pts.join(" ") }, stroke), g);
+        }
+      }
+      else if (m.Kind === "picture") { el("image", { href: pictureUrls[m.Picture] || "", x: m.X, y: m.Y, width: m.W, height: m.H, preserveAspectRatio: "none" }, g); }
+      else if (m.Kind === "text") {
+        var lines = wrap(m.Text, m.W, m.Size);
+        lines.forEach(function (l, n) {
+          var tx = el("text", { x: m.X, y: m.Y + m.Size * (0.85 + n * 1.25), "font-size": m.Size, fill: m.Color, "class": "edittext" }, g);
+          tx.textContent = l;
+        });
+      }
+      // A box round it to hold it by (the picture, the signature and the text are moved by dragging).
+      var bb = bounds(m);
+      el("rect", { x: bb.X - 3, y: bb.Y - 3, width: bb.W + 6, height: bb.H + 6, "class": "editgrip" }, g);
+    }
+    function bounds(m) {
+      if (m.Points && m.Points.length) {
+        var xs = m.Points.filter(function (v, i) { return i % 2 === 0; }), ys = m.Points.filter(function (v, i) { return i % 2 === 1; });
+        var x0 = Math.min.apply(null, xs), y0 = Math.min.apply(null, ys);
+        return { X: x0, Y: y0, W: Math.max.apply(null, xs) - x0, H: Math.max.apply(null, ys) - y0 };
+      }
+      if (m.Kind === "text") { return { X: m.X, Y: m.Y, W: m.W, H: Math.max(m.H, wrap(m.Text, m.W, m.Size).length * m.Size * 1.25) }; }
+      return { X: m.X, Y: m.Y, W: m.W, H: m.H };
+    }
+    function shift(m, dx, dy) {
+      if (m.Points && m.Points.length) { for (var i = 0; i < m.Points.length; i += 2) { m.Points[i] += dx; m.Points[i + 1] += dy; } }
+      m.X += dx; m.Y += dy;
+    }
+
+    // Where the pointer is on a page, in points.
+    function at(e, fig, p) {
+      var r = fig.getBoundingClientRect();
+      return { x: Math.max(0, Math.min(p.w, (e.clientX - r.left) / r.width * p.w)), y: Math.max(0, Math.min(p.h, (e.clientY - r.top) / r.height * p.h)) };
+    }
+    function gated() {
+      if (accepted.signed && accepted.nopassword) { return false; }
+      say(word("tick"));
+      return true;
+    }
+    function down(e, fig, p) {
+      if (e.button !== 0 || tool === "pages" || tool === "stamp" || e.target.closest(".editchoose, .edittextbox")) { return; }
+      if (gated()) { return; }
+      say("");
+      var start = at(e, fig, p);
+      var hit = e.target.closest("[data-mark]");
+      // A mark already there is chosen and moved by dragging.
+      if (hit && (tool === "markup" || tool === "sign")) {
+        var m = S.marks[parseInt(hit.getAttribute("data-mark"), 10)];
+        e.preventDefault();
+        change();
+        selected = m;
+        var last = start;
+        drag(fig, p, function (pt) { shift(m, pt.x - last.x, pt.y - last.y); last = pt; draw(fig, p, indexOf(p.uid)); }, function () { buttons(); });
+        redrawAll();
+        return;
+      }
+      selected = null;
+      if (placing) {
+        e.preventDefault();
+        change();
+        var placed = placing(start, p);
+        placing = null;
+        view.classList.remove("placing");
+        S.marks.push(placed);
+        selected = placed;
+        redrawAll();
+        return;
+      }
+      if (tool === "markup" && shape === "text") {
+        e.preventDefault();
+        typeAt(fig, p, start);
+        return;
+      }
+      e.preventDefault();
+      var kind = tool === "redact" ? "redact" : shape;
+      if (tool === "sign") { return; }
+      var mark = { Kind: kind, uid: p.uid, X: start.x, Y: start.y, W: 0, H: 0, Points: [], Strokes: [], Color: colour, Line: line, Size: size };
+      if (kind === "line" || kind === "arrow") { mark.Points = [start.x, start.y, start.x, start.y]; }
+      if (kind === "pen") { mark.Points = [start.x, start.y]; }
+      var svg = fig.querySelector(".editmarks"), ghost = null;
+      drag(fig, p, function (pt) {
+        if (kind === "pen") { mark.Points.push(pt.x, pt.y); }
+        else if (kind === "line" || kind === "arrow") { mark.Points[2] = pt.x; mark.Points[3] = pt.y; }
+        else { mark.X = Math.min(start.x, pt.x); mark.Y = Math.min(start.y, pt.y); mark.W = Math.abs(pt.x - start.x); mark.H = Math.abs(pt.y - start.y); }
+        if (ghost) { ghost.remove(); }
+        ghost = el("g", {}, svg);
+        if (kind === "redact") { el("rect", { x: mark.X, y: mark.Y, width: mark.W, height: mark.H, "class": "editredact" }, ghost); }
+        else { drawMark(ghost, mark, -1); }
+      }, function () {
+        if (ghost) { ghost.remove(); }
+        var big = kind === "pen" ? mark.Points.length >= 4 : kind === "line" || kind === "arrow" ? Math.abs(mark.Points[2] - mark.Points[0]) + Math.abs(mark.Points[3] - mark.Points[1]) > 3 : mark.W > 3 && mark.H > 3;
+        if (!big) { return; }
+        change();
+        if (kind === "redact") { S.redact.push({ uid: p.uid, X: mark.X, Y: mark.Y, W: mark.W, H: mark.H }); }
+        else {
+          if (kind === "highlight") { snap(mark, p); }
+          S.marks.push(mark);
+          selected = mark;
+        }
+        redrawAll();
+      });
+    }
+    function drag(fig, p, move, end) {
+      function mv(e) { move(at(e, fig, p)); }
+      function up() {
+        document.removeEventListener("pointermove", mv);
+        document.removeEventListener("pointerup", up);
+        document.removeEventListener("pointercancel", up);
+        end();
+      }
+      document.addEventListener("pointermove", mv);
+      document.addEventListener("pointerup", up);
+      document.addEventListener("pointercancel", up);
+    }
+    // DES-22 §7.4: a highlight over text takes the height of the words it covers.
+    var texts = {};
+    function snap(m, p) {
+      var runs = texts[p.uid];
+      if (!runs) { return; }
+      var over = runs.filter(function (r) { var top = r.Y - r.S * 0.85, w = r.W || r.T.length * r.S * 0.5; return r.X < m.X + m.W && r.X + w > m.X && top < m.Y + m.H && r.Y + r.S * 0.25 > m.Y; });
+      if (!over.length) { return; }
+      var y0 = Math.min.apply(null, over.map(function (r) { return r.Y - r.S * 0.85; })), y1 = Math.max.apply(null, over.map(function (r) { return r.Y + r.S * 0.25; }));
+      m.Y = y0; m.H = y1 - y0;
+    }
+    function loadText(p, i) {
+      if (texts[p.uid]) { return; }
+      texts[p.uid] = [];
+      var url = arranged ? base + "/" + key + "/text/" + i : viewBase + "/text/" + p.page + (entry ? "?entry=" + encodeURIComponent(entry) : "");
+      fetch(url, { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) { if (d) { texts[p.uid] = d.Runs || []; } }).catch(function () { });
+    }
+    // A text box: typed in place; Enter makes a new line, a click elsewhere or Escape finishes it.
+    function typeAt(fig, p, start) {
+      var r = fig.getBoundingClientRect(), scale = r.width / p.w;
+      var box = document.createElement("textarea");
+      box.className = "edittextbox";
+      box.placeholder = word("typeHere");
+      box.style.left = (start.x / p.w * 100) + "%";
+      box.style.top = (start.y / p.h * 100) + "%";
+      box.style.width = Math.min(200, p.w - start.x) / p.w * 100 + "%";
+      box.style.fontSize = (size * scale) + "px";
+      box.style.color = colour;
+      fig.appendChild(box);
+      box.focus();
+      var done = false;
+      function finish() {
+        if (done) { return; }
+        done = true;
+        var text = box.value.replace(/\s+$/, "");
+        box.remove();
+        if (!text) { return; }
+        change();
+        var m = { Kind: "text", uid: p.uid, X: start.x, Y: start.y, W: Math.min(200, p.w - start.x), H: size * 1.25, Points: [], Strokes: [], Color: colour, Line: 1, Size: size, Text: text };
+        S.marks.push(m);
+        selected = m;
+        redrawAll();
+      }
+      box.addEventListener("blur", finish);
+      box.addEventListener("keydown", function (e) { if (e.key === "Escape") { e.preventDefault(); box.blur(); } });
+    }
+
+    // The tools.
+    $$("[data-edit-tool]", view).forEach(function (b) {
+      b.addEventListener("click", function () {
+        tool = b.getAttribute("data-edit-tool");
+        $$("[data-edit-tool]", view).forEach(function (o) { o.setAttribute("aria-pressed", o === b ? "true" : "false"); });
+        $$("[data-edit-panel]", view).forEach(function (pnl) { pnl.hidden = pnl.getAttribute("data-edit-panel") !== tool; });
+        view.setAttribute("data-tool", tool);
+        placing = null;
+        view.classList.remove("placing");
+        say("");
+      });
+    });
+    view.setAttribute("data-tool", tool);
+    $$("[data-edit-shape]", view).forEach(function (b) {
+      b.addEventListener("click", function () {
+        shape = b.getAttribute("data-edit-shape");
+        $$("[data-edit-shape]", view).forEach(function (o) { o.setAttribute("aria-pressed", o === b ? "true" : "false"); });
+        placing = null;
+        view.classList.remove("placing");
+      });
+    });
+    $$("[data-edit-colour]", view).forEach(function (b) {
+      b.addEventListener("click", function () {
+        colour = b.getAttribute("data-edit-colour");
+        $$("[data-edit-colour]", view).forEach(function (o) { o.setAttribute("aria-checked", o === b ? "true" : "false"); });
+        if (selected && selected.Kind !== "picture") { change(); selected.Color = colour; redrawAll(); }
+      });
+    });
+    var lineSel = view.querySelector("[data-edit-line]"), sizeSel = view.querySelector("[data-edit-size]");
+    if (lineSel) { lineSel.addEventListener("change", function () { line = parseFloat(lineSel.value) || 2; }); }
+    if (sizeSel) { sizeSel.addEventListener("change", function () { size = parseFloat(sizeSel.value) || 12; }); }
+    var removeBtn = view.querySelector("[data-edit-remove]");
+    if (removeBtn) {
+      removeBtn.addEventListener("click", function () {
+        if (!selected) { return; }
+        change();
+        S.marks = S.marks.filter(function (m) { return m !== selected; });
+        selected = null;
+        redrawAll();
+      });
+    }
+    scope.on(document, "keydown", function (e) {
+      if ((e.key === "Delete" || e.key === "Backspace") && selected && !e.target.closest("input, textarea, select")) { e.preventDefault(); if (removeBtn) { removeBtn.click(); } }
+      if ((e.ctrlKey || e.metaKey) && !e.target.closest("input, textarea")) {
+        if (e.key === "z" && !e.shiftKey) { e.preventDefault(); back(); }
+        if (e.key === "y" || (e.key === "z" && e.shiftKey) || e.key === "Z") { e.preventDefault(); forward(); }
+      }
+    });
+    // A picture (JPEG or PNG, at most 8 MB) is placed where the page is clicked next.
+    function addPicture(file, then) {
+      if (!file) { return; }
+      if (file.size > 8 * 1024 * 1024) { say(word("tooBig")); return; }
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        pictures.push(file);
+        pictureUrls.push(url);
+        var n = pictures.length - 1, ratio = img.naturalHeight / (img.naturalWidth || 1);
+        then(n, ratio);
+      };
+      img.src = url;
+    }
+    var picIn = view.querySelector("[data-edit-picture]");
+    if (picIn) {
+      picIn.addEventListener("change", function () {
+        addPicture(picIn.files[0], function (n, ratio) {
+          view.classList.add("placing");
+          placing = function (pt, p) { var w = Math.min(160, p.w - pt.x); return { Kind: "picture", uid: p.uid, X: pt.x, Y: pt.y, W: w, H: w * ratio, Points: [], Strokes: [], Color: "#000000", Line: 1, Size: 12, Picture: n }; };
+        });
+        picIn.value = "";
+      });
+    }
+
+    // Sign (DES-22 §7.5): strokes drawn on the pad, kept as strokes (sharp at any size); or the person's own scan.
+    var pad = view.querySelector("[data-edit-pad]"), padStrokes = [], padPoints = [];
+    var placeBtn = view.querySelector("[data-edit-padplace]");
+    function padDraw() {
+      if (!pad) { return; }
+      var c = pad.getContext("2d");
+      c.clearRect(0, 0, pad.width, pad.height);
+      c.strokeStyle = "#1a237e"; c.lineWidth = 2.5; c.lineCap = "round"; c.lineJoin = "round";
+      var starts = padStrokes.concat([padPoints.length / 2]);
+      for (var s = 0; s + 1 < starts.length; s++) {
+        c.beginPath();
+        for (var q = starts[s]; q < starts[s + 1]; q++) { if (q === starts[s]) { c.moveTo(padPoints[q * 2], padPoints[q * 2 + 1]); } else { c.lineTo(padPoints[q * 2], padPoints[q * 2 + 1]); } }
+        c.stroke();
+      }
+      if (placeBtn) { placeBtn.disabled = padPoints.length < 4; }
+    }
+    if (pad) {
+      pad.addEventListener("pointerdown", function (e) {
+        e.preventDefault();
+        var r = pad.getBoundingClientRect();
+        function pt(ev) { return [(ev.clientX - r.left) / r.width * pad.width, (ev.clientY - r.top) / r.height * pad.height]; }
+        padStrokes.push(padPoints.length / 2);
+        padPoints.push.apply(padPoints, pt(e));
+        function mv(ev) { padPoints.push.apply(padPoints, pt(ev)); padDraw(); }
+        function up() { document.removeEventListener("pointermove", mv); document.removeEventListener("pointerup", up); padDraw(); }
+        document.addEventListener("pointermove", mv);
+        document.addEventListener("pointerup", up);
+      });
+    }
+    var clearBtn = view.querySelector("[data-edit-padclear]");
+    if (clearBtn) { clearBtn.addEventListener("click", function () { padStrokes = []; padPoints = []; padDraw(); }); }
+    var savedBtn = view.querySelector("[data-edit-padsaved]");
+    if (savedBtn) {
+      savedBtn.addEventListener("click", function () {
+        fetch("/settings/drawn-signature", { credentials: "same-origin" }).then(function (r) { return r.status === 200 ? r.json() : null; }).then(function (d) {
+          if (!d || !pad) { return; }
+          var sx = pad.width / (d.W || pad.width), sy = pad.height / (d.H || pad.height), k = Math.min(sx, sy);
+          padPoints = d.Points.map(function (v, i) { return v * k; });
+          padStrokes = d.Strokes.slice();
+          padDraw();
+        }).catch(function () { });
+      });
+    }
+    if (placeBtn) {
+      placeBtn.addEventListener("click", function () {
+        if (padPoints.length < 4) { return; }
+        var keep = view.querySelector("[data-edit-padkeep]");
+        if (keep && keep.checked && tokenEl) {
+          var body = new FormData();
+          body.set("__RequestVerificationToken", tokenEl.value);
+          body.set("signature", JSON.stringify({ Points: padPoints, Strokes: padStrokes, W: pad.width, H: pad.height }));
+          fetch("/settings/drawn-signature", { method: "POST", body: body, credentials: "same-origin" }).catch(function () { });
+        }
+        var pts = padPoints.slice(), strokes = padStrokes.slice();
+        var xs = pts.filter(function (v, i) { return i % 2 === 0; }), ys = pts.filter(function (v, i) { return i % 2 === 1; });
+        var x0 = Math.min.apply(null, xs), y0 = Math.min.apply(null, ys), wide = (Math.max.apply(null, xs) - x0) || 1;
+        view.classList.add("placing");
+        placing = function (at0, p) {
+          var k = Math.min(160, p.w - at0.x) / wide;
+          var out = pts.map(function (v, i) { return i % 2 === 0 ? at0.x + (v - x0) * k : at0.y + (v - y0) * k; });
+          return { Kind: "sign", uid: p.uid, X: at0.x, Y: at0.y, W: 0, H: 0, Points: out, Strokes: strokes, Color: "#1a237e", Line: 1.6, Size: 12 };
+        };
+      });
+    }
+    var scanIn = view.querySelector("[data-edit-scan]");
+    if (scanIn) {
+      scanIn.addEventListener("change", function () {
+        addPicture(scanIn.files[0], function (n, ratio) {
+          view.classList.add("placing");
+          placing = function (pt, p) { var w = Math.min(160, p.w - pt.x); return { Kind: "picture", uid: p.uid, X: pt.x, Y: pt.y, W: w, H: w * ratio, Points: [], Strokes: [], Color: "#000000", Line: 1, Size: 12, Picture: n }; };
+        });
+        scanIn.value = "";
+      });
+    }
+
+    // Redact (DES-22 §7.6): boxes drawn on the page; found words and patient details offered as boxes to keep or drop.
+    var found = view.querySelector("[data-edit-found]"), allBtn = view.querySelector("[data-edit-redactall]");
+    var foundBar = view.querySelector("[data-edit-foundbar]"), foundHint = view.querySelector("[data-edit-foundhint]"), foundCancel = view.querySelector("[data-edit-foundcancel]");
+    // The bar's line for found boxes: how many, how many left out, and Redact while any is kept.
+    function foundSay(none) {
+      var out = pending.filter(function (b) { return b.drop; }).length;
+      if (foundBar) { foundBar.hidden = !none && pending.length === 0; }
+      if (found) { found.textContent = none ? word("none") : word("found", pending.length) + (out ? " · " + word("leftOut", out) : ""); }
+      if (foundHint) { foundHint.hidden = pending.length === 0; }
+      if (allBtn) { allBtn.hidden = pending.length === 0; allBtn.disabled = out === pending.length; }
+    }
+    function foundDone() {
+      pending = [];
+      if (foundBar) { foundBar.hidden = true; }
+      redrawAll();
+    }
+    function offer(hits, pad2) {
+      pending = [];
+      (hits || []).forEach(function (h) {
+        var p = S.pages[h.Page];
+        if (!p) { return; }
+        (h.Boxes || []).forEach(function (b) {
+          var d = pad2 ? 2 : 0;
+          pending.push({ uid: p.uid, X: b.X - d, Y: b.Y - d, W: b.W + 2 * d, H: b.H + 2 * d, drop: false });
+        });
+      });
+      foundSay(pending.length === 0);
+      redrawAll();
+      // The first found box itself is brought into view, clear of the bar - not its page, whose middle may be far from it.
+      var first = view.querySelector("[data-pending='0']");
+      if (first) { first.scrollIntoView({ block: "center", inline: "nearest" }); }
+    }
+    // Find runs on the pages as they will be: the viewer's own when nothing was moved, else the arranged copy.
+    function findUrl(q) {
+      return untouched() ? viewBase + "/find?q=" + encodeURIComponent(q) + (entry ? "&entry=" + encodeURIComponent(entry) : "") : base + "/" + key + "/find?q=" + encodeURIComponent(q);
+    }
+    var findForm = view.querySelector("[data-edit-findform]");
+    if (findForm) {
+      findForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+        var q = (view.querySelector("[data-edit-find]") || {}).value || "";
+        if (!q.trim()) { foundDone(); return; }
+        fetch(findUrl(q.trim()), { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : { Hits: [] }; }).then(function (d) { offer(d.Hits, true); }).catch(function () { });
+      });
+    }
+    var signsBtn = view.querySelector("[data-edit-signs]");
+    if (signsBtn) {
+      signsBtn.addEventListener("click", function () {
+        var url = untouched() ? base + "/signs" + (entry ? "?entry=" + encodeURIComponent(entry) : "") : base + "/" + key + "/signs";
+        fetch(url, { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : { Hits: [] }; }).then(function (d) { offer(d.Hits, false); }).catch(function () { });
+      });
+    }
+    if (allBtn) {
+      allBtn.addEventListener("click", function () {
+        var keep = pending.filter(function (b) { return !b.drop; });
+        if (!keep.length) { return; }
+        change();
+        keep.forEach(function (b) { S.redact.push({ uid: b.uid, X: b.X, Y: b.Y, W: b.W, H: b.H }); });
+        foundDone();
+      });
+    }
+    if (foundCancel) { foundCancel.addEventListener("click", foundDone); }
+    holder.addEventListener("pointerdown", function (e) {
+      var r = e.target.closest("[data-redact]");
+      if (!r || tool !== "redact") { return; }
+      // A redaction box is taken away by clicking it (Undo brings it back).
+      e.stopPropagation();
+      e.preventDefault();
+      change();
+      S.redact.splice(parseInt(r.getAttribute("data-redact"), 10), 1);
+      redrawAll();
+    }, true);
+
+    // Pages (DES-22 §7.7): turn, move, remove and keep only the chosen pages; join the mail's other PDFs at the end.
+    function count() {
+      var n = Object.keys(chosen).filter(function (u) { return pageOf(u); }).length;
+      var c = view.querySelector("[data-edit-chosen]");
+      if (c) { c.textContent = n ? word("chosen", n) : ""; }
+    }
+    function picks() { return S.pages.filter(function (p) { return chosen[p.uid]; }); }
+    function arrange(then) {
+      if (untouched()) {
+        key = null;
+        arranged = false;
+        texts = {};
+        build();
+        S.pages.forEach(function (p, i) { loadText(p, i); });
+        if (then) { then(); }
+        return;
+      }
+      say(word("arranging"));
+      var body = new FormData();
+      body.set("__RequestVerificationToken", tokenEl ? tokenEl.value : "");
+      body.set("plan", JSON.stringify({ Pages: S.pages.map(function (p) { return { File: p.file, Page: p.page, Turn: p.turn }; }) }));
+      body.set("join", S.join.join(","));
+      body.set("entry", entry);
+      fetch(base + "/arrange", { method: "POST", body: body, credentials: "same-origin" }).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d || !d.key) { say(d && d.problem ? d.problem : word("failed")); return; }
+        // The answer spells out each joined file's pages; known pages keep who they are, so their marks stay on them.
+        var old = S.pages.slice(), next = [], o = 0;
+        d.pages.forEach(function (q) {
+          var mine = old[o];
+          if (mine && mine.page !== -1 && mine.file === q.file && mine.page === q.page) { mine.w = q.w; mine.h = q.h; next.push(mine); o++; return; }
+          if (mine && mine.page === -1 && mine.file === q.file) {
+            next.push({ uid: "p" + (uidNext++), file: q.file, page: q.page, turn: q.turn, w: q.w, h: q.h });
+            if (!d.pages[next.length] || d.pages[next.length].file !== q.file) { o++; }
+            return;
+          }
+          next.push({ uid: "p" + (uidNext++), file: q.file, page: q.page, turn: q.turn, w: q.w, h: q.h });
+        });
+        S.pages = next;
+        key = d.key;
+        arranged = true;
+        texts = {};
+        say("");
+        build();
+        S.pages.forEach(function (p, i) { loadText(p, i); });
+        if (then) { then(); }
+      }).catch(function () { say(word("failed")); });
+    }
+    // Turning a page turns the marks and boxes on it with it.
+    function turnMarks(p, quarter) {
+      var w = p.w, h = p.h;
+      function pt(x, y) { return quarter === 90 ? [h - y, x] : [y, w - x]; }
+      function box(b) {
+        var a = pt(b.X, b.Y), c = pt(b.X + b.W, b.Y + b.H);
+        b.X = Math.min(a[0], c[0]); b.Y = Math.min(a[1], c[1]); b.W = Math.abs(c[0] - a[0]); b.H = Math.abs(c[1] - a[1]);
+      }
+      S.marks.forEach(function (m) {
+        if (m.uid !== p.uid) { return; }
+        if (m.Points && m.Points.length) { for (var i = 0; i < m.Points.length; i += 2) { var q = pt(m.Points[i], m.Points[i + 1]); m.Points[i] = q[0]; m.Points[i + 1] = q[1]; } }
+        if (m.Kind === "text") { var q2 = pt(m.X, m.Y); m.W = Math.min(m.W, h); m.X = Math.max(0, Math.min(q2[0], h - m.W)); m.Y = Math.max(0, Math.min(q2[1], w - m.Size * 1.25)); } else { box(m); }
+      });
+      S.redact.forEach(function (b) { if (b.uid === p.uid) { box(b); } });
+      p.w = h; p.h = w;
+    }
+    function needChosen() { if (picks().length) { return false; } say(word("chooseFirst")); return true; }
+    $$("[data-edit-turn]", view).forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (gated() || needChosen()) { return; }
+        var q = parseInt(b.getAttribute("data-edit-turn"), 10);
+        change();
+        picks().forEach(function (p) { p.turn = (p.turn + q) % 360; turnMarks(p, q === 90 ? 90 : 270); });
+        arrange();
+      });
+    });
+    $$("[data-edit-move]", view).forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (gated() || needChosen()) { return; }
+        var step = parseInt(b.getAttribute("data-edit-move"), 10);
+        change();
+        var list = S.pages.slice(), order = step < 0 ? list.map(function (p, i) { return i; }) : list.map(function (p, i) { return list.length - 1 - i; });
+        order.forEach(function (i) {
+          var j = i + step;
+          if (chosen[list[i].uid] && j >= 0 && j < list.length && !chosen[list[j].uid]) { var t = list[i]; list[i] = list[j]; list[j] = t; }
+        });
+        S.pages = list;
+        arrange();
+      });
+    });
+    function keepOnly(keep) {
+      if (!keep.length) { say(word("lastPage")); return; }
+      change();
+      var uids = {};
+      keep.forEach(function (p) { uids[p.uid] = true; });
+      S.pages = keep;
+      S.marks = S.marks.filter(function (m) { return uids[m.uid]; });
+      S.redact = S.redact.filter(function (b) { return uids[b.uid]; });
+      chosen = {};
+      arrange();
+    }
+    var delBtn = view.querySelector("[data-edit-delete]");
+    if (delBtn) { delBtn.addEventListener("click", function () { if (gated() || needChosen()) { return; } keepOnly(S.pages.filter(function (p) { return !chosen[p.uid]; })); }); }
+    var takeBtn = view.querySelector("[data-edit-take]");
+    if (takeBtn) { takeBtn.addEventListener("click", function () { if (gated() || needChosen()) { return; } keepOnly(picks()); }); }
+    $$("[data-edit-join]", view).forEach(function (b) {
+      b.addEventListener("change", function () {
+        if (gated()) { b.checked = !b.checked; return; }
+        var att = parseInt(b.getAttribute("data-edit-join"), 10);
+        change();
+        if (b.checked) {
+          S.join.push(att);
+          S.pages.push({ uid: "p" + (uidNext++), file: S.join.length, page: -1, turn: 0, w: 595, h: 842 });
+        } else {
+          var f = S.join.indexOf(att) + 1;
+          S.join.splice(f - 1, 1);
+          var gone = {};
+          S.pages = S.pages.filter(function (p) { if (p.file === f) { gone[p.uid] = true; return false; } return true; });
+          S.pages.forEach(function (p) { if (p.file > f) { p.file--; } });
+          S.marks = S.marks.filter(function (m) { return !gone[m.uid]; });
+          S.redact = S.redact.filter(function (r) { return !gone[r.uid]; });
+        }
+        arrange();
+      });
+    });
+
+    // Stamp (DES-22 §7.7): a watermark and page numbers on every page, drawn by Anjal (D-376).
+    function stampNow() {
+      var on = view.querySelector("[data-edit-wm]"), numOn = view.querySelector("[data-edit-num]");
+      function v(sel) { var x = view.querySelector(sel); return x ? x.value : ""; }
+      S.wm = on && on.checked && v("[data-edit-wmtext]").trim() ? {
+        Text: v("[data-edit-wmtext]").trim().slice(0, 120),
+        Size: Math.max(12, Math.min(200, parseFloat(v("[data-edit-wmsize]")) || 60)),
+        Angle: Math.max(-90, Math.min(90, parseFloat(v("[data-edit-wmangle]")) || 0)),
+        Opacity: parseFloat(v("[data-edit-wmopacity]")) || 0.2,
+        Color: "#808080"
+      } : null;
+      S.num = numOn && numOn.checked && v("[data-edit-numtext]").trim() ? {
+        Format: v("[data-edit-numtext]").trim().slice(0, 120),
+        Where: v("[data-edit-numwhere]") || "bottom-centre",
+        Start: Math.max(0, Math.min(99999, parseInt(v("[data-edit-numstart]"), 10) || 1)),
+        Size: 10
+      } : null;
+      redrawAll();
+    }
+    $$("[data-edit-panel=stamp] input, [data-edit-panel=stamp] select", view).forEach(function (x) {
+      x.addEventListener("focus", function () { x.setAttribute("data-was", snapshot()); });
+      x.addEventListener("change", function () {
+        if (gated()) { return; }
+        undo.push(x.getAttribute("data-was") || snapshot());
+        redo = [];
+        stampNow();
+        x.setAttribute("data-was", snapshot());
+        buttons();
+      });
+    });
+
+    // Undo and Redo: the whole state as it was, the pages arranged again when they differ.
+    function restore(text) {
+      var before = S.pages.map(function (p) { return { file: p.file, page: p.page, turn: p.turn }; });
+      S = JSON.parse(text);
+      selected = null;
+      pending = [];
+      var fb = view.querySelector("[data-edit-foundbar]");
+      if (fb) { fb.hidden = true; }
+      var wm = view.querySelector("[data-edit-wm]"), num = view.querySelector("[data-edit-num]");
+      if (wm) { wm.checked = !!S.wm; }
+      if (num) { num.checked = !!S.num; }
+      $$("[data-edit-join]", view).forEach(function (b) { b.checked = S.join.indexOf(parseInt(b.getAttribute("data-edit-join"), 10)) >= 0; });
+      if (!samePages(before, S.pages)) { arrange(); } else { redrawAll(); }
+      buttons();
+    }
+    function back() { if (!undo.length) { return; } hideReview(); redo.push(snapshot()); restore(undo.pop()); }
+    function forward() { if (!redo.length) { return; } hideReview(); undo.push(snapshot()); restore(redo.pop()); }
+    var undoBtn = view.querySelector("[data-edit-undo]"), redoBtn = view.querySelector("[data-edit-redo]");
+    if (undoBtn) { undoBtn.addEventListener("click", back); }
+    if (redoBtn) { redoBtn.addEventListener("click", forward); }
+
+    // The ticks (§7.8, 1; D-374): nothing is drawn or saved until the person has ticked.
+    $$("[data-edit-accept]", view).forEach(function (b) {
+      b.addEventListener("change", function () { accepted[b.getAttribute("data-edit-accept")] = b.checked; if (b.checked) { say(""); } });
+    });
+
+    // Save: the whole list, in points on the pages as they will be, with the pictures; the new mail opens.
+    var menu = view.querySelector("[data-edit-savemenu]");
+    // The owner's check (17 Nov 2026): "Reply to another mail with it" and "Add to a draft I'm writing" first open the
+    // picker; the mail or draft chosen goes with the save as its target.
+    $$("[data-edit-go]", view).forEach(function (b) {
+      b.addEventListener("click", function () {
+        if (menu) { menu.open = false; }
+        if (gated()) { return; }
+        var go = b.getAttribute("data-edit-go");
+        var picker = go.indexOf("pick-") === 0 ? view.querySelector("[data-mailpick='" + go.slice(5) + "']") : null;
+        if (picker) {
+          window.anjalMailPick(picker, function (id, act) { save(act, id); });
+          return;
+        }
+        save(go, null);
+      });
+    });
+    function save(go, target) {
+        say(word("saving"));
+        var plan = {
+          Pages: untouched() ? [] : S.pages.map(function (p) { return { File: p.file, Page: p.page, Turn: p.turn }; }),
+          Marks: S.marks.filter(function (m) { return indexOf(m.uid) >= 0; }).map(function (m) {
+            var o = { Kind: m.Kind, Page: indexOf(m.uid), X: m.X, Y: m.Y, W: m.W, H: m.H, Points: m.Points, Strokes: m.Strokes, Color: m.Color, Line: m.Line, Size: m.Size };
+            if (m.Text) { o.Text = m.Text; }
+            if (m.Kind === "picture") { o.Picture = m.Picture; }
+            return o;
+          }),
+          Redactions: S.redact.filter(function (r) { return indexOf(r.uid) >= 0; }).map(function (r) { return { Page: indexOf(r.uid), X: r.X, Y: r.Y, W: r.W, H: r.H }; }),
+          Watermark: S.wm, Numbers: S.num,
+          AcceptSignedRewrite: !!view.querySelector("[data-edit-accept=signed]:checked"),
+          AcceptNoPassword: !!view.querySelector("[data-edit-accept=nopassword]:checked")
+        };
+        var body = new FormData();
+        body.set("__RequestVerificationToken", tokenEl ? tokenEl.value : "");
+        body.set("plan", JSON.stringify(plan));
+        body.set("join", S.join.join(","));
+        body.set("entry", entry);
+        body.set("go", go);
+        if (target) { body.set("target", target); }
+        pictures.forEach(function (f, i) { body.append("picture" + i, f, "picture" + i); });
+        post(body, go, target);
+    }
+
+    // The save, and after a redaction its second step: the summary is read, then the same file is attached.
+    var review = view.querySelector("[data-edit-review]"), reviewKept = null, reviewGo = null, reviewTarget = null;
+    function hideReview() {
+      reviewKept = null;
+      if (review) { review.hidden = true; }
+    }
+    function post(body, go, target) {
+      hideReview();
+      view.classList.add("saving");
+      fetch(base + "/save", { method: "POST", body: body, credentials: "same-origin" }).then(function (r) { return r.json(); }).then(function (d) {
+        view.classList.remove("saving");
+        if (d && d.go) { undo = []; window.anjalGo(d.go); return; }
+        if (d && d.kept && review) {
+          say("");
+          reviewKept = d.kept;
+          reviewGo = go;
+          reviewTarget = target || null;
+          var list = review.querySelector("[data-edit-review-lines]");
+          list.textContent = "";
+          (d.review || []).forEach(function (line) { var li = document.createElement("li"); li.textContent = line; list.appendChild(li); });
+          review.hidden = false;
+          review.scrollIntoView({ block: "nearest" });
+          var attach = review.querySelector("[data-edit-attach]");
+          if (attach) { attach.focus(); }
+          return;
+        }
+        say(d && d.problem ? d.problem : word("failed"));
+        if (d && d.page !== undefined && d.page !== null && S.pages[d.page]) { var f = figOf(S.pages[d.page].uid); if (f) { f.scrollIntoView({ block: "center" }); } }
+      }).catch(function () { view.classList.remove("saving"); say(word("failed")); });
+    }
+    if (review) {
+      review.querySelector("[data-edit-attach]").addEventListener("click", function () {
+        if (!reviewKept) { return; }
+        say(word("saving"));
+        var body = new FormData();
+        body.set("__RequestVerificationToken", tokenEl ? tokenEl.value : "");
+        body.set("entry", entry);
+        body.set("kept", reviewKept);
+        body.set("go", reviewGo);
+        if (reviewTarget) { body.set("target", reviewTarget); }
+        post(body, reviewGo, reviewTarget);
+      });
+      review.querySelector("[data-edit-review-back]").addEventListener("click", hideReview);
+    }
+
+    // Leaving with changes not saved asks first, in the page (no browser dialog).
+    var leave = view.querySelector("[data-edit-leave]");
+    if (leave) {
+      leave.addEventListener("click", function (e) {
+        if (!dirty() || leave.getAttribute("data-sure") === "1") { return; }
+        e.preventDefault();
+        e.stopPropagation();
+        leave.setAttribute("data-sure", "1");
+        say(word("leave"));
+      }, true);
+    }
+    scope.on(window, "beforeunload", function (e) { if (dirty()) { e.preventDefault(); e.returnValue = ""; } });
+
+    // Zooming asks for sharper pictures of the pages, as the viewer does.
+    $$("[data-pdf-zoom]", view).forEach(function (b) {
+      b.addEventListener("click", function () {
+        window.setTimeout(function () {
+          $$(".editpage", holder).forEach(function (f, i) {
+            var img = f.querySelector("img"), want = Math.max(200, Math.min(2000, Math.round(f.getBoundingClientRect().width * (window.devicePixelRatio || 1) / 100) * 100));
+            if (img && want > parseInt(f.getAttribute("data-px") || "1000", 10)) { f.setAttribute("data-px", String(want)); img.src = pageSrc(S.pages[i], i, want); }
+          });
+        }, 80);
+      });
+    });
+
+    build();
+    S.pages.forEach(function (p, i) { loadText(p, i); });
+    buttons();
   });
 }());
 

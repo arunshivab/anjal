@@ -252,7 +252,14 @@ public static class PdfJobs
         try
         {
             using var stream = new MemoryStream(bytes, writable: false);
-            if (string.IsNullOrEmpty(password) && PdfDocument.RequiresPassword(stream))
+            // D-405 (the library's advisory, 17 Nov 2026): the limits hold from the first byte read, the password
+            // probe included (the open takes them in its options; a job that opened its own scope keeps it).
+            bool needsPassword;
+            using (PdfWorkScope.Current is null ? PdfWorkScope.Enter(Limits, CancellationToken.None) : null)
+            {
+                needsPassword = string.IsNullOrEmpty(password) && PdfDocument.RequiresPassword(stream);
+            }
+            if (needsPassword)
             {
                 return JobAnswer.Status(ViewStatus.NeedsPassword, null);
             }

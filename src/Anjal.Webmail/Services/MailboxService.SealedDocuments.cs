@@ -14,7 +14,7 @@ namespace Anjal.Webmail.Services;
 public sealed partial class MailboxService
 {
     /// <summary>The mailbox documents kept encrypted.</summary>
-    internal static readonly string[] SealedDocumentKinds = { ContactsKind, GroupsKind, TemplatesKind };
+    internal static readonly string[] SealedDocumentKinds = { ContactsKind, GroupsKind, TemplatesKind, DrawnSignatureKind };
 
     private byte[]? addressPepper;
 
