@@ -300,6 +300,45 @@ async function editedDraft(editor) {
   }
 }
 
+// rc.30 (DES-22 §21.6): the DICOM screens - a DICOM file, its patient details, a ZIP's study, its series and a
+// series' patient details. The crawl keeps two screens of each kind, and the mails with PDFs and ZIPs fill the
+// "file in a mail" kind first, so these are found on purpose: the first mail carrying a DICOM file (its tag in the
+// mail's file list) is opened, and each of its files followed to the study and its series. Nothing when DICOM is off.
+async function dicomScreens(w) {
+  if (!(await visit(w, '/folder/INBOX', 250))) {
+    return [];
+  }
+  const ids = await w.page.$$eval('#maillist a[href*="open="]', (a) => [...new Set(a.map((x) => new URL(x.href).searchParams.get('open')))]);
+  const list = [];
+  for (const id of ids) {
+    await visit(w, '/folder/INBOX?open=' + id, 150);
+    const files = await w.page.$$eval('.attrow', (rows) => rows.filter((r) => r.querySelector('.ftag-dicom, .ftag-zip')).map((r) => r.querySelector('a.attname')).filter((a) => a).map((a) => a.getAttribute('href')));
+    const hasDicom = await w.page.$('.ftag-dicom');
+    if (!hasDicom || files.length === 0) {
+      continue;
+    }
+    for (const f of [...new Set(files)]) {
+      await visit(w, f, 600);
+      if (await w.page.$('.dicomview')) {
+        list.push(f, f + '&patient=1');
+      }
+      const study = await w.page.$$eval('a[href*="study=1"]', (as) => (as[0] ? as[0].getAttribute('href') : null));
+      if (study) {
+        // The archive's own list, where "View as a study" is offered.
+        list.push(f, study);
+        await visit(w, study, 900);
+        const series = await w.page.$$eval('a[href*="&series="]', (as) => [...new Set(as.map((a) => a.getAttribute('href')))]);
+        series.slice(0, 2).forEach((s) => list.push(s));
+        if (series[0]) {
+          list.push(series[0] + '&patient=1');
+        }
+      }
+    }
+    break;
+  }
+  return list;
+}
+
 // The screens list is found once per run and kept, so every check looks at the same screens.
 let screens = null;
 async function allScreens() {
@@ -309,6 +348,8 @@ async function allScreens() {
   const s = await open(SMALL);
   try {
     screens = await findScreens(s);
+    // Before the desk's screens: the first of those moves the session into the desk.
+    screens = screens.concat((await dicomScreens(s)).filter((u) => !screens.includes(u)));
     screens = screens.concat(await deskScreens(s));
     // rc.29 part 2 (DES-22 §7): the PDF editor's other tools, each opened from its address, so every check sees
     // every panel (Sign, Redact when it is on, Pages, Stamp start hidden behind Mark up).

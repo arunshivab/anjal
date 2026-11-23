@@ -18,6 +18,8 @@ namespace Anjal.Viewing;
 [JsonSerializable(typeof(ArchiveView))]
 [JsonSerializable(typeof(FileOut))]
 [JsonSerializable(typeof(DicomView))]
+[JsonSerializable(typeof(DicomPatient))]
+[JsonSerializable(typeof(DicomStudyView))]
 [JsonSerializable(typeof(EditPlan))]
 [JsonSerializable(typeof(EditCheck))]
 [JsonSerializable(typeof(EditReport))]
@@ -80,6 +82,16 @@ public static class ViewJson
     /// <returns>The JSON.</returns>
     public static string Write(DicomView value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.DicomView);
 
+    /// <summary>Writes a DICOM file's patient fields (D-366).</summary>
+    /// <param name="value">The fields.</param>
+    /// <returns>The JSON.</returns>
+    public static string Write(DicomPatient value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.DicomPatient);
+
+    /// <summary>Writes a grouped study (AC-19).</summary>
+    /// <param name="value">The grouping.</param>
+    /// <returns>The JSON.</returns>
+    public static string Write(DicomStudyView value) => JsonSerializer.Serialize(value, ViewJsonContext.Default.DicomStudyView);
+
     /// <summary>Writes the editor's plan.</summary>
     /// <param name="value">The plan.</param>
     /// <returns>Its JSON.</returns>
@@ -134,6 +146,16 @@ public static class ViewJson
     /// <param name="json">The JSON.</param>
     /// <returns>The value.</returns>
     public static DicomView? ReadDicom(string? json) => json is null ? null : JsonSerializer.Deserialize(json, ViewJsonContext.Default.DicomView);
+
+    /// <summary>Reads a DICOM file's patient fields.</summary>
+    /// <param name="json">The JSON, or null.</param>
+    /// <returns>The fields, or null.</returns>
+    public static DicomPatient? ReadDicomPatient(string? json) => json is null ? null : JsonSerializer.Deserialize(json, ViewJsonContext.Default.DicomPatient);
+
+    /// <summary>Reads a grouped study.</summary>
+    /// <param name="json">The JSON, or null.</param>
+    /// <returns>The grouping, or null.</returns>
+    public static DicomStudyView? ReadStudy(string? json) => json is null ? null : JsonSerializer.Deserialize(json, ViewJsonContext.Default.DicomStudyView);
 
     /// <summary>Reads a request.</summary>
     /// <param name="json">The JSON.</param>

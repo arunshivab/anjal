@@ -15,6 +15,12 @@ rc.29: the shapes that cross the socket, written and read without reflection, so
 - **Box** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **DateTimeOffset** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **Default** *(property)* - The default associated with a default instance.
+- **DicomIssueCount** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **DicomPatient** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **DicomPatientGroup** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **DicomSeriesGroup** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **DicomStudyGroup** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **DicomStudyView** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **DicomView** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **DmarcReport** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **DmarcRow** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
@@ -33,6 +39,10 @@ rc.29: the shapes that cross the socket, written and read without reflection, so
 - **Int64** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **ListArchiveItem** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **ListBox** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **ListDicomIssueCount** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **ListDicomPatientGroup** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **ListDicomSeriesGroup** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
+- **ListDicomStudyGroup** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **ListDouble** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **ListEditMark** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.
 - **ListFindHit** *(property)* - Defines the source generated JSON serialization contract metadata for a given type.

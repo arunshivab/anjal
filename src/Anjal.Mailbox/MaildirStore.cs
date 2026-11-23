@@ -218,7 +218,7 @@ public sealed class MaildirStore : IMaildirStore
             await fs.FlushAsync(ct).ConfigureAwait(false);
             fs.Flush(flushToDisk: true);
         }
-        System.IO.File.Move(tmpPath, newPath);
+        MaildirFiles.Move(tmpPath, newPath, overwrite: false);
 
         return new MaildirWriteResult
         {
@@ -311,7 +311,7 @@ public sealed class MaildirStore : IMaildirStore
             await fs.FlushAsync(ct).ConfigureAwait(false);
             fs.Flush(flushToDisk: true);
         }
-        System.IO.File.Move(tmp, full, overwrite: true);
+        MaildirFiles.Move(tmp, full, overwrite: true);
         return true;
     }
 
@@ -368,7 +368,7 @@ public sealed class MaildirStore : IMaildirStore
         System.IO.Directory.CreateDirectory(System.IO.Path.Combine(dir, "cur"));
         if (!string.Equals(source, target, System.StringComparison.Ordinal))
         {
-            System.IO.File.Move(source, target, overwrite: true);
+            MaildirFiles.Move(source, target, overwrite: true);
         }
         return "cur/" + newName;
     }
@@ -389,7 +389,7 @@ public sealed class MaildirStore : IMaildirStore
         }
         string toDir = this.EnsureFolder(tenantSlug, address, toFolder);
         string target = System.IO.Path.Combine(toDir, sub, name);
-        System.IO.File.Move(source, target, overwrite: true);
+        MaildirFiles.Move(source, target, overwrite: true);
         return sub + "/" + name;
     }
 
@@ -407,7 +407,7 @@ public sealed class MaildirStore : IMaildirStore
         {
             return false;
         }
-        System.IO.File.Delete(full);
+        MaildirFiles.Delete(full);
         return true;
     }
 

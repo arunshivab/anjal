@@ -15,6 +15,9 @@ namespace Anjal.Examples.WebmailDemo;
 ///   dotnet run --project examples/Anjal.WebmailDemo
 ///   open http://127.0.0.1:8080/  and sign in as arun@anjal.localhost / Lotus-Garden-42
 ///
+/// rc.30: set ANJAL_VIEWER_DICOM=on first (PowerShell: $env:ANJAL_VIEWER_DICOM = "on") to see the made-up CT
+/// study as DICOM - the file, the study and the series view.
+///
 /// Messages composed in the UI land in the in-memory outbound queue (and
 /// the Sent folder); nothing leaves the machine. Ctrl+C to stop.
 /// </summary>
@@ -80,6 +83,20 @@ internal static class Program
             ("Statement-September.zip", "application/zip", DemoFiles.LockedZip("Teak-River-7",
                 ("Statement-September.pdf", DemoFiles.Pdf("Account statement", "September 2026")),
                 ("Read-me.txt", Encoding.ASCII.GetBytes("Statement for September.\n"))))));
+
+        // rc.30 (DES-22 §21): a made-up CT study - a chest series of five slices, shuffled, and a scout of two - and one
+        // slice on its own. Shown only when the demo runs with ANJAL_VIEWER_DICOM=on; otherwise plain attachments.
+        await DeliverAsync(sink, WithFiles("Imaging department <imaging@example.com>", "CT chest images for Tuesday's meeting", "Sat, 19 Sep 2026 09:35:00 +0530", "demo-7",
+            "The CT chest study for Tuesday's meeting is attached, with the slice we discussed on its own.",
+            ("CT-chest-study.zip", "application/zip", DemoFiles.Zip(
+                ("CT-chest/IM0003.dcm", DemoFiles.Dicom(3, 7.5, "2", "Chest 2.5 mm")),
+                ("CT-chest/IM0001.dcm", DemoFiles.Dicom(1, 2.5, "2", "Chest 2.5 mm")),
+                ("CT-chest/IM0005.dcm", DemoFiles.Dicom(5, 12.5, "2", "Chest 2.5 mm")),
+                ("CT-chest/IM0002.dcm", DemoFiles.Dicom(2, 5.0, "2", "Chest 2.5 mm")),
+                ("CT-chest/IM0004.dcm", DemoFiles.Dicom(4, 10.0, "2", "Chest 2.5 mm")),
+                ("CT-chest/SCOUT1.dcm", DemoFiles.Dicom(1, 0.0, "1", "Scout")),
+                ("CT-chest/SCOUT2.dcm", DemoFiles.Dicom(2, 0.0, "1", "Scout")))),
+            ("Slice-3.dcm", "application/dicom", DemoFiles.Dicom(3, 7.5, "2", "Chest 2.5 mm"))));
 
         await DeliverAsync(sink,
             "Subject: YOU HAVE WON THE LOTTERY\r\nContent-Type: text/plain\r\n\r\n" +

@@ -96,8 +96,9 @@ psql -h localhost -U postgres -d "$DB" -q -v ON_ERROR_STOP=1 -c "INSERT INTO ten
   ON CONFLICT (tenant_id, kind) DO UPDATE SET body = EXCLUDED.body;"
 
 # 4. The webmail.
+# rc.30 (DES-22 §21): DICOM is on here, so its screens (a file, a study, a series) are checked; off by default elsewhere.
 env "${COMMON[@]}" ANJAL_WEBMAIL_PORT="$WEB_PORT" ANJAL_WEBMAIL_KEYS_DIR="$WORK/keys" \
-  ANJAL_OPERATORS="$ADDRESS" ANJAL_BACKUP_STATUS="$WORK/backup-status" \
+  ANJAL_OPERATORS="$ADDRESS" ANJAL_BACKUP_STATUS="$WORK/backup-status" ANJAL_VIEWER_DICOM=on \
   setsid dotnet "$ROOT/src/Anjal.Webmail/bin/$CONFIG/net10.0/Anjal.Webmail.dll" > "$WORK/webmail.log" 2>&1 < /dev/null &
 echo $! > "$WORK/webmail.pid"
 wait_for "http://127.0.0.1:$WEB_PORT/sign-in" "The webmail" "$WORK/webmail.log"

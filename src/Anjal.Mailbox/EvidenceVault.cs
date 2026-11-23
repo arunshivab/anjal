@@ -81,7 +81,7 @@ public sealed class EvidenceVault
         {
             System.IO.File.SetUnixFileMode(temp, System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.GroupRead);
         }
-        System.IO.File.Move(temp, final, overwrite: false);
+        MaildirFiles.Move(temp, final, overwrite: false);
         return (relative, bytes.LongLength, Sha256Hex(bytes));
     }
 
@@ -108,7 +108,7 @@ public sealed class EvidenceVault
             {
                 System.IO.File.SetAttributes(full, System.IO.FileAttributes.Normal);
             }
-            System.IO.File.Delete(full);
+            MaildirFiles.Delete(full);
         }
     }
 

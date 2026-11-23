@@ -29,4 +29,11 @@
     <ProjectReference Include="..\Anjal.Acme.Tests\Anjal.Acme.Tests.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- rc.30: the made-up DICOM files of the viewer's tests, for the webmail's study and series view. -->
+    <Compile Include="..\Anjal.Viewer.Tests\TestDicom.cs" Link="TestDicom.cs" />
+    <!-- rc.30: the hostile mail set of the MIME tests, delivered and opened in the webmail. -->
+    <Compile Include="..\Anjal.Mime.Tests\HostileMail.cs" Link="HostileMail.cs" />
+  </ItemGroup>
+
 </Project>

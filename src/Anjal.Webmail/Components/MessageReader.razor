@@ -215,7 +215,7 @@ else
                 </div>
             }
 
-            @if (Previewed is AttachmentView pv && MailboxService.PreviewType(pv) is string ptype)
+            @if (Previewed is AttachmentView pv && Mail.PreviewOf(pv) is string ptype)
             {
                 @* UX-06: the attachment in the letter area, with the way back. rc.28 (DES-18 §10, R10 [10b]/[10c]):
                    the mail's other files beside it, the previous and next file (also ← and →), and for an
@@ -252,7 +252,7 @@ else
                             @foreach (AttachmentView f in view.Attachments)
                             {
                                 (string ftag, string fkind) = FileTag.Of(f.FileName, f.ContentType);
-                                bool shows = MailboxService.PreviewType(f) is not null;
+                                bool shows = Mail.PreviewOf(f) is not null;
                                 <a class="pvfile @(f.Index == pv.Index ? "on" : null)" href="@(shows ? PreviewLink(f.Index) : $"/message/{Id}/attachment/{f.Index}")" aria-current="@(f.Index == pv.Index ? "true" : null)" title="@f.FileName">
                                     <span class="ftag ftag-@fkind" aria-hidden="true">@ftag</span><span class="fn">@f.FileName</span>
                                 </a>
@@ -265,7 +265,7 @@ else
                            own box with the label of what it is (owner, 15 Nov, option A). *@
                         <AttachmentViewer MessageId="Id" File="pv" FileLink="@PreviewLink(pv.Index)" Entry="@ViewEntry" SheetIndex="@ViewSheet" L="L" Clock="clock"
                                           Edit="@EditAsked" EditHref="@EditHref(pv.Index)" Back="@EditBack(pv.Index)" EditTool="@(Http?.Request.Query["tool"].ToString())"
-                                          Others="@(view.Attachments.Where(a => a.Index != pv.Index && MailboxService.PreviewType(a) == "application/pdf").ToList())" />
+                                          Others="@(view.Attachments.Where(a => a.Index != pv.Index && Mail.PreviewOf(a) == "application/pdf").ToList())" />
                     }
                     else
                     {
@@ -829,7 +829,7 @@ else
                         (string tag, string kind) = FileTag.Of(a.FileName, a.ContentType);
                         <div class="attrow">
                             <span class="ftag ftag-@kind" aria-hidden="true">@tag</span>
-                            @if (MailboxService.PreviewType(a) is not null)
+                            @if (Mail.PreviewOf(a) is not null)
                             {
                                 <a class="attname" href="@PreviewLink(a.Index)" title="@L["Show it here"]">
                                     <span class="fn">@a.FileName</span>
@@ -1255,7 +1255,7 @@ else
     // rc.28: the files before and after this one that can be shown here.
     private (AttachmentView? Before, AttachmentView? After) Neighbours(AttachmentView current)
     {
-        List<AttachmentView> shown = view is null ? new() : view.Attachments.Where(a => MailboxService.PreviewType(a) is not null).ToList();
+        List<AttachmentView> shown = view is null ? new() : view.Attachments.Where(a => Mail.PreviewOf(a) is not null).ToList();
         int at = shown.FindIndex(a => a.Index == current.Index);
         return (at > 0 ? shown[at - 1] : null, at >= 0 && at + 1 < shown.Count ? shown[at + 1] : null);
     }

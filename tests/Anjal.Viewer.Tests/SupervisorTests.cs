@@ -66,6 +66,32 @@ public sealed class SupervisorTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task ADicomGrouping_RunsInAChildOfItsOwn_BesideAnotherJob()
+    {
+        // rc.30 (AC-19): the grouping's child is started for it with a 1 GiB heap; the others keep 512 MB.
+        string host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+        var command = new ChildCommand(host, new[] { Path.Combine(AppContext.BaseDirectory, "Anjal.Viewer.dll"), "--child" });
+        foreach ((long limit, long want) in new[] { (ChildProcess.DefaultHeapLimit, 512L), (1024L * 1024 * 1024, 1024L) })
+        {
+            using ChildProcess? child = await ChildProcess.StartAsync(command, TimeSpan.FromSeconds(60), TextWriter.Null, limit, CancellationToken.None);
+            Assert.NotNull(child);
+            (ViewAnswer heap, _, _) = await child.RunAsync(ViewJson.Write(new ViewRequest { Kind = "test.heap" }), new[] { Array.Empty<byte>() }, TimeSpan.FromSeconds(20), 2048L * 1024 * 1024, CancellationToken.None);
+            long bytes = System.Text.Json.JsonDocument.Parse(heap.Json!).RootElement.GetProperty("heap").GetInt64();
+            Assert.Equal(want, bytes / (1024 * 1024));
+        }
+
+        var client = new ViewerClient(this.Socket);
+        byte[] zip = TestFiles.ZipBytes(("a.dcm", TestDicom.Slice("1", 1, 0)), ("b.dcm", TestDicom.Slice("1", 2, 5)));
+        Task<ViewResult> grouping = client.AskAsync(new ViewRequest { Kind = ViewKinds.DicomGroup, Who = "g" }, zip);
+        Task<ViewResult> other = client.AskAsync(new ViewRequest { Kind = ViewKinds.PdfInfo, Who = "h" }, TestFiles.Pdf("Beside it"));
+        ViewResult grouped = await grouping;
+        Assert.Equal(ViewStatus.Ok, grouped.Answer.Status);
+        Assert.Equal(2, ViewJson.ReadStudy(grouped.Answer.Json)!.Patients.Single().Studies.Single().Series.Single().Slices);
+        Assert.Equal(ViewStatus.Ok, (await other).Answer.Status);
+        Assert.Equal(15, ViewKinds.Deadline(ViewKinds.DicomGroup).TotalSeconds);
+    }
+
+    [Fact]
     public async Task AJobThatHangs_IsStoppedAtItsDeadline_AndTheNextRunsInAFreshChild()
     {
         var client = new ViewerClient(this.Socket);

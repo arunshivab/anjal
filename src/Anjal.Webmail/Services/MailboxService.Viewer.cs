@@ -1,3 +1,4 @@
+using Anjal.Store;
 using Anjal.Viewing;
 
 namespace Anjal.Webmail.Services;
@@ -11,6 +12,28 @@ public sealed partial class MailboxService
 {
     /// <summary>rc.29 (DES-22 §4): the viewer, when one is set up; null leaves attachments Download only.</summary>
     public ViewerAccess? Viewer { get; init; }
+
+    /// <summary>
+    /// rc.30 (D-366): a DICOM file's patient name and ID were shown to the mailbox's own person (Show patient details).
+    /// The log says which mail and file, never the name or the ID.
+    /// </summary>
+    /// <param name="actor">Who.</param>
+    /// <param name="messageId">The mail.</param>
+    /// <param name="index">The attachment.</param>
+    /// <param name="entry">The file inside the archive, or null.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>A task.</returns>
+    public async Task LogDicomPatientAsync(string actor, Guid messageId, int index, string? entry, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        await this.messageStore.AppendAuditAsync(new AuditEvent
+        {
+            Actor = actor,
+            Action = "webmail.dicom.patient-details",
+            Subject = messageId.ToString("D") + "/" + index.ToString(System.Globalization.CultureInfo.InvariantCulture) + (string.IsNullOrEmpty(entry) ? string.Empty : "/" + entry),
+            Detail = "patient name and ID shown",
+        }, ct).ConfigureAwait(false);
+    }
 
     /// <summary>
     /// D-405 (decision A, 17 Nov 2026): a report a receiver attached (DMARC or TLS), read in the viewer process like

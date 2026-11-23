@@ -18,7 +18,9 @@ a separate `anjal-viewer` service with no network, no disk to write, its own mem
 timer per job (D-358). Built on chuvadi-pdf 3.34.0, Chuvadi.Docs 2.2.0, Chuvadi.Sheets 2.1.0 and
 Chuvadi.Zip 1.0.0 from `localpackages/`, each checked against its SHA-256 in CI. The 25 MB limit's refusal and the
 18 MB note say large imaging studies go by link (AC-18); the recovery sheet asks for a printer
-(AC-15). DICOM is written but switched off until the Siaara package is out.
+(AC-15). DICOM (rc.30, on SIAARA v0.1.0-rc.1 from `localpackages/`): a file's preview, a ZIP's study grouped by
+patient, study and series, and a scroll-through series view - off by default, `ANJAL_VIEWER_DICOM=on` on a test
+server only until SIAARA v0.1.0.
 And a PDF editor in the mail (DES-22 §7, rc.29 part 2): mark up (text in every script, shapes, pen,
 highlight, pictures), sign (a drawn signature or the person's scan, kept sealed to their key only when
 asked), redact (boxes, found words, and patient details such as MRN, Aadhaar and phone numbers offered as
@@ -953,7 +955,7 @@ not per browser, so a user's choice follows them to any machine.
 | `ANJAL_VIEWER_SOCKET` | (unset) | rc.29 (DES-22): the anjal-viewer service's socket, `/run/anjal-viewer/viewer.sock` in production. Attachments shown in the mail window are read there, never in the webmail. Unset: a viewer program is looked for beside the webmail and started on this machine (development), else attachments are Download only. The viewer process reads the same name for where to listen |
 | `ANJAL_VIEWER_PATH` | (unset) | rc.29: the viewer program to start on this machine when `ANJAL_VIEWER_SOCKET` is unset (`Anjal.Viewer` or `Anjal.Viewer.dll`); unset, it is found under `src/Anjal.Viewer/bin` |
 | `ANJAL_VIEWER` | (on) | rc.29: `off` turns viewing off; every attachment is then Download only |
-| `ANJAL_VIEWER_DICOM` | (off) | rc.29: `on` would show DICOM images; stays off until the Siaara package is released (D-372) |
+| `ANJAL_VIEWER_DICOM` | (off) | rc.30: `on` shows DICOM previews, study grouping and the series view (SIAARA v0.1.0-rc.1); for a test server only until SIAARA v0.1.0 (D-372) |
 | `ANJAL_VIEWER_TEST_HOOKS` | (off) | rc.29, the viewer process: `1` adds two jobs that hang and grow, for the tests of its kill timer and memory limit. Never set in production |
 
 Run it alongside the mail server:

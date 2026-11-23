@@ -16,3 +16,4 @@ rc.28 (DES-18 §10, D-337), moved into the viewer process in rc.29 (AC-17, D-381
 - **Limits** *(method)* - The library's caps for an archive Anjal reads: its preset for untrusted input, each lowered to Anjal's own budget where Anjal's is tighter (AC-20).
 - **List** *(method)* - Lists an archive, or the archive inside it that names.
 - **ParsePath** *(method)* - Reads "3" or "3/5" into places; an empty array for null or anything else.
+- **Unpacked** *(method)* - rc.30 (AC-19): one listed entry of the archive itself (not one inside an archive in it), unpacked in memory with the same caps as - for the DICOM grouping, which reads the listing once and then each file in turn, holding one at a time.

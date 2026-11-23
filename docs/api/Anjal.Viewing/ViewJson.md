@@ -9,6 +9,7 @@ rc.29: JSON for the shapes that cross the socket.
 - **ReadAnswer** *(method)* - Reads an answer.
 - **ReadArchive** *(method)* - Reads an archive's listing.
 - **ReadDicom** *(method)* - Reads a DICOM preview's caption.
+- **ReadDicomPatient** *(method)* - Reads a DICOM file's patient fields.
 - **ReadDmarc** *(method)* - Reads a DMARC report.
 - **ReadEditCheck** *(method)* - Reads what the editor must know first.
 - **ReadEditReport** *(method)* - Reads what Save did.
@@ -19,6 +20,7 @@ rc.29: JSON for the shapes that cross the socket.
 - **ReadPlan** *(method)* - Reads the editor's plan.
 - **ReadRequest** *(method)* - Reads a request.
 - **ReadSheet** *(method)* - Reads a sheet.
+- **ReadStudy** *(method)* - Reads a grouped study.
 - **ReadTls** *(method)* - Reads a TLS report's rows.
 - **ReadWord** *(method)* - Reads a Word document's text view.
 - **Write** *(method)* - Writes a request.
@@ -31,6 +33,8 @@ rc.29: JSON for the shapes that cross the socket.
 - **Write** *(method)* - Writes an archive's listing.
 - **Write** *(method)* - Writes a file's name and type.
 - **Write** *(method)* - Writes a DICOM preview's caption.
+- **Write** *(method)* - Writes a DICOM file's patient fields (D-366).
+- **Write** *(method)* - Writes a grouped study (AC-19).
 - **Write** *(method)* - Writes the editor's plan.
 - **Write** *(method)* - Writes what the editor must know first.
 - **Write** *(method)* - Writes what Save did.

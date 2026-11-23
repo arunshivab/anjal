@@ -33,8 +33,17 @@ public static class ViewKinds
     /// <summary>A picture checked by its bytes and given back as itself (inside an archive).</summary>
     public const string Picture = "picture";
 
-    /// <summary>A DICOM file's preview (switched off until the Siaara package is on the feed, D-372).</summary>
+    /// <summary>A DICOM file's preview (rc.30: SIAARA v0.1.0-rc.1; shown only with ANJAL_VIEWER_DICOM=on, D-372).</summary>
     public const string Dicom = "dicom";
+
+    /// <summary>rc.30 (D-366): a DICOM file's patient name and ID, for Show patient details only.</summary>
+    public const string DicomPatient = "dicom.patient";
+
+    /// <summary>
+    /// rc.30 (AC-19, D-386): a ZIP's DICOM files grouped by patient, study and series. Run in a child of its own with
+    /// 1 GiB (heap and stop), one at a time, beside at most one other job.
+    /// </summary>
+    public const string DicomGroup = "dicom.group";
 
     /// <summary>rc.29 part 2 (DES-22 §7.8, 1): what the editor must know first - signatures, a password, forms.</summary>
     public const string PdfEditCheck = "pdf.edit.check";
@@ -73,7 +82,8 @@ public static class ViewKinds
         PdfClean => TimeSpan.FromSeconds(30),
         Word => TimeSpan.FromSeconds(15),
         Sheet => TimeSpan.FromSeconds(8),
-        Dicom => TimeSpan.FromSeconds(8),
+        Dicom or DicomPatient => TimeSpan.FromSeconds(8),
+        DicomGroup => TimeSpan.FromSeconds(15),
         PdfEditCheck => TimeSpan.FromSeconds(10),
         PdfArrange => TimeSpan.FromSeconds(30),
         PdfSave => TimeSpan.FromSeconds(90),

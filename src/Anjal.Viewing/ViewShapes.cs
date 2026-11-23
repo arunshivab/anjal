@@ -329,8 +329,9 @@ public sealed class ArchiveItem
 }
 
 /// <summary>
-/// rc.29 (DES-22 §3.4): a DICOM file's preview - its outcome, and the caption fields as text from the file (escaped
-/// when shown). The patient's name and ID are never here. The picture and the strip's tiles travel as files.
+/// rc.29 (DES-22 §3.4; rc.30 on SIAARA v0.1.0-rc.1): a DICOM file's preview - its outcome, and the caption fields as
+/// text from the file (escaped when shown). The patient's name and ID are never here. The picture travels as the
+/// answer's first file, and for several frames the strip (the frames side by side, one picture) as the second.
 /// </summary>
 public sealed class DicomView
 {
@@ -363,6 +364,105 @@ public sealed class DicomView
 
     /// <summary>Why there is no picture, from the toolkit.</summary>
     public string? Reason { get; init; }
+
+    /// <summary>rc.30: the strip of several frames is the answer's second file; how many frames it shows.</summary>
+    public int StripFrames { get; init; }
+}
+
+/// <summary>
+/// rc.30 (D-366): a DICOM file's Patient's Name and Patient ID, read only when the mailbox's own person asks (Show
+/// patient details), and logged.
+/// </summary>
+public sealed class DicomPatient
+{
+    /// <summary>Patient's Name, as stored.</summary>
+    public string? Name { get; init; }
+
+    /// <summary>Patient ID, as stored.</summary>
+    public string? Id { get; init; }
+}
+
+/// <summary>
+/// rc.30 (AC-19, D-386; DES-22 §18.3): the DICOM files of a ZIP grouped by patient, study and series with SIAARA's
+/// grouping (and the ZIP's DICOMDIR, when it has one). No patient's name or ID: patients are told apart by number.
+/// </summary>
+public sealed class DicomStudyView
+{
+    /// <summary>The patients, in the toolkit's order.</summary>
+    public List<DicomPatientGroup> Patients { get; init; } = new();
+
+    /// <summary>DICOM files the ZIP holds (by their mark).</summary>
+    public int Files { get; init; }
+
+    /// <summary>Files the grouping read.</summary>
+    public int FilesRead { get; init; }
+
+    /// <summary>Files that could not be put in a series.</summary>
+    public int Ungrouped { get; init; }
+
+    /// <summary>Files whose header could not be read whole (ReadLoss above 0).</summary>
+    public int Incomplete { get; init; }
+
+    /// <summary>The grouping's limit that was reached (the toolkit's name for it), or null when none was.</summary>
+    public string? Budget { get; init; }
+
+    /// <summary>Files of the ZIP not read for the grouping: too large, refused or unreadable.</summary>
+    public int Skipped { get; init; }
+
+    /// <summary>What the grouping found worth saying, counted by kind (the toolkit's names).</summary>
+    public List<DicomIssueCount> Issues { get; init; } = new();
+}
+
+/// <summary>rc.30: one patient of a grouped study (by number; no name or ID).</summary>
+public sealed class DicomPatientGroup
+{
+    /// <summary>The patient's number, from 1.</summary>
+    public int Number { get; init; }
+
+    /// <summary>The patient's studies.</summary>
+    public List<DicomStudyGroup> Studies { get; init; } = new();
+}
+
+/// <summary>rc.30: one study.</summary>
+public sealed class DicomStudyGroup
+{
+    /// <summary>The study date, as stored (display-safe).</summary>
+    public string? Date { get; init; }
+
+    /// <summary>The study's series.</summary>
+    public List<DicomSeriesGroup> Series { get; init; } = new();
+}
+
+/// <summary>rc.30: one series and its slices, in the toolkit's order.</summary>
+public sealed class DicomSeriesGroup
+{
+    /// <summary>The series' number in the whole grouping, from 1 (the address of its series view).</summary>
+    public int Number { get; init; }
+
+    /// <summary>The modality (display-safe).</summary>
+    public string? Modality { get; init; }
+
+    /// <summary>The series description (display-safe).</summary>
+    public string? Description { get; init; }
+
+    /// <summary>The files of the series.</summary>
+    public int Slices { get; init; }
+
+    /// <summary>The frames in all: a multi-frame file counts its frames.</summary>
+    public long Frames { get; init; }
+
+    /// <summary>The ZIP entry of each slice, in order (the archive's places, as the archive viewer names them).</summary>
+    public List<string> Entries { get; init; } = new();
+}
+
+/// <summary>rc.30: how often the grouping found one kind of thing to say.</summary>
+public sealed class DicomIssueCount
+{
+    /// <summary>The kind, the toolkit's name.</summary>
+    public string Kind { get; init; } = string.Empty;
+
+    /// <summary>How many.</summary>
+    public int Count { get; init; }
 }
 
 /// <summary>A file given back whole (a Download from an archive, or a picture): its name and type.</summary>

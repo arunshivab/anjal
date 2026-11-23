@@ -1841,7 +1841,7 @@ second SSH session, never during this upgrade.
    at /run/anjal-viewer/viewer.sock.`
 8. **The viewer, as the webmail's user:**
    ```
-   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page, 2 locked archives
+   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page, 2 locked archives, DICOM
    ```
 9. **Seal what was kept before rc.25** (rc.28, D-264), once. This is step 6 of "rc.27 to rc.28"
    below: a dry run first, read its line, and run it for real only if it shows `0 with a problem`.
@@ -1891,7 +1891,8 @@ wording; the print and phone fixes): backup first (section 11). No schema change
    vm$ sudo grep '^ANJAL_VIEWER_SOCKET=' /etc/anjal/webmail.env   # ANJAL_VIEWER_SOCKET=/run/anjal-viewer/viewer.sock
    ```
    `ANJAL_VIEWER=off` (not set by default) turns viewing off and leaves every attachment Download
-   only. The DICOM view stays off in rc.29; do not set `ANJAL_VIEWER_DICOM`.
+   only. The DICOM view (rc.30, on SIAARA v0.1.0-rc.1, a release candidate) is off unless
+   `ANJAL_VIEWER_DICOM=on` is set: set it only on a test server, never in production, until SIAARA v0.1.0.
 3. **clamd's stream limit matched to the 25 MB mail limit** (AC-18). Read first:
    ```
    vm$ sudo grep -E '^StreamMaxLength' /etc/clamav/clamd.conf   # e.g. StreamMaxLength 25M
@@ -1916,12 +1917,15 @@ wording; the print and phone fixes): backup first (section 11). No schema change
    vm$ sudo journalctl -u anjal-webmail --since -2min --no-pager | grep 'Viewer:'
    ```
    The last line says `Viewer: the anjal-viewer service at /run/anjal-viewer/viewer.sock.`
-5. **The viewer, as the webmail's user** (a small PDF the check makes itself; no mail is read):
+5. **The viewer, as the webmail's user** (a small PDF, two locked ZIPs and a made-up DICOM slice and study the check
+   makes itself; no mail is read):
    ```
-   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page, 2 locked archives
-   vm$ systemctl show anjal-viewer -p PrivateNetwork -p RestrictAddressFamilies -p MemoryMax
+   vm$ sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock   # viewer ok: 1 page, 2 locked archives, DICOM
+   vm$ systemctl show anjal-viewer -p PrivateNetwork -p RestrictAddressFamilies
+   vm$ systemctl cat anjal-viewer | grep '^MemoryMax'
    ```
-   `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, `MemoryMax=1610612736` (1.5 GB).
+   `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, and `MemoryMax=2048M` (rc.30 raised it from 1536M for
+   the DICOM grouping's 1 GiB child, AC-19).
 6. **In the webmail** (the owner): open a mail with a PDF, a Word file, an Excel file and a ZIP. Each
    shows in the mail window; Download still gives the file as it came. A password-protected PDF asks
    for its password. A program inside a ZIP is listed but cannot be opened or downloaded.

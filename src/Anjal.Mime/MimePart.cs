@@ -45,6 +45,11 @@ public sealed class MimePart : MimeEntity
             {
                 encoding = Encoding.UTF8;
             }
+            catch (NotSupportedException)
+            {
+                // rc.30 (the hostile mail set): UTF-7 is known to .NET but refused (SYSLIB0001).
+                encoding = Encoding.UTF8;
+            }
         }
         return encoding.GetString(this.Body);
     }

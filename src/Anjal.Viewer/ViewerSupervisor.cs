@@ -14,7 +14,10 @@ public sealed class SupervisorOptions
     /// <summary>How many warmed children are kept ready (2, DES-22 §4.1).</summary>
     public int ReadyChildren { get; init; } = 2;
 
-    /// <summary>How many jobs run at once (2: the service's 1.5 GB holds two children at their 768 MB).</summary>
+    /// <summary>
+    /// How many jobs run at once (2: the service's 2 GB holds two children at their 768 MB, or a DICOM grouping at
+    /// 1 GiB beside one other).
+    /// </summary>
     public int Running { get; init; } = 2;
 
     /// <summary>The most jobs one person may have at once, running or waiting (4).</summary>
@@ -25,6 +28,12 @@ public sealed class SupervisorOptions
 
     /// <summary>A child holding more memory than this is stopped (768 MB).</summary>
     public long ChildMemoryLimit { get; init; } = 768L * 1024 * 1024;
+
+    /// <summary>
+    /// rc.30 (AC-19, the coordinator's decision of 18 Nov): a DICOM grouping runs in a child of its own, started for
+    /// it, with a 1 GiB heap and stopped past 1 GiB; one grouping at a time.
+    /// </summary>
+    public long GroupingMemoryLimit { get; init; } = 1024L * 1024 * 1024;
 
     /// <summary>How long a child may take to warm before it is given up.</summary>
     public TimeSpan ReadyWait { get; init; } = TimeSpan.FromSeconds(60);
@@ -49,6 +58,7 @@ public sealed class ViewerSupervisor : IAsyncDisposable
     private readonly SupervisorOptions options;
     private readonly Channel<ChildProcess> ready;
     private readonly SemaphoreSlim running;
+    private readonly SemaphoreSlim grouping = new(1, 1);
     private readonly ConcurrentDictionary<string, int> perPerson = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource stopping = new();
     private readonly object countLock = new();
@@ -259,6 +269,10 @@ public sealed class ViewerSupervisor : IAsyncDisposable
 
     private async Task<(ViewAnswer, List<byte[]>)> RunJobAsync(string json, List<byte[]> files, ViewRequest request, CancellationToken ct)
     {
+        if (request.Kind == ViewKinds.DicomGroup)
+        {
+            return await this.RunGroupingAsync(json, files, request, ct).ConfigureAwait(false);
+        }
         await this.running.WaitAsync(ct).ConfigureAwait(false);
         try
         {
@@ -283,6 +297,49 @@ public sealed class ViewerSupervisor : IAsyncDisposable
         finally
         {
             this.running.Release();
+        }
+    }
+
+    // rc.30 (AC-19): a DICOM grouping - one at a time, in a child started for it with a 1 GiB heap and stopped past
+    // 1 GiB, taking one of the running places, so at most one other job runs beside it (2 GB for the service).
+    private async Task<(ViewAnswer, List<byte[]>)> RunGroupingAsync(string json, List<byte[]> files, ViewRequest request, CancellationToken ct)
+    {
+        await this.grouping.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            await this.running.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                ChildProcess? child = await ChildProcess.StartAsync(this.options.Child, this.options.ReadyWait, this.options.Log, this.options.GroupingMemoryLimit, ct).ConfigureAwait(false);
+                if (child is null)
+                {
+                    return (new ViewAnswer { Status = ViewStatus.Unavailable }, new List<byte[]>());
+                }
+                using (child)
+                {
+                    (ViewAnswer answer, List<byte[]> outFiles, ChildEnd end) = await child.RunAsync(json, files, ViewKinds.Deadline(request.Kind), this.options.GroupingMemoryLimit, ct).ConfigureAwait(false);
+                    Interlocked.Increment(ref this.jobs);
+                    if (end == ChildEnd.Deadline)
+                    {
+                        Interlocked.Increment(ref this.byDeadline);
+                        this.Log("stopped a " + request.Kind + " job at its deadline");
+                    }
+                    else if (end == ChildEnd.Memory)
+                    {
+                        Interlocked.Increment(ref this.byMemory);
+                        this.Log("stopped a " + request.Kind + " job past " + (this.options.GroupingMemoryLimit / (1024 * 1024)) + " MB");
+                    }
+                    return (answer, outFiles);
+                }
+            }
+            finally
+            {
+                this.running.Release();
+            }
+        }
+        finally
+        {
+            this.grouping.Release();
         }
     }
 
