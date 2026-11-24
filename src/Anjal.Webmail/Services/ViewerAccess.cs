@@ -50,10 +50,11 @@ public sealed class ViewerAccess : IDisposable
     }
 
     /// <summary>
-    /// rc.29 (D-372): whether DICOM files are offered in the viewer. Off until the Siaara package is on the feed and
-    /// the viewer is built with it; <c>ANJAL_VIEWER_DICOM=on</c> then switches it on.
+    /// rc.29 (D-372); rc.30: whether DICOM files are offered in the viewer - a file's preview, a ZIP's study grouping
+    /// and the series view, on SIAARA v0.1.0-rc.1. Off unless <c>ANJAL_VIEWER_DICOM=on</c>: a test server only until
+    /// SIAARA v0.1.0. The tests switch it on.
     /// </summary>
-    public bool DicomOn { get; init; }
+    public bool DicomOn { get; internal set; }
 
     /// <summary>
     /// The PDF editor's held-back parts (the library's security advisory, D-405 and D-406, 17 Nov 2026): redaction,

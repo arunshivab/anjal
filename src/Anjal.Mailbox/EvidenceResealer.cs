@@ -156,7 +156,7 @@ public sealed class EvidenceResealer
         {
             System.IO.File.SetUnixFileMode(temp, System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.GroupRead);
         }
-        System.IO.File.Move(temp, full, overwrite: false);
+        MaildirFiles.Move(temp, full, overwrite: false);
         this.log?.Invoke($"Re-seal: the list of changes is {relative} (SHA-256 {EvidenceVault.Sha256Hex(Encoding.UTF8.GetBytes(sb.ToString()))}).");
     }
 

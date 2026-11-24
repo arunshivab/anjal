@@ -20,14 +20,11 @@
     <InternalsVisibleTo Include="Anjal.Viewer.Tests" />
   </ItemGroup>
 
-  <!-- D-372: DICOM is built only with -p:Siaara=true, once the Siaara package is on the GitHub feed. Until then the
-       code that calls it is not compiled, and the webmail's DICOM switch stays off. -->
-  <ItemGroup Condition="'$(Siaara)' != 'true'">
-    <Compile Remove="Dicom\DicomJob.Siaara.cs" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(Siaara)' == 'true'">
-    <Compile Remove="Dicom\DicomJob.Off.cs" />
-    <PackageReference Include="Siaara" Version="0.1.0" />
+  <!-- rc.30 (D-372, AC-19): the DICOM preview, on SIAARA v0.1.0-rc.1 from localpackages (verified 18 Nov 2026:
+       SHA-256 and SSHSIG release signature). Always built; shown only with ANJAL_VIEWER_DICOM=on, off by default
+       until v0.1.0. -->
+  <ItemGroup>
+    <PackageReference Include="Siaara" Version="0.1.0-rc.1" />
   </ItemGroup>
 
   <PropertyGroup>

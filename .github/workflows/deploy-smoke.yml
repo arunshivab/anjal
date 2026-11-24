@@ -164,7 +164,8 @@ jobs:
           test "$(systemctl show anjal-viewer -p PrivateNetwork --value)" = yes
           test "$(systemctl show anjal-viewer -p RestrictAddressFamilies --value)" = AF_UNIX
           test "$(systemctl show anjal-viewer -p ProtectSystem --value)" = strict
-          test "$(systemctl show anjal-viewer -p MemoryMax --value)" = $((1536*1024*1024))
+          # rc.30: 2048M, for the DICOM grouping's 1 GiB child beside one other job (DES-22 §21.5).
+          test "$(systemctl show anjal-viewer -p MemoryMax --value)" = $((2048*1024*1024))
           test "$(systemctl show anjal-viewer -p User --value)" = anjal-viewer
           # Its children are its own: two kept ready.
           sleep 2

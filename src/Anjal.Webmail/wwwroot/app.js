@@ -3697,6 +3697,58 @@
   });
   });
 
+  // rc.30 (AC-19, DES-22 §18.3): a DICOM series, one slice at a time - drawn by the viewer when asked for, never
+  // ahead of the person. The slider, the arrow keys, Page Up and Down, Home and End, and the mouse wheel over the
+  // picture move through the slices; the picture is asked for once the moving stops for a moment. Without the
+  // script, Previous and Next are plain links.
+  page(function dicomSeries() {
+    $$("[data-dicom-series]").forEach(function (box) {
+      var entries;
+      try { entries = JSON.parse(box.getAttribute("data-entries") || "[]"); } catch (e) { return; }
+      var img = box.querySelector("[data-dicom-img]"), range = box.querySelector("[data-dicom-range]"), at = box.querySelector("[data-dicom-at]");
+      if (!img || !range || !at || !entries.length) { return; }
+      var src = box.getAttribute("data-src"), link = box.getAttribute("data-link"), word = box.getAttribute("data-word-at") || "{n} / {total}";
+      var n = parseInt(range.value, 10) || 1, timer = 0;
+      function show() {
+        var text = word.replace("{n}", String(n)).replace("{total}", String(entries.length));
+        at.textContent = text;
+        img.alt = text;
+        range.value = String(n);
+        clearTimeout(timer);
+        timer = setTimeout(function () {
+          img.src = src + encodeURIComponent(entries[n - 1]);
+          try { history.replaceState(null, "", link + "&slice=" + n); } catch (e) { /* the address stays */ }
+        }, 120);
+      }
+      function go(to) {
+        to = Math.max(1, Math.min(entries.length, to));
+        if (to !== n) { n = to; show(); }
+      }
+      range.addEventListener("input", function () { go(parseInt(range.value, 10) || 1); });
+      box.querySelectorAll("[data-dicom-step]").forEach(function (a) {
+        a.addEventListener("click", function (e) { e.preventDefault(); go(n + parseInt(a.getAttribute("data-dicom-step"), 10)); });
+      });
+      // The keys move the slices wherever the focus is on this page (not only on the series), so ← and → never
+      // leave for the mail's next file here; Escape still goes back. Caught before the viewer's own keys (capture).
+      // The slider and any field keep their own keys: the slider moves itself and says so through "input".
+      window.addEventListener("keydown", function (e) {
+        var t = e.target;
+        if (e.ctrlKey || e.metaKey || e.altKey || (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) { return; }
+        var step = { ArrowUp: -1, ArrowLeft: -1, ArrowDown: 1, ArrowRight: 1, PageUp: -10, PageDown: 10 }[e.key];
+        if (e.key === "Home") { go(1); }
+        else if (e.key === "End") { go(entries.length); }
+        else if (step) { go(n + step); }
+        else { return; }
+        e.preventDefault();
+        e.stopPropagation();
+      }, true);
+      var frame = box.querySelector(".dicomframe");
+      if (frame) {
+        frame.addEventListener("wheel", function (e) { e.preventDefault(); go(n + (e.deltaY > 0 ? 1 : -1)); }, { passive: false });
+      }
+    });
+  });
+
   page(function printButtons() {
   $$("[data-print]").forEach(function (b) { b.addEventListener("click", function () { window.print(); }); });
   // rc.28 (DES-18 §10): the viewer - ← and → for the previous and next file, Escape back to the letter,

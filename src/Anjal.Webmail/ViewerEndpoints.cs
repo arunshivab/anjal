@@ -68,6 +68,18 @@ internal static class ViewerEndpoints
             return r.Ok && r.Files.Count > 0 && FileKinds.PictureType(r.Files[0]) is string type ? Picture(http, r.Files[0], type) : Results.NotFound();
         }).RequireAuthorization();
 
+        // rc.30 (DES-22 §3.4): a DICOM file's picture (0) and, for several frames, its strip (1) - drawn by the viewer,
+        // given as PNG; only with the DICOM switch on (D-372).
+        app.MapGet(Base + "/dicom/{part:int}", async (HttpContext http, Guid id, int index, int part, string? entry, MailboxService svc, Words words, CancellationToken ct) =>
+        {
+            if (svc.Viewer is not ViewerAccess { DicomOn: true } || part is < 0 or > 1)
+            {
+                return Results.NotFound();
+            }
+            ViewResult r = await AskAsync(http, svc, words, id, index, new ViewRequest { Kind = ViewKinds.Dicom, Entry = string.IsNullOrEmpty(entry) ? null : entry }, ct).ConfigureAwait(false);
+            return r.Ok && r.Files.Count > part && FileKinds.PictureType(r.Files[part]) == "image/png" ? Picture(http, r.Files[part], "image/png") : Results.NotFound();
+        }).RequireAuthorization();
+
         // DES-22 §3.1: a file's password, for this view only - kept in the session's memory for 10 minutes, never on
         // disk, never logged.
         app.MapPost(Base + "/password", (HttpContext http, Guid id, int index, [FromForm] string? password, [FromForm] string? entry, [FromForm] string? back, MailboxService svc) =>

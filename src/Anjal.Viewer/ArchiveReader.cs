@@ -144,6 +144,28 @@ public static class ArchiveReader
         return result.Bytes is null ? result with { Place = path.Length == 2 ? path[0].ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty } : result;
     }
 
+    /// <summary>
+    /// rc.30 (AC-19): one listed entry of the archive itself (not one inside an archive in it), unpacked in memory with
+    /// the same caps as <see cref="Entry"/> - for the DICOM grouping, which reads the listing once and then each file
+    /// in turn, holding one at a time.
+    /// </summary>
+    /// <param name="bytes">The attachment's bytes.</param>
+    /// <param name="listing">The archive's listing, from <see cref="List"/>.</param>
+    /// <param name="item">One of its entries.</param>
+    /// <param name="passwords">The passwords typed for the archive.</param>
+    /// <returns>The entry, or the status that says why it is not given.</returns>
+    public static EntryResult Unpacked(byte[] bytes, ArchiveListing listing, ArchiveItem item, ArchivePasswords passwords = default)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        ArgumentNullException.ThrowIfNull(listing);
+        ArgumentNullException.ThrowIfNull(item);
+        if (!listing.Listed || item.Folder || item.Blocked || item.Index < 0)
+        {
+            return EntryResult.Of(ViewStatus.Refused);
+        }
+        return item.Unsupported ? EntryResult.Of(ViewStatus.Unsupported) : Unpack(bytes, item, passwords.Outer, listing.View.Locked);
+    }
+
     /// <summary>Reads "3" or "3/5" into places; an empty array for null or anything else.</summary>
     /// <param name="entryPath">The path.</param>
     /// <returns>The places.</returns>

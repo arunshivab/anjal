@@ -253,6 +253,11 @@ internal static class MimeReader
         {
             return Encoding.UTF8;
         }
+        catch (NotSupportedException)
+        {
+            // rc.30: UTF-7 is known to .NET but refused (SYSLIB0001).
+            return Encoding.UTF8;
+        }
     }
 
     private static byte[] QuotedPrintable(string text)

@@ -2,7 +2,7 @@
 
 **Namespace:** `Anjal.Viewing`
 
-rc.29 (DES-22 §3.4): a DICOM file's preview - its outcome, and the caption fields as text from the file (escaped when shown). The patient's name and ID are never here. The picture and the strip's tiles travel as files.
+rc.29 (DES-22 §3.4; rc.30 on SIAARA v0.1.0-rc.1): a DICOM file's preview - its outcome, and the caption fields as text from the file (escaped when shown). The patient's name and ID are never here. The picture travels as the answer's first file, and for several frames the strip (the frames side by side, one picture) as the second.
 
 ## Members
 
@@ -14,5 +14,6 @@ rc.29 (DES-22 §3.4): a DICOM file's preview - its outcome, and the caption fiel
 - **Reason** *(property)* - Why there is no picture, from the toolkit.
 - **Rows** *(property)* - The rows.
 - **Series** *(property)* - The series description.
+- **StripFrames** *(property)* - rc.30: the strip of several frames is the answer's second file; how many frames it shows.
 - **StudyDate** *(property)* - The study date.
 - **TransferSyntax** *(property)* - The transfer syntax's name.

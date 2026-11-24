@@ -1842,9 +1842,11 @@ textarea.railinp { resize: vertical; }
 .pvtools { display: inline-flex; gap: 2px; }
 .pvimg[data-turn] { transition: transform 0.15s ease; }
 .pvzip { width: 100%; align-self: stretch; }
-.ziptable { width: 100%; border-collapse: collapse; font-size: 14px; background: var(--surface-100); border-radius: 10px; overflow: hidden; }
+.ziptable { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface-100); border-radius: 10px; overflow: hidden; }
 .ziptable th, .ziptable td { padding: 6px 10px; border-bottom: 1px solid var(--line); text-align: left; }
-.ziptable td.num { text-align: right; white-space: nowrap; }
+.ziptable td.num { text-align: right; white-space: nowrap; font-size: 13px; }
+/* rc.30 (the "same" screen check): the archive's table in the house table look - 13px cells, 12px column heads. */
+.ziptable thead th { font-size: 12px; }
 .ziptable .zname { display: inline-flex; align-items: center; gap: 6px; padding-left: calc(var(--depth, 0) * 18px); overflow-wrap: anywhere; }
 .ziptable tr.zblocked .zname { color: var(--ink-muted); text-decoration: line-through; }
 @media (max-width: 1023px) { .pvstrip { display: none; } }
@@ -4811,7 +4813,9 @@ button.tdrow-open { width: 100%; border: 0; background: none; color: inherit; fo
 .ziptable td:first-child { min-width: 8em; }
 /* rc.29: on a narrow card (a phone) the date gives way, so the name, size and buttons always fit. */
 .zipwrap { container-type: inline-size; }
-@container (max-width: 479px) { .ziptable th:nth-child(3), .ziptable td:nth-child(3) { display: none; } .ziptable td:first-child { min-width: 6em; } }
+@container (max-width: 479px) { .ziptable th:nth-child(3), .ziptable td:nth-child(3) { display: none; } .ziptable td:first-child { min-width: 6em; } .ziptable tr > * { padding-left: 6px; padding-right: 6px; } }
+/* rc.30: in a narrow list the cells give the name their padding, so a short name inside a folder (a CT study's
+   "SCOUT1.dcm", 1366 px with the rail open) stays on one line beside its size, View and Download. */
 .ziptable td.zacts .btn { margin-right: 6px; }
 /* PDF (D-359): server-drawn pages with their text laid over them. */
 .pdfview { display: flex; flex-direction: column; gap: 10px; }
@@ -4897,8 +4901,8 @@ html.js .pdfedit-go { display: inline-flex; gap: 6px; }
 .joinset { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
 .joinset legend { padding: 0 4px; font-size: 12px; font-weight: 600; color: var(--ink-muted); }
 @media (min-width: 720px) and (min-height: 481px), (min-width: 951px) {
-  /* rc.29 part 2 (the "same" screen check, PR #72): a small button is drawn full size only beside a field (owner, 10 Oct
-     2026); a row of buttons alone - Sign's Clear, Use a scan, Place it on the page - keeps the small buttons' look. */
+  /* rc.30 (the "same" screen check): a small button is drawn full size only beside a field (owner, 10 Oct 2026); a row
+     of buttons alone - Sign's Clear, Use a scan, Place it on the page - keeps the small buttons' look. */
   .editrow > .btn:not(.btn-sm), .editrow select, .editrow .inp, .editbar > .btn, .editbar .savemenu > summary { height: var(--h-reg); }
   .editrow > .iconbtn, .editrow .editpick.iconbtn { width: var(--h-reg); height: var(--h-reg); }
   .editrow:has(> select) > .btn.btn-sm, .editrow:has(> .inp) > .btn.btn-sm, .editrow:has(> input) > .btn.btn-sm { height: var(--h-reg); padding: 0 14px; font-size: 13px; }
@@ -4979,7 +4983,27 @@ html.js .pdfedit-go { display: inline-flex; gap: 6px; }
 .sheetgrid tbody th { position: sticky; left: 0; z-index: 1; background: var(--surface-200); color: var(--ink-muted); font-weight: 600; text-align: right; }
 .sheetgrid thead th.corner { left: 0; z-index: 3; }
 .sheetgrid td.num { text-align: right; font-variant-numeric: tabular-nums; }
-.dicomview { display: flex; flex-direction: column; gap: 10px; }
+.dicomview, .dicomstudy, .dicomseriesview { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+/* rc.30 (DES-22 §3.4, §18.3): a DICOM picture on black, its strip, and the series scroller. */
+.dicomframe { display: flex; justify-content: center; align-items: center; background: #000; border-radius: 8px; padding: 8px; min-height: 160px; overscroll-behavior: contain; }
+/* rc.30: the picture fills a frame of one height - a small image is drawn larger, and moving between slices of
+   different sizes never moves the page. */
+.dicomimg { display: block; width: 100%; height: calc(40vh / var(--z, 1)); object-fit: contain; image-rendering: auto; }
+.dicomstrip { overflow-x: auto; background: #000; border-radius: 8px; padding: 6px; }
+.dicomstrip img { display: block; max-width: none; height: auto; }
+.dicomscroll { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dicomrange { flex: 1 1 200px; min-width: 120px; accent-color: var(--label-6); }
+.dicomat { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink-muted); }
+.dicomseriesview:focus-visible { outline: 2px solid var(--label-6); outline-offset: 4px; border-radius: 8px; }
+.dicomgo { margin: 0 0 8px; }
+.dicompat { display: flex; flex-direction: column; gap: 6px; }
+.dicomh { font-size: 15px; margin: 6px 0 0; }
+.dicomstudyline { margin: 0; color: var(--ink-muted); }
+.dicomseries { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-100); }
+.dicomseries li { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.dicomseries li:last-child { border-bottom: 0; }
+.dicomsname { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.dicomseries .mt { color: var(--ink-muted); white-space: nowrap; }
 @media (max-width: 719px), (max-height: 480px) and (max-width: 950px) {
   .pvbody.pvdoc { padding: 6px; }
   .pvframe > .pvbody.pvdoc { padding-top: 18px; }
@@ -4987,6 +5011,7 @@ html.js .pdfedit-go { display: inline-flex; gap: 6px; }
   .pdffind { flex-basis: 100%; }
   .pdfpage { width: calc(100% * var(--pdfzoom)); }
   .wordview { padding: 16px 14px; }
+  .dicomimg { height: calc(32vh / var(--z, 1)); }
 }
 @media print { .pdfbar, .pdfthumbs, .pdftext, .pdfmarks { display: none !important; } }
 

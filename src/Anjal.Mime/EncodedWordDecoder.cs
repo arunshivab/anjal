@@ -145,6 +145,12 @@ public static class EncodedWordDecoder
             // Fall back to UTF-8 if the named charset isn't known to this runtime.
             enc = Encoding.UTF8;
         }
+        catch (NotSupportedException)
+        {
+            // rc.30 (the hostile mail set): .NET knows UTF-7 but refuses it (SYSLIB0001); without this a subject in
+            // "=?utf-7?...?=" stopped the whole mail from being read.
+            enc = Encoding.UTF8;
+        }
 
         decoded = enc.GetString(bytes);
         return true;

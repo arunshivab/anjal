@@ -38,9 +38,11 @@ PrivateTmp=true
 PrivateDevices=true
 UMask=0007
 
-# Its own share of the machine (DES-22 §4.1, §9): 1.5 GB for the service, no swap; each child is also stopped by
-# the viewer itself past 768 MB, or at its job's deadline.
-MemoryMax=1536M
+# Its own share of the machine (DES-22 §4.1, §9): 2 GB for the service, no swap; each child is also stopped by
+# the viewer itself past 768 MB, or at its job's deadline. rc.30 (AC-19): a DICOM grouping runs in a child of its
+# own held to 1 GiB, one at a time, beside at most one other job: 1 GiB + 768 MB + the supervisor stays under 2 GB.
+# (Was 1536M; the E2E server has 5.4 GiB, 3.3 GiB of it free with everything running, 18 Nov 2026.)
+MemoryMax=2048M
 MemorySwapMax=0
 TasksMax=64
 

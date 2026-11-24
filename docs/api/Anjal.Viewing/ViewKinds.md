@@ -8,7 +8,9 @@ rc.29 (DES-22 §4): the jobs the viewer process does.
 
 - **ArchiveEntry** *(field)* - One file from inside an archive, for its Download (never a program).
 - **ArchiveList** *(field)* - What is inside an archive (AC-17).
-- **Dicom** *(field)* - A DICOM file's preview (switched off until the Siaara package is on the feed, D-372).
+- **Dicom** *(field)* - A DICOM file's preview (rc.30: SIAARA v0.1.0-rc.1; shown only with ANJAL_VIEWER_DICOM=on, D-372).
+- **DicomGroup** *(field)* - rc.30 (AC-19, D-386): a ZIP's DICOM files grouped by patient, study and series. Run in a child of its own with 1 GiB (heap and stop), one at a time, beside at most one other job.
+- **DicomPatient** *(field)* - rc.30 (D-366): a DICOM file's patient name and ID, for Show patient details only.
 - **DmarcReport** *(field)* - A DMARC aggregate report attached by a receiver (rc.15, items 31 to 33), unpacked and read here like every other outside file (D-405, decision A of 17 Nov 2026).
 - **PdfArrange** *(field)* - rc.29 part 2 (DES-22 §7.7): the pages in their new order and turn, as a PDF the viewer's jobs can show.
 - **PdfClean** *(field)* - A copy of a PDF without its scripts, actions and embedded files (D-367).

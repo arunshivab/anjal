@@ -32,6 +32,9 @@ public sealed record ChildCommand(string FileName, IReadOnlyList<string> Argumen
 /// </summary>
 internal sealed class ChildProcess : IDisposable
 {
+    /// <summary>A child's managed heap limit (512 MB, DES-22 §4.1).</summary>
+    public const long DefaultHeapLimit = 512L * 1024 * 1024;
+
     private readonly Process process;
 
     private ChildProcess(Process process)
@@ -48,7 +51,17 @@ internal sealed class ChildProcess : IDisposable
     /// <param name="log">Where its log lines go (only those with the child's prefix).</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>The child, or null.</returns>
-    public static async Task<ChildProcess?> StartAsync(ChildCommand command, TimeSpan readyWait, TextWriter log, CancellationToken ct)
+    public static Task<ChildProcess?> StartAsync(ChildCommand command, TimeSpan readyWait, TextWriter log, CancellationToken ct) =>
+        StartAsync(command, readyWait, log, DefaultHeapLimit, ct);
+
+    /// <summary>Starts a child with a heap limit of its own and waits until it says it is ready.</summary>
+    /// <param name="command">How to start it.</param>
+    /// <param name="readyWait">How long it may take to warm.</param>
+    /// <param name="log">Where its log lines go.</param>
+    /// <param name="heapLimit">Its managed heap's hard limit (rc.30: 1 GiB for a DICOM grouping).</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>The child, or null.</returns>
+    public static async Task<ChildProcess?> StartAsync(ChildCommand command, TimeSpan readyWait, TextWriter log, long heapLimit, CancellationToken ct)
     {
         var info = new ProcessStartInfo(command.FileName)
         {
@@ -63,7 +76,8 @@ internal sealed class ChildProcess : IDisposable
             info.ArgumentList.Add(a);
         }
         // DES-22 §4.1: each child's managed heap is held to 512 MB; the supervisor's 768 MB watch is the backstop.
-        info.Environment["DOTNET_GCHeapHardLimit"] = "0x20000000";
+        // rc.30: a DICOM grouping's child is held to 1 GiB, and stopped past 1 GiB.
+        info.Environment["DOTNET_GCHeapHardLimit"] = "0x" + heapLimit.ToString("X", System.Globalization.CultureInfo.InvariantCulture);
         Process? p;
         try
         {

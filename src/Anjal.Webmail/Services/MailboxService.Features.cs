@@ -557,7 +557,8 @@ public sealed partial class MailboxService
     /// viewer. Judged by its declared type and its name; null when it is only a Download (SVG and HTML never show).
     /// </summary>
     /// <param name="a">The attachment.</param>
-    public static string? PreviewType(AttachmentView a)
+    /// <param name="dicom">rc.30: offer DICOM files (the server's DICOM switch, D-372).</param>
+    public static string? PreviewType(AttachmentView a, bool dicom = false)
     {
         ArgumentNullException.ThrowIfNull(a);
         string ct = a.ContentType.ToLowerInvariant();
@@ -575,9 +576,20 @@ public sealed partial class MailboxService
             // rc.29 (DES-22 §3.2, §3.3): Word as text, a workbook as a grid.
             (_, ".docx") or ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", _) => WordType,
             (_, ".xlsx") or ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", _) => SheetType,
+            // rc.30 (DES-22 §3.4, D-372): DICOM only when the switch is on - a .dcm, application/dicom, or a file with
+            // no extension; the viewer then goes by the file's own "DICM" mark, not its name.
+            _ when dicom && (ext is ".dcm" || ext.Length == 0 || ct is "application/dicom") => DicomType,
             _ => null,
         };
     }
+
+    /// <summary>rc.30: what a file is shown as here, with DICOM when this server's DICOM switch is on (D-372).</summary>
+    /// <param name="a">The attachment.</param>
+    /// <returns>The preview type, or null for Download only.</returns>
+    public string? PreviewOf(AttachmentView a) => PreviewType(a, this.Viewer?.DicomOn == true);
+
+    /// <summary>rc.30 (DES-22 §3.4): the preview type of a DICOM file - its picture and caption, drawn by the viewer.</summary>
+    public const string DicomType = "dicom";
 
     /// <summary>rc.28 (DES-18 §10): the preview type of a ZIP - listed by the viewer, never served inline.</summary>
     public const string ZipType = "application/zip";

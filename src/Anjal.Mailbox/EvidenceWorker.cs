@@ -271,7 +271,7 @@ public sealed class EvidenceWorker
                 // Part of the proof, like the evidence itself: read-only.
                 System.IO.File.SetUnixFileMode(temp, System.IO.UnixFileMode.UserRead | System.IO.UnixFileMode.GroupRead);
             }
-            System.IO.File.Move(temp, full, overwrite: false);
+            MaildirFiles.Move(temp, full, overwrite: false);
         }
         else
         {

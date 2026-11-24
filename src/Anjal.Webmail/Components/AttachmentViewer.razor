@@ -10,12 +10,16 @@
 {
     @Trouble(status)
 }
+else if (kind == KindArchive && study is not null)
+{
+    @StudyView(study)
+}
 else if (kind == KindArchive && archive is not null)
 {
     <section class="pvzip" aria-label="@L["Inside the archive"]">
         @if (EntryPlaces.Length > 0)
         {
-            <p class="pvcrumb"><a class="linkbtn" href="@Link(null)"><LipiIcon Name="chevron-left" Size="14" />@L["Back to the archive"]</a> <b>@entryName</b></p>
+            <p class="pvcrumb"><a class="linkbtn" href="@Link(null)" title="@L["Show the archive's files"]"><LipiIcon Name="chevron-left" Size="14" />@L["Back to the archive"]</a> <b>@entryName</b></p>
         }
         @if (archive.Refused is not null)
         {
@@ -27,6 +31,11 @@ else if (kind == KindArchive && archive is not null)
             {
                 @* AC-20: opened with its password, in the viewer only; nothing inside was virus-scanned. *@
                 <p class="notice n-warn readnotice"><LipiIcon Name="lock" Size="16" /><span>@L["These files were not virus-scanned: the archive is locked with a password. They are shown here only and cannot be downloaded one by one; download the whole archive to keep them."]</span></p>
+            }
+            @if (StudyOffered)
+            {
+                @* rc.30 (AC-19): a ZIP of DICOM files, grouped by patient, study and series. *@
+                <p class="dicomgo"><a class="btn btn-s btn-sm" href="@StudyLink(0, 0)" title="@L["Group these DICOM files by patient, study and series"]"><LipiIcon Name="image-study" Size="15" />@L["View as a study"]</a></p>
             }
             <p class="hint">@L["{n} files, {size} unpacked. Programs are blocked and cannot be taken out."].Replace("{n}", archive.Entries.Count(e => !e.Folder).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{size}", Anjal.Webmail.Components.Layout.MainLayout.Size(archive.Expanded), StringComparison.Ordinal)</p>
             <div class="zipwrap">
@@ -73,7 +82,7 @@ else
 {
     @if (EntryPlaces.Length > 0)
     {
-        <p class="pvcrumb"><a class="linkbtn" href="@Link(ParentPlace)"><LipiIcon Name="chevron-left" Size="14" />@L["Back to the archive"]</a> <b>@entryName</b>
+        <p class="pvcrumb"><a class="linkbtn" href="@Link(ParentPlace)" title="@L["Show the archive's files"]"><LipiIcon Name="chevron-left" Size="14" />@L["Back to the archive"]</a> <b>@entryName</b>
             @if (!fromLocked)
             {
                 <a class="iconbtn" href="/message/@MessageId/attachment/@File.Index/zip?entry=@Uri.EscapeDataString(Entry!)" aria-label="@L["Download"] @entryName" title="@L["Download"]"><LipiIcon Name="download" Size="15" /></a>
@@ -269,13 +278,26 @@ else
     }
     else if (kind == FileKinds.Dicom && dicom is not null)
     {
-        <section class="dicomview">
+        <section class="dicomview" aria-label="@L["DICOM image"]">
             <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@L["A preview, not for diagnosis."]</span></p>
             @if (dicom.Incomplete)
             {
                 <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@L["Incomplete file: what is shown is what could be read."]</span></p>
             }
-            <p class="hint">@string.Join(" · ", new[] { dicom.Modality, dicom.StudyDate, dicom.Series, dicom.Rows is null ? null : dicom.Rows + " × " + dicom.Columns, dicom.Frames, dicom.TransferSyntax }.Where(x => !string.IsNullOrEmpty(x)).Select(x => x!.Length > 256 ? x[..256] : x))</p>
+            @if (dicom.Outcome == "Ok")
+            {
+                <div class="dicomframe"><img class="dicomimg" src="@($"{ViewBase}/dicom/0{EntryQueryFirst}")" alt="@L["DICOM image"]" data-viewer-img /></div>
+                @if (dicom.StripFrames > 1)
+                {
+                    <div class="dicomstrip"><img src="@($"{ViewBase}/dicom/1{EntryQueryFirst}")" alt="@L["{n} frames side by side"].Replace("{n}", dicom.StripFrames.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)" /></div>
+                }
+            }
+            else
+            {
+                <p class="notice n-info readnotice"><LipiIcon Name="info" Size="16" /><span>@OutcomeWords(dicom.Outcome)</span></p>
+            }
+            <p class="hint">@Caption(dicom)</p>
+            @PatientPart(Entry)
         </section>
     }
     else
@@ -367,6 +389,18 @@ else
     private WordView? word;
     private SheetView? sheet;
     private DicomView? dicom;
+    private DicomStudyView? study;
+    private DicomSeriesGroup? series;
+    private int sliceAt;
+    private DicomPatient? patient;
+
+    // The patient details read (and logged) in this showing, kept across the draws of one page.
+    private readonly Anjal.Webmail.Services.OnceFor<DicomPatient?> patientRead = new();
+
+    // The viewer's load for what it is given, joined by a second setting of the same parameters.
+    private readonly Anjal.Webmail.Services.OnceFor<bool> loadRun = new();
+
+    private int dicomFiles;
     private readonly HashSet<int> hiddenColumns = new();
     private readonly HashSet<(int, int)> covered = new();
     private readonly Dictionary<(int, int), (int, int)> spans = new();
@@ -381,7 +415,20 @@ else
 
     private string? ParentPlace => EntryPlaces.Length > 1 ? EntryPlaces[0].ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
 
-    protected override async Task OnParametersSetAsync()
+    // rc.30: the viewer loads once for what it is given. The page is streamed, so the mail window around it may draw
+    // again, setting these same parameters again, while the first load still waits on the viewer; a second load then
+    // cleared what the first was filling in and asked the viewer for the same file again (macOS CI, 24 Nov 2026: the
+    // patient details logged twice, and a Word file shown without its view). The same parameters on the same address
+    // now join the load already running.
+    protected override Task OnParametersSetAsync() => loadRun.Run(
+        string.Join("|", MessageId.ToString("N"), File.Index.ToString(System.Globalization.CultureInfo.InvariantCulture), FileLink, Entry, SheetIndex.ToString(System.Globalization.CultureInfo.InvariantCulture), Edit ? "edit" : string.Empty, OnDraft ? "draft" : string.Empty, EditHref, EditTool, Back, Others.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), Http?.Request.Path.Value, Http?.Request.QueryString.Value),
+        async () =>
+        {
+            await LoadAsync();
+            return true;
+        });
+
+    private async Task LoadAsync()
     {
         status = null;
         statusDetail = null;
@@ -394,6 +441,11 @@ else
         word = null;
         sheet = null;
         dicom = null;
+        study = null;
+        series = null;
+        sliceAt = 0;
+        patient = null;
+        dicomFiles = 0;
         hiddenColumns.Clear();
         covered.Clear();
         spans.Clear();
@@ -404,12 +456,13 @@ else
         }
         string session = Anjal.Webmail.ViewerEndpoints.SessionKey(Http, mailboxId);
         string language = L.Language;
-        string? fileKind = MailboxService.PreviewType(File) switch
+        string? fileKind = Mail.PreviewOf(File) switch
         {
             MailboxService.ZipType => KindArchive,
             "application/pdf" => FileKinds.Pdf,
             MailboxService.WordType => FileKinds.Word,
             MailboxService.SheetType => FileKinds.Sheet,
+            MailboxService.DicomType when Mail.Viewer?.DicomOn == true => FileKinds.Dicom,
             _ => null,
         };
         if (fileKind == KindArchive && EntryPlaces.Length > 0)
@@ -436,6 +489,23 @@ else
             case KindArchive:
                 r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.ArchiveList, Entry = Entry }, session, language);
                 archive = r.Ok ? ViewJson.ReadArchive(r.Answer.Json) : null;
+                dicomFiles = archive?.Entries.Count(e => e.Opens == FileKinds.Dicom && !e.Folder && !e.Blocked) ?? 0;
+                if (r.Ok && StudyOffered && Query("study") == "1")
+                {
+                    // rc.30 (AC-19): the archive's DICOM files grouped by the viewer, in a child of its own.
+                    r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.DicomGroup }, session, language);
+                    study = r.Ok ? ViewJson.ReadStudy(r.Answer.Json) : null;
+                    int wanted = QueryInt("series");
+                    series = study?.Patients.SelectMany(p => p.Studies).SelectMany(s => s.Series).FirstOrDefault(s => s.Number == wanted);
+                    if (series is not null)
+                    {
+                        sliceAt = Math.Clamp(QueryInt("slice"), 1, series.Entries.Count);
+                        if (Query("patient") == "1")
+                        {
+                            patient = await PatientAsync(mailboxId, series.Entries[sliceAt - 1], session, language);
+                        }
+                    }
+                }
                 break;
             case FileKinds.Pdf:
                 r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.PdfInfo, Entry = Entry }, session, language);
@@ -471,6 +541,10 @@ else
             case FileKinds.Dicom:
                 r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.Dicom, Entry = Entry }, session, language);
                 dicom = r.Ok ? ViewJson.ReadDicom(r.Answer.Json) : null;
+                if (dicom is not null && Query("patient") == "1")
+                {
+                    patient = await PatientAsync(mailboxId, Entry, session, language);
+                }
                 break;
             case FileKinds.Picture:
                 r = ViewResult.Of(ViewStatus.Ok);
@@ -555,6 +629,65 @@ else
     private string Link(string? entry, int sheetIndex = 0) => FileLink
         + (string.IsNullOrEmpty(entry) ? string.Empty : "&entry=" + Uri.EscapeDataString(entry))
         + (sheetIndex > 0 ? "&sheet=" + sheetIndex.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty);
+
+    // rc.30: the address's own words (study, series, slice, patient), read as the page is drawn.
+    private string Query(string name) => Http?.Request.Query[name].ToString() ?? string.Empty;
+
+    private int QueryInt(string name) =>
+        int.TryParse(Query(name), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int n) && n < 100_000 ? n : 0;
+
+    // rc.30 (AC-19): a ZIP holding at least two DICOM files is offered as a study, with the switch on (D-372).
+    private bool StudyOffered => Mail.Viewer?.DicomOn == true && EntryPlaces.Length == 0 && dicomFiles >= 2;
+
+    private string StudyLink(int seriesNumber, int slice) => FileLink + "&study=1"
+        + (seriesNumber > 0 ? "&series=" + seriesNumber.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
+        + (slice > 0 ? "&slice=" + slice.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty);
+
+    // D-366: a DICOM file's patient name and ID, for the mailbox's own person, on a click, logged once for each
+    // showing: the page is streamed, so its parameters may be set again while the first read is still waiting, and
+    // that later run is handed the same read (OnceFor).
+    private Task<DicomPatient?> PatientAsync(Guid mailboxId, string? entry, string session, string language) =>
+        patientRead.Run(
+            MessageId.ToString("N") + "/" + File.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" + (entry ?? string.Empty),
+            () => ReadPatientAsync(mailboxId, entry, session, language));
+
+    private async Task<DicomPatient?> ReadPatientAsync(Guid mailboxId, string? entry, string session, string language)
+    {
+        ViewResult r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.DicomPatient, Entry = string.IsNullOrEmpty(entry) ? null : entry }, session, language);
+        DicomPatient? found = r.Ok ? ViewJson.ReadDicomPatient(r.Answer.Json) : null;
+        if (found is not null)
+        {
+            await Mail.LogDicomPatientAsync(Http?.User.Identity?.Name ?? string.Empty, MessageId, File.Index, entry);
+        }
+        return found;
+    }
+
+    private string Caption(DicomView d) => string.Join(" · ", new[]
+    {
+        d.Modality,
+        StudyDate(d.StudyDate),
+        d.Series,
+        d.Rows is null ? null : d.Rows + " × " + d.Columns,
+        d.Frames is null ? null : L["{n} frames"].Replace("{n}", d.Frames, StringComparison.Ordinal),
+        d.TransferSyntax,
+    }.Where(x => !string.IsNullOrEmpty(x)).Select(x => x!.Length > 256 ? x[..256] : x));
+
+    // A DICOM date (YYYYMMDD) in the reader's way of writing dates; anything else as it was stored.
+    private string? StudyDate(string? stored) =>
+        DateOnly.TryParseExact(stored, "yyyyMMdd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateOnly d)
+            ? Clock.Date(new DateTimeOffset(d.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero))
+            : stored;
+
+    private string OutcomeWords(string outcome) => outcome switch
+    {
+        "NotDicom" => L["This is not a DICOM file."],
+        "NoPixelData" => L["This DICOM file holds no picture (a report, a structure set or an index)."],
+        "Unsupported" => L["Anjal can't draw this kind of DICOM picture yet. Download it to open it elsewhere."],
+        "TooLarge" => L["This DICOM file is too large to show here. Download it instead."],
+        _ => L["This DICOM file is damaged and could not be shown."],
+    };
+
+    private string Plural(int n, string one, string many) => Count(n, one, many);
 
     private string PageWord(int n) => L["Page {n} of {total}"].Replace("{n}", (n + 1).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{total}", (pdf?.Pages.Count ?? 0).ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal);
 
@@ -743,5 +876,112 @@ else
         ArchiveRefusals.Unsupported => L["This archive uses a method Anjal can't open. Download the original."],
         ArchiveRefusals.TooDeep => L["Anjal opens an archive inside an archive, but not one level deeper. Download it to look inside."],
         _ => L["This archive cannot be read. Download it to look inside."],
+    };
+
+    // rc.30 (D-366): Show patient details, or the details themselves once asked for (and logged).
+    private RenderFragment PatientPart(string? entry) => __builder =>
+    {
+        if (patient is not null)
+        {
+            <p class="notice n-info readnotice dicompatient"><LipiIcon Name="user" Size="16" /><span>@L["Patient's name"]: <b>@(patient.Name ?? "-")</b> · @L["Patient ID"]: <b>@(patient.Id ?? "-")</b><br />@L["Shown to you only, and logged."]</span></p>
+        }
+        else
+        {
+            <p><a class="linkbtn" href="@((series is not null ? StudyLink(series.Number, sliceAt) : Link(entry)) + "&patient=1")" rel="nofollow" title="@L["Show the patient's name and ID. This is logged."]">@L["Show patient details"]</a></p>
+        }
+    };
+
+    // rc.30 (AC-19, D-386; DES-22 §18.3): the study as patient > study > series, or one series to scroll through.
+    private RenderFragment StudyView(DicomStudyView s) => __builder =>
+    {
+        <section class="dicomstudy" aria-label="@L["DICOM study"]">
+            <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@L["A preview, not for diagnosis."]</span></p>
+            @if (series is null)
+            {
+                <p class="pvcrumb"><a class="linkbtn" href="@Link(null)" title="@L["Show the archive's files"]"><LipiIcon Name="chevron-left" Size="14" />@L["Back to the archive"]</a></p>
+                @StudyNotices(s)
+                @if (s.Patients.Count == 0)
+                {
+                    <p class="notice n-info readnotice"><LipiIcon Name="info" Size="16" /><span>@L["No DICOM series could be grouped in this archive. Each file still opens from the archive."]</span></p>
+                }
+                @foreach (DicomPatientGroup p in s.Patients)
+                {
+                    <div class="dicompat">
+                        <h3 class="dicomh">@L["Patient {n}"].Replace("{n}", p.Number.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal)</h3>
+                        @foreach (DicomStudyGroup st in p.Studies)
+                        {
+                            <p class="dicomstudyline">@(StudyDate(st.Date) is string date ? L["Study of {date}"].Replace("{date}", date, StringComparison.Ordinal) : L["Study (no date given)"])</p>
+                            <ul class="dicomseries">
+                                @foreach (DicomSeriesGroup sg in st.Series)
+                                {
+                                    <li>
+                                        <span class="ftag ftag-img" aria-hidden="true">@(sg.Modality ?? "?")</span>
+                                        <span class="dicomsname">@(sg.Description ?? L["Series {n}"].Replace("{n}", sg.Number.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal))</span>
+                                        <span class="mt">@Plural(sg.Slices, L["1 slice"], L["{n} slices"])@(sg.Frames > sg.Slices ? " · " + L["{n} frames"].Replace("{n}", sg.Frames.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal) : null)</span>
+                                        <a class="btn btn-s btn-sm" href="@StudyLink(sg.Number, 1)" title="@L["Scroll through this series one slice at a time"]">@L["View"]</a>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+                }
+            }
+            else
+            {
+                string total = series.Entries.Count.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                string at = L["Slice {n} of {total}"].Replace("{n}", sliceAt.ToString(System.Globalization.CultureInfo.InvariantCulture), StringComparison.Ordinal).Replace("{total}", total, StringComparison.Ordinal);
+                <p class="pvcrumb"><a class="linkbtn" href="@StudyLink(0, 0)" title="@L["Show the study's patients and series"]"><LipiIcon Name="chevron-left" Size="14" />@L["Back to the study"]</a> <b>@string.Join(" · ", new[] { series.Modality, series.Description }.Where(x => !string.IsNullOrEmpty(x)))</b></p>
+                <div class="dicomseriesview" data-dicom-series data-src="@($"{ViewBase}/dicom/0?entry=")" data-entries="@System.Text.Json.JsonSerializer.Serialize(series.Entries)"
+                     data-link="@StudyLink(series.Number, 0)" data-word-at="@L["Slice {n} of {total}"]" tabindex="0" aria-label="@L["Slices"]">
+                    <div class="dicomframe"><img class="dicomimg" src="@($"{ViewBase}/dicom/0?entry={Uri.EscapeDataString(series.Entries[sliceAt - 1])}")" alt="@at" data-dicom-img /></div>
+                    <div class="dicomscroll">
+                        <a class="iconbtn" href="@StudyLink(series.Number, Math.Max(1, sliceAt - 1))" aria-label="@L["Previous slice"]" title="@L["Previous slice"]" data-dicom-step="-1"><LipiIcon Name="chevron-left" Size="16" /></a>
+                        <input class="dicomrange" type="range" min="1" max="@total" value="@sliceAt" aria-label="@L["Slice"]" data-dicom-range />
+                        <a class="iconbtn" href="@StudyLink(series.Number, Math.Min(series.Entries.Count, sliceAt + 1))" aria-label="@L["Next slice"]" title="@L["Next slice"]" data-dicom-step="1"><LipiIcon Name="chevron-right" Size="16" /></a>
+                        <span class="dicomat" data-dicom-at aria-live="polite">@at</span>
+                    </div>
+                    <p class="hint">@L["Use the arrow keys or the mouse wheel to move through the slices."]</p>
+                </div>
+                @PatientPart(series.Entries[sliceAt - 1])
+            }
+        </section>
+    };
+
+    // rc.30: what the grouping found worth saying, in plain words (the coordinator's decision of 18 Nov).
+    private RenderFragment StudyNotices(DicomStudyView s) => __builder =>
+    {
+        string Num(int n) => n.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        int Issue(params string[] kinds) => s.Issues.Where(i => kinds.Contains(i.Kind)).Sum(i => i.Count);
+        if (s.Budget is not null)
+        {
+            <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@L["Only part of this study could be grouped: it is larger than Anjal reads at once. Download the archive to see all of it."]</span></p>
+        }
+        if (s.Incomplete > 0)
+        {
+            <p class="notice n-warn readnotice"><LipiIcon Name="warning" Size="16" /><span>@L["{n} files could not be read whole: what could be read is shown."].Replace("{n}", Num(s.Incomplete), StringComparison.Ordinal)</span></p>
+        }
+        int unread = s.Skipped + Issue("Skipped");
+        if (unread > 0)
+        {
+            <p class="notice n-info readnotice"><LipiIcon Name="info" Size="16" /><span>@L["{n} files could not be read and are left out."].Replace("{n}", Num(unread), StringComparison.Ordinal)</span></p>
+        }
+        if (s.Ungrouped > 0)
+        {
+            <p class="notice n-info readnotice"><LipiIcon Name="info" Size="16" /><span>@L["{n} files have no study or series and are not grouped here; each still opens from the archive."].Replace("{n}", Num(s.Ungrouped), StringComparison.Ordinal)</span></p>
+        }
+        int copies = Issue("Duplicate");
+        if (copies > 0)
+        {
+            <p class="notice n-info readnotice"><LipiIcon Name="info" Size="16" /><span>@L["{n} files are copies of others and are shown once."].Replace("{n}", Num(copies), StringComparison.Ordinal)</span></p>
+        }
+        if (Issue("DicomdirSkipped", "DicomdirDamaged", "ListedMissing", "PresentUnlisted", "AmbiguousMatch") > 0)
+        {
+            <p class="notice n-info readnotice"><LipiIcon Name="info" Size="16" /><span>@L["The study's index (DICOMDIR) does not match its files; the files are grouped by what they say themselves."]</span></p>
+        }
+        int disagree = Issue("StudyPatientConflict", "SeriesModalityConflict", "SeriesSizeConflict", "UnsafeName");
+        if (disagree > 0)
+        {
+            <p class="notice n-info readnotice"><LipiIcon Name="info" Size="16" /><span>@L["{n} files do not agree with the rest of their study or series."].Replace("{n}", Num(disagree), StringComparison.Ordinal)</span></p>
+        }
     };
 }

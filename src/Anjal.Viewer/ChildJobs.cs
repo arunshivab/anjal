@@ -65,6 +65,11 @@ public static class ChildJobs
                 }
                 return JobAnswer.File(entry.Bytes, ViewJson.Write(new FileOut { Name = entry.Name ?? string.Empty, Type = FileKinds.PictureType(entry.Bytes) ?? "application/octet-stream" }));
         }
+        if (request.Kind == ViewKinds.DicomGroup)
+        {
+            // rc.30 (AC-19): the whole ZIP, grouped; never a ZIP inside it.
+            return string.IsNullOrEmpty(request.Entry) ? DicomJob.Group(file, Passwords(request), ct) : JobAnswer.Status(ViewStatus.Refused, null);
+        }
         byte[] bytes = file;
         string name = request.Name ?? string.Empty;
         if (!string.IsNullOrEmpty(request.Entry))
@@ -90,6 +95,7 @@ public static class ChildJobs
                 ? JobAnswer.File(bytes, ViewJson.Write(new FileOut { Name = name, Type = type }))
                 : JobAnswer.Status(ViewStatus.Unsupported, null),
             ViewKinds.Dicom => DicomJob.Run(bytes, ct),
+            ViewKinds.DicomPatient => DicomJob.Patient(bytes),
             ViewKinds.PdfEditCheck => PdfEdit.Check(bytes, request.Password, ct),
             ViewKinds.PdfSigns => request.Switches is { Redact: true } ? PatientSigns.Find(bytes, request.Password, ct) : JobAnswer.Status(ViewStatus.Refused, null),
             ViewKinds.PdfArrange => request.Plan is EditPlan arrange ? PdfEdit.Arrange(WithMain(bytes, files), request.Password, arrange.Whole(), request.Switches ?? EditSwitches.Shipped, ct) : JobAnswer.Status(ViewStatus.Refused, null),
@@ -123,6 +129,11 @@ public static class ChildJobs
         if (kind == "test.hang")
         {
             Thread.Sleep(Timeout.Infinite);
+        }
+        if (kind == "test.heap")
+        {
+            // rc.30: the heap limit this child was started with (the grouping's child has 1 GiB).
+            return JobAnswer.Json("{\"heap\":" + GC.GetGCMemoryInfo().TotalAvailableMemoryBytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}");
         }
         if (kind == "test.grow")
         {

@@ -56,6 +56,7 @@ PEOPLE = {
     "spam1": ("Lottery Winner Desk", "prize@win-big.example"),
     "spam2": ("Crypto Profits", "offers@quick-returns.example"),
     "news": ("Healthcare Weekly", "newsletter@hc-weekly.example"),
+    "imaging": ("Imaging department", "imaging@{d}"),
 }
 
 def small_pdf(lines):
@@ -182,6 +183,13 @@ AUDIT_ZIP = _zip([("Audit papers/Infection-control-register.pdf", small_pdf(["In
                   ("Audit papers/Calibration-log.xlsx", small_xlsx("Log", [["Device", "Checked"], ["Infusion pump IP-200", "1 Oct"], ["Monitor M-4", "2 Oct"]])),
                   ("Training-records.docx", small_docx("Training records", ["Fire safety and hand hygiene, September."], [["Course", "Staff"], ["Fire safety", "42"]]))])
 STATEMENT_ZIP = locked_zip("Teak-River-7", [("Statement-September.pdf", small_pdf(["Account statement", "September 2026"])), ("Read-me.txt", b"Statement for September.\n")])
+# rc.30 (DES-22 §21): a made-up CT study - a chest series of five slices and a scout of two - and one slice on its own,
+# for the DICOM viewer, the study and the series view (shown only with ANJAL_VIEWER_DICOM=on). No real patient.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from viewer_check import dicom_slice  # noqa: E402
+CT_STUDY_ZIP = _zip([("CT-chest/IM%04d.dcm" % n, dicom_slice(n, 2.5 * n, series="2", description="Chest 2.5 mm", patient="SAMPLE^PATIENT", size=128)) for n in (3, 1, 5, 2, 4)]
+                    + [("CT-chest/SCOUT%d.dcm" % n, dicom_slice(n, 0.0, series="1", description="Scout", patient="SAMPLE^PATIENT", size=128)) for n in (1, 2)])
+CT_SLICE_DCM = dicom_slice(3, 7.5, series="2", description="Chest 2.5 mm", patient="SAMPLE^PATIENT", size=128)
 TINY_PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
 
 
@@ -296,6 +304,10 @@ def messages(you, domain):
         "Thanks Ravi, moving case 4.\n\nMeera", days=0, hour=8, reply=(b, "irt"))
     add("anil", me, "Re: Theatre list for Monday",
         "Is there room for one more case on Monday afternoon?\n\nAnil", days=0, hour=11)
+    # rc.30: a CT study in a ZIP and one slice on its own (DICOM; DES-22 §21).
+    add("imaging", me, "CT chest images for Tuesday's meeting",
+        "Arun,\n\nThe CT chest study for Tuesday's meeting is attached, with the slice we discussed on its own.\n\nImaging department",
+        att=[("CT-chest-study.zip", CT_STUDY_ZIP, "application/zip"), ("Slice-3.dcm", CT_SLICE_DCM, "application/dicom")], days=2, hour=15)
     # More ordinary mail across the ten days, so the list is long enough to scroll.
     for i in range(1, 31):
         who = ["meera", "ravi", "quality", "accounts", "it", "board", "training", "hr"][i % 8]

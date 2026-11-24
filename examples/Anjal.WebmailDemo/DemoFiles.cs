@@ -226,6 +226,89 @@ internal static class DemoFiles
         return output.ToArray();
     }
 
+    /// <summary>
+    /// rc.30 (DES-22 §21): a made-up DICOM slice - Explicit VR Little Endian, 16-bit MONOCHROME2, a gradient with a ring
+    /// that grows with the slice number - for the patient "SAMPLE^PATIENT" (no real person). Shown only with
+    /// ANJAL_VIEWER_DICOM=on.
+    /// </summary>
+    /// <param name="number">The slice's number in its series.</param>
+    /// <param name="z">Its position along the body, in mm.</param>
+    /// <param name="series">The series' number.</param>
+    /// <param name="description">The series' description.</param>
+    /// <param name="size">Rows and columns.</param>
+    /// <returns>The file.</returns>
+    public static byte[] Dicom(int number, double z, string series, string description, int size = 128)
+    {
+        string sop = "1.2.826.0.1.3680043.10.999.3." + series + "." + number.ToString(CultureInfo.InvariantCulture);
+        byte[] pixels = new byte[size * size * 2];
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                double r = Math.Sqrt(((x - (size / 2.0)) * (x - (size / 2.0))) + ((y - (size / 2.0)) * (y - (size / 2.0))));
+                int v = Math.Abs(r - (size * (0.15 + (0.03 * number)))) < 1.5 ? 4095 : (x + y) * 2047 / size;
+                pixels[2 * ((y * size) + x)] = (byte)v;
+                pixels[(2 * ((y * size) + x)) + 1] = (byte)(v >> 8);
+            }
+        }
+        using var meta = new MemoryStream();
+        DicomElement(meta, 0x0002, 0x0001, "OB", new byte[] { 0, 1 });
+        DicomElement(meta, 0x0002, 0x0002, "UI", Uid("1.2.840.10008.5.1.4.1.1.2"));
+        DicomElement(meta, 0x0002, 0x0003, "UI", Uid(sop));
+        DicomElement(meta, 0x0002, 0x0010, "UI", Uid("1.2.840.10008.1.2.1"));
+        using var file = new MemoryStream();
+        file.Write(new byte[128]);
+        file.Write("DICM"u8);
+        DicomElement(file, 0x0002, 0x0000, "UL", BitConverter.GetBytes((uint)meta.Length));
+        meta.WriteTo(file);
+        DicomElement(file, 0x0008, 0x0016, "UI", Uid("1.2.840.10008.5.1.4.1.1.2"));
+        DicomElement(file, 0x0008, 0x0018, "UI", Uid(sop));
+        DicomElement(file, 0x0008, 0x0020, "DA", Even("20260919"));
+        DicomElement(file, 0x0008, 0x0060, "CS", Even("CT"));
+        DicomElement(file, 0x0008, 0x103E, "LO", Even(description));
+        DicomElement(file, 0x0010, 0x0010, "PN", Even("SAMPLE^PATIENT"));
+        DicomElement(file, 0x0010, 0x0020, "LO", Even("SAMPLE-0001"));
+        DicomElement(file, 0x0020, 0x000D, "UI", Uid("1.2.826.0.1.3680043.10.999.1"));
+        DicomElement(file, 0x0020, 0x000E, "UI", Uid("1.2.826.0.1.3680043.10.999.2." + series));
+        DicomElement(file, 0x0020, 0x0011, "IS", Even(series));
+        DicomElement(file, 0x0020, 0x0013, "IS", Even(number.ToString(CultureInfo.InvariantCulture)));
+        DicomElement(file, 0x0020, 0x0032, "DS", Even("0\\0\\" + z.ToString("0.0", CultureInfo.InvariantCulture)));
+        DicomElement(file, 0x0020, 0x0037, "DS", Even("1\\0\\0\\0\\1\\0"));
+        DicomElement(file, 0x0028, 0x0002, "US", BitConverter.GetBytes((ushort)1));
+        DicomElement(file, 0x0028, 0x0004, "CS", Even("MONOCHROME2"));
+        DicomElement(file, 0x0028, 0x0010, "US", BitConverter.GetBytes((ushort)size));
+        DicomElement(file, 0x0028, 0x0011, "US", BitConverter.GetBytes((ushort)size));
+        DicomElement(file, 0x0028, 0x0100, "US", BitConverter.GetBytes((ushort)16));
+        DicomElement(file, 0x0028, 0x0101, "US", BitConverter.GetBytes((ushort)12));
+        DicomElement(file, 0x0028, 0x0102, "US", BitConverter.GetBytes((ushort)11));
+        DicomElement(file, 0x0028, 0x0103, "US", BitConverter.GetBytes((ushort)0));
+        DicomElement(file, 0x7FE0, 0x0010, "OW", pixels);
+        return file.ToArray();
+    }
+
+    // One element: its tag, its value representation, its length (four bytes for the long ones) and its value.
+    private static void DicomElement(Stream s, ushort group, ushort element, string vr, byte[] value)
+    {
+        s.Write(BitConverter.GetBytes(group));
+        s.Write(BitConverter.GetBytes(element));
+        s.Write(Encoding.ASCII.GetBytes(vr));
+        if (vr is "OB" or "OW")
+        {
+            s.Write(new byte[2]);
+            s.Write(BitConverter.GetBytes((uint)value.Length));
+        }
+        else
+        {
+            s.Write(BitConverter.GetBytes((ushort)value.Length));
+        }
+        s.Write(value);
+    }
+
+    // A UID is padded with a NUL to an even length; text with a space.
+    private static byte[] Uid(string uid) => Encoding.ASCII.GetBytes(uid.Length % 2 == 0 ? uid : uid + "\0");
+
+    private static byte[] Even(string text) => Encoding.ASCII.GetBytes(text.Length % 2 == 0 ? text : text + " ");
+
     private static byte[] Text(string s) => Encoding.UTF8.GetBytes(s);
 
     private static byte[] Encrypt(uint[] keys, byte[] plain)
