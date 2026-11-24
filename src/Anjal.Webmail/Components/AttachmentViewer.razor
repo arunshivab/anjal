@@ -393,6 +393,13 @@ else
     private DicomSeriesGroup? series;
     private int sliceAt;
     private DicomPatient? patient;
+
+    // The patient details read (and logged) in this showing, kept across the draws of one page.
+    private readonly Anjal.Webmail.Services.OnceFor<DicomPatient?> patientRead = new();
+
+    // The viewer's load for what it is given, joined by a second setting of the same parameters.
+    private readonly Anjal.Webmail.Services.OnceFor<bool> loadRun = new();
+
     private int dicomFiles;
     private readonly HashSet<int> hiddenColumns = new();
     private readonly HashSet<(int, int)> covered = new();
@@ -408,7 +415,20 @@ else
 
     private string? ParentPlace => EntryPlaces.Length > 1 ? EntryPlaces[0].ToString(System.Globalization.CultureInfo.InvariantCulture) : null;
 
-    protected override async Task OnParametersSetAsync()
+    // rc.30: the viewer loads once for what it is given. The page is streamed, so the mail window around it may draw
+    // again, setting these same parameters again, while the first load still waits on the viewer; a second load then
+    // cleared what the first was filling in and asked the viewer for the same file again (macOS CI, 24 Nov 2026: the
+    // patient details logged twice, and a Word file shown without its view). The same parameters on the same address
+    // now join the load already running.
+    protected override Task OnParametersSetAsync() => loadRun.Run(
+        string.Join("|", MessageId.ToString("N"), File.Index.ToString(System.Globalization.CultureInfo.InvariantCulture), FileLink, Entry, SheetIndex.ToString(System.Globalization.CultureInfo.InvariantCulture), Edit ? "edit" : string.Empty, OnDraft ? "draft" : string.Empty, EditHref, EditTool, Back, Others.Count.ToString(System.Globalization.CultureInfo.InvariantCulture), Http?.Request.Path.Value, Http?.Request.QueryString.Value),
+        async () =>
+        {
+            await LoadAsync();
+            return true;
+        });
+
+    private async Task LoadAsync()
     {
         status = null;
         statusDetail = null;
@@ -623,8 +643,15 @@ else
         + (seriesNumber > 0 ? "&series=" + seriesNumber.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty)
         + (slice > 0 ? "&slice=" + slice.ToString(System.Globalization.CultureInfo.InvariantCulture) : string.Empty);
 
-    // D-366: a DICOM file's patient name and ID, for the mailbox's own person, on a click, logged.
-    private async Task<DicomPatient?> PatientAsync(Guid mailboxId, string? entry, string session, string language)
+    // D-366: a DICOM file's patient name and ID, for the mailbox's own person, on a click, logged once for each
+    // showing: the page is streamed, so its parameters may be set again while the first read is still waiting, and
+    // that later run is handed the same read (OnceFor).
+    private Task<DicomPatient?> PatientAsync(Guid mailboxId, string? entry, string session, string language) =>
+        patientRead.Run(
+            MessageId.ToString("N") + "/" + File.Index.ToString(System.Globalization.CultureInfo.InvariantCulture) + "/" + (entry ?? string.Empty),
+            () => ReadPatientAsync(mailboxId, entry, session, language));
+
+    private async Task<DicomPatient?> ReadPatientAsync(Guid mailboxId, string? entry, string session, string language)
     {
         ViewResult r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.DicomPatient, Entry = string.IsNullOrEmpty(entry) ? null : entry }, session, language);
         DicomPatient? found = r.Ok ? ViewJson.ReadDicomPatient(r.Answer.Json) : null;
