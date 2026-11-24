@@ -1766,6 +1766,11 @@ vm$ psql "host=127.0.0.1 dbname=anjal user=anjal" -Atc "select captured_at, dire
 vm$ unset TOKEN
 ```
 
+**rc.27 to rc.30 in one install** (the first server, 25 Nov 2026): **DEPLOY-rc27-to-rc30.md**, beside this file,
+replaces the block below for that server. It installs v1.0.0-rc.30.1 and adds the read-only fact check, the memory
+decision (the viewer's 2048M cap beside ClamAV in 5.4 GiB with no swap), a tested way back, and the operator steps
+for Sangam's mail. The block below stays as the record of what rc.28 and rc.29 add.
+
 **rc.27 to rc.29 in one install** (the first server, which runs rc.27 since 9 Nov and was never
 updated to rc.28; the owner, 12 Nov). This one install brings everything rc.28 and rc.29 change on the
 server. rc.28 brought the secure link (DES-19), mail apps over IMAP on 993 with a password per app and

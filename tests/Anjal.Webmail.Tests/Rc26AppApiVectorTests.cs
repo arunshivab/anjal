@@ -60,10 +60,13 @@ public sealed partial class Rc26AppApiTests
         try
         {
             HttpClient c = this.Client();
-            // One body byte changed ("Test only." to "Test only!"): the same signature is refused.
+            // One body byte changed ("Test only." to "Test only!"): the '.' at 0-based offset 119, the 120th of the
+            // body's 122 bytes (offset 120 is the closing quote; Sangam's tests, 25 Nov 2026). The same signature is refused.
             byte[] changed = Encoding.UTF8.GetBytes(VectorBody.Replace("only.", "only!", StringComparison.Ordinal));
+            Assert.Equal(122, body.Length);
             Assert.Equal(body.Length, changed.Length);
-            Assert.Single(body.Where((b, i) => b != changed[i]));
+            Assert.Equal((byte)'"', body[120]);
+            Assert.Equal(119, Enumerable.Range(0, body.Length).Single(i => body[i] != changed[i]));
             using (HttpRequestMessage tampered = VectorRequest(changed))
             {
                 HttpResponseMessage refused = await c.SendAsync(tampered);

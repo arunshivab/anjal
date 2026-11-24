@@ -1101,10 +1101,14 @@ public sealed partial class MailboxService
                 dkimValue = "(the DKIM key could not be read)";
             }
         }
+        // rc.30.1 (Sangam's M10 (b), 13 Nov 2026): a domain may also authorise this server through the shared record
+        // _spf.<the server name's parent> (_spf.anjal.co.in), "v=spf1 include:_spf.anjal.co.in -all"; that passes too.
+        int dot = this.hostName.IndexOf('.', StringComparison.Ordinal);
+        string spfInclude = "include:_spf." + (dot > 0 ? this.hostName[(dot + 1)..] : this.hostName);
         var wanted = new List<(string Kind, string Name, string Type, string Value, Func<IReadOnlyList<string>, string> Judge)>
         {
             ("MX", "@", "MX", "10 " + this.hostName, found => found.Any(f => string.Equals(f.TrimEnd('.'), this.hostName, StringComparison.OrdinalIgnoreCase)) ? "pass" : found.Count == 0 ? "missing" : "different"),
-            ("SPF", "@", "TXT", "v=spf1 mx -all", found => found.Any(f => f.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase) && (f.Contains(" mx", StringComparison.OrdinalIgnoreCase) || f.Contains(this.hostName, StringComparison.OrdinalIgnoreCase))) ? "pass" : found.Any(f => f.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase)) ? "different" : "missing"),
+            ("SPF", "@", "TXT", "v=spf1 mx -all", found => found.Any(f => f.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase) && (f.Contains(" mx", StringComparison.OrdinalIgnoreCase) || f.Contains(this.hostName, StringComparison.OrdinalIgnoreCase) || f.Contains(spfInclude, StringComparison.OrdinalIgnoreCase))) ? "pass" : found.Any(f => f.StartsWith("v=spf1", StringComparison.OrdinalIgnoreCase)) ? "different" : "missing"),
             ("DKIM", selector + "._domainkey", "TXT", dkimValue, found => found.Any(f => dkimValue.StartsWith("v=DKIM1", StringComparison.Ordinal) && f.Replace(" ", string.Empty, StringComparison.Ordinal).Contains(dkimValue.Split("p=")[1], StringComparison.Ordinal)) ? "pass" : found.Count == 0 ? "missing" : "different"),
             // DEF-121 (rc.23): the template at best practice - reject, strict alignment, subdomains too - as anjal.co.in publishes.
             ("DMARC", "_dmarc", "TXT", "v=DMARC1; p=reject; adkim=s; aspf=s; sp=reject; rua=mailto:dmarc-reports@" + d, found => found.Any(f => f.StartsWith("v=DMARC1", StringComparison.OrdinalIgnoreCase)) ? "pass" : "missing"),

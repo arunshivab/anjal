@@ -204,6 +204,20 @@ public sealed class Rc14OrganisationTests : IDisposable
         Assert.All(records, r => Assert.Equal("unchecked", r.Status));
     }
 
+    [Theory]
+    [InlineData("v=spf1 mx -all", "pass")]
+    [InlineData("v=spf1 include:_spf.anjal.co.in -all", "pass")]
+    [InlineData("v=spf1 ip4:151.185.43.171 -all", "different")]
+    [InlineData("v=spf1 include:_spf.example.net -all", "different")]
+    public async Task SpfThroughTheSharedRecord_Passes(string spf, string expected)
+    {
+        // rc.30.1 (Sangam's M10 (b)): sangamid.in publishes "v=spf1 include:_spf.anjal.co.in -all".
+        Assert.Null(await this.svc.AddTenantDomainAsync(this.tenant, "clinic.example"));
+        Task<IReadOnlyList<string>?> Lookup(string name) => Task.FromResult<IReadOnlyList<string>?>(name == "clinic.example" ? new[] { spf } : Array.Empty<string>());
+        IReadOnlyList<DnsRecordCheck> records = await this.svc.DomainRecordsAsync("clinic.example", Lookup);
+        Assert.Equal(expected, records.Single(r => r.Kind == "SPF").Status);
+    }
+
     [Fact]
     public async Task OrganisationTemplates_AreOfferedToEveryoneInIt()
     {
