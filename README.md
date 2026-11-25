@@ -10,7 +10,9 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v1.0.0-rc.30.1** (November 2026) - rc.30 with its own version number (rc.30 still said rc.29 in
+**v1.0.0-rc.30.2** (November 2026) - a reopened draft is sent as one HTML document, not one nested inside
+another (found on the first server: spam filters score nested HTML), and the first server's upgrade notes folded into
+the runbook. **v1.0.0-rc.30.1** - rc.30 with its own version number (rc.30 still said rc.29 in
 `Directory.Build.props`, so its build could not be published as rc.30) and the one runbook from rc.27 straight to rc.30,
 `deploy/DEPLOY-rc27-to-rc30.md`. Attachments shown in the mail window (rc.29, DES-22): PDF (pages,
 text to select and copy, Find, outline, thumbnails), Word (the text and its tables and pictures),

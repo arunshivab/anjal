@@ -1030,7 +1030,9 @@ public sealed partial class MailboxService
         }
         // Formatted mail carries both forms: the plain text is derived from the
         // sanitised HTML, never taken on trust from the browser.
-        string cleanHtml = request.BodyHtml.Trim().Length == 0 ? string.Empty : HtmlSanitizer.Sanitize(request.BodyHtml);
+        // Only what is inside a body goes into the one document built below (rc.31, D7: a reopened draft carried a
+        // whole document, and was sent nested inside a second one).
+        string cleanHtml = request.BodyHtml.Trim().Length == 0 ? string.Empty : HtmlBodyOnly(HtmlSanitizer.Sanitize(request.BodyHtml)).Trim();
         if (cleanHtml.Length > 0)
         {
             body = HtmlText.ToPlain(cleanHtml).Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n";

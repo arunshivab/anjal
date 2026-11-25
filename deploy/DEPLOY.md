@@ -1771,6 +1771,12 @@ replaces the block below for that server. It installs v1.0.0-rc.30.1 and adds th
 decision (the viewer's 2048M cap beside ClamAV in 5.4 GiB with no swap), a tested way back, and the operator steps
 for Sangam's mail. The block below stays as the record of what rc.28 and rc.29 add.
 
+**rc.30.1 to rc.30.2**: programs only. No schema change and no new setting. Build with `publish.ps1 -Version
+1.0.0-rc.30.2`, copy it over, check its SHA-256, run `install.sh` once (rc.30.1 becomes the `.old` copies), then
+`sudo systemctl restart anjal-viewer anjal-server anjal-webmail`. Then check health shows `1.0.0-rc.30.2`, run
+viewer_check.py, and send one mail out. The way back is the `.old` copies (DEPLOY-rc27-to-rc30.md, Set R, with rc.30.1's
+copies in place of rc.27's).
+
 **rc.27 to rc.29 in one install** (the first server, which runs rc.27 since 9 Nov and was never
 updated to rc.28; the owner, 12 Nov). This one install brings everything rc.28 and rc.29 change on the
 server. rc.28 brought the secure link (DES-19), mail apps over IMAP on 993 with a password per app and
@@ -1910,7 +1916,7 @@ wording; the print and phone fixes): backup first (section 11). No schema change
    vm$ echo 'StreamMaxLength 25M' | sudo tee -a /etc/clamav/clamd.conf >/dev/null
    vm$ sudo grep -E '^StreamMaxLength' /etc/clamav/clamd.conf   # StreamMaxLength 25M
    vm$ sudo systemctl restart clamav-daemon
-   vm$ echo zPING | sudo -u anjal nc -U /var/run/clamav/clamd.ctl   # PONG once ready
+   vm$ printf 'nPING\n' | sudo -u anjal nc -U /var/run/clamav/clamd.ctl   # PONG once ready
    ```
    (`dpkg-reconfigure clamav-daemon` would write the file again; if it is ever run, check this line
    afterwards.)
@@ -2290,7 +2296,9 @@ and confirm only after a **new** SSH session and the webmail both work:
 vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh generate    # writes and checks /etc/anjal/anjal-egress.nft
 vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh apply       # active now; removes itself in 3 minutes
       (in a second terminal: open a new SSH session; load the webmail)
-vm$ timeout 5 bash -c 'exec 3<>/dev/tcp/gmail-smtp-in.l.google.com/25' && echo WRONG || echo "refused (correct)"
+vm$ ip4=$(getent ahostsv4 gmail-smtp-in.l.google.com | awk 'NR==1{print $1}')   # IPv4: the name resolves to IPv6 first, and with no IPv6 route that fails before the rule
+vm$ timeout 5 bash -c "exec 3<>/dev/tcp/$ip4/25" && echo WRONG || echo "refused (correct)"
+vm$ sudo journalctl -k --since -2min --no-pager | grep -c 'anjal-egress SMTP-DENY'   # 1 or more: the rule itself refused it
 vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh confirm     # keep: loaded at every boot, port check on
 vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh status      # rules, units, recent refusals
 vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh remove      # take it off completely
@@ -2466,7 +2474,7 @@ vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh apply     # then a new SSH sessio
 vm$ sudo bash /opt/anjal/bin/anjal-firewall.sh confirm
 vm$ sudo systemctl restart clamav-freshclam              # first download; clamd starts once daily.cvd is there
 vm$ sudo systemctl status clamav-daemon --no-pager | head -5
-vm$ echo zPING | sudo -u anjal nc -U /var/run/clamav/clamd.ctl   # answers PONG once ready
+vm$ printf 'nPING\n' | sudo -u anjal nc -U /var/run/clamav/clamd.ctl   # answers PONG once ready
 ```
 
 From rc.29 (AC-18), clamd's stream limit must match the 25 MB mail limit: read

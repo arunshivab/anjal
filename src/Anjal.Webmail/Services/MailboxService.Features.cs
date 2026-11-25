@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 using Anjal.Mailbox;
 using Anjal.Mime;
 using Anjal.Store;
@@ -478,8 +479,50 @@ public sealed partial class MailboxService
         MimePart? text = null;
         var ignored = new List<(MimePart Part, AttachmentView View)>();
         Walk(body, ref html, ref text, ignored);
-        return html is null ? string.Empty : HtmlSanitizer.Sanitize(html.GetBodyAsText());
+        return html is null ? string.Empty : HtmlBodyOnly(HtmlSanitizer.Sanitize(html.GetBodyAsText()));
     }
+
+    /// <summary>
+    /// rc.31 (D7, found on the first server, 25 Nov 2026): what is inside a document's body, when the HTML is a whole
+    /// document (<c>html</c>, <c>head</c> and <c>body</c> around everything). A draft is stored as a whole document;
+    /// reopened, it went back into the editor whole, and when sent it was wrapped in a second document, so the mail
+    /// carried <c>&lt;html&gt;&lt;body&gt;&lt;html&gt;&lt;body&gt;</c>, which spam filters score. Unwraps as many
+    /// layers as there are, but only a wrapper around the whole of it: a fragment, or a document quoted somewhere
+    /// inside the person's own text, is returned as it is, so nothing they wrote is lost.
+    /// </summary>
+    /// <param name="html">HTML, a whole document or a fragment.</param>
+    /// <returns>The body's content.</returns>
+    internal static string HtmlBodyOnly(string html)
+    {
+        ArgumentNullException.ThrowIfNull(html);
+        string current = html;
+        try
+        {
+            for (int layer = 0; layer < 16; layer++)
+            {
+                Match open = DocumentStart().Match(current);
+                Match close = DocumentEnd().Match(current);
+                if (!open.Success || !close.Success || close.Index < open.Index + open.Length)
+                {
+                    return current;
+                }
+                current = current[(open.Index + open.Length)..close.Index];
+            }
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return html;
+        }
+        return current;
+    }
+
+    // The start of a whole document: an optional doctype, html and head, then the body tag, before anything else.
+    [GeneratedRegex(@"\A\s*(?:<!doctype[^>]*>\s*)?(?:<html(?:\s[^>]*)?>\s*)?(?:<head(?:\s[^>]*)?>.*?</head\s*>\s*)?<body(?:\s[^>]*)?>", RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex DocumentStart();
+
+    // The end of a whole document: the body's closing tag, then at most the html's, then nothing.
+    [GeneratedRegex(@"</body\s*>\s*(?:</html\s*>\s*)?\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, 1000)]
+    private static partial Regex DocumentEnd();
 
     /// <summary>The most attachment data one message may carry, before encoding: 18 MB.</summary>
     public const long MaxAttachmentBytes = 18L * 1024 * 1024;
