@@ -45,7 +45,7 @@ Copy-Item "$repo\deploy\anjal-firewall.sh", "$repo\deploy\anjal-portcheck.sh" "$
 Copy-Item "$repo\deploy\*.service", "$repo\deploy\*.timer", "$repo\deploy\*.example" "$out\bin\"
 Copy-Item "$repo\tools\sql\schema.sql" "$out\bin\"
 Copy-Item "$repo\tools\viewer_check.py" "$out\bin\"
-Copy-Item "$repo\deploy\DEPLOY.md" "$out\"
+Copy-Item "$repo\deploy\DEPLOY*.md" "$out\"     # DEPLOY.md, and the one-install runbooks beside it (rc.30.1)
 
 # Normalise line endings for scripts, units and templates (git may have checked them out CRLF).
 foreach ($f in Get-ChildItem "$out\bin\*" -Include *.sh, *.py, *.service, *.timer, *.example) {
