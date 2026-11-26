@@ -24,6 +24,9 @@ public static class ViewKinds
     /// <summary>One sheet of a workbook (2,000 rows at most, D-361).</summary>
     public const string Sheet = "sheet";
 
+    /// <summary>rc.31 (D4): a CSV or TSV file as a plain table (10 MB, 5,000 rows, 200 columns, 1,000 characters a cell).</summary>
+    public const string Csv = "csv";
+
     /// <summary>What is inside an archive (AC-17).</summary>
     public const string ArchiveList = "archive.list";
 
@@ -40,10 +43,15 @@ public static class ViewKinds
     public const string DicomPatient = "dicom.patient";
 
     /// <summary>
-    /// rc.30 (AC-19, D-386): a ZIP's DICOM files grouped by patient, study and series. Run in a child of its own with
-    /// 1 GiB (heap and stop), one at a time, beside at most one other job.
+    /// rc.30 (AC-19, D-386): a ZIP's DICOM files grouped by patient, study and series. rc.31 (lite DICOM): run in a
+    /// child of its own like every DICOM job (a 256 MiB heap, stopped past 320 MB), one grouping at a time.
     /// </summary>
     public const string DicomGroup = "dicom.group";
+
+    /// <summary>rc.31 (lite DICOM): whether a kind is a DICOM job, run in a child of its own at 320 MB.</summary>
+    /// <param name="kind">The kind.</param>
+    /// <returns>True for <see cref="Dicom"/>, <see cref="DicomPatient"/> and <see cref="DicomGroup"/>.</returns>
+    public static bool IsDicom(string? kind) => kind is Dicom or DicomPatient or DicomGroup;
 
     /// <summary>rc.29 part 2 (DES-22 §7.8, 1): what the editor must know first - signatures, a password, forms.</summary>
     public const string PdfEditCheck = "pdf.edit.check";
@@ -81,7 +89,7 @@ public static class ViewKinds
         PdfFind => TimeSpan.FromSeconds(15),
         PdfClean => TimeSpan.FromSeconds(30),
         Word => TimeSpan.FromSeconds(15),
-        Sheet => TimeSpan.FromSeconds(8),
+        Sheet or Csv => TimeSpan.FromSeconds(8),
         Dicom or DicomPatient => TimeSpan.FromSeconds(8),
         DicomGroup => TimeSpan.FromSeconds(15),
         PdfEditCheck => TimeSpan.FromSeconds(10),

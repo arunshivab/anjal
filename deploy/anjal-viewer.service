@@ -38,13 +38,16 @@ PrivateTmp=true
 PrivateDevices=true
 UMask=0007
 
-# Its own share of the machine (DES-22 §4.1, §9): 2 GB for the service, no swap; each child is also stopped by
-# the viewer itself past 768 MB, or at its job's deadline. rc.30 (AC-19): a DICOM grouping runs in a child of its
-# own held to 1 GiB, one at a time, beside at most one other job: 1 GiB + 768 MB + the supervisor stays under 2 GB.
-# (Was 1536M; the E2E server has 5.4 GiB, 3.3 GiB of it free with everything running, 18 Nov 2026.)
-MemoryMax=2048M
+# Its own share of the machine (DES-22 §4.1, §9): 1536M for the service, no swap; each child is also stopped by
+# the viewer itself past 768 MB, or at its job's deadline. rc.31 (lite DICOM, 25 Nov 2026): every DICOM job runs in
+# a child of its own held to a 256 MiB heap and stopped past 320 MB, one grouping at a time, so two jobs at their
+# stops plus the supervisor stay under 1536M again. (rc.30 had 2048M, for a 1 GiB grouping child.)
+MemoryMax=1536M
 MemorySwapMax=0
-TasksMax=64
+# rc.31: every thread of the supervisor and its children counts here (about 9 a waiting child, 14 the supervisor, more
+# while a job runs). 64 was too few once a DICOM child is kept ready beside the 3 others: a child could not make its
+# threads and broke mid-answer (found by deploy-smoke, 26 Nov 2026). 128 still stops a runaway that keeps starting.
+TasksMax=128
 
 NoNewPrivileges=true
 CapabilityBoundingSet=

@@ -91,18 +91,20 @@ public sealed class Rc30DicomTests : IAsyncLifetime, IDisposable
         Assert.Contains("class=\"dicomview\"", reader, StringComparison.Ordinal);
         Assert.Contains("A preview, not for diagnosis.", reader, StringComparison.Ordinal);
         Assert.Contains($"/message/{m.Id}/attachment/0/view/dicom/0", reader, StringComparison.Ordinal);
-        Assert.Contains($"/message/{m.Id}/attachment/0/view/dicom/1", reader, StringComparison.Ordinal);
+        // rc.31 (lite DICOM): no strip of frames (SIAARA's MaxStripFrames 0), so only the picture is linked.
+        Assert.DoesNotContain($"/message/{m.Id}/attachment/0/view/dicom/1", reader, StringComparison.Ordinal);
         Assert.Contains("CT · ", reader, StringComparison.Ordinal);
         Assert.Contains("3 frames", reader, StringComparison.Ordinal);
         Assert.Contains("Show patient details", reader, StringComparison.Ordinal);
         Assert.DoesNotContain("PATIENT", reader, StringComparison.Ordinal);
         Assert.DoesNotContain("TEST-0001", reader, StringComparison.Ordinal);
-        foreach (int part in new[] { 0, 1 })
+        using (HttpResponseMessage picture = await this.client.GetAsync($"message/{m.Id}/attachment/0/view/dicom/0"))
         {
-            using HttpResponseMessage picture = await this.client.GetAsync($"message/{m.Id}/attachment/0/view/dicom/{part}");
             Assert.Equal(HttpStatusCode.OK, picture.StatusCode);
             Assert.Equal("image/png", picture.Content.Headers.ContentType!.MediaType);
         }
+        // rc.31 (lite DICOM): no strip, so there is no second picture.
+        Assert.Equal(HttpStatusCode.NotFound, (await this.client.GetAsync($"message/{m.Id}/attachment/0/view/dicom/1")).StatusCode);
         Assert.Empty(await this.PatientLogAsync());
 
         string shown = WebUtility.HtmlDecode(await this.client.GetStringAsync(PatientLink(reader, $"folder/INBOX?open={m.Id}&preview=0")));

@@ -4172,6 +4172,9 @@
     "Group these DICOM files by patient, study and series": "இந்த DICOM கோப்புகளை நோயாளி, ஆய்வு, தொடர் வாரியாகத் தொகு",
     "Scroll through this series one slice at a time": "இந்தத் தொடரை ஒவ்வொரு ஸ்லைஸாக நகர்த்திப் பார்",
     "Show the study's patients and series": "ஆய்வின் நோயாளிகளையும் தொடர்களையும் காட்டு",
-    "Show the patient's name and ID. This is logged.": "நோயாளியின் பெயரையும் அடையாள எண்ணையும் காட்டு. இது பதிவு செய்யப்படும்."
+    "Show the patient's name and ID. This is logged.": "நோயாளியின் பெயரையும் அடையாள எண்ணையும் காட்டு. இது பதிவு செய்யப்படும்.",
+    "Table (CSV)": "அட்டவணை (CSV)",
+    "1 row": "1 வரிசை",
+    "Only the start of this table is shown: at most 5,000 rows, 200 columns, 10 MB and 1,000 characters in a cell. Download it to see all of it.": "இந்த அட்டவணையின் தொடக்கம் மட்டுமே காட்டப்படுகிறது: அதிகபட்சம் 5,000 வரிசைகள், 200 நெடுவரிசைகள், 10 MB, ஒரு கலத்தில் 1,000 எழுத்துகள். முழுவதையும் பார்க்க இதைப் பதிவிறக்கவும்."
   }
 }

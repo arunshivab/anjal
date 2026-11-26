@@ -139,6 +139,30 @@ public sealed class Rc29ViewerTests : IAsyncLifetime, IDisposable
     }
 
     [Fact]
+    public async Task ACsv_IsATable_AndANupkg_IsListedLikeAZip()
+    {
+        // rc.31 (D4, D3): a CSV is a plain table whose cells are never evaluated; a .nupkg (a ZIP under another
+        // name) is listed like a ZIP, with the label its own extension (D2).
+        await this.SignInAsync();
+        byte[] nupkg = Zip(("lib/net10.0/readme.txt", Encoding.UTF8.GetBytes("inside the package")));
+        MessageRow m = await this.DeliverAsync(
+            ("ward.csv", "text/csv", Encoding.UTF8.GetBytes("Bed,Name,Total\n1,\"Rao, K\",=SUM(A1:A9)\n")),
+            ("Chuvadi.Pdf.3.34.0.nupkg", "application/octet-stream", nupkg));
+        string raw = await this.client.GetStringAsync($"folder/INBOX?open={m.Id}&preview=0");
+        string table = WebUtility.HtmlDecode(raw);
+        Assert.Contains("class=\"sheetgrid\"", table, StringComparison.Ordinal);
+        Assert.Contains(">Rao, K<", table, StringComparison.Ordinal);
+        Assert.Contains(">=SUM(A1:A9)<", table, StringComparison.Ordinal);
+        Assert.Equal("xls: Table (CSV) · 2 rows", Tab(table));
+        Assert.Contains(">CSV</span>", table, StringComparison.Ordinal);
+        Assert.Contains(">NUPKG</span>", table, StringComparison.Ordinal);
+
+        string listing = WebUtility.HtmlDecode(await this.client.GetStringAsync($"folder/INBOX?open={m.Id}&preview=1"));
+        Assert.Contains("class=\"ziptable\"", listing, StringComparison.Ordinal);
+        Assert.Contains("readme.txt", listing, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task AZip_ListsItsFiles_AndOpensThem()
     {
         await this.SignInAsync();

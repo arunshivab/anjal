@@ -3,6 +3,9 @@
    the list of changes until Save. Nothing in the PDF changes until Save, and Save makes a new file (§6.3). *@
 @using Anjal.Viewing
 
+@* rc.31 (D8, owner, 26 Nov 2026): the bar and the chosen tool's row stay together at the top while the pages scroll;
+   before, only the bar did, and the row (Turn left, Turn right ...) slid away under it. *@
+<div class="editstick">
 <div class="pdfbar editbar" role="toolbar" aria-label="@L["Edit this PDF"]">
     <div class="edittools" role="group" aria-label="@L["Tools"]">
         @foreach ((string key, string word, string icon) in Tools.Where(x => x.Key != "redact" || Switches.Redact))
@@ -205,6 +208,7 @@
         <label class="editfield"><span>@L["Starts at"]</span><input class="inp inpnum" type="number" min="0" max="99999" value="1" aria-label="@L["Starts at"]" data-edit-numstart /></label>
     </div>
     <p class="hint">@L["{n} is the page's number and {N} how many pages there are."]</p>
+</div>
 </div>
 <p class="notice n-warn" data-edit-problem role="alert" hidden></p>
 @* Decisions of 15 Nov 2026 (3.34.0): after a redaction, what was removed is read before the file is attached. *@

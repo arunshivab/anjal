@@ -35,6 +35,13 @@ public sealed class AttachmentView
 
     /// <summary>Decoded size in bytes.</summary>
     public long SizeBytes { get; init; }
+
+    /// <summary>
+    /// rc.31 (D3): the file's own bytes start with a ZIP's mark, though its name is not one Anjal knows (a .nupkg, say).
+    /// It is then listed like any ZIP, with the same limits. Office and OpenDocument files are ZIPs too but keep their
+    /// own viewers, so they are never marked.
+    /// </summary>
+    public bool ZipInside { get; init; }
 }
 
 /// <summary>An opened message, ready to render.</summary>
@@ -1312,7 +1319,30 @@ public sealed partial class MailboxService
             FileName = fileName,
             ContentType = mime,
             SizeBytes = part.Body.LongLength,
+            ZipInside = LooksLikeZip(fileName, part.Body),
         }));
+    }
+
+    // rc.31 (D3): ZIP-based formats that have viewers of their own (or are documents, not archives) are never listed
+    // as archives, whatever their bytes say.
+    private static readonly HashSet<string> OwnZipFormats = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".zip", ".docx", ".docm", ".dotx", ".dotm", ".xlsx", ".xlsm", ".xltx", ".xltm", ".pptx", ".pptm", ".ppsx", ".potx",
+        ".odt", ".ods", ".odp", ".odg", ".odf", ".ott", ".epub",
+    };
+
+    /// <summary>rc.31 (D3): whether a file not named as a ZIP starts with a ZIP's mark (PK 3 4, or PK 5 6 for an empty one).</summary>
+    /// <param name="fileName">The file's name.</param>
+    /// <param name="body">Its bytes.</param>
+    /// <returns>True when it should be listed as a ZIP.</returns>
+    internal static bool LooksLikeZip(string fileName, ReadOnlySpan<byte> body)
+    {
+        ArgumentNullException.ThrowIfNull(fileName);
+        if (body.Length < 4 || body[0] != (byte)'P' || body[1] != (byte)'K' || !((body[2] == 3 && body[3] == 4) || (body[2] == 5 && body[3] == 6)))
+        {
+            return false;
+        }
+        return !OwnZipFormats.Contains(Path.GetExtension(fileName));
     }
 
     private static string FileNameOf(MimePart part, int index, ContentType type)

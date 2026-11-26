@@ -87,7 +87,18 @@ module.exports = {
           if (how === 'hidden') { continue; }
           if (await w.page.evaluate(([CTL, i]) => document.querySelectorAll(CTL)[i].disabled, [CTL, i])) { continue; }
           const bad = [];
-          const onResp = (r) => { const st = r.status(); if (st >= 400 && !/\/api\/ping|favicon/.test(r.url())) { bad.push(st + ' ' + r.request().method() + ' ' + r.url().replace(L.base, '')); } };
+          // rc.31 (D6): the viewer answers "busy, try again" (503) when one person has more than four files asked for at
+          // once (a PDF's thumbnails, say); the page asks again a little later. That is fine when the same address then
+          // answers; it fails only if it never does.
+          const busy = new Set();
+          const answered = new Set();
+          const bare = (u) => u.replace(L.base, '').replace(/[?&]again=\d+/, '');
+          const onResp = (r) => {
+            const st = r.status();
+            if (st === 503 && /\/view\//.test(r.url())) { busy.add(r.request().method() + ' ' + bare(r.url())); return; }
+            if (st < 400) { answered.add(r.request().method() + ' ' + bare(r.url())); }
+            if (st >= 400 && !/\/api\/ping|favicon/.test(r.url())) { bad.push(st + ' ' + r.request().method() + ' ' + r.url().replace(L.base, '')); }
+          };
           const onErr = (e) => bad.push('script error: ' + e.message.slice(0, 80));
           w.page.on('response', onResp);
           w.page.on('pageerror', onErr);
@@ -95,6 +106,8 @@ module.exports = {
           await w.page.locator(CTL).nth(i).click({ timeout: 3000, force: true }).catch((e) => bad.push('could not be pressed: ' + e.message.split('\n')[0].slice(0, 80)));
           await w.page.waitForTimeout(700);
           await w.page.waitForLoadState('load').catch(() => {});
+          for (let t = 0; t < 10 && [...busy].some((k) => !answered.has(k)); t++) { await w.page.waitForTimeout(500); }
+          [...busy].filter((k) => !answered.has(k)).forEach((k) => bad.push('503 ' + k + ' (busy, and not answered when asked again)'));
           const at = w.page.url();
           if (at.startsWith('chrome-error')) { bad.push('the browser showed an error page'); }
           if (/\/null(\?|$)/.test(at)) { bad.push('went to /null'); }

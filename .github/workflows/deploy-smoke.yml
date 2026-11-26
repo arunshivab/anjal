@@ -158,16 +158,23 @@ jobs:
           # DES-22 section 4.1: the webmail (user anjal, in group anjal-viewer) hands the viewer a file over its
           # socket; the shipped PDF check is read the same way.
           sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock
+          # rc.31: again, once the DICOM child is kept ready beside the others - all of them within the unit's TasksMax.
+          sleep 3
+          sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock
+          test "$(systemctl show anjal-viewer -p TasksMax --value)" = 128
+          tasks=$(systemctl show anjal-viewer -p TasksCurrent --value)
+          echo "viewer tasks: $tasks of 128"
+          test "$tasks" -lt 120
           # Nobody else may reach the socket's folder.
           if sudo -u nobody test -r /run/anjal-viewer; then echo "::error::the viewer's folder is open to others"; exit 1; fi
           # No network, no disk to write, its own memory cap - as shipped.
           test "$(systemctl show anjal-viewer -p PrivateNetwork --value)" = yes
           test "$(systemctl show anjal-viewer -p RestrictAddressFamilies --value)" = AF_UNIX
           test "$(systemctl show anjal-viewer -p ProtectSystem --value)" = strict
-          # rc.30: 2048M, for the DICOM grouping's 1 GiB child beside one other job (DES-22 §21.5).
-          test "$(systemctl show anjal-viewer -p MemoryMax --value)" = $((2048*1024*1024))
+          # rc.31: 1536M again - a DICOM job's child is stopped at 320 MB (lite DICOM; rc.30 had 2048M).
+          test "$(systemctl show anjal-viewer -p MemoryMax --value)" = $((1536*1024*1024))
           test "$(systemctl show anjal-viewer -p User --value)" = anjal-viewer
-          # Its children are its own: two kept ready.
+          # Its children are its own: two kept ready (and, after the DICOM check, one more for DICOM).
           sleep 2
           test "$(pgrep -u anjal-viewer -f -- '--child' | wc -l)" -ge 2
 

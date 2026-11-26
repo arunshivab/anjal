@@ -23,19 +23,36 @@
     var z = document.documentElement.currentCSSZoom || parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
     return z > 0 ? z : 1;
   };
-  // rc.16 (2c): the words and kind of a file's type tag - the same rules as FileTag.Of on the server.
+  // rc.31 (D6): a page picture the viewer could not draw at that moment (503, busy) is asked for again, up to three
+  // times, a little later each time, instead of staying a broken image.
+  document.addEventListener("error", function (e) {
+    var img = e.target;
+    if (!img || img.tagName !== "IMG" || !img.closest || !img.closest(".pdfview, .pvbody")) { return; }
+    var tries = parseInt(img.getAttribute("data-tries") || "0", 10);
+    if (tries >= 3) { return; }
+    var first = img.getAttribute("data-src0") || img.getAttribute("src") || "";
+    if (!first) { return; }
+    img.setAttribute("data-src0", first);
+    img.setAttribute("data-tries", String(tries + 1));
+    setTimeout(function () { img.src = first + (first.indexOf("?") < 0 ? "?" : "&") + "again=" + (tries + 1); }, 700 * (tries + 1));
+  }, true);
+  // rc.31 (D2): the words and kind of a file's type tag - the same rules as FileTag.Of on the server: the real
+  // extension in capitals, at most five letters; the kind (the colour) still follows the family.
   var fileTag = function (name, type) {
-    var ext = (/\.([^.]+)$/.exec(name || "") || ["", ""])[1].toLowerCase();
+    var ext = (/\.([^.\/\\]+)$/.exec(name || "") || ["", ""])[1].toLowerCase();
     type = (type || "").toLowerCase();
-    if (type === "application/pdf" || ext === "pdf") { return ["PDF", "pdf"]; }
-    if (type === "application/dicom" || ext === "dcm" || (name || "").toUpperCase() === "DICOMDIR") { return ["DICOM", "dicom"]; }
-    if (type.indexOf("image/") === 0 || /^(jpe?g|png|gif|webp|bmp|tiff?|heic)$/.test(ext)) { return [/^jpe?g$/.test(ext) ? "JPG" : ext === "png" ? "PNG" : "IMG", "img"]; }
-    if (/^(docx?|odt|rtf)$/.test(ext)) { return ["DOC", "doc"]; }
-    if (/^(xlsx?|ods|csv)$/.test(ext)) { return ["XLS", "xls"]; }
-    if (/^(pptx?|odp)$/.test(ext)) { return ["PPT", "ppt"]; }
-    if (/^(zip|7z|rar|gz|tgz|tar|bz2|xz)$/.test(ext)) { return ["ZIP", "zip"]; }
-    var shown = ext ? ext.toUpperCase() : "FILE";
-    return [shown.slice(0, 4), "other"];
+    var kind = "other";
+    if (type === "application/pdf" || ext === "pdf") { kind = "pdf"; }
+    else if (type === "application/dicom" || ext === "dcm" || (name || "").toUpperCase() === "DICOMDIR") { kind = "dicom"; }
+    else if (type.indexOf("image/") === 0 || /^(jpe?g|png|gif|webp|bmp|tiff?|heic)$/.test(ext)) { kind = "img"; }
+    else if (/^(docx?|odt|rtf)$/.test(ext)) { kind = "doc"; }
+    else if (/^(xlsx?|ods|csv|tsv)$/.test(ext)) { kind = "xls"; }
+    else if (/^(pptx?|odp)$/.test(ext)) { kind = "ppt"; }
+    else if (/^(zip|7z|rar|gz|tgz|tar|bz2|xz)$/.test(ext)) { kind = "zip"; }
+    var shown = ext ? ext.toUpperCase()
+      : (name || "").toUpperCase() === "DICOMDIR" ? "DICOM"
+      : kind === "pdf" ? "PDF" : kind === "dicom" ? "DCM" : "FILE";
+    return [shown.slice(0, 5), kind];
   };
 
   /* ---------- 0. Swapping pages: no full reloads (owner, 9 Oct 2026, "C") ----------
@@ -4437,6 +4454,17 @@
     var problem = view.querySelector("[data-edit-problem]");
     var thumbs = view.querySelector("[data-pdf-thumbstrip]");
     if (thumbs) { thumbs.hidden = true; }
+    // rc.31 (D8): the bar and the tool's row stay at the top while the pages scroll (.editstick). Once scrolled, the
+    // tool's notes and Sign's drawing pad fold away (what is drawn is kept), so the block stays small enough to leave
+    // the pages in view; back at the top they show again. Two thresholds, so it does not flicker at one point.
+    var stick = view.querySelector(".editstick"), scroller = view.closest(".pvbody");
+    if (stick && scroller) {
+      var stuck = false;
+      scroller.addEventListener("scroll", function () {
+        var now = stuck ? scroller.scrollTop > 8 : scroller.scrollTop > 40;
+        if (now !== stuck) { stuck = now; stick.classList.toggle("stuck", stuck); }
+      }, { passive: true });
+    }
 
     // The state Save sends; every change takes a copy first, for Undo.
     var uidNext = 0;
@@ -4613,6 +4641,24 @@
       // A box round it to hold it by (the picture, the signature and the text are moved by dragging).
       var bb = bounds(m);
       el("rect", { x: bb.X - 3, y: bb.Y - 3, width: bb.W + 6, height: bb.H + 6, "class": "editgrip" }, g);
+      // rc.31 (D5, owner, 26 Nov 2026): a chosen signature or picture has a handle at each corner to make it bigger
+      // or smaller; it keeps its shape, and the opposite corner stays where it is.
+      if (selected === m && k >= 0 && (m.Kind === "sign" || m.Kind === "picture")) {
+        [["nw", bb.X - 3, bb.Y - 3], ["ne", bb.X + bb.W + 3, bb.Y - 3], ["sw", bb.X - 3, bb.Y + bb.H + 3], ["se", bb.X + bb.W + 3, bb.Y + bb.H + 3]].forEach(function (c) {
+          el("rect", { x: c[1] - 4, y: c[2] - 4, width: 8, height: 8, "class": "editsize editsize-" + c[0], "data-corner": c[0] }, g);
+        });
+      }
+    }
+    // Makes a signature or picture bigger or smaller by a factor, holding the point (ax, ay) still; never smaller than
+    // 12 points across nor wider than its page.
+    function scaleMark(m, f, ax, ay, pageW) {
+      var bb = bounds(m);
+      var w = bb.W * f;
+      if (w < 12) { f = 12 / (bb.W || 12); }
+      if (w > pageW) { f = pageW / (bb.W || pageW); }
+      if (m.Points && m.Points.length) { for (var i = 0; i < m.Points.length; i += 2) { m.Points[i] = ax + (m.Points[i] - ax) * f; m.Points[i + 1] = ay + (m.Points[i + 1] - ay) * f; } }
+      // X and Y move with the points (as shift() keeps them); W and H scale for a picture.
+      m.X = ax + (m.X - ax) * f; m.Y = ay + (m.Y - ay) * f; m.W *= f; m.H *= f;
     }
     function bounds(m) {
       if (m.Points && m.Points.length) {
@@ -4644,6 +4690,23 @@
       say("");
       var start = at(e, fig, p);
       var hit = e.target.closest("[data-mark]");
+      var corner = e.target.closest("[data-corner]");
+      // rc.31 (D5): a corner handle makes the chosen signature or picture bigger or smaller, keeping its shape.
+      if (hit && corner && (tool === "markup" || tool === "sign")) {
+        var sm = S.marks[parseInt(hit.getAttribute("data-mark"), 10)];
+        e.preventDefault();
+        change();
+        selected = sm;
+        var c0 = corner.getAttribute("data-corner"), box0 = bounds(sm);
+        var ax = c0.indexOf("w") >= 0 ? box0.X + box0.W : box0.X, ay = c0.indexOf("n") >= 0 ? box0.Y + box0.H : box0.Y;
+        drag(fig, p, function (pt) {
+          var now = bounds(sm), want = Math.max(Math.abs(pt.x - ax), Math.abs(pt.y - ay) * (now.W / (now.H || 1)));
+          if (now.W > 0 && want > 0) { scaleMark(sm, want / now.W, ax, ay, p.w); }
+          draw(fig, p, indexOf(p.uid));
+        }, function () { buttons(); });
+        redrawAll();
+        return;
+      }
       // A mark already there is chosen and moved by dragging.
       if (hit && (tool === "markup" || tool === "sign")) {
         var m = S.marks[parseInt(hit.getAttribute("data-mark"), 10)];
@@ -4723,11 +4786,28 @@
       var y0 = Math.min.apply(null, over.map(function (r) { return r.Y - r.S * 0.85; })), y1 = Math.max.apply(null, over.map(function (r) { return r.Y + r.S * 0.25; }));
       m.Y = y0; m.H = y1 - y0;
     }
+    // rc.31 (D6): a page's text is asked for one at a time, behind the page pictures, and asked again when the viewer
+    // was busy. Asking for every page's text at once after a turn took all four of the person's places in the viewer,
+    // and the page pictures asked for at the same moment were turned away and drawn broken.
+    var textQueue = [], textBusy = false;
+    function pumpText() {
+      if (textBusy || !textQueue.length) { return; }
+      var job = textQueue.shift();
+      if (job.key !== key) { pumpText(); return; }
+      textBusy = true;
+      fetch(job.url, { credentials: "same-origin" }).then(function (r) {
+        if (r.status === 503 && job.tries < 3) { job.tries++; setTimeout(function () { textQueue.push(job); pumpText(); }, 1000 * job.tries); return null; }
+        return r.ok ? r.json() : null;
+      }).then(function (d) { if (d && job.key === key) { texts[job.uid] = d.Runs || []; } })
+        .catch(function () { })
+        .then(function () { textBusy = false; pumpText(); });
+    }
     function loadText(p, i) {
       if (texts[p.uid]) { return; }
       texts[p.uid] = [];
       var url = arranged ? base + "/" + key + "/text/" + i : viewBase + "/text/" + p.page + (entry ? "?entry=" + encodeURIComponent(entry) : "");
-      fetch(url, { credentials: "same-origin" }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) { if (d) { texts[p.uid] = d.Runs || []; } }).catch(function () { });
+      textQueue.push({ uid: p.uid, url: url, key: key, tries: 0 });
+      pumpText();
     }
     // A text box: typed in place; Enter makes a new line, a click elsewhere or Escape finishes it.
     function typeAt(fig, p, start) {
@@ -4802,6 +4882,18 @@
     }
     scope.on(document, "keydown", function (e) {
       if ((e.key === "Delete" || e.key === "Backspace") && selected && !e.target.closest("input, textarea, select")) { e.preventDefault(); if (removeBtn) { removeBtn.click(); } }
+      // rc.31 (D5): from the keyboard, Shift with the arrows makes the chosen signature or picture bigger (up, right)
+      // or smaller (down, left), from its top left corner.
+      if (e.shiftKey && /^Arrow/.test(e.key) && selected && (selected.Kind === "sign" || selected.Kind === "picture") && !e.target.closest("input, textarea, select")) {
+        var pg = S.pages.filter(function (q) { return q.uid === selected.uid; })[0];
+        if (pg) {
+          e.preventDefault();
+          change();
+          var b0 = bounds(selected);
+          scaleMark(selected, e.key === "ArrowUp" || e.key === "ArrowRight" ? 1.1 : 1 / 1.1, b0.X, b0.Y, pg.w);
+          redrawAll();
+        }
+      }
       if ((e.ctrlKey || e.metaKey) && !e.target.closest("input, textarea")) {
         if (e.key === "z" && !e.shiftKey) { e.preventDefault(); back(); }
         if (e.key === "y" || (e.key === "z" && e.shiftKey) || e.key === "Z") { e.preventDefault(); forward(); }
@@ -4890,7 +4982,9 @@
         var x0 = Math.min.apply(null, xs), y0 = Math.min.apply(null, ys), wide = (Math.max.apply(null, xs) - x0) || 1;
         view.classList.add("placing");
         placing = function (at0, p) {
-          var k = Math.min(160, p.w - at0.x) / wide;
+          // rc.31 (D5, owner, 26 Nov 2026): a fifth of the page's width at first (about 4 cm on A4), not up to 160
+          // points whatever the page; the corner handles or Shift with the arrows change it.
+          var k = Math.min(p.w * 0.2, p.w - at0.x) / wide;
           var out = pts.map(function (v, i) { return i % 2 === 0 ? at0.x + (v - x0) * k : at0.y + (v - y0) * k; });
           return { Kind: "sign", uid: p.uid, X: at0.x, Y: at0.y, W: 0, H: 0, Points: out, Strokes: strokes, Color: "#1a237e", Line: 1.6, Size: 12 };
         };
@@ -4901,7 +4995,8 @@
       scanIn.addEventListener("change", function () {
         addPicture(scanIn.files[0], function (n, ratio) {
           view.classList.add("placing");
-          placing = function (pt, p) { var w = Math.min(160, p.w - pt.x); return { Kind: "picture", uid: p.uid, X: pt.x, Y: pt.y, W: w, H: w * ratio, Points: [], Strokes: [], Color: "#000000", Line: 1, Size: 12, Picture: n }; };
+          // rc.31 (D5): a scan of a signature starts at a fifth of the page's width too.
+          placing = function (pt, p) { var w = Math.min(p.w * 0.2, p.w - pt.x); return { Kind: "picture", uid: p.uid, X: pt.x, Y: pt.y, W: w, H: w * ratio, Points: [], Strokes: [], Color: "#000000", Line: 1, Size: 12, Picture: n }; };
         });
         scanIn.value = "";
       });

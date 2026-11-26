@@ -4172,6 +4172,9 @@
     "Group these DICOM files by patient, study and series": "इन DICOM फ़ाइलों को मरीज़, अध्ययन और सीरीज़ के अनुसार समूहित करें",
     "Scroll through this series one slice at a time": "इस सीरीज़ को एक-एक स्लाइस करके देखें",
     "Show the study's patients and series": "अध्ययन के मरीज़ और सीरीज़ दिखाएँ",
-    "Show the patient's name and ID. This is logged.": "मरीज़ का नाम और आईडी दिखाएँ। यह दर्ज किया जाता है।"
+    "Show the patient's name and ID. This is logged.": "मरीज़ का नाम और आईडी दिखाएँ। यह दर्ज किया जाता है।",
+    "Table (CSV)": "तालिका (CSV)",
+    "1 row": "1 पंक्ति",
+    "Only the start of this table is shown: at most 5,000 rows, 200 columns, 10 MB and 1,000 characters in a cell. Download it to see all of it.": "इस तालिका का केवल शुरुआती हिस्सा दिखाया गया है: अधिकतम 5,000 पंक्तियाँ, 200 कॉलम, 10 MB और एक खाने में 1,000 अक्षर। पूरी तालिका देखने के लिए इसे डाउनलोड करें।"
   }
 }

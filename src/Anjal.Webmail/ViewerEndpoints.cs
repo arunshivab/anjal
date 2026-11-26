@@ -21,14 +21,14 @@ internal static class ViewerEndpoints
         app.MapGet(Base + "/page/{page:int}", async (HttpContext http, Guid id, int index, int page, int? w, string? entry, MailboxService svc, Words words, CancellationToken ct) =>
         {
             ViewResult r = await AskAsync(http, svc, words, id, index, new ViewRequest { Kind = ViewKinds.PdfPage, Page = page, Width = Math.Clamp(w ?? 1200, 60, 2000), Entry = entry }, ct).ConfigureAwait(false);
-            return r.Ok && r.Files.Count > 0 && FileKinds.PictureType(r.Files[0]) == "image/png" ? Picture(http, r.Files[0], "image/png") : Results.NotFound();
+            return r.Ok && r.Files.Count > 0 && FileKinds.PictureType(r.Files[0]) == "image/png" ? Picture(http, r.Files[0], "image/png") : NotShown(http, r);
         }).RequireAuthorization();
 
         // A PDF page's text and where each run sits, for the text laid over the picture (select, copy, find).
         app.MapGet(Base + "/text/{page:int}", async (HttpContext http, Guid id, int index, int page, string? entry, MailboxService svc, Words words, CancellationToken ct) =>
         {
             ViewResult r = await AskAsync(http, svc, words, id, index, new ViewRequest { Kind = ViewKinds.PdfText, Page = page, Entry = entry }, ct).ConfigureAwait(false);
-            return r.Ok && r.Answer.Json is string json ? Results.Text(json, "application/json") : Results.NotFound();
+            return r.Ok && r.Answer.Json is string json ? Results.Text(json, "application/json") : NotShown(http, r);
         }).RequireAuthorization();
 
         // Find in a PDF.
@@ -47,14 +47,14 @@ internal static class ViewerEndpoints
         app.MapGet(Base + "/clean", async (HttpContext http, Guid id, int index, string? entry, MailboxService svc, Words words, CancellationToken ct) =>
         {
             ViewResult r = await AskAsync(http, svc, words, id, index, new ViewRequest { Kind = ViewKinds.PdfClean, Entry = entry }, ct).ConfigureAwait(false);
-            return r.Ok && r.Files.Count > 0 ? Results.File(r.Files[0], "application/octet-stream", "without-scripts.pdf") : Results.NotFound();
+            return r.Ok && r.Files.Count > 0 ? Results.File(r.Files[0], "application/octet-stream", "without-scripts.pdf") : NotShown(http, r);
         }).RequireAuthorization();
 
         // A Word document's picture (re-drawn as PNG by the viewer), by its place among the document's pictures.
         app.MapGet(Base + "/word-picture/{k:int}", async (HttpContext http, Guid id, int index, int k, string? entry, MailboxService svc, Words words, CancellationToken ct) =>
         {
             ViewResult r = await AskAsync(http, svc, words, id, index, new ViewRequest { Kind = ViewKinds.Word, Entry = entry }, ct).ConfigureAwait(false);
-            return r.Ok && k >= 0 && k < r.Files.Count && FileKinds.PictureType(r.Files[k]) == "image/png" ? Picture(http, r.Files[k], "image/png") : Results.NotFound();
+            return r.Ok && k >= 0 && k < r.Files.Count && FileKinds.PictureType(r.Files[k]) == "image/png" ? Picture(http, r.Files[k], "image/png") : NotShown(http, r);
         }).RequireAuthorization();
 
         // A picture inside an archive (AC-17), its type judged by its bytes.
@@ -65,7 +65,7 @@ internal static class ViewerEndpoints
                 return Results.NotFound();
             }
             ViewResult r = await AskAsync(http, svc, words, id, index, new ViewRequest { Kind = ViewKinds.Picture, Entry = entry }, ct).ConfigureAwait(false);
-            return r.Ok && r.Files.Count > 0 && FileKinds.PictureType(r.Files[0]) is string type ? Picture(http, r.Files[0], type) : Results.NotFound();
+            return r.Ok && r.Files.Count > 0 && FileKinds.PictureType(r.Files[0]) is string type ? Picture(http, r.Files[0], type) : NotShown(http, r);
         }).RequireAuthorization();
 
         // rc.30 (DES-22 §3.4): a DICOM file's picture (0) and, for several frames, its strip (1) - drawn by the viewer,
@@ -77,7 +77,7 @@ internal static class ViewerEndpoints
                 return Results.NotFound();
             }
             ViewResult r = await AskAsync(http, svc, words, id, index, new ViewRequest { Kind = ViewKinds.Dicom, Entry = string.IsNullOrEmpty(entry) ? null : entry }, ct).ConfigureAwait(false);
-            return r.Ok && r.Files.Count > part && FileKinds.PictureType(r.Files[part]) == "image/png" ? Picture(http, r.Files[part], "image/png") : Results.NotFound();
+            return r.Ok && r.Files.Count > part && FileKinds.PictureType(r.Files[part]) == "image/png" ? Picture(http, r.Files[part], "image/png") : NotShown(http, r);
         }).RequireAuthorization();
 
         // DES-22 §3.1: a file's password, for this view only - kept in the session's memory for 10 minutes, never on
@@ -138,13 +138,13 @@ internal static class ViewerEndpoints
         app.MapGet(edit + "/{key}/page/{page:int}", async (HttpContext http, Guid id, int index, string key, int page, int? w, MailboxService svc, CancellationToken ct) =>
         {
             ViewResult r = await ArrangedAsync(http, svc, key, new ViewRequest { Kind = ViewKinds.PdfPage, Page = page, Width = Math.Clamp(w ?? 1200, 60, 2000) }, ct).ConfigureAwait(false);
-            return r.Ok && r.Files.Count > 0 && FileKinds.PictureType(r.Files[0]) == "image/png" ? Picture(http, r.Files[0], "image/png") : Results.NotFound();
+            return r.Ok && r.Files.Count > 0 && FileKinds.PictureType(r.Files[0]) == "image/png" ? Picture(http, r.Files[0], "image/png") : NotShown(http, r);
         }).RequireAuthorization();
 
         app.MapGet(edit + "/{key}/text/{page:int}", async (HttpContext http, Guid id, int index, string key, int page, MailboxService svc, CancellationToken ct) =>
         {
             ViewResult r = await ArrangedAsync(http, svc, key, new ViewRequest { Kind = ViewKinds.PdfText, Page = page }, ct).ConfigureAwait(false);
-            return r.Ok && r.Answer.Json is string json ? Results.Text(json, "application/json") : Results.NotFound();
+            return r.Ok && r.Answer.Json is string json ? Results.Text(json, "application/json") : NotShown(http, r);
         }).RequireAuthorization();
 
         app.MapGet(edit + "/{key}/find", async (HttpContext http, Guid id, int index, string key, string? q, MailboxService svc, CancellationToken ct) =>
@@ -405,6 +405,21 @@ internal static class ViewerEndpoints
         WebmailAuthService.MailboxIdOf(http.User) is Guid mailboxId
             ? await svc.ArrangedViewAsync(key, request, SessionKey(http, mailboxId), ct).ConfigureAwait(false)
             : ViewResult.Of(ViewStatus.Unavailable);
+
+    // rc.31 (D6, the owner on the first server, 26 Nov 2026): the viewer turns a person's fifth job at once away as
+    // Busy. That was answered 404, so the browser drew a broken page and never asked again (after a page turn the
+    // editor asked for every page's text at once). Busy is now 503 with Retry-After, which the page asks again for.
+    internal static IResult NotShown(HttpContext http, ViewResult r)
+    {
+        ArgumentNullException.ThrowIfNull(http);
+        ArgumentNullException.ThrowIfNull(r);
+        if (r.Answer.Status == ViewStatus.Busy)
+        {
+            http.Response.Headers.RetryAfter = "1";
+            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+        return Results.NotFound();
+    }
 
     internal static string SessionKey(HttpContext http, Guid mailboxId) =>
         SessionRegistry.SessionOf(http.User) is string sid ? sid + "/" + mailboxId.ToString("N") : "m/" + mailboxId.ToString("N");

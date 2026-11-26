@@ -619,6 +619,11 @@ public sealed partial class MailboxService
             // rc.29 (DES-22 §3.2, §3.3): Word as text, a workbook as a grid.
             (_, ".docx") or ("application/vnd.openxmlformats-officedocument.wordprocessingml.document", _) => WordType,
             (_, ".xlsx") or ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", _) => SheetType,
+            // rc.31 (D4): CSV and TSV as a plain table.
+            (_, ".csv" or ".tsv") or ("text/csv" or "text/tab-separated-values", _) => TableType,
+            // rc.31 (D3): a file whose bytes are a ZIP under another name (a .nupkg, say, or no extension) is listed like
+            // a ZIP - before the DICOM rule, which would otherwise claim a ZIP with no extension.
+            _ when a.ZipInside => ZipType,
             // rc.30 (DES-22 §3.4, D-372): DICOM only when the switch is on - a .dcm, application/dicom, or a file with
             // no extension; the viewer then goes by the file's own "DICM" mark, not its name.
             _ when dicom && (ext is ".dcm" || ext.Length == 0 || ct is "application/dicom") => DicomType,
@@ -642,6 +647,9 @@ public sealed partial class MailboxService
 
     /// <summary>rc.29 (DES-22 §3.3): the preview type of a workbook - shown as a grid by the viewer.</summary>
     public const string SheetType = "sheet";
+
+    /// <summary>rc.31 (D4): the preview type of a CSV or TSV file - a plain table drawn by the viewer.</summary>
+    public const string TableType = "table";
 
     /// <summary>The carry index that means "the whole message, as an .eml attachment" (rc.12, item 23).</summary>
     public const int WholeMessage = -1;

@@ -30,7 +30,7 @@ jobs:
           - group: menus
             checks: "noscroll,names,menus"
           - group: buttons
-            checks: "tips,close,keyboard,swap,flap,viewer"
+            checks: "tips,close,keyboard,swap,flap,viewer,cursor,editor"
           # rc.26 (27 Oct 2026): pressing every button grew past the job's limit with the new
           # console pages (the buttons group was cancelled at 75 minutes), so it runs on its own.
           - group: reach
@@ -39,7 +39,7 @@ jobs:
           - group: layout
             checks: "shrink,clip,steady,live,lineup"
           - group: look
-            checks: "align,same,sizes,scrollbars,zoom,contrast"
+            checks: "align,same,sizes,scrollbars,zoom,contrast,tags"
           # rc.28 (DES-18, D-335): phones and tablets - a touch screen at each width band, nothing
           # scrolls sideways, the tablet envelope beside the letter; controls under 44px are listed.
           - group: devices

@@ -83,6 +83,29 @@ def small_pdf(lines):
     return bytes(out)
 
 
+def pages_pdf(pages):
+    """rc.31 (D6): a real PDF of several pages, each with a few lines, for the editor's turn check (six pages)."""
+    n = len(pages)
+    objects = [b"<< /Type /Catalog /Pages 2 0 R >>",
+               b"<< /Type /Pages /Kids [" + b" ".join(b"%d 0 R" % (4 + 2 * i) for i in range(n)) + b"] /Count %d >>" % n,
+               b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"]
+    for i, lines in enumerate(pages):
+        text = "".join("BT /F1 14 Tf 72 %d Td (%s) Tj ET\n" % (760 - 22 * k, line) for k, line in enumerate(lines)).encode()
+        objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents %d 0 R >>" % (5 + 2 * i))
+        objects.append(b"<< /Length %d >>\nstream\n" % len(text) + text + b"endstream")
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for k, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % k + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for o in offsets:
+        out += b"%010d 00000 n \n" % o
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref)
+    return bytes(out)
+
+
 def _zip(entries):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -174,7 +197,14 @@ def small_xlsx(sheet, rows):
 AGENDA_PDF = small_pdf(["Quality review - Friday 15:00", "1. Minutes of the last review", "2. Incident reports", "3. Hand hygiene audit", "4. Audit readiness"])
 INVOICE_PDF = small_pdf(["Invoice 2026-114", "September services", "Due 15 October 2026"])
 ROTA_PDF = small_pdf(["Holiday rota - Diwali week", "The hospital stays open throughout."])
-THEATRE_PDF = small_pdf(["Theatre list - Monday", "Theatre 1: 08:00 to 14:00", "Theatre 2: 09:00 to 17:00"])
+# rc.31 (D6): six pages, one a day, so the PDF editor's turn check has pages below the first two.
+THEATRE_PDF = pages_pdf([["Theatre list - " + day, "Theatre 1: 08:00 to 14:00", "Theatre 2: 09:00 to 17:00"]
+                         for day in ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")])
+# rc.31 (D4, D3): a CSV shown as a table (with a cell that looks like a formula, shown as written) and a .nupkg, a ZIP
+# under another name, listed like one.
+ROSTER_CSV = b"Date,Ward,Day,Night,Note\r\n1 Oct,Ward 3,Meera,Ravi,\r\n2 Oct,Ward 3,Ravi,Meera,\"Swap, agreed\"\r\n3 Oct,Ward 4,Anil,Priya,=1+1\r\n"
+TOOLS_NUPKG = _zip([("Anjal.Sample.nuspec", b"<?xml version=\"1.0\"?><package><metadata><id>Anjal.Sample</id><version>1.0.0</version></metadata></package>\n"),
+                    ("lib/net10.0/readme.txt", b"A sample package.\n")])
 ROSTER_XLSX = small_xlsx("October", [["Date", "Ward", "Day", "Night"], ["1 Oct", "Ward 3", "Meera", "Ravi"], ["2 Oct", "Ward 3", "Ravi", "Meera"], ["3 Oct", "Ward 4", "Anil", "Priya"], ["Shifts", "", 3, 3]])
 MINUTES_DOCX = small_docx("Minutes of the 30 September meeting", ["Present: the board and the quality committee.", "Draft - corrections by Monday, please."],
                           [["Item", "Decision"], ["Audit readiness", "Agreed"], ["New infusion pumps", "Ordered"]])
@@ -217,11 +247,13 @@ def messages(you, domain):
         att=[("Invoice-2026-114.pdf", INVOICE_PDF, "application/pdf")], days=0, hour=8)
     add("meera", me, "Revised duty roster for October",
         "Hi Arun,\n\nTwo changes from last week, marked in yellow in the attached roster. Please confirm by Thursday.\n\nThanks,\nMeera",
-        att=[("Roster-October.xlsx", ROSTER_XLSX, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")], days=0, hour=7)
+        att=[("Roster-October.xlsx", ROSTER_XLSX, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+             ("Roster-October.csv", ROSTER_CSV, "text/csv")], days=0, hour=7)
     add("priya", me, "நாளை காலை 10 மணிக்கு கூட்டம்",
         "வணக்கம்,\n\nநாளை காலை 10 மணிக்கு வாராந்திர கூட்டம் நடைபெறும். அறிக்கையை முன்கூட்டியே படிக்கவும்.\n\nநன்றி,\nபிரியா", days=0, hour=6)
     add("it", me, "Planned maintenance, Saturday 22:00",
-        "Systems will be unavailable for about forty minutes on Saturday from 22:00. Mail sent during that time will be delivered afterwards.", days=1, hour=18)
+        "Systems will be unavailable for about forty minutes on Saturday from 22:00. Mail sent during that time will be delivered afterwards.",
+        att=[("Anjal.Sample.1.0.0.nupkg", TOOLS_NUPKG, "application/octet-stream")], days=1, hour=18)
     add("board", me, "Minutes of the 30 September meeting",
         "Draft minutes for your corrections by Monday.", att=[("Minutes-30-Sep.docx", MINUTES_DOCX, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")], days=1, hour=11)
     add("anil", me, "ഓണാശംസകൾ - യോഗം നാളെ രാവിലെ പത്തിന്",

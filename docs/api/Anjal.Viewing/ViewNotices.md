@@ -12,4 +12,5 @@ rc.29 (DES-22 §2): the notices shown above a viewed file, as codes the webmail 
 - **ManyPages** *(field)* - More pages than are shown (2,000).
 - **Partial** *(field)* - Not every part could be shown (a picture the library cannot draw yet, a damaged page, a skipped part).
 - **PdfActive** *(field)* - A PDF with scripts, actions or embedded files.
+- **TableCut** *(field)* - rc.31 (D4): a table (CSV) is shown only in part: past 10 MB, 5,000 rows, 200 columns or 1,000 characters a cell.
 - **Xfa** *(field)* - An XFA form, which draws little or nothing from its pages.
