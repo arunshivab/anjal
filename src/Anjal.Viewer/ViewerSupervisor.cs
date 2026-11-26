@@ -65,7 +65,8 @@ public sealed class ViewerSupervisor : IAsyncDisposable
     private readonly SemaphoreSlim grouping = new(1, 1);
 
     // rc.31 (lite DICOM): one warmed child with the DICOM heap, kept ready once the first DICOM job has come (a server
-    // with DICOM off never starts one), so a series' slices do not each wait for a child to start.
+    // with DICOM off never starts one), so a series' slices do not each wait for a child to start. Only one: the next
+    // is started when it is taken, not beforehand (each child's threads count against the unit's TasksMax).
     private readonly Channel<ChildProcess> readyDicom = Channel.CreateBounded<ChildProcess>(new BoundedChannelOptions(1) { SingleReader = false, SingleWriter = true });
     private Task? dicomFiller;
     private int dicomStarted;
@@ -340,7 +341,7 @@ public sealed class ViewerSupervisor : IAsyncDisposable
         {
             if (Interlocked.Exchange(ref this.dicomStarted, 1) == 0)
             {
-                this.dicomFiller = Task.Run(() => this.FillAsync(this.readyDicom, this.options.DicomHeapLimit, this.stopping.Token), CancellationToken.None);
+                this.dicomFiller = Task.Run(() => this.FillAsync(this.readyDicom, this.options.DicomHeapLimit, this.stopping.Token, onlyWhenEmpty: true), CancellationToken.None);
             }
             ChildProcess? child = this.readyDicom.Reader.TryRead(out ChildProcess? warm)
                 ? warm
@@ -372,12 +373,17 @@ public sealed class ViewerSupervisor : IAsyncDisposable
         }
     }
 
-    // Keeps a pool of warmed children full: one is started as soon as one is taken.
-    private async Task FillAsync(Channel<ChildProcess> pool, long heapLimit, CancellationToken ct)
+    // Keeps a pool of warmed children full: one is started as soon as one is taken. With onlyWhenEmpty (the DICOM
+    // pool of one), the next is started only once the pool has room, so no second child waits beside the first.
+    private async Task FillAsync(Channel<ChildProcess> pool, long heapLimit, CancellationToken ct, bool onlyWhenEmpty = false)
     {
         TimeSpan pause = TimeSpan.FromSeconds(1);
         while (!ct.IsCancellationRequested)
         {
+            if (onlyWhenEmpty && !await pool.Writer.WaitToWriteAsync(ct).ConfigureAwait(false))
+            {
+                return;
+            }
             ChildProcess? child = await ChildProcess.StartAsync(this.options.Child, this.options.ReadyWait, this.options.Log, heapLimit, ct).ConfigureAwait(false);
             if (child is null)
             {

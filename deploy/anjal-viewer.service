@@ -44,7 +44,10 @@ UMask=0007
 # stops plus the supervisor stay under 1536M again. (rc.30 had 2048M, for a 1 GiB grouping child.)
 MemoryMax=1536M
 MemorySwapMax=0
-TasksMax=64
+# rc.31: every thread of the supervisor and its children counts here (about 9 a waiting child, 14 the supervisor, more
+# while a job runs). 64 was too few once a DICOM child is kept ready beside the 3 others: a child could not make its
+# threads and broke mid-answer (found by deploy-smoke, 26 Nov 2026). 128 still stops a runaway that keeps starting.
+TasksMax=128
 
 NoNewPrivileges=true
 CapabilityBoundingSet=

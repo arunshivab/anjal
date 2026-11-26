@@ -1795,8 +1795,10 @@ vm$ sudo systemctl restart anjal-viewer anjal-server anjal-webmail
 vm$ systemctl show anjal-viewer -p MemoryMax --value              # 1610612736 (1536M), from the unit alone now
 ```
 Then check health shows `1.0.0-rc.31`, run viewer_check.py, open a CSV attachment, and send one mail out. After
-viewer_check.py (it makes a DICOM slice and study itself) the viewer also keeps children ready for DICOM (one waiting
-and one starting, about 50 MB each), so `pgrep -u anjal-viewer -f -- '--child' | wc -l` says 5 from then on, not 3. The way back
+viewer_check.py (it makes a DICOM slice and study itself) the viewer also keeps one child ready for DICOM (about
+50 MB), so `pgrep -u anjal-viewer -f -- '--child' | wc -l` says 4 from then on, not 3. The unit's `TasksMax` goes from
+64 to 128 for that (every thread of the viewer and its children counts; 64 was too few with the DICOM child, found by
+deploy-smoke). Read it before the install and after: `systemctl show anjal-viewer -p TasksMax -p TasksCurrent`. The way back
 is the `.old` copies as for rc.30.2; the unit's 1536M is the same value the drop-in held, so nothing else changes back.
 
 **rc.27 to rc.29 in one install** (the first server, which runs rc.27 since 9 Nov and was never
