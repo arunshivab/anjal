@@ -15,8 +15,8 @@ public sealed class SupervisorOptions
     public int ReadyChildren { get; init; } = 2;
 
     /// <summary>
-    /// How many jobs run at once (2: the service's 2 GB holds two children at their 768 MB, or a DICOM grouping at
-    /// 1 GiB beside one other).
+    /// How many jobs run at once (2: the service's 1536M holds two children at their 768 MB; rc.31: a DICOM job is
+    /// stopped at 320 MB, so it fits beside any other).
     /// </summary>
     public int Running { get; init; } = 2;
 
@@ -30,10 +30,14 @@ public sealed class SupervisorOptions
     public long ChildMemoryLimit { get; init; } = 768L * 1024 * 1024;
 
     /// <summary>
-    /// rc.30 (AC-19, the coordinator's decision of 18 Nov): a DICOM grouping runs in a child of its own, started for
-    /// it, with a 1 GiB heap and stopped past 1 GiB; one grouping at a time.
+    /// rc.31 (lite DICOM, the coordinator 25 Nov 2026): every DICOM job - a preview, a slice, the patient fields and a
+    /// grouping - runs in a child of its own, started for it with a <see cref="DicomHeapLimit"/> heap and stopped
+    /// past this (320 MB); one grouping at a time. (rc.30 had 1 GiB for a grouping alone.)
     /// </summary>
-    public long GroupingMemoryLimit { get; init; } = 1024L * 1024 * 1024;
+    public long DicomMemoryLimit { get; init; } = 320L * 1024 * 1024;
+
+    /// <summary>rc.31 (lite DICOM): the managed heap of a DICOM job's child (256 MiB), inside its 320 MB stop.</summary>
+    public long DicomHeapLimit { get; init; } = 256L * 1024 * 1024;
 
     /// <summary>How long a child may take to warm before it is given up.</summary>
     public TimeSpan ReadyWait { get; init; } = TimeSpan.FromSeconds(60);
@@ -59,6 +63,12 @@ public sealed class ViewerSupervisor : IAsyncDisposable
     private readonly Channel<ChildProcess> ready;
     private readonly SemaphoreSlim running;
     private readonly SemaphoreSlim grouping = new(1, 1);
+
+    // rc.31 (lite DICOM): one warmed child with the DICOM heap, kept ready once the first DICOM job has come (a server
+    // with DICOM off never starts one), so a series' slices do not each wait for a child to start.
+    private readonly Channel<ChildProcess> readyDicom = Channel.CreateBounded<ChildProcess>(new BoundedChannelOptions(1) { SingleReader = false, SingleWriter = true });
+    private Task? dicomFiller;
+    private int dicomStarted;
     private readonly ConcurrentDictionary<string, int> perPerson = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource stopping = new();
     private readonly object countLock = new();
@@ -110,7 +120,7 @@ public sealed class ViewerSupervisor : IAsyncDisposable
             File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
         }
         this.listener.Listen(64);
-        this.filler = Task.Run(() => this.FillAsync(this.stopping.Token));
+        this.filler = Task.Run(() => this.FillAsync(this.ready, ChildProcess.DefaultHeapLimit, this.stopping.Token));
         if (this.options.ParentProcessId is int parent)
         {
             _ = Task.Run(() => this.WatchParentAsync(parent, this.stopping.Token));
@@ -149,17 +159,25 @@ public sealed class ViewerSupervisor : IAsyncDisposable
     {
         await this.stopping.CancelAsync().ConfigureAwait(false);
         this.listener?.Dispose();
-        if (this.filler is not null)
+        foreach (Task? fill in new[] { this.filler, this.dicomFiller })
         {
+            if (fill is null)
+            {
+                continue;
+            }
             try
             {
-                await this.filler.ConfigureAwait(false);
+                await fill.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
             }
         }
         while (this.ready.Reader.TryRead(out ChildProcess? child))
+        {
+            child.Dispose();
+        }
+        while (this.readyDicom.Reader.TryRead(out ChildProcess? child))
         {
             child.Dispose();
         }
@@ -271,7 +289,19 @@ public sealed class ViewerSupervisor : IAsyncDisposable
     {
         if (request.Kind == ViewKinds.DicomGroup)
         {
-            return await this.RunGroupingAsync(json, files, request, ct).ConfigureAwait(false);
+            await this.grouping.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                return await this.RunDicomAsync(json, files, request, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                this.grouping.Release();
+            }
+        }
+        if (ViewKinds.IsDicom(request.Kind))
+        {
+            return await this.RunDicomAsync(json, files, request, ct).ConfigureAwait(false);
         }
         await this.running.WaitAsync(ct).ConfigureAwait(false);
         try
@@ -300,56 +330,55 @@ public sealed class ViewerSupervisor : IAsyncDisposable
         }
     }
 
-    // rc.30 (AC-19): a DICOM grouping - one at a time, in a child started for it with a 1 GiB heap and stopped past
-    // 1 GiB, taking one of the running places, so at most one other job runs beside it (2 GB for the service).
-    private async Task<(ViewAnswer, List<byte[]>)> RunGroupingAsync(string json, List<byte[]> files, ViewRequest request, CancellationToken ct)
+    // rc.31 (lite DICOM): a DICOM job in a child of its own with a 256 MiB heap (the warmed one when it is ready) and
+    // stopped past 320 MB, taking one of the running places like any other job. A grouping waits for the one before
+    // it (above).
+    private async Task<(ViewAnswer, List<byte[]>)> RunDicomAsync(string json, List<byte[]> files, ViewRequest request, CancellationToken ct)
     {
-        await this.grouping.WaitAsync(ct).ConfigureAwait(false);
+        await this.running.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            await this.running.WaitAsync(ct).ConfigureAwait(false);
-            try
+            if (Interlocked.Exchange(ref this.dicomStarted, 1) == 0)
             {
-                ChildProcess? child = await ChildProcess.StartAsync(this.options.Child, this.options.ReadyWait, this.options.Log, this.options.GroupingMemoryLimit, ct).ConfigureAwait(false);
-                if (child is null)
-                {
-                    return (new ViewAnswer { Status = ViewStatus.Unavailable }, new List<byte[]>());
-                }
-                using (child)
-                {
-                    (ViewAnswer answer, List<byte[]> outFiles, ChildEnd end) = await child.RunAsync(json, files, ViewKinds.Deadline(request.Kind), this.options.GroupingMemoryLimit, ct).ConfigureAwait(false);
-                    Interlocked.Increment(ref this.jobs);
-                    if (end == ChildEnd.Deadline)
-                    {
-                        Interlocked.Increment(ref this.byDeadline);
-                        this.Log("stopped a " + request.Kind + " job at its deadline");
-                    }
-                    else if (end == ChildEnd.Memory)
-                    {
-                        Interlocked.Increment(ref this.byMemory);
-                        this.Log("stopped a " + request.Kind + " job past " + (this.options.GroupingMemoryLimit / (1024 * 1024)) + " MB");
-                    }
-                    return (answer, outFiles);
-                }
+                this.dicomFiller = Task.Run(() => this.FillAsync(this.readyDicom, this.options.DicomHeapLimit, this.stopping.Token), CancellationToken.None);
             }
-            finally
+            ChildProcess? child = this.readyDicom.Reader.TryRead(out ChildProcess? warm)
+                ? warm
+                : await ChildProcess.StartAsync(this.options.Child, this.options.ReadyWait, this.options.Log, this.options.DicomHeapLimit, ct).ConfigureAwait(false);
+            if (child is null)
             {
-                this.running.Release();
+                return (new ViewAnswer { Status = ViewStatus.Unavailable }, new List<byte[]>());
+            }
+            using (child)
+            {
+                (ViewAnswer answer, List<byte[]> outFiles, ChildEnd end) = await child.RunAsync(json, files, ViewKinds.Deadline(request.Kind, request.Page), this.options.DicomMemoryLimit, ct).ConfigureAwait(false);
+                Interlocked.Increment(ref this.jobs);
+                if (end == ChildEnd.Deadline)
+                {
+                    Interlocked.Increment(ref this.byDeadline);
+                    this.Log("stopped a " + request.Kind + " job at its deadline");
+                }
+                else if (end == ChildEnd.Memory)
+                {
+                    Interlocked.Increment(ref this.byMemory);
+                    this.Log("stopped a " + request.Kind + " job past " + (this.options.DicomMemoryLimit / (1024 * 1024)) + " MB");
+                }
+                return (answer, outFiles);
             }
         }
         finally
         {
-            this.grouping.Release();
+            this.running.Release();
         }
     }
 
-    // Keeps the pool of warmed children full: one is started as soon as one is taken.
-    private async Task FillAsync(CancellationToken ct)
+    // Keeps a pool of warmed children full: one is started as soon as one is taken.
+    private async Task FillAsync(Channel<ChildProcess> pool, long heapLimit, CancellationToken ct)
     {
         TimeSpan pause = TimeSpan.FromSeconds(1);
         while (!ct.IsCancellationRequested)
         {
-            ChildProcess? child = await ChildProcess.StartAsync(this.options.Child, this.options.ReadyWait, this.options.Log, ct).ConfigureAwait(false);
+            ChildProcess? child = await ChildProcess.StartAsync(this.options.Child, this.options.ReadyWait, this.options.Log, heapLimit, ct).ConfigureAwait(false);
             if (child is null)
             {
                 if (ct.IsCancellationRequested)
@@ -371,7 +400,7 @@ public sealed class ViewerSupervisor : IAsyncDisposable
             pause = TimeSpan.FromSeconds(1);
             try
             {
-                await this.ready.Writer.WriteAsync(child, ct).ConfigureAwait(false);
+                await pool.Writer.WriteAsync(child, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {

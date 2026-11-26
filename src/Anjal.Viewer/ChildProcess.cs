@@ -58,7 +58,7 @@ internal sealed class ChildProcess : IDisposable
     /// <param name="command">How to start it.</param>
     /// <param name="readyWait">How long it may take to warm.</param>
     /// <param name="log">Where its log lines go.</param>
-    /// <param name="heapLimit">Its managed heap's hard limit (rc.30: 1 GiB for a DICOM grouping).</param>
+    /// <param name="heapLimit">Its managed heap's hard limit (rc.31: 256 MiB for a DICOM job).</param>
     /// <param name="ct">Cancellation.</param>
     /// <returns>The child, or null.</returns>
     public static async Task<ChildProcess?> StartAsync(ChildCommand command, TimeSpan readyWait, TextWriter log, long heapLimit, CancellationToken ct)
@@ -76,7 +76,7 @@ internal sealed class ChildProcess : IDisposable
             info.ArgumentList.Add(a);
         }
         // DES-22 §4.1: each child's managed heap is held to 512 MB; the supervisor's 768 MB watch is the backstop.
-        // rc.30: a DICOM grouping's child is held to 1 GiB, and stopped past 1 GiB.
+        // rc.31 (lite DICOM): a DICOM job's child is held to 256 MiB, and stopped past 320 MB.
         info.Environment["DOTNET_GCHeapHardLimit"] = "0x" + heapLimit.ToString("X", System.Globalization.CultureInfo.InvariantCulture);
         Process? p;
         try

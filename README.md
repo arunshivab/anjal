@@ -10,7 +10,13 @@ and DMARC signature verification use the BCL's
 
 ## Status
 
-**v1.0.0-rc.30.2** (November 2026) - a reopened draft is sent as one HTML document, not one nested inside
+**v1.0.0-rc.31** (November 2026) - from the owner's first-server check: CSV and TSV shown as a plain table (5,000
+rows, 200 columns, 10 MB, nothing in a cell ever evaluated); a file's label is its own extension in capitals (DOCX,
+XLSX, NUPKG) at one size; a file of unknown kind that is a ZIP inside (a .nupkg) is listed like one; in the PDF
+editor, a signature placed at a fifth of the page's width with corner handles and Shift+arrows to resize it, pages that
+no longer come back blank after a turn, and the tool row kept with the editor bar while scrolling; the hand cursor on
+every control. Lite DICOM: SIAARA's smaller limits, a ZIP's files read one at a time through one buffer, and every
+DICOM job stopped at 320 MB, so the viewer's cap is 1536M again. **v1.0.0-rc.30.2** - a reopened draft is sent as one HTML document, not one nested inside
 another (found on the first server: spam filters score nested HTML), and the first server's upgrade notes folded into
 the runbook. **v1.0.0-rc.30.1** - rc.30 with its own version number (rc.30 still said rc.29 in
 `Directory.Build.props`, so its build could not be published as rc.30) and the one runbook from rc.27 straight to rc.30,

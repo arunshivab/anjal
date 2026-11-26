@@ -68,10 +68,16 @@ public sealed class SupervisorTests : IAsyncLifetime, IDisposable
     [Fact]
     public async Task ADicomGrouping_RunsInAChildOfItsOwn_BesideAnotherJob()
     {
-        // rc.30 (AC-19): the grouping's child is started for it with a 1 GiB heap; the others keep 512 MB.
+        // rc.31 (lite DICOM): a DICOM job's child is started for it with a 256 MiB heap and stopped at 320 MB; the
+        // others keep 512 MB.
+        var options = new SupervisorOptions();
+        Assert.Equal(256L * 1024 * 1024, options.DicomHeapLimit);
+        Assert.Equal(320L * 1024 * 1024, options.DicomMemoryLimit);
+        Assert.True(ViewKinds.IsDicom(ViewKinds.Dicom) && ViewKinds.IsDicom(ViewKinds.DicomPatient) && ViewKinds.IsDicom(ViewKinds.DicomGroup));
+        Assert.False(ViewKinds.IsDicom(ViewKinds.PdfInfo));
         string host = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
         var command = new ChildCommand(host, new[] { Path.Combine(AppContext.BaseDirectory, "Anjal.Viewer.dll"), "--child" });
-        foreach ((long limit, long want) in new[] { (ChildProcess.DefaultHeapLimit, 512L), (1024L * 1024 * 1024, 1024L) })
+        foreach ((long limit, long want) in new[] { (ChildProcess.DefaultHeapLimit, 512L), (options.DicomHeapLimit, 256L) })
         {
             using ChildProcess? child = await ChildProcess.StartAsync(command, TimeSpan.FromSeconds(60), TextWriter.Null, limit, CancellationToken.None);
             Assert.NotNull(child);

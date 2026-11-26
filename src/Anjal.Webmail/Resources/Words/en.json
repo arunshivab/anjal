@@ -4171,6 +4171,9 @@
     "Group these DICOM files by patient, study and series": "Group these DICOM files by patient, study and series",
     "Scroll through this series one slice at a time": "Scroll through this series one slice at a time",
     "Show the study's patients and series": "Show the study's patients and series",
-    "Show the patient's name and ID. This is logged.": "Show the patient's name and ID. This is logged."
+    "Show the patient's name and ID. This is logged.": "Show the patient's name and ID. This is logged.",
+    "Table (CSV)": "Table (CSV)",
+    "1 row": "1 row",
+    "Only the start of this table is shown: at most 5,000 rows, 200 columns, 10 MB and 1,000 characters in a cell. Download it to see all of it.": "Only the start of this table is shown: at most 5,000 rows, 200 columns, 10 MB and 1,000 characters in a cell. Download it to see all of it."
   }
 }

@@ -91,6 +91,7 @@ public static class ChildJobs
             ViewKinds.PdfClean => PdfJobs.Clean(bytes, request.Password, ct),
             ViewKinds.Word => WordJob.Run(bytes, request.Password, ct),
             ViewKinds.Sheet => SheetJob.Run(bytes, request.Password, request.Sheet, request.Culture, ct),
+            ViewKinds.Csv => CsvJob.Run(bytes, name, ct),
             ViewKinds.Picture => FileKinds.PictureType(bytes) is string type
                 ? JobAnswer.File(bytes, ViewJson.Write(new FileOut { Name = name, Type = type }))
                 : JobAnswer.Status(ViewStatus.Unsupported, null),
@@ -132,7 +133,7 @@ public static class ChildJobs
         }
         if (kind == "test.heap")
         {
-            // rc.30: the heap limit this child was started with (the grouping's child has 1 GiB).
+            // The heap limit this child was started with (rc.31: a DICOM job's child has 256 MiB).
             return JobAnswer.Json("{\"heap\":" + GC.GetGCMemoryInfo().TotalAvailableMemoryBytes.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}");
         }
         if (kind == "test.grow")

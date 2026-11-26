@@ -469,6 +469,89 @@ public static class ArchiveReader
         }
     }
 
+    /// <summary>
+    /// rc.31 (lite DICOM, the coordinator 25 Nov 2026): the listed entries unpacked one after another from one opening
+    /// of the archive, each through the same reused buffer: its size is checked against <paramref name="maxBytes"/>
+    /// before anything is unpacked, then it is copied with the library's own caps and handed to
+    /// <paramref name="each"/> - which must not keep the bytes, because the next entry overwrites them. An entry that
+    /// cannot be given is handed over with given false.
+    /// </summary>
+    /// <param name="archive">The attachment's bytes.</param>
+    /// <param name="listing">Its listing, from <see cref="List"/>.</param>
+    /// <param name="items">The entries wanted, from that listing.</param>
+    /// <param name="password">The archive's password, when it is locked.</param>
+    /// <param name="maxBytes">The most one entry may weigh.</param>
+    /// <param name="each">Called once an entry, in order, with its bytes or with given false.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <returns>Ok, or the status that says why the archive could not be opened.</returns>
+    public static string EachUnpacked(byte[] archive, ArchiveListing listing, IReadOnlyList<ArchiveItem> items, string? password, long maxBytes, EntryBytes each, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(archive);
+        ArgumentNullException.ThrowIfNull(listing);
+        ArgumentNullException.ThrowIfNull(items);
+        ArgumentNullException.ThrowIfNull(each);
+        if (!listing.Listed)
+        {
+            return ViewStatus.Refused;
+        }
+        ZipReader zip;
+        try
+        {
+            zip = Open(archive, MaxEntries);
+        }
+        catch (ZipLimitExceededException)
+        {
+            return ViewStatus.TooLarge;
+        }
+        catch (ZipFormatException)
+        {
+            return ViewStatus.Damaged;
+        }
+        catch (InvalidDataException)
+        {
+            return ViewStatus.Damaged;
+        }
+        using (zip)
+        {
+            using var buffer = new MemoryStream();
+            foreach (ArchiveItem item in items)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (item.Folder || item.Blocked || item.Unsupported || item.Index < 0 || item.Index >= zip.Count || item.Size > maxBytes || item.Size > MaxEntryBytes)
+                {
+                    each(item, false, default);
+                    continue;
+                }
+                ZipEntryInfo e = zip.Entries[item.Index];
+                if (e.Size != item.Size || (e.Size > EntryRatioFrom && (e.CompressedSize <= 0 || e.Size / e.CompressedSize > MaxRatio)))
+                {
+                    each(item, false, default);
+                    continue;
+                }
+                buffer.SetLength(0);
+                bool read;
+                try
+                {
+                    zip.CopyTo(e, buffer, e.IsEncrypted ? password : null);
+                    read = buffer.Length == e.Size;
+                }
+                catch (Exception ex) when (ex is ZipPasswordRequiredException or ZipLimitExceededException or ZipUnsupportedException or ZipFormatException or InvalidDataException or IOException)
+                {
+                    read = false;
+                }
+                if (read)
+                {
+                    each(item, true, buffer.GetBuffer().AsSpan(0, (int)buffer.Length));
+                }
+                else
+                {
+                    each(item, false, default);
+                }
+            }
+        }
+        return ViewStatus.Ok;
+    }
+
     private static ArchiveView Relock(ArchiveView v) => new() { Entries = v.Entries, Locked = true, Expanded = v.Expanded, Refused = v.Refused };
 
     // UTF-8 when the entry says so, or when its bytes are valid UTF-8; otherwise the DOS code page 437. The library
@@ -490,6 +573,12 @@ public static class ArchiveReader
         }
     }
 }
+
+/// <summary>rc.31: one entry's bytes, handed over by <see cref="ArchiveReader.EachUnpacked"/>.</summary>
+/// <param name="item">The entry.</param>
+/// <param name="given">False when the entry is not given (too large, unreadable, a wrong password).</param>
+/// <param name="bytes">Its bytes, valid only during the call; empty when it is not given.</param>
+public delegate void EntryBytes(ArchiveItem item, bool given, ReadOnlySpan<byte> bytes);
 
 /// <summary>AC-20: the passwords a person typed for an archive and for an archive inside it, for one request.</summary>
 /// <param name="Outer">The attachment's own password.</param>

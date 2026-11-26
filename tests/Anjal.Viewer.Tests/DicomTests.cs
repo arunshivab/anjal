@@ -29,14 +29,15 @@ public sealed class DicomTests
     }
 
     [Fact]
-    public void AFileOfSeveralFrames_HasItsStrip()
+    public void AFileOfSeveralFrames_ShowsItsFirstFrame_WithNoStrip()
     {
+        // rc.31 (lite DICOM, SIAARA's values): MaxStripFrames 0, so a file of several frames shows its first frame
+        // and says how many it has; the strip is not drawn (rc.30 drew one).
         JobAnswer a = DicomJob.Run(TestDicom.Slice("1", 1, 0, size: 32, frames: 4), CancellationToken.None);
         DicomView view = ViewJson.ReadDicom(a.Answer.Json)!;
         Assert.Equal("4", view.Frames);
-        Assert.True(view.StripFrames > 1);
-        Assert.Equal(2, a.Files.Count);
-        Assert.All(a.Files, f => Assert.Equal("image/png", FileKinds.PictureType(f)));
+        Assert.Equal(0, view.StripFrames);
+        Assert.Equal("image/png", FileKinds.PictureType(Assert.Single(a.Files)));
     }
 
     [Fact]

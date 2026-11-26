@@ -520,6 +520,9 @@ public static class ViewNotices
 
     /// <summary>More pages than are shown (2,000).</summary>
     public const string ManyPages = "many-pages";
+
+    /// <summary>rc.31 (D4): a table (CSV) is shown only in part: past 10 MB, 5,000 rows, 200 columns or 1,000 characters a cell.</summary>
+    public const string TableCut = "table-cut";
 }
 
 /// <summary>rc.29 (AC-17): which viewer opens a file, judged by its name and first bytes.</summary>
@@ -543,6 +546,9 @@ public static class FileKinds
     /// <summary>A DICOM file.</summary>
     public const string Dicom = "dicom";
 
+    /// <summary>rc.31 (D4): a table of text, CSV or TSV, shown as a plain grid (nothing in it is evaluated).</summary>
+    public const string Table = "table";
+
     /// <summary>
     /// The kind of a file by its name and declared type; null when no viewer opens it. DICOM files are recognised
     /// by their bytes ("DICM" at 128), not their name; call <see cref="IsDicom"/> for those.
@@ -564,6 +570,7 @@ public static class FileKinds
             ("image/png" or "image/jpeg" or "image/gif" or "image/webp" or "image/bmp", _) => Picture,
             (_, ".zip") or ("application/zip" or "application/x-zip-compressed", _) => Archive,
             (_, ".dcm") or ("application/dicom", _) => Dicom,
+            (_, ".csv" or ".tsv") or ("text/csv" or "text/tab-separated-values", _) => Table,
             _ => null,
         };
     }

@@ -1777,6 +1777,28 @@ for Sangam's mail. The block below stays as the record of what rc.28 and rc.29 a
 viewer_check.py, and send one mail out. The way back is the `.old` copies (DEPLOY-rc27-to-rc30.md, Set R, with rc.30.1's
 copies in place of rc.27's).
 
+**rc.30.2 to rc.31**: programs and the viewer's unit. No schema change and no new setting. rc.31 brings the viewer's
+cap back to `MemoryMax=1536M` (a DICOM job's child is now held to a 256 MiB heap and stopped at 320 MB), so the
+first server's drop-in from DEPLOY-rc27-to-rc30.md Set 9 (`e2e-memory.conf`, 1536M while DICOM was off) is no longer
+needed. Build with `publish.ps1 -Version 1.0.0-rc.31`, copy it over, check its SHA-256, and run `install.sh` once
+(rc.30.2 becomes the `.old` copies). Then, on the first server only, read before removing:
+```
+vm$ systemctl cat anjal-viewer | grep -E '^# /|^MemoryMax'      # the unit's 1536M, and the drop-in's 1536M below it
+vm$ ls -l /etc/systemd/system/anjal-viewer.service.d/            # only e2e-memory.conf expected
+```
+If the folder holds anything other than `e2e-memory.conf`, stop and ask. Otherwise:
+```
+vm$ sudo rm /etc/systemd/system/anjal-viewer.service.d/e2e-memory.conf
+vm$ sudo rmdir /etc/systemd/system/anjal-viewer.service.d
+vm$ sudo systemctl daemon-reload
+vm$ sudo systemctl restart anjal-viewer anjal-server anjal-webmail
+vm$ systemctl show anjal-viewer -p MemoryMax --value              # 1610612736 (1536M), from the unit alone now
+```
+Then check health shows `1.0.0-rc.31`, run viewer_check.py, open a CSV attachment, and send one mail out. After
+viewer_check.py (it makes a DICOM slice and study itself) the viewer also keeps children ready for DICOM (one waiting
+and one starting, about 50 MB each), so `pgrep -u anjal-viewer -f -- '--child' | wc -l` says 5 from then on, not 3. The way back
+is the `.old` copies as for rc.30.2; the unit's 1536M is the same value the drop-in held, so nothing else changes back.
+
 **rc.27 to rc.29 in one install** (the first server, which runs rc.27 since 9 Nov and was never
 updated to rc.28; the owner, 12 Nov). This one install brings everything rc.28 and rc.29 change on the
 server. rc.28 brought the secure link (DES-19), mail apps over IMAP on 993 with a password per app and
@@ -1935,8 +1957,8 @@ wording; the print and phone fixes): backup first (section 11). No schema change
    vm$ systemctl show anjal-viewer -p PrivateNetwork -p RestrictAddressFamilies
    vm$ systemctl cat anjal-viewer | grep '^MemoryMax'
    ```
-   `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, and `MemoryMax=2048M` (rc.30 raised it from 1536M for
-   the DICOM grouping's 1 GiB child, AC-19).
+   `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, and `MemoryMax=1536M` (rc.31 brought it back from
+   rc.30's 2048M: a DICOM job's child is now held to a 256 MiB heap and stopped at 320 MB).
 6. **In the webmail** (the owner): open a mail with a PDF, a Word file, an Excel file and a ZIP. Each
    shows in the mail window; Download still gives the file as it came. A password-protected PDF asks
    for its password. A program inside a ZIP is listed but cannot be opened or downloaded.

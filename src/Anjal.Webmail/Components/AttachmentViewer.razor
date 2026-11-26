@@ -220,7 +220,7 @@ else
             }
         </article>
     }
-    else if (kind == FileKinds.Sheet && sheet is not null)
+    else if ((kind == FileKinds.Sheet || kind == FileKinds.Table) && sheet is not null)
     {
         @Notices(sheet.Notices)
         @if (sheet.Sheets.Count > 1)
@@ -462,6 +462,7 @@ else
             "application/pdf" => FileKinds.Pdf,
             MailboxService.WordType => FileKinds.Word,
             MailboxService.SheetType => FileKinds.Sheet,
+            MailboxService.TableType => FileKinds.Table,
             MailboxService.DicomType when Mail.Viewer?.DicomOn == true => FileKinds.Dicom,
             _ => null,
         };
@@ -538,6 +539,15 @@ else
                     Layout(sheet);
                 }
                 break;
+            case FileKinds.Table:
+                // rc.31 (D4): a CSV or TSV file as a plain table; every cell is the text it holds.
+                r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.Csv, Entry = Entry }, session, language);
+                sheet = r.Ok ? ViewJson.ReadSheet(r.Answer.Json) : null;
+                if (sheet is not null)
+                {
+                    Layout(sheet);
+                }
+                break;
             case FileKinds.Dicom:
                 r = await Mail.ViewAsync(mailboxId, MessageId, File.Index, new ViewRequest { Kind = ViewKinds.Dicom, Entry = Entry }, session, language);
                 dicom = r.Ok ? ViewJson.ReadDicom(r.Answer.Json) : null;
@@ -564,12 +574,14 @@ else
         FileKinds.Pdf => "pdf",
         FileKinds.Word => "doc",
         FileKinds.Sheet => "xls",
+        // rc.31 (D4): a table takes a workbook's colour.
+        FileKinds.Table => "xls",
         FileKinds.Picture => "img",
         FileKinds.Dicom => "dicom",
         _ => string.Empty,
     };
 
-    private string? TabWords => TabKind switch
+    private string? TabWords => kind == FileKinds.Table ? L["Table (CSV)"] : TabKind switch
     {
         "zip" => L["ZIP archive"],
         "pdf" => L["PDF document"],
@@ -590,6 +602,7 @@ else
                 KindArchive when archive is { Refused: null } => Count(archive.Entries.Count(e => !e.Folder), L["1 file"], L["{n} files"]),
                 FileKinds.Pdf when pdf is not null => Count(pdf.Pages.Count, L["1 page"], L["{n} pages"]),
                 FileKinds.Sheet when sheet is not null => Count(Math.Max(1, sheet.Sheets.Count(t => !t.Hidden)), L["1 sheet"], L["{n} sheets"]),
+                FileKinds.Table when sheet is not null => Count(sheet.Shown, L["1 row"], L["{n} rows"]),
                 _ => null,
             };
             if (count is not null)
@@ -818,6 +831,7 @@ else
                 ViewNotices.Incomplete => L["Incomplete file: what is shown is what could be read."],
                 ViewNotices.Xfa => L["This PDF is a form of a kind that may show little here. Download it to fill it in."],
                 ViewNotices.ManyPages => L["Only the first 2,000 pages are shown."],
+                ViewNotices.TableCut => L["Only the start of this table is shown: at most 5,000 rows, 200 columns, 10 MB and 1,000 characters in a cell. Download it to see all of it."],
                 _ => string.Empty,
             };
             if (text.Length == 0)

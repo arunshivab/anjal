@@ -12,6 +12,7 @@ rc.28 (DES-18 §10, D-337), moved into the viewer process in rc.29 (AC-17, D-381
 - **MaxExpanded** *(field)* - At most this many bytes unpacked, the outer and inner archive together (D-337).
 - **MaxLevels** *(field)* - How many archives deep a listing goes (AC-17): the attachment, and one inside it.
 - **MaxRatio** *(field)* - At most this many times larger unpacked than packed (D-337).
+- **EachUnpacked** *(method)* - rc.31 (lite DICOM, the coordinator 25 Nov 2026): the listed entries unpacked one after another from one opening of the archive, each through the same reused buffer: its size is checked against before anything is unpacked, then it is copied with the library's own caps and handed to - which must not keep the bytes, because the next entry overwrites them. An entry that cannot be given is handed over with given false.
 - **Entry** *(method)* - One file from inside an archive, unpacked in memory, for a viewer or its Download: never a program, a folder, an entry from a refused archive, or more than its own declared size or 64 MB. A file from a locked archive is given, marked , only for a viewer.
 - **Limits** *(method)* - The library's caps for an archive Anjal reads: its preset for untrusted input, each lowered to Anjal's own budget where Anjal's is tighter (AC-20).
 - **List** *(method)* - Lists an archive, or the archive inside it that names.

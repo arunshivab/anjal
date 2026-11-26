@@ -4172,6 +4172,9 @@
     "Group these DICOM files by patient, study and series": "या DICOM फायली रुग्ण, अभ्यास आणि मालिकेनुसार गटबद्ध करा",
     "Scroll through this series one slice at a time": "ही मालिका एकेक स्लाइस करून पहा",
     "Show the study's patients and series": "अभ्यासातील रुग्ण आणि मालिका दाखवा",
-    "Show the patient's name and ID. This is logged.": "रुग्णाचे नाव आणि आयडी दाखवा. याची नोंद होते."
+    "Show the patient's name and ID. This is logged.": "रुग्णाचे नाव आणि आयडी दाखवा. याची नोंद होते.",
+    "Table (CSV)": "तक्ता (CSV)",
+    "1 row": "1 ओळ",
+    "Only the start of this table is shown: at most 5,000 rows, 200 columns, 10 MB and 1,000 characters in a cell. Download it to see all of it.": "या तक्त्याचा फक्त सुरुवातीचा भाग दाखवला आहे: जास्तीत जास्त 5,000 ओळी, 200 स्तंभ, 10 MB आणि एका खान्यात 1,000 अक्षरे. पूर्ण तक्ता पाहण्यासाठी हे डाउनलोड करा."
   }
 }

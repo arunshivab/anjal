@@ -4172,6 +4172,9 @@
     "Group these DICOM files by patient, study and series": "ഈ DICOM ഫയലുകൾ രോഗി, പഠനം, സീരീസ് എന്നിങ്ങനെ തരംതിരിക്കുക",
     "Scroll through this series one slice at a time": "ഈ സീരീസ് ഓരോ സ്ലൈസായി നീക്കി കാണുക",
     "Show the study's patients and series": "പഠനത്തിലെ രോഗികളെയും സീരീസുകളെയും കാണിക്കുക",
-    "Show the patient's name and ID. This is logged.": "രോഗിയുടെ പേരും ഐഡിയും കാണിക്കുക. ഇത് രേഖപ്പെടുത്തും."
+    "Show the patient's name and ID. This is logged.": "രോഗിയുടെ പേരും ഐഡിയും കാണിക്കുക. ഇത് രേഖപ്പെടുത്തും.",
+    "Table (CSV)": "പട്ടിക (CSV)",
+    "1 row": "1 വരി",
+    "Only the start of this table is shown: at most 5,000 rows, 200 columns, 10 MB and 1,000 characters in a cell. Download it to see all of it.": "ഈ പട്ടികയുടെ തുടക്കം മാത്രമേ കാണിക്കുന്നുള്ളൂ: പരമാവധി 5,000 വരികൾ, 200 നിരകൾ, 10 MB, ഒരു കളത്തിൽ 1,000 അക്ഷരങ്ങൾ. മുഴുവനും കാണാൻ ഇത് ഡൗൺലോഡ് ചെയ്യുക."
   }
 }

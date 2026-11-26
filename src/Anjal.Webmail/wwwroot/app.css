@@ -15,7 +15,9 @@ img { max-width: 100%; }
               padding: 8px 12px; border-radius: var(--radius-sm); }
 
   * { box-sizing: border-box; }
-  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  /* rc.31 (D9): a button's, a menu's or anything acting as a button's words cannot be selected, and each shows the hand. */
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; user-select: none; -webkit-user-select: none; }
+  summary, [role="button"] { cursor: pointer; user-select: none; -webkit-user-select: none; }
   a { color: var(--brand); }
   :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
   /* the annotation markers the brief asks for */
@@ -24,8 +26,10 @@ img { max-width: 100%; }
        margin-left: 3px; line-height: 1; }
   /* app chrome */
   .top { display: flex; align-items: center; }
+/* rc.31 (D9): a menu (summary) or label drawn as a button shows the hand and its words cannot be selected, as a
+   button's; only a <button> had them before, so Save (a menu) showed a text cursor. */
 .btn { border: 1px solid transparent; display: inline-flex; align-items: center;
-         gap: 7px; white-space: nowrap; }
+         gap: 7px; white-space: nowrap; cursor: pointer; user-select: none; -webkit-user-select: none; }
   .btn-p { color: var(--on-brand); }
   .btn-s { color: var(--ink); }
   .btn-q { color: var(--ink-muted); }
@@ -3521,8 +3525,10 @@ a.authbtn { color: var(--on-brand); }
 .envelope .eactions .emore .emenu { bottom: calc(100% + 6px); top: auto; right: 0; left: auto; }
 
 /* File-type tags (2c): the same tag in the envelope, compose and the dashboard. */
-.ftag { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; width: 38px; height: 28px; border-radius: 7px;
-        font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; }
+/* rc.31 (D1, D2): one size for every tag, sized for five letters (NUPKG); ".attrow span" (flex: 1 1 auto) used to
+   stretch or squeeze it with the name beside it, so a short name gave a wide tag and a long one a narrow tag. */
+.ftag, .attrow .ftag, .pvfile .ftag { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 42px; width: 42px; min-width: 42px; height: 28px; border-radius: 7px;
+        font-size: 9.5px; font-weight: 800; letter-spacing: 0; overflow: hidden; }
 .ftag-pdf { background: var(--label-1-soft); color: var(--danger); }
 .ftag-img { background: var(--label-4-soft); color: color-mix(in srgb, var(--label-4) 75%, var(--ink)); }
 .ftag-dicom { background: var(--label-6-soft); color: color-mix(in srgb, var(--label-6) 75%, var(--ink)); font-size: 8.5px; }
@@ -4881,6 +4887,12 @@ html.js .pdfedit-go { display: inline-flex; gap: 6px; }
 .editgate p { margin: 0 0 6px; }
 .edittick { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .edittick input { width: 16px; height: 16px; margin: 0; accent-color: var(--brand); }
+/* rc.31 (D8): the bar and the tool's panel are one sticky block; its own background covers the viewer's padding above
+   it, so no page shows through above or between them. */
+.editstick { position: sticky; top: -12px; z-index: 3; display: flex; flex-direction: column; gap: 6px; margin-top: -12px; padding: 12px 0 6px; background: var(--surface-300); }
+.editstick > .pdfbar { position: static; }
+/* rc.31 (D8): once the pages scroll, the notes and Sign's pad fold away, so only the bar and the tool's row stay on top. */
+.editstick.stuck .editpanel > .hint, .editstick.stuck .signpad > .hint, .editstick.stuck .signnote, .editstick.stuck .padcanvas, .editstick.stuck .joinset { display: none; }
 .editpanel { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: 10px; background: var(--surface-100); border: 1px solid var(--line); }
 .editpanel[hidden] { display: none; }
 .editpanel .hint { margin: 0; }
@@ -4915,6 +4927,10 @@ html.js .pdfedit-go { display: inline-flex; gap: 6px; }
 .pdfedit[data-tool="pages"] .editmarks, .pdfedit[data-tool="stamp"] .editmarks { cursor: default; }
 .pdfedit.placing .editmarks { cursor: copy; }
 .editmark .editgrip { fill: transparent; stroke: none; pointer-events: all; }
+/* rc.31 (D5): the corner handles of a chosen signature or picture. */
+.editmark .editsize { fill: var(--surface-000); stroke: var(--brand); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: all; }
+.editmark .editsize-nw, .editmark .editsize-se { cursor: nwse-resize; }
+.editmark .editsize-ne, .editmark .editsize-sw { cursor: nesw-resize; }
 .editmark { cursor: move; }
 .editmark.on .editgrip { stroke: var(--brand); stroke-width: 1; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; }
 .edittext { font-family: inherit; }
