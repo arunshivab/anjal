@@ -54,12 +54,12 @@ What `ss -tlnp` should show (TCP), and nothing else:
 | 127.0.0.1 | 5432 | postgres |
 | 127.0.0.1 | 8025 | Anjal.Server (the admin API) |
 | 0.0.0.0 | 10050 | zabbix_agentd (closed by the Security Group) |
-| 127.0.0.53 and 127.0.0.54 | 53 | systemd-resolve (the machine's own DNS) |
 
 There must be **no** 993, no caddy, nginx, apache or httpd.
 
-`ss -ulnp` (UDP) should show 443 held by Anjal.Webmail (HTTP/3), and 53 on 127.0.0.53/54 (systemd-resolve). 68
-(DHCP) is normal if present. If **51820** shows, WireGuard (1e) has been set up: that is fine, just say so.
+`ss -ulnp` (UDP) should show 443 held by Anjal.Webmail (HTTP/3), twice (two sockets). Nothing listens on 53: the E2E
+image has no local DNS stub (seen on the first server, 25 Nov 2026); if a 127.0.0.53/54 line does show, that is
+systemd-resolve and fine. 68 (DHCP) is normal if present. If **51820** shows, WireGuard (1e) has been set up: that is fine, just say so.
 
 **Server:**
 ```bash
@@ -108,7 +108,10 @@ Expected:
   - `ANJAL_WEBMAIL_BIND=0.0.0.0`, `ANJAL_WEBMAIL_PORT=80`, `ANJAL_WEBMAIL_HTTPS_PORT=443`;
   - `ANJAL_ACME_DOMAINS=mail.anjal.co.in`, or `mail.anjal.co.in,mta-sts.anjal.co.in` if 13i was done, **the same in
     both scopes**;
-  - `ANJAL_ACME_HOST=true`; no `ANJAL_ACME_STAGING` that is not commented out;
+  - `ANJAL_ACME_HOST=true` for the webmail and **`false` for the server** (only the webmail answers Let's Encrypt
+    on port 80); no `ANJAL_ACME_STAGING` that is not commented out;
+  - the env files may list fewer `ANJAL_ACME_DOMAINS` than the database (13i stored the full list there); the
+    database wins, and the start-up log says so;
   - `ANJAL_MTA_STS_MODE` testing or enforce, if 13i was done;
   - **no** `ANJAL_IMAP_TLS_PORT` and **no** `ANJAL_VIEWER...` anywhere.
 - **Health:** `"status":"ok"`, with `store`, `maildir` and `tls` all ok.
@@ -223,9 +226,11 @@ sudo install -d -m 700 /root/pre-rc30
 sudo tar -czf /root/pre-rc30/opt-anjal.tgz -C / opt/anjal
 sudo tar -czf /root/pre-rc30/etc.tgz -C / etc/anjal etc/clamav/clamd.conf usr/local/sbin/anjal-portcheck $(cd / && ls -d etc/systemd/system/anjal-*)
 cd /tmp && sudo -u postgres pg_dump -Fc -d anjal -f /var/lib/postgresql/anjal-pre-rc30.dump; cd ~
+sudo chmod 600 /var/lib/postgresql/anjal-pre-rc30.dump
 sudo ls -l /root/pre-rc30 /var/lib/postgresql/anjal-pre-rc30.dump
 ```
-That gives three files, each larger than 0. The database copy is **not encrypted**, so it stays in PostgreSQL's own
+That gives three files, each larger than 0, and the database copy is `-rw-------` (postgres's own umask through
+sudo would otherwise leave it readable by every account, as on the first server). The database copy is **not encrypted**, so it stays in PostgreSQL's own
 private folder and is deleted in Set 14.
 
 ---
@@ -292,6 +297,11 @@ ls /opt/anjal                                            # bin  server  server.o
 `install.sh` keeps rc.27's programs as `server.old` and `webmail.old`, adds the `anjal-viewer` user, folder and unit,
 and never touches `/etc/anjal/*.env`. **Run it only once**: a second run would replace the `.old` copies with rc.30.1
 (Set 2's copy still has rc.27).
+
+Its closing lines are written for a new server and do not apply here: "backup timer left off until DEPLOY.md
+section 11" means it did not *turn on* the timer, and an existing one stays on (check:
+`systemctl is-enabled anjal-backup.timer` says `enabled`); "Next: edit /etc/anjal/*.env, then section 6" is
+skipped, because Set 6 adds the only two new settings.
 
 **Server** (the schema; it asks for the database password: type it from the paper copy):
 ```bash
@@ -371,13 +381,16 @@ sudo grep -nE '^(StreamMaxLength|ConcurrentDatabaseReload)' /etc/clamav/clamd.co
 sudo systemctl restart clamav-daemon
 ```
 Expected: `StreamMaxLength 25M` and `ConcurrentDatabaseReload no`. clamd takes about a minute to load its
-signatures. Mail with files is answered "try later" meanwhile.
+signatures. Mail with files is answered "try later" meanwhile (D-242). clamd writes its own log,
+`/var/log/clamav/clamav.log`, not the journal; its last start-up line is "Self checking every 3600 seconds".
 
 **Server**, after a minute:
 ```bash
-echo zPING | sudo -u anjal nc -U /var/run/clamav/clamd.ctl     # PONG
+printf 'nPING\n' | sudo -u anjal nc -U /var/run/clamav/clamd.ctl     # PONG
 ```
-If it says the connection was refused, wait another minute and run it again.
+If it says the connection was refused, wait another minute and run it again. (A `z` command such as `zPING` must end
+with a zero byte, so `echo zPING` only gets "COMMAND READ TIMED OUT"; `VERSION` answers "COMMAND UNAVAILABLE" on
+this clamd.)
 
 (`dpkg-reconfigure clamav-daemon` would rewrite this file. If it is ever run, check these lines afterwards.)
 
@@ -392,9 +405,13 @@ mail import), and WireGuard's replies. It also installs the port check that know
 ```bash
 sudo bash /opt/anjal/bin/anjal-firewall.sh generate
 sudo bash /opt/anjal/bin/anjal-firewall.sh apply
-timeout 5 bash -c 'exec 3<>/dev/tcp/gmail-smtp-in.l.google.com/25' && echo WRONG || echo "refused (correct)"
+ip4=$(getent ahostsv4 gmail-smtp-in.l.google.com | awk 'NR==1{print $1}'); echo "testing $ip4"
+timeout 5 bash -c "exec 3<>/dev/tcp/$ip4/25" && echo WRONG || echo "refused (correct)"
+sudo journalctl -k --since -2min --no-pager | grep -c 'anjal-egress SMTP-DENY'                    # 1 or more
 ```
-The rules are active now and **remove themselves in 3 minutes** unless confirmed.
+The test goes over IPv4 on purpose: the name resolves to IPv6 first, the server has no IPv6 route, and that fails
+with "Network is unreachable" without ever reaching the rule. Expected: "Connection refused", "refused (correct)",
+and a count of 1 or more (the rule's own log line). The rules are active now and **remove themselves in 3 minutes** unless confirmed.
 
 **PC, in a new PowerShell window, within the 3 minutes:**
 ```powershell
@@ -458,7 +475,7 @@ In the warnings, nothing new except, possibly, the start-up note that `ANJAL_IMA
 ```bash
 sudo -u anjal python3 /opt/anjal/bin/viewer_check.py /run/anjal-viewer/viewer.sock     # viewer ok: 1 page, 2 locked archives, DICOM
 systemctl show anjal-viewer -p NRestarts -p PrivateNetwork -p RestrictAddressFamilies -p MemoryMax
-pgrep -u anjal-viewer -f -- '--child' | wc -l                                           # 2 (kept ready)
+pgrep -u anjal-viewer -f -- '--child' | wc -l                                           # 3 (2 ready, 1 waiting to join them)
 ```
 Expected: `NRestarts=0`, `PrivateNetwork=yes`, `RestrictAddressFamilies=AF_UNIX`, and `MemoryMax=1610612736` (1536M, M1). (The check previews DICOM by talking to the viewer directly. In the webmail, DICOM
 stays off.)
@@ -488,12 +505,13 @@ If it is under 500 MB, say so before going on.
 ```bash
 sudo ss -tlnp
 sudo ss -ulnp
-sudo ss -xlp | grep -c viewer.sock                  # 1
+sudo test -S /run/anjal-viewer/viewer.sock && echo socket     # socket
 sudo /usr/local/sbin/anjal-portcheck                # anjal-portcheck: ok - Anjal's ports are held only by Anjal
 ```
 - **TCP:** exactly Set 0's list **plus 993, held by Anjal.Server**, on the same addresses as 465.
 - **UDP:** unchanged.
-- The viewer adds no network port at all, only its socket file.
+- The viewer adds no network port at all, only its socket file. (It runs in a network namespace of its own,
+  `PrivateNetwork=yes`, so `ss` on the host does not list that socket; `test -S` sees the file.)
 
 ---
 

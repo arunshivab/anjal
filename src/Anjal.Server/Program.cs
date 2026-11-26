@@ -193,7 +193,7 @@ public static class Program
         Log(mailboxSink.DescribeServerRoleAddresses());
         Log(scanner is null
             ? "Virus scanning: off (ANJAL_CLAMAV not set). Programs and scripts are still refused and disk images sent to Junk by name."
-            : $"Virus scanning: ClamAV at {System.Environment.GetEnvironmentVariable(Anjal.Mailbox.ClamdScanner.Setting)}; mail with files is held in quarantine while the scanner is down.");
+            : $"Virus scanning: ClamAV at {System.Environment.GetEnvironmentVariable(Anjal.Mailbox.ClamdScanner.Setting)}; mail with files is answered \"try later\" while the scanner is down (D-242).");
 
         // v1.0.0-rc.8: the evidence store (ANJAL-DES-01) - the original of every
         // message as received or sent, fingerprinted, with a daily manifest chain.

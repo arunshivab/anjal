@@ -97,6 +97,47 @@ public sealed class WebmailFeatureTests : System.IDisposable
     }
 
     [Fact]
+    public async System.Threading.Tasks.Task Draft_WithHtml_ReopenedAndSaved_IsSentAsOneDocument()
+    {
+        // rc.31 (D7): a reply saved as a draft, reopened and sent went out as <html><body><html><body>.
+        await this.SeedAsync();
+        var req = new ComposeRequest { To = "alice@example.com", Subject = "Re: files", BodyHtml = "<p>See the <b>file</b>.</p>" };
+        System.Guid? id = await this.svc.SaveDraftAsync(this.mailbox.Id, req);
+        ComposeRequest loaded = (await this.svc.LoadDraftAsync(this.mailbox.Id, id!.Value))!;
+        Assert.DoesNotContain("<html", loaded.BodyHtml, System.StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<body", loaded.BodyHtml, System.StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("<b>file</b>", loaded.BodyHtml, System.StringComparison.Ordinal);
+
+        // Saved and reopened again: still no layers.
+        loaded.DraftId = id;
+        System.Guid? again = await this.svc.SaveDraftAsync(this.mailbox.Id, loaded);
+        ComposeRequest twice = (await this.svc.LoadDraftAsync(this.mailbox.Id, again!.Value))!;
+        Assert.DoesNotContain("<html", twice.BodyHtml, System.StringComparison.OrdinalIgnoreCase);
+
+        // An older draft that already holds a whole document (or two) is still sent as exactly one.
+        twice.BodyHtml = "<html><head></head><body><html><head></head><body>" + twice.BodyHtml + "</body></html></body></html>";
+        string wire = System.Text.Encoding.UTF8.GetString(MailboxService.BuildMessage(this.mailbox, twice, AddressParser.Parse(twice.To), AddressParser.Parse(twice.Cc)))
+            .Replace("=\r\n", string.Empty, System.StringComparison.Ordinal);
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(wire, "<html", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        Assert.Equal(1, System.Text.RegularExpressions.Regex.Count(wire, "<body", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        Assert.Contains("file", wire, System.StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("<p>Hi</p>", "<p>Hi</p>")]
+    [InlineData("<html><head></head><body><p>Hi</p></body></html>", "<p>Hi</p>")]
+    [InlineData("<html><head></head><body><html><head></head><body><p>Hi</p></body></html></body></html>", "<p>Hi</p>")]
+    [InlineData("<HTML><BODY class=\"x\"><p>Hi</p></BODY></HTML>", "<p>Hi</p>")]
+    [InlineData("<p>about &lt;body&gt; tags</p>", "<p>about &lt;body&gt; tags</p>")]
+    [InlineData("<bodyguard>kept</bodyguard>", "<bodyguard>kept</bodyguard>")]
+    [InlineData("<div>mine</div><blockquote><html><body>theirs</body></html></blockquote>", "<div>mine</div><blockquote><html><body>theirs</body></html></blockquote>")]
+    [InlineData("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>t</title></head><body>\n<p>Hi</p>\n</body></html>\n", "\n<p>Hi</p>\n")]
+    public void HtmlBodyOnly_UnwrapsEveryLayer_AndLeavesFragments(string html, string expected)
+    {
+        Assert.Equal(expected, MailboxService.HtmlBodyOnly(html));
+    }
+
+    [Fact]
     public async System.Threading.Tasks.Task Draft_OfAnotherMailbox_IsRefused()
     {
         await this.SeedAsync();

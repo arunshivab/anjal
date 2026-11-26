@@ -455,6 +455,12 @@ internal sealed class FakeAcmeServer : IDisposable
         catch (ObjectDisposedException)
         {
         }
+        catch (HttpListenerException)
+        {
+            // rc.30.2 (PR #75, Ubuntu CI): on Linux the managed HttpListener's Close can rebind the prefix's port while
+            // removing it and fail with "Address already in use" when another test has taken that port meanwhile. The
+            // test's own checks have all run by then; a listener that is closing is not a result, so cleanup goes on.
+        }
         this.root.Dispose();
         this.cts.Dispose();
     }
